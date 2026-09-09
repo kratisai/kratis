@@ -102,5 +102,10 @@ public class AotHints implements RuntimeHintsRegistrar {
         // Without this hint the resource is stripped from the native image and any
         // code that calls HttpUrl.topPrivateDomain() / cookie handling will fail.
         hints.resources().registerPattern("okhttp3/internal/publicsuffix/PublicSuffixDatabase.gz");
+
+        // Liquibase changelogs are classpath resources loaded at runtime; GraalVM strips
+        // unregistered resources, failing startup with "no changelog could be found".
+        hints.resources().registerPattern("db/changelog-master.yaml");
+        hints.resources().registerPattern("db/changelog/.*");
     }
 }
