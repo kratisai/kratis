@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PingResult",
+  "type": "object",
+  "required": [
+    "type",
+    "status"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "ping",
+      "enum": [
+        "ping"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pong"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

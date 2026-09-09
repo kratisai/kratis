@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionReplayCompleteResult",
+  "type": "object",
+  "required": ["type", "executionId", "activityCount"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "execution_replay_complete",
+      "enum": ["execution_replay_complete"]
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "activityCount": {
+      "type": "integer"
+    }
+  },
+  "additionalProperties": false
+}

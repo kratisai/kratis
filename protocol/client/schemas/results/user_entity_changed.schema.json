@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UserEntityChangedResult",
+  "type": "object",
+  "required": [
+    "type",
+    "userId",
+    "entity"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "user_entity_changed",
+      "enum": [
+        "user_entity_changed"
+      ]
+    },
+    "userId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "entity": {
+      "type": "string",
+      "enum": [
+        "TEAMS",
+        "PROFILE"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

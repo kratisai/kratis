@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CompleteParams",
+  "type": "object",
+  "required": ["exitCode", "executionId"],
+  "properties": {
+    "exitCode": { "type": "integer" },
+    "executionId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

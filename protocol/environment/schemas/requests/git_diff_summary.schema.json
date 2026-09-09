@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitDiffSummaryParams",
+  "type": "object",
+  "properties": {
+    "baseBranch": { "type": "string" },
+    "executionId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

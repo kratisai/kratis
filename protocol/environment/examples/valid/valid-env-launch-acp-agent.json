@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.launch_acp_agent",
+  "params": {
+    "agentCommand": "claude --dangerously-skip-permissions",
+    "executionId": "123e4567-e89b-12d3-a456-426614174000"
+  },
+  "id": 13
+}

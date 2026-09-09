@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LaunchAcpAgentParams",
+  "type": "object",
+  "required": ["agentCommand", "executionId"],
+  "properties": {
+    "agentCommand": { "type": "string" },
+    "modelName": { "type": "string" },
+    "executionId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

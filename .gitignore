@@ -1,0 +1,23 @@
+/.idea/
+*.iml
+
+.junie/
+/out/
+/*.tmp
+
+.env
+
+/control-plane/data/
+/control-plane/postgres-data/
+/control-plane/target/
+
+# Local developer overrides (e.g. personal GitHub App credentials)
+/control-plane/src/main/resources/application-local.properties
+
+/web/coverage/
+/web/dist/
+/web/node_modules/
+/web/.eslintcache
+
+/build/bin/*
+sidecar/kratis-connector

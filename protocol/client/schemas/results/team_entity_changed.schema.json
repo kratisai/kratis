@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TeamEntityChangedResult",
+  "type": "object",
+  "required": [
+    "type",
+    "teamId",
+    "entity"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "team_entity_changed",
+      "enum": [
+        "team_entity_changed"
+      ]
+    },
+    "teamId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "entity": {
+      "type": "string",
+      "enum": [
+        "REPOSITORIES",
+        "CREDENTIALS",
+        "MODEL_PROVIDERS",
+        "ENVIRONMENTS",
+        "SANDBOX_EXECUTIONS",
+        "CHATS",
+        "USAGE",
+        "PERMISSIONS"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.acp_prompt",
+  "params": {
+    "taskPrompt": "Do the work",
+    "extraField": "should_fail"
+  },
+  "id": 14
+}

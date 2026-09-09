@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.registerGitAuth",
+  "params": {
+    "credentialType": "GITHUB",
+    "token": "legacy-value"
+  },
+  "id": 11
+}

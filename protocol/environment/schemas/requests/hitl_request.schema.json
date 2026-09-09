@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HitlRequest",
+  "type": "object",
+  "required": ["hitlId", "message", "kind"],
+  "properties": {
+    "hitlId": {
+      "type": "string",
+      "description": "Correlation ID of the HITL request (ACP toolCallId for approvals, question id for questions)."
+    },
+    "message": {
+      "type": "string",
+      "description": "The question or instruction shown to the user."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["approval", "question"],
+      "description": "The kind of HITL interaction: authorize a command (approval) or answer a structured question (question)."
+    },
+    "executionId": { "type": "string" },
+    "command": {
+      "type": "string",
+      "description": "The command to authorize (kind=approval)."
+    },
+    "title": {
+      "type": "string",
+      "description": "Short title of the action requesting approval (kind=approval)."
+    },
+    "toolKind": {
+      "type": "string",
+      "description": "Tool kind of the action requesting approval, e.g. execute, edit (kind=approval)."
+    },
+    "options": {
+      "type": "array",
+      "description": "Selectable options presented to the user (kind=approval).",
+      "items": {
+        "type": "object",
+        "required": ["optionId", "name", "kind"],
+        "properties": {
+          "optionId": { "type": "string" },
+          "name": { "type": "string" },
+          "kind": {
+            "type": "string",
+            "enum": ["allow_once", "allow_always", "reject_once", "reject_always"]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "diff": {
+      "type": "object",
+      "description": "Before/after text of an edit-kind approval (kind=approval).",
+      "properties": {
+        "oldText": { "type": "string" },
+        "newText": { "type": "string" },
+        "path": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "form": {
+      "type": "object",
+      "description": "JSON Schema for the expected answer (kind=question)."
+    }
+  },
+  "additionalProperties": false
+}

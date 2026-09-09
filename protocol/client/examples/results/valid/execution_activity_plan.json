@@ -1,0 +1,23 @@
+{
+  "type": "execution_activity",
+  "executionId": "00000000-0000-0000-0000-000000000006",
+  "activityType": "PLAN",
+  "description": "Agent plan updated",
+  "actionId": "plan",
+  "status": "in_progress",
+  "detail": {
+    "plan": [
+      { "content": "Setup repo", "priority": "high", "status": "in_progress" },
+      { "content": "Implement feature", "priority": "medium", "status": "pending" },
+      { "content": "Run tests", "priority": "low", "status": "completed" }
+    ],
+    "rawUpdate": {
+      "sessionUpdate": "plan",
+      "entries": [
+        { "content": "Setup repo", "priority": "high", "status": "in_progress" },
+        { "content": "Implement feature", "priority": "medium", "status": "pending" },
+        { "content": "Run tests", "priority": "low", "status": "completed" }
+      ]
+    }
+  }
+}

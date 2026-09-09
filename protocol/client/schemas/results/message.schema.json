@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MessageResult",
+  "type": "object",
+  "required": [
+    "type",
+    "content",
+    "chatId",
+    "messageId",
+    "role",
+    "timestamp"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "message",
+      "enum": [
+        "message"
+      ]
+    },
+    "content": {
+      "type": "string"
+    },
+    "chatId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "messageId": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "user",
+        "assistant",
+        "system",
+        "tool"
+      ]
+    },
+    "timestamp": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

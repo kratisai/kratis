@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "method": "auth",
+  "params": {
+    "token": "bearer-jwt-token-xyz"
+  },
+  "id": 0
+}

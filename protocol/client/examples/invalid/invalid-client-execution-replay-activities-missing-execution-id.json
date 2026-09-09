@@ -1,0 +1,6 @@
+{
+  "jsonrpc": "2.0",
+  "method": "execution.replay_activities",
+  "params": {},
+  "id": 5
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionOutputResult",
+  "type": "object",
+  "required": [
+    "type",
+    "executionId",
+    "line",
+    "stream"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "execution_output",
+      "enum": [
+        "execution_output"
+      ]
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "line": {
+      "type": "string"
+    },
+    "stream": {
+      "type": "string",
+      "enum": [
+        "stdout",
+        "stderr"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

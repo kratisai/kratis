@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.output",
+  "params": {
+    "line": "Compiling project",
+    "stream": "stdout",
+    "unexpectedExtraProperty": "should_be_rejected"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AcpPromptParams",
+  "type": "object",
+  "required": ["taskPrompt", "executionId"],
+  "properties": {
+    "taskPrompt": { "type": "string" },
+    "executionId": { "type": "string" },
+    "isSteering": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

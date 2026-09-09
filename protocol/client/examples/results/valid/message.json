@@ -1,0 +1,8 @@
+{
+  "type": "message",
+  "content": "hello",
+  "chatId": "00000000-0000-0000-0000-000000000002",
+  "messageId": "m1",
+  "role": "assistant",
+  "timestamp": "2026-08-13T10:00:00Z"
+}

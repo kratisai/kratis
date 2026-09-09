@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionStatusChangedResult",
+  "type": "object",
+  "required": [
+    "type",
+    "teamId",
+    "chatId",
+    "executionId"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "execution_status_changed",
+      "enum": [
+        "execution_status_changed"
+      ]
+    },
+    "teamId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "chatId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": true
+}

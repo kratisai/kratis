@@ -1,0 +1,316 @@
+package com.kratisai.controlplane.service;
+
+import com.kratisai.controlplane.client.litellm.LiteLLMClient;
+import com.kratisai.controlplane.client.litellm.LiteLLMDto.*;
+import com.kratisai.controlplane.model.ModelKind;
+import com.kratisai.controlplane.model.ModelProvider;
+import com.kratisai.controlplane.model.ProviderModel;
+import com.kratisai.controlplane.model.ProviderType;
+import com.kratisai.controlplane.model.Team;
+import com.kratisai.controlplane.repository.ModelProviderRepository;
+import com.kratisai.controlplane.repository.TeamRepository;
+import jakarta.annotation.PostConstruct;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.RestClientException;
+
+@Service
+public class LiteLLMProvisioningService {
+
+    private static final Logger logger = LoggerFactory.getLogger(LiteLLMProvisioningService.class);
+
+    private static final int MAX_STARTUP_RECONCILE_RETRIES = 12;
+
+    // LiteLLM returns an HTTP 500 (rather than an empty list) from `/model/info` when no models
+    // have been configured on the proxy yet -  This is expected
+    private static final String EMPTY_MODEL_LIST_ERROR_MARKER = "Model List not loaded in";
+
+    public enum VirtualKeyScope {
+        SANDBOX,
+        INGESTION
+    }
+
+    private static final Map<ProviderType, String> PROVIDER_MAPPING = Map.ofEntries(
+            Map.entry(ProviderType.OPENAI, "openai"),
+            Map.entry(ProviderType.ANTHROPIC, "anthropic"),
+            Map.entry(ProviderType.GOOGLE, "gemini"),
+            Map.entry(ProviderType.GROQ, "groq"),
+            Map.entry(ProviderType.MISTRAL, "mistral"),
+            Map.entry(ProviderType.DEEPSEEK, "deepseek"),
+            Map.entry(ProviderType.OLLAMA, "ollama"),
+            Map.entry(ProviderType.AZURE_OPENAI, "azure"),
+            Map.entry(ProviderType.BEDROCK, "bedrock"));
+
+    private final LiteLLMClient liteLLMClient;
+    private final ModelProviderRepository modelProviderRepository;
+    private final TeamRepository teamRepository;
+    private final boolean reconcileOnStartup;
+
+    private final AtomicBoolean reconciliationSettled = new AtomicBoolean(false);
+    private final AtomicInteger reconcileFailures = new AtomicInteger(0);
+
+    public LiteLLMProvisioningService(
+            LiteLLMClient liteLLMClient,
+            ModelProviderRepository modelProviderRepository,
+            TeamRepository teamRepository,
+            @Value("${kratis.litellm.reconcile-on-startup:true}") boolean reconcileOnStartup) {
+        this.liteLLMClient = liteLLMClient;
+        this.modelProviderRepository = modelProviderRepository;
+        this.teamRepository = teamRepository;
+        this.reconcileOnStartup = reconcileOnStartup;
+    }
+
+    @PostConstruct
+    void reconcileOnStartup() {
+        if (!reconcileOnStartup) {
+            reconciliationSettled.set(true);
+            logger.info("LiteLLM startup reconciliation skipped (disabled by configuration)");
+            return;
+        }
+        try {
+            Set<String> existingModels = listExistingLiteLLMModels();
+            for (ModelProvider provider : modelProviderRepository.findAll()) {
+                for (ProviderModel providerModel : provider.getModels()) {
+                    String modelName = providerModel.getModelName();
+                    String litellmName = buildLiteLLMModelName(provider, modelName);
+                    if (!existingModels.contains(litellmName)) {
+                        logger.info("Reconciling missing model '{}' on startup", litellmName);
+                        provisionSingleModel(provider, modelName, providerModel.getKind());
+                    }
+                }
+            }
+
+            for (Team team : teamRepository.findAllWithIngestionAndEmbeddingProviders()) {
+                ensureModelRegistered(
+                        team.getIngestionProvider(), team.getIngestionModel(), ModelKind.CHAT, existingModels);
+                ensureModelRegistered(
+                        team.getEmbeddingProvider(), team.getEmbeddingModel(), ModelKind.EMBEDDING, existingModels);
+            }
+
+            reconciliationSettled.set(true);
+            logger.info("LiteLLM startup reconciliation complete");
+        } catch (RestClientException e) {
+            // LiteLLM may not be reachable yet. Spring's Docker Compose integration only waits for a
+            // TCP-level probe on the published port, so the container can be running while the LiteLLM
+            // HTTP gateway is still booting. Startup must not fail because of it; retryReconciliation()
+            // keeps trying until LiteLLM is reachable.
+            int failureCount = reconcileFailures.incrementAndGet();
+            logger.warn(
+                    "LiteLLM unavailable during startup reconciliation (attempt {}/{}), skipping. The application "
+                            + "will continue starting. Cause: {}",
+                    failureCount,
+                    MAX_STARTUP_RECONCILE_RETRIES,
+                    e.getMessage());
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${kratis.litellm.reconcile-retry-delay-ms:10000}")
+    void retryReconciliation() {
+        if (!reconcileOnStartup || reconciliationSettled.get()) {
+            return;
+        }
+        if (reconcileFailures.get() >= MAX_STARTUP_RECONCILE_RETRIES) {
+            logger.warn(
+                    "Giving up on LiteLLM startup reconciliation after {} failed attempts. Models will need to be "
+                            + "reconciled manually once LiteLLM is available.",
+                    reconcileFailures.get());
+            reconciliationSettled.set(true);
+            return;
+        }
+        logger.info("Retrying LiteLLM startup reconciliation (LiteLLM may still have been starting up)");
+        reconcileOnStartup();
+    }
+
+    public void ensureModelRegistered(ModelProvider provider, String modelName, ModelKind kind) {
+        ensureModelRegistered(provider, modelName, kind, null);
+    }
+
+    public void ensureModelsRegistered(
+            ModelProvider chatProvider, String chatModel, ModelProvider embeddingProvider, String embeddingModel) {
+        ensureModelRegistered(chatProvider, chatModel, ModelKind.CHAT, null);
+        ensureModelRegistered(embeddingProvider, embeddingModel, ModelKind.EMBEDDING, null);
+    }
+
+    private Set<String> listExistingLiteLLMModels() {
+        ListModelsResponse response = fetchModelList();
+        if (response == null || response.data() == null) {
+            return Set.of();
+        }
+        return response.data().stream().map(ModelConfig::modelName).collect(Collectors.toSet());
+    }
+
+    private @Nullable ListModelsResponse fetchModelList() {
+        try {
+            return liteLLMClient.listModels();
+        } catch (HttpServerErrorException e) {
+            if (isEmptyModelListError(e)) {
+                logger.info("LiteLLM has no models configured yet");
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    private boolean isEmptyModelListError(HttpServerErrorException e) {
+        String body = e.getResponseBodyAsString();
+        return body.contains(EMPTY_MODEL_LIST_ERROR_MARKER);
+    }
+
+    private boolean isModelRegisteredInLiteLLM(String litellmModelName) {
+        try {
+            ListModelsV2Response response = liteLLMClient.listModelByName(litellmModelName);
+            return response.data() != null && !response.data().isEmpty();
+        } catch (RestClientException e) {
+            logger.debug("Error checking model '{}' in LiteLLM: {}", litellmModelName, e.getMessage());
+            return false;
+        }
+    }
+
+    private void ensureModelRegistered(
+            ModelProvider provider, String modelName, ModelKind kind, Set<String> knownExistingLiteLLMModels) {
+        if (provider == null || modelName == null || modelName.isBlank()) {
+            return;
+        }
+
+        boolean alreadyOnProvider = provider.getModels().stream()
+                .anyMatch(pm -> pm.getModelName().equals(modelName) && pm.getKind() == kind);
+
+        if (!alreadyOnProvider) {
+            List<ProviderModel> updatedModels = new ArrayList<>(provider.getModels());
+            updatedModels.add(new ProviderModel(modelName, kind));
+            provider.setModels(updatedModels);
+            modelProviderRepository.save(provider);
+        }
+
+        boolean registeredInLiteLLM = knownExistingLiteLLMModels != null
+                ? knownExistingLiteLLMModels.contains(buildLiteLLMModelName(provider, modelName))
+                : isModelRegisteredInLiteLLM(buildLiteLLMModelName(provider, modelName));
+
+        // Re-provision if the model was just added, OR if LiteLLM doesn't actually have it
+        // registered despite it already being on the provider's persisted model list (self-heal
+        // against lost LiteLLM state / pre-existing misconfigured teams).
+        if (!alreadyOnProvider || !registeredInLiteLLM) {
+            provisionSingleModel(provider, modelName, kind);
+        }
+    }
+
+    public void provisionModel(ModelProvider provider) {
+        String litellmProvider = resolveLiteLLMProvider(provider.getProviderType());
+        if (litellmProvider == null) {
+            logger.warn(
+                    "Provider type '{}' is not supported by LiteLLM, skipping provisioning",
+                    provider.getProviderType());
+            return;
+        }
+
+        List<ProviderModel> models = provider.getModels();
+        if (models.isEmpty()) {
+            logger.warn(
+                    "Provider '{}' has no model names configured, skipping provisioning", provider.getDisplayName());
+            return;
+        }
+
+        for (ProviderModel providerModel : models) {
+            provisionSingleModel(provider, providerModel.getModelName(), providerModel.getKind());
+        }
+    }
+
+    private void provisionSingleModel(ModelProvider provider, String modelName, ModelKind kind) {
+        String litellmProvider = resolveLiteLLMProvider(provider.getProviderType());
+        String litellmName = buildLiteLLMModelName(provider, modelName);
+
+        String apiBase =
+                provider.getBaseUrl() != null && !provider.getBaseUrl().isBlank() ? provider.getBaseUrl() : null;
+
+        // LiteLLM expects api_base to include the /v1 suffix for OpenAI-compatible APIs.
+        // However, for Gemini API format (ProviderType.GOOGLE), the base URL should NOT have /v1 appended
+        boolean isGeminiProvider = provider.getProviderType() == ProviderType.GOOGLE;
+        if (apiBase != null && !isGeminiProvider && !apiBase.endsWith("/v1") && !apiBase.endsWith("/v1/")) {
+            apiBase = apiBase + "/v1";
+        }
+
+        LiteLLMParams params = new LiteLLMParams(modelName, provider.getApiKey(), litellmProvider, apiBase);
+        ModelInfo modelInfo = new ModelInfo(kind == ModelKind.EMBEDDING ? "embedding" : "chat");
+        AddModelRequest request = new AddModelRequest(litellmName, params, modelInfo);
+
+        // Delete existing model first to clear any cooldown state from previous failed deployments
+        // This is important for test environments where LiteLLM containers are reused
+        try {
+            liteLLMClient.deleteModel(new DeleteModelRequest(litellmName));
+            logger.debug("Deleted existing model '{}' from LiteLLM to clear cooldown state", litellmName);
+        } catch (RestClientException e) {
+            // Model doesn't exist, which is fine
+            logger.debug("Model '{}' not found in LiteLLM (expected for new models): {}", litellmName, e.getMessage());
+        }
+
+        logger.info(
+                "Provisioning model '{}' as '{}' (provider: {}) to LiteLLM", modelName, litellmName, litellmProvider);
+        liteLLMClient.addModel(request);
+        logger.info("Successfully provisioned model '{}' to LiteLLM", litellmName);
+    }
+
+    public void removeModel(ModelProvider provider) {
+        for (String modelName : provider.getModelNames()) {
+            String litellmName = buildLiteLLMModelName(provider, modelName);
+            try {
+                logger.info("Removing model '{}' from LiteLLM", litellmName);
+                liteLLMClient.deleteModel(new DeleteModelRequest(litellmName));
+                logger.info("Successfully removed model '{}' from LiteLLM", litellmName);
+            } catch (RestClientException e) {
+                logger.warn(
+                        "Failed to remove model '{}' from LiteLLM (may not exist): {}", litellmName, e.getMessage());
+            }
+        }
+    }
+
+    public boolean verifyModelRegistered(ModelProvider provider) {
+        ListModelsResponse response = fetchModelList();
+        if (response == null || response.data() == null) {
+            return false;
+        }
+        Set<String> existingModels =
+                response.data().stream().map(ModelConfig::modelName).collect(Collectors.toSet());
+
+        for (String modelName : provider.getModelNames()) {
+            String litellmName = buildLiteLLMModelName(provider, modelName);
+            if (!existingModels.contains(litellmName)) {
+                return false;
+            }
+        }
+        return !provider.getModelNames().isEmpty();
+    }
+
+    public boolean verifyModelRegistered(ModelProvider provider, String modelName) {
+        return isModelRegisteredInLiteLLM(buildLiteLLMModelName(provider, modelName));
+    }
+
+    public String resolveLiteLLMProvider(ProviderType providerType) {
+        return PROVIDER_MAPPING.get(providerType);
+    }
+
+    public String buildLiteLLMModelName(ModelProvider provider, String modelName) {
+        Objects.requireNonNull(provider.getTeam(), "ModelProvider must have an associated team");
+        String sanitizedProvider = provider.getDisplayName().toLowerCase().replaceAll("[^a-z0-9-]", "-");
+        String sanitizedModel = modelName.toLowerCase().replaceAll("[^a-z0-9-]", "-");
+        String teamSuffix = provider.getTeam().getId().toString().substring(0, 8);
+        return provider.getProviderType().name().toLowerCase()
+                + "-" + sanitizedProvider
+                + "-" + sanitizedModel
+                + "-" + teamSuffix;
+    }
+
+    public String buildVirtualKeyAlias(VirtualKeyScope scope, UUID ownerId) {
+        Objects.requireNonNull(scope, "scope is required");
+        Objects.requireNonNull(ownerId, "ownerId is required");
+        return "kratis-" + scope.name().toLowerCase() + "-" + ownerId;
+    }
+}

@@ -1,0 +1,2721 @@
+databaseChangeLog:
+- changeSet:
+    id: 001-baseline-extension
+    author: kratis
+    dbms: postgresql
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: false
+        stripComments: true
+        sql: CREATE EXTENSION IF NOT EXISTS vector
+
+- changeSet:
+    id: 001-baseline-001
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: users_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: email
+            type: VARCHAR(255)
+        - column:
+            constraints:
+              nullable: false
+            name: password_hash
+            type: VARCHAR(255)
+        - column:
+            constraints:
+              nullable: false
+            name: display_name
+            type: VARCHAR(255)
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        tableName: users
+- changeSet:
+    id: 001-baseline-002
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: teams_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: name
+            type: VARCHAR(255)
+        - column:
+            name: description
+            type: TEXT
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: updated_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValueBoolean: false
+            name: is_default
+            type: BOOLEAN
+        - column:
+            name: tavily_api_key
+            remarks: Tavily API key for web search integration
+            type: TEXT
+        - column:
+            name: ingestion_provider_id
+            remarks: Foreign key reference to model_providers for agentic research
+            type: UUID
+        - column:
+            name: ingestion_model
+            remarks: Ingestion model name for agentic research
+            type: VARCHAR(255)
+        - column:
+            name: embedding_provider_id
+            type: UUID
+        - column:
+            name: embedding_model
+            type: VARCHAR(255)
+        tableName: teams
+- changeSet:
+    id: 001-baseline-003
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: team_members_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: user_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            defaultValue: member
+            name: role
+            type: VARCHAR(50)
+        tableName: team_members
+- changeSet:
+    id: 001-baseline-004
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: repositories_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: name
+            type: VARCHAR(255)
+        - column:
+            constraints:
+              nullable: false
+            name: url
+            type: VARCHAR(500)
+        - column:
+            constraints:
+              nullable: false
+            defaultValue: main
+            name: branch
+            type: VARCHAR(255)
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: updated_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            name: credential_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            defaultValue: GENERIC
+            name: repository_type
+            type: VARCHAR(50)
+        tableName: repositories
+- changeSet:
+    id: 001-baseline-005
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: refresh_tokens_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: token
+            type: VARCHAR(500)
+        - column:
+            constraints:
+              nullable: false
+            name: user_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: expires_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        tableName: refresh_tokens
+- changeSet:
+    id: 001-baseline-006
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: model_providers_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: display_name
+            type: VARCHAR(255)
+        - column:
+            constraints:
+              nullable: false
+            name: provider_type
+            type: VARCHAR(50)
+        - column:
+            name: api_key
+            type: VARCHAR(500)
+        - column:
+            name: base_url
+            type: VARCHAR(500)
+        - column:
+            constraints:
+              nullable: false
+            defaultValueBoolean: true
+            name: is_active
+            type: BOOLEAN
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: updated_at
+            type: TIMESTAMP WITH TIME ZONE
+        tableName: model_providers
+- changeSet:
+    id: 001-baseline-007
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            autoIncrement: true
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: scratchpad_pkey
+            name: id
+            type: BIGINT
+        - column:
+            constraints:
+              nullable: false
+            name: chat_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: fact
+            type: TEXT
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        tableName: scratchpad
+- changeSet:
+    id: 001-baseline-008
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: sessions_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: user_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: title
+            type: VARCHAR(500)
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: updated_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            name: archived_at
+            type: TIMESTAMP WITH TIME ZONE
+        tableName: chats
+- changeSet:
+    id: 001-baseline-009
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            autoIncrement: true
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: chat_memory_pkey
+            name: id
+            type: BIGINT
+        - column:
+            constraints:
+              nullable: false
+            name: chat_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: message_index
+            type: INTEGER
+        - column:
+            constraints:
+              nullable: false
+            name: message_type
+            type: VARCHAR(50)
+        - column:
+            constraints:
+              nullable: false
+            name: message_text
+            type: TEXT
+        - column:
+            name: tool_calls
+            type: JSONB
+        - column:
+            name: tool_call_responses
+            type: JSONB
+        - column:
+            name: metadata
+            type: JSONB
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        tableName: chat_memory
+- changeSet:
+    id: 001-baseline-010
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            autoIncrement: true
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: canvas_pkey
+            name: id
+            type: BIGINT
+        - column:
+            constraints:
+              nullable: false
+            name: chat_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: document_id
+            type: VARCHAR(255)
+        - column:
+            constraints:
+              nullable: false
+            name: title
+            type: VARCHAR(500)
+        - column:
+            constraints:
+              nullable: false
+            name: content
+            type: TEXT
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: updated_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValue: DOCUMENT
+            name: canvas_type
+            type: VARCHAR(50)
+        - column:
+            name: repository_id
+            type: UUID
+        - column:
+            name: new_repo_name
+            type: VARCHAR(255)
+        - column:
+            name: deleted_at
+            type: TIMESTAMP WITH TIME ZONE
+        tableName: canvas
+- changeSet:
+    id: 001-baseline-011
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: ctx_ingestion_batches_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: repository_id
+            type: UUID
+        - column:
+            name: commit_hash
+            type: VARCHAR(40)
+        - column:
+            constraints:
+              nullable: false
+            defaultValue: pending
+            name: status
+            type: VARCHAR(20)
+        - column:
+            constraints:
+              nullable: false
+            defaultValueBoolean: false
+            name: is_active
+            type: BOOLEAN
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: started_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            name: completed_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            name: error_message
+            type: TEXT
+        - column:
+            name: virtual_key
+            type: TEXT
+        - column:
+            name: total_spend
+            type: FLOAT8
+        - column:
+            name: total_tokens
+            type: BIGINT
+        - column:
+            name: prompt_tokens
+            type: BIGINT
+        - column:
+            name: completion_tokens
+            type: BIGINT
+        - column:
+            name: usage_last_updated_at
+            type: TIMESTAMP WITHOUT TIME ZONE
+        - column:
+            name: total_tool_calls
+            type: BIGINT
+        tableName: ingestion_batches
+- changeSet:
+    id: 001-baseline-012
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: ctx_nodes_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: batch_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: repo_name
+            type: VARCHAR(255)
+        - column:
+            name: node_type
+            type: VARCHAR(50)
+        - column:
+            name: path
+            type: TEXT
+        - column:
+            name: metadata
+            type: JSONB
+        - column:
+            name: symbol_name
+            type: TEXT
+        - column:
+            name: archetype_group
+            type: VARCHAR(255)
+        tableName: ctx_nodes
+- changeSet:
+    id: 001-baseline-013
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: ctx_edges_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: batch_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: source_node_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: target_node_id
+            type: UUID
+        - column:
+            name: relation_type
+            type: VARCHAR(50)
+        tableName: ctx_edges
+- changeSet:
+    id: 001-baseline-014
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: repo_credentials_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: name
+            type: VARCHAR(100)
+        - column:
+            constraints:
+              nullable: false
+            name: type
+            type: VARCHAR(50)
+        - column:
+            name: encrypted_secret
+            type: TEXT
+        - column:
+            name: public_key
+            type: TEXT
+        - column:
+            name: provider_metadata
+            type: JSONB
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: updated_at
+            type: TIMESTAMP WITH TIME ZONE
+        tableName: repo_credentials
+- changeSet:
+    id: 001-baseline-015
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: ingestion_batch_logs_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: batch_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            defaultValue: INFO
+            name: level
+            type: VARCHAR(20)
+        - column:
+            constraints:
+              nullable: false
+            name: step
+            type: VARCHAR(50)
+        - column:
+            constraints:
+              nullable: false
+            name: message
+            type: TEXT
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITHOUT TIME ZONE
+        tableName: ingestion_batch_logs
+- changeSet:
+    id: 001-baseline-016
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: ctx_wiki_pages_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: batch_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: repo_name
+            type: VARCHAR(255)
+        - column:
+            name: parent_page_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: page_slug
+            type: VARCHAR(255)
+        - column:
+            constraints:
+              nullable: false
+            name: title
+            type: VARCHAR(255)
+        - column:
+            defaultValueNumeric: 0
+            name: order_index
+            type: INTEGER
+        - column:
+            constraints:
+              nullable: false
+            name: content
+            type: TEXT
+        tableName: ctx_wiki_pages
+- changeSet:
+    id: 001-baseline-017
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: ctx_archetypes_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: batch_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: name
+            type: VARCHAR(255)
+        - column:
+            constraints:
+              nullable: false
+            name: glob_pattern
+            type: VARCHAR(255)
+        - column:
+            constraints:
+              nullable: false
+            name: created_at
+            type: TIMESTAMP WITHOUT TIME ZONE
+        tableName: ctx_archetypes
+- changeSet:
+    id: 001-baseline-018
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: ctx_architecture_patterns_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: batch_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: description
+            type: TEXT
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            name: name
+            type: VARCHAR(255)
+        tableName: ctx_architecture_patterns
+- changeSet:
+    id: 001-baseline-019
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: ctx_dimensions_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: batch_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: category
+            type: VARCHAR(50)
+        - column:
+            constraints:
+              nullable: false
+            name: name
+            type: VARCHAR(255)
+        - column:
+            name: synopsis
+            type: TEXT
+        - column:
+            name: glob_patterns
+            type: JSONB
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        tableName: ctx_dimensions
+- changeSet:
+    id: 001-baseline-020
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: ctx_node_dimensions_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: node_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: dimension_id
+            type: UUID
+        - column:
+            name: rank_score
+            type: FLOAT8
+        tableName: ctx_node_dimensions
+- changeSet:
+    id: 001-baseline-021
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: execution_environments_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: name
+            type: VARCHAR(100)
+        - column:
+            constraints:
+              nullable: false
+            defaultValue: DISCONNECTED
+            name: status
+            type: VARCHAR(50)
+        - column:
+            name: container_id
+            type: VARCHAR(255)
+        - column:
+            name: last_heartbeat
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            name: provider_id
+            type: UUID
+        - column:
+            name: user_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            defaultValue: SANDBOX
+            name: type
+            type: VARCHAR(50)
+        - column:
+            name: auth_token
+            type: VARCHAR(255)
+        tableName: execution_environments
+- changeSet:
+    id: 001-baseline-022
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: sandbox_executions_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: environment_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: chat_id
+            type: UUID
+        - column:
+            name: exit_code
+            type: INTEGER
+        - column:
+            constraints:
+              nullable: false
+            defaultValue: RUNNING
+            name: status
+            type: VARCHAR(50)
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: started_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            name: completed_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            name: repository_id
+            type: UUID
+        - column:
+            name: harness
+            type: VARCHAR(50)
+        - column:
+            name: task_prompt
+            type: TEXT
+        - column:
+            defaultValueNumeric: 0
+            name: total_tokens
+            type: BIGINT
+        - column:
+            defaultValueNumeric: 0
+            name: prompt_tokens
+            type: BIGINT
+        - column:
+            defaultValueNumeric: 0
+            name: completion_tokens
+            type: BIGINT
+        - column:
+            defaultValueComputed: 0
+            name: total_spend
+            type: FLOAT8
+        - column:
+            name: usage_last_updated_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            name: virtual_key
+            type: TEXT
+        - column:
+            name: model_provider_id
+            type: UUID
+        - column:
+            name: model_name
+            type: VARCHAR(255)
+        - column:
+            name: new_repo_name
+            type: VARCHAR(255)
+        - column:
+            name: new_repo_credential_id
+            type: UUID
+        - column:
+            name: published_branch
+            type: VARCHAR(255)
+        - column:
+            name: published_pr_number
+            type: BIGINT
+        - column:
+            name: published_pr_url
+            type: VARCHAR(1024)
+        - column:
+            name: target_branch
+            type: VARCHAR(255)
+        tableName: sandbox_executions
+- changeSet:
+    id: 001-baseline-023
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: sandbox_permission_rules_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: command_root
+            type: TEXT
+        - column:
+            constraints:
+              nullable: false
+            name: rule_type
+            type: VARCHAR(50)
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValue: ALLOW
+            name: action
+            type: VARCHAR(16)
+        - column:
+            name: created_by_user_id
+            type: UUID
+        tableName: sandbox_permission_rules
+- changeSet:
+    id: 001-baseline-024
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: environment_providers_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: name
+            type: VARCHAR(100)
+        - column:
+            name: docker_image
+            type: VARCHAR(255)
+        tableName: environment_providers
+- changeSet:
+    id: 001-baseline-025
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: chat_usage_sessions_pkey
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: chat_id
+            type: UUID
+        - column:
+            name: virtual_key
+            type: TEXT
+        - column:
+            name: total_spend
+            type: FLOAT8
+        - column:
+            name: total_tokens
+            type: BIGINT
+        - column:
+            name: prompt_tokens
+            type: BIGINT
+        - column:
+            name: completion_tokens
+            type: BIGINT
+        - column:
+            name: usage_last_updated_at
+            type: TIMESTAMP WITHOUT TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            name: started_at
+            type: TIMESTAMP WITHOUT TIME ZONE
+        - column:
+            name: ended_at
+            type: TIMESTAMP WITHOUT TIME ZONE
+        - column:
+            name: model
+            type: VARCHAR(255)
+        tableName: chat_usage_sessions
+- changeSet:
+    id: 001-baseline-026
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: sandbox_execution_activities_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: execution_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: sequence
+            type: BIGINT
+        - column:
+            name: action_id
+            type: TEXT
+        - column:
+            constraints:
+              nullable: false
+            name: activity_type
+            type: VARCHAR(50)
+        - column:
+            constraints:
+              nullable: false
+            name: status
+            type: VARCHAR(50)
+        - column:
+            constraints:
+              nullable: false
+            name: description
+            type: TEXT
+        - column:
+            name: detail
+            type: JSONB
+        - column:
+            name: approved
+            type: BOOLEAN
+        - column:
+            name: resolved_by
+            type: UUID
+        - column:
+            name: resolved_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: updated_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            name: selected_option_id
+            type: VARCHAR(255)
+        remarks: Persisted per-execution activity log; HITL outcomes are stored on
+          the activity row
+        tableName: sandbox_execution_activities
+- changeSet:
+    id: 001-baseline-027
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: kratis_installation_pkey
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: singleton_key
+            type: VARCHAR(32)
+        - column:
+            constraints:
+              nullable: false
+            name: install_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: created_at
+            type: TIMESTAMP WITHOUT TIME ZONE
+        tableName: kratis_installation
+- changeSet:
+    id: 001-baseline-028
+    author: kratis
+    changes:
+    - addUniqueConstraint:
+        columnNames: email
+        constraintName: users_email_key
+        tableName: users
+- changeSet:
+    id: 001-baseline-029
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_team_members_team_id
+        tableName: team_members
+- changeSet:
+    id: 001-baseline-030
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: user_id
+        indexName: idx_team_members_user_id
+        tableName: team_members
+- changeSet:
+    id: 001-baseline-031
+    author: kratis
+    changes:
+    - addUniqueConstraint:
+        columnNames: user_id, team_id
+        constraintName: uq_team_members_user_team
+        tableName: team_members
+- changeSet:
+    id: 001-baseline-032
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_repositories_team_id
+        tableName: repositories
+- changeSet:
+    id: 001-baseline-033
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: credential_id
+        indexName: idx_repositories_credential_id
+        tableName: repositories
+- changeSet:
+    id: 001-baseline-034
+    author: kratis
+    changes:
+    - addUniqueConstraint:
+        columnNames: name, team_id
+        constraintName: uq_repositories_name_team
+        tableName: repositories
+- changeSet:
+    id: 001-baseline-035
+    author: kratis
+    changes:
+    - addUniqueConstraint:
+        columnNames: token
+        constraintName: refresh_tokens_token_key
+        tableName: refresh_tokens
+- changeSet:
+    id: 001-baseline-036
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_model_providers_team_id
+        tableName: model_providers
+- changeSet:
+    id: 001-baseline-037
+    author: kratis
+    changes:
+    - addUniqueConstraint:
+        columnNames: display_name, team_id
+        constraintName: uq_model_providers_display_name_team
+        tableName: model_providers
+- changeSet:
+    id: 001-baseline-038
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: chat_id
+        indexName: idx_scratchpad_chat_id
+        tableName: scratchpad
+- changeSet:
+    id: 001-baseline-039
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        - column:
+            name: user_id
+        indexName: idx_chats_team_user
+        tableName: chats
+- changeSet:
+    id: 001-baseline-040
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        - column:
+            defaultValueComputed: now()
+            name: updated_at
+        indexName: idx_chats_team_updated
+        tableName: chats
+- changeSet:
+    id: 001-baseline-041
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: chat_id
+        - column:
+            name: message_index
+        indexName: idx_chat_memory_chat_id
+        tableName: chat_memory
+- changeSet:
+    id: 001-baseline-042
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: chat_id
+        indexName: idx_canvas_chat_id
+        tableName: canvas
+- changeSet:
+    id: 001-baseline-043
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: chat_id
+        - column:
+            name: document_id
+        indexName: idx_canvas_chat_document
+        tableName: canvas
+        unique: true
+- changeSet:
+    id: 001-baseline-044
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: repository_id
+        indexName: idx_ctx_ingestion_batches_repo_id
+        tableName: ingestion_batches
+- changeSet:
+    id: 001-baseline-045
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: status
+        indexName: idx_ctx_ingestion_batches_status
+        tableName: ingestion_batches
+- changeSet:
+    id: 001-baseline-046
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            defaultValueBoolean: false
+            name: is_active
+        indexName: idx_ctx_ingestion_batches_is_active
+        tableName: ingestion_batches
+- changeSet:
+    id: 001-baseline-047
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: batch_id
+        indexName: idx_ctx_nodes_batch_id
+        tableName: ctx_nodes
+- changeSet:
+    id: 001-baseline-048
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_ctx_nodes_team_id
+        tableName: ctx_nodes
+- changeSet:
+    id: 001-baseline-049
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: repo_name
+        indexName: idx_ctx_nodes_repo_name
+        tableName: ctx_nodes
+- changeSet:
+    id: 001-baseline-050
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: node_type
+        indexName: idx_ctx_nodes_node_type
+        tableName: ctx_nodes
+- changeSet:
+    id: 001-baseline-051
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: symbol_name
+        indexName: idx_ctx_nodes_symbol_name
+        tableName: ctx_nodes
+- changeSet:
+    id: 001-baseline-052
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: batch_id
+        indexName: idx_ctx_edges_batch_id
+        tableName: ctx_edges
+- changeSet:
+    id: 001-baseline-053
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_ctx_edges_team_id
+        tableName: ctx_edges
+- changeSet:
+    id: 001-baseline-054
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: source_node_id
+        indexName: idx_ctx_edges_source_node_id
+        tableName: ctx_edges
+- changeSet:
+    id: 001-baseline-055
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: target_node_id
+        indexName: idx_ctx_edges_target_node_id
+        tableName: ctx_edges
+- changeSet:
+    id: 001-baseline-056
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: relation_type
+        indexName: idx_ctx_edges_relation_type
+        tableName: ctx_edges
+- changeSet:
+    id: 001-baseline-057
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_repo_credentials_team_id
+        tableName: repo_credentials
+- changeSet:
+    id: 001-baseline-058
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: type
+        indexName: idx_repo_credentials_type
+        tableName: repo_credentials
+- changeSet:
+    id: 001-baseline-059
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: batch_id
+        indexName: idx_ingestion_batch_logs_batch_id
+        tableName: ingestion_batch_logs
+- changeSet:
+    id: 001-baseline-060
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_ingestion_batch_logs_team_id
+        tableName: ingestion_batch_logs
+- changeSet:
+    id: 001-baseline-061
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: batch_id
+        indexName: idx_ctx_wiki_pages_batch_id
+        tableName: ctx_wiki_pages
+- changeSet:
+    id: 001-baseline-062
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_ctx_wiki_pages_team_id
+        tableName: ctx_wiki_pages
+- changeSet:
+    id: 001-baseline-063
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: repo_name
+        indexName: idx_ctx_wiki_pages_repo_name
+        tableName: ctx_wiki_pages
+- changeSet:
+    id: 001-baseline-064
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: page_slug
+        indexName: idx_ctx_wiki_pages_page_slug
+        tableName: ctx_wiki_pages
+- changeSet:
+    id: 001-baseline-065
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: batch_id
+        indexName: idx_ctx_archetypes_batch_id
+        tableName: ctx_archetypes
+- changeSet:
+    id: 001-baseline-066
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_ctx_archetypes_team_id
+        tableName: ctx_archetypes
+- changeSet:
+    id: 001-baseline-067
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: batch_id
+        indexName: idx_ctx_architecture_patterns_batch_id
+        tableName: ctx_architecture_patterns
+- changeSet:
+    id: 001-baseline-068
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_ctx_architecture_patterns_team_id
+        tableName: ctx_architecture_patterns
+- changeSet:
+    id: 001-baseline-069
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: batch_id
+        indexName: idx_ctx_dimensions_batch_id
+        tableName: ctx_dimensions
+- changeSet:
+    id: 001-baseline-070
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_ctx_dimensions_team_id
+        tableName: ctx_dimensions
+- changeSet:
+    id: 001-baseline-071
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: node_id
+        indexName: idx_ctx_node_dimensions_node_id
+        tableName: ctx_node_dimensions
+- changeSet:
+    id: 001-baseline-072
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: dimension_id
+        indexName: idx_ctx_node_dimensions_dimension_id
+        tableName: ctx_node_dimensions
+- changeSet:
+    id: 001-baseline-073
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: auth_token
+        indexName: idx_exec_envs_token
+        tableName: execution_environments
+- changeSet:
+    id: 001-baseline-074
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: chat_id
+        indexName: idx_sandbox_execs_chat
+        tableName: sandbox_executions
+- changeSet:
+    id: 001-baseline-075
+    author: kratis
+    changes:
+    - addUniqueConstraint:
+        columnNames: team_id, command_root, rule_type, action
+        constraintName: uq_sandbox_permission_rules_team_cmd_type_action
+        tableName: sandbox_permission_rules
+- changeSet:
+    id: 001-baseline-076
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_env_providers_team
+        tableName: environment_providers
+- changeSet:
+    id: 001-baseline-077
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: chat_id
+        indexName: idx_chat_usage_sessions_chat_id
+        tableName: chat_usage_sessions
+- changeSet:
+    id: 001-baseline-078
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: execution_id
+        - column:
+            name: sequence
+        indexName: idx_sandbox_execution_activities_execution
+        tableName: sandbox_execution_activities
+- changeSet:
+    id: 001-baseline-079
+    author: kratis
+    changes:
+    - addUniqueConstraint:
+        columnNames: singleton_key
+        constraintName: kratis_installation_singleton_key_key
+        tableName: kratis_installation
+- changeSet:
+    id: 001-baseline-080
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: pk_ctx_architecture_pattern_exemplars
+            name: pattern_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: pk_ctx_architecture_pattern_exemplars
+            name: node_id
+            type: UUID
+        tableName: ctx_architecture_pattern_exemplars
+- changeSet:
+    id: 001-baseline-081
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: ctx_embeddings_pkey
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: batch_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: team_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: page_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: chunk_text
+            type: TEXT
+        - column:
+            name: embedding
+            type: VECTOR
+        - column:
+            constraints:
+              nullable: false
+            name: dim_size
+            type: INTEGER
+        tableName: ctx_embeddings
+- changeSet:
+    id: 001-baseline-082
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: pk_model_provider_models
+            name: model_provider_id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: pk_model_provider_models
+            name: model_name
+            type: VARCHAR(255)
+        - column:
+            constraints:
+              nullable: false
+            name: model_kind
+            type: VARCHAR(20)
+        tableName: model_provider_models
+- changeSet:
+    id: 001-baseline-083
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: batch_id
+        indexName: idx_ctx_embeddings_batch
+        tableName: ctx_embeddings
+- changeSet:
+    id: 001-baseline-084
+    author: kratis
+    dbms: postgresql
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: false
+        stripComments: true
+        sql: CREATE INDEX idx_ctx_embeddings_embedding_1024 ON ctx_embeddings USING hnsw ((embedding::vector(1024)) vector_cosine_ops) WHERE (dim_size = 1024)
+- changeSet:
+    id: 001-baseline-085
+    author: kratis
+    dbms: postgresql
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: false
+        stripComments: true
+        sql: CREATE INDEX idx_ctx_embeddings_embedding_1536 ON ctx_embeddings USING hnsw ((embedding::vector(1536)) vector_cosine_ops) WHERE (dim_size = 1536)
+- changeSet:
+    id: 001-baseline-086
+    author: kratis
+    dbms: postgresql
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: false
+        stripComments: true
+        sql: CREATE INDEX idx_ctx_embeddings_embedding_3072 ON ctx_embeddings USING hnsw ((embedding::halfvec(3072)) halfvec_cosine_ops) WHERE (dim_size = 3072)
+- changeSet:
+    id: 001-baseline-087
+    author: kratis
+    dbms: postgresql
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: false
+        stripComments: true
+        sql: CREATE INDEX idx_ctx_embeddings_embedding_384 ON ctx_embeddings USING hnsw ((embedding::vector(384)) vector_cosine_ops) WHERE (dim_size = 384)
+- changeSet:
+    id: 001-baseline-088
+    author: kratis
+    dbms: postgresql
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: false
+        stripComments: true
+        sql: CREATE INDEX idx_ctx_embeddings_embedding_768 ON ctx_embeddings USING hnsw ((embedding::vector(768)) vector_cosine_ops) WHERE (dim_size = 768)
+- changeSet:
+    id: 001-baseline-089
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: page_id
+        indexName: idx_ctx_embeddings_page
+        tableName: ctx_embeddings
+- changeSet:
+    id: 001-baseline-090
+    author: kratis
+    changes:
+    - createIndex:
+        columns:
+        - column:
+            name: team_id
+        indexName: idx_ctx_embeddings_team
+        tableName: ctx_embeddings
+- changeSet:
+    id: 001-baseline-check-canvas-repo-form
+    author: kratis
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: false
+        stripComments: true
+        sql: ALTER TABLE canvas ADD CONSTRAINT chk_canvas_repo_form CHECK (((((canvas_type)::text = 'DOCUMENT'::text) AND (repository_id IS NULL) AND (new_repo_name IS NULL)) OR (((canvas_type)::text = 'SPEC'::text) AND (((repository_id IS NOT NULL) AND (new_repo_name IS NULL)) OR ((repository_id IS NULL) AND (new_repo_name IS NOT NULL))))))
+
+- changeSet:
+    id: 001-baseline-091
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: repository_id
+        baseTableName: canvas
+        constraintName: fk_canvas_repository
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: SET NULL
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: repositories
+        validate: true
+- changeSet:
+    id: 001-baseline-092
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: chat_id
+        baseTableName: chat_usage_sessions
+        constraintName: fk_chat_usage_session_chat
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: chats
+        validate: true
+- changeSet:
+    id: 001-baseline-093
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: team_id
+        baseTableName: chats
+        constraintName: fk_chats_team
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: NO ACTION
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: teams
+        validate: true
+- changeSet:
+    id: 001-baseline-094
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: user_id
+        baseTableName: chats
+        constraintName: fk_chats_user
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: NO ACTION
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: users
+        validate: true
+- changeSet:
+    id: 001-baseline-095
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: node_id
+        baseTableName: ctx_architecture_pattern_exemplars
+        constraintName: fk_ctx_arch_pattern_exemplars_node
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ctx_nodes
+        validate: true
+- changeSet:
+    id: 001-baseline-096
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: pattern_id
+        baseTableName: ctx_architecture_pattern_exemplars
+        constraintName: fk_ctx_arch_pattern_exemplars_pattern
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ctx_architecture_patterns
+        validate: true
+- changeSet:
+    id: 001-baseline-097
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: batch_id
+        baseTableName: ctx_archetypes
+        constraintName: fk_ctx_archetypes_batch
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ingestion_batches
+        validate: true
+- changeSet:
+    id: 001-baseline-098
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: team_id
+        baseTableName: ctx_archetypes
+        constraintName: fk_ctx_archetypes_team
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: teams
+        validate: true
+- changeSet:
+    id: 001-baseline-099
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: batch_id
+        baseTableName: ctx_architecture_patterns
+        constraintName: fk_ctx_architecture_patterns_batch
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ingestion_batches
+        validate: true
+- changeSet:
+    id: 001-baseline-100
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: team_id
+        baseTableName: ctx_architecture_patterns
+        constraintName: fk_ctx_architecture_patterns_team
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: teams
+        validate: true
+- changeSet:
+    id: 001-baseline-101
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: batch_id
+        baseTableName: ctx_dimensions
+        constraintName: fk_ctx_dimensions_batch
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ingestion_batches
+        validate: true
+- changeSet:
+    id: 001-baseline-102
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: team_id
+        baseTableName: ctx_dimensions
+        constraintName: fk_ctx_dimensions_team
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: teams
+        validate: true
+- changeSet:
+    id: 001-baseline-103
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: batch_id
+        baseTableName: ctx_edges
+        constraintName: fk_ctx_edges_batch
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ingestion_batches
+        validate: true
+- changeSet:
+    id: 001-baseline-104
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: source_node_id
+        baseTableName: ctx_edges
+        constraintName: fk_ctx_edges_source_node
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ctx_nodes
+        validate: true
+- changeSet:
+    id: 001-baseline-105
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: target_node_id
+        baseTableName: ctx_edges
+        constraintName: fk_ctx_edges_target_node
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ctx_nodes
+        validate: true
+- changeSet:
+    id: 001-baseline-106
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: batch_id
+        baseTableName: ctx_embeddings
+        constraintName: fk_ctx_embeddings_batch
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: NO ACTION
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ingestion_batches
+        validate: true
+- changeSet:
+    id: 001-baseline-107
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: page_id
+        baseTableName: ctx_embeddings
+        constraintName: fk_ctx_embeddings_page
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: NO ACTION
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ctx_wiki_pages
+        validate: true
+- changeSet:
+    id: 001-baseline-108
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: team_id
+        baseTableName: ctx_embeddings
+        constraintName: fk_ctx_embeddings_team
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: NO ACTION
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: teams
+        validate: true
+- changeSet:
+    id: 001-baseline-109
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: repository_id
+        baseTableName: ingestion_batches
+        constraintName: fk_ctx_ingestion_batches_repository
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: repositories
+        validate: true
+- changeSet:
+    id: 001-baseline-110
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: dimension_id
+        baseTableName: ctx_node_dimensions
+        constraintName: fk_ctx_node_dimensions_dimension
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ctx_dimensions
+        validate: true
+- changeSet:
+    id: 001-baseline-111
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: node_id
+        baseTableName: ctx_node_dimensions
+        constraintName: fk_ctx_node_dimensions_node
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ctx_nodes
+        validate: true
+- changeSet:
+    id: 001-baseline-112
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: batch_id
+        baseTableName: ctx_nodes
+        constraintName: fk_ctx_nodes_batch
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ingestion_batches
+        validate: true
+- changeSet:
+    id: 001-baseline-113
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: batch_id
+        baseTableName: ctx_wiki_pages
+        constraintName: fk_ctx_wiki_pages_batch
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ingestion_batches
+        validate: true
+- changeSet:
+    id: 001-baseline-114
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: parent_page_id
+        baseTableName: ctx_wiki_pages
+        constraintName: fk_ctx_wiki_pages_parent
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ctx_wiki_pages
+        validate: true
+- changeSet:
+    id: 001-baseline-115
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: team_id
+        baseTableName: environment_providers
+        constraintName: fk_env_providers_team
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: teams
+        validate: true
+- changeSet:
+    id: 001-baseline-116
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: provider_id
+        baseTableName: execution_environments
+        constraintName: fk_exec_envs_provider
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: SET NULL
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: environment_providers
+        validate: true
+- changeSet:
+    id: 001-baseline-117
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: team_id
+        baseTableName: execution_environments
+        constraintName: fk_execution_environments_team
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: teams
+        validate: true
+- changeSet:
+    id: 001-baseline-118
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: user_id
+        baseTableName: execution_environments
+        constraintName: fk_execution_environments_user
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: SET NULL
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: users
+        validate: true
+- changeSet:
+    id: 001-baseline-119
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: batch_id
+        baseTableName: ingestion_batch_logs
+        constraintName: fk_ingestion_batch_logs_batch
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: ingestion_batches
+        validate: true
+- changeSet:
+    id: 001-baseline-120
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: model_provider_id
+        baseTableName: model_provider_models
+        constraintName: fk_model_provider_models_provider
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: model_providers
+        validate: true
+- changeSet:
+    id: 001-baseline-121
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: team_id
+        baseTableName: model_providers
+        constraintName: fk_model_providers_team
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: teams
+        validate: true
+- changeSet:
+    id: 001-baseline-122
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: user_id
+        baseTableName: refresh_tokens
+        constraintName: fk_refresh_tokens_user
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: users
+        validate: true
+- changeSet:
+    id: 001-baseline-123
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: team_id
+        baseTableName: repo_credentials
+        constraintName: fk_repo_credentials_team
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: teams
+        validate: true
+- changeSet:
+    id: 001-baseline-124
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: credential_id
+        baseTableName: repositories
+        constraintName: fk_repositories_credential
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: SET NULL
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: repo_credentials
+        validate: true
+- changeSet:
+    id: 001-baseline-125
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: team_id
+        baseTableName: repositories
+        constraintName: fk_repositories_team
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: teams
+        validate: true
+- changeSet:
+    id: 001-baseline-126
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: execution_id
+        baseTableName: sandbox_execution_activities
+        constraintName: fk_sandbox_execution_activities_execution
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: sandbox_executions
+        validate: true
+- changeSet:
+    id: 001-baseline-127
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: resolved_by
+        baseTableName: sandbox_execution_activities
+        constraintName: fk_sandbox_execution_activities_resolved_by
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: SET NULL
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: users
+        validate: true
+- changeSet:
+    id: 001-baseline-128
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: chat_id
+        baseTableName: sandbox_executions
+        constraintName: fk_sandbox_executions_chat
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: chats
+        validate: true
+- changeSet:
+    id: 001-baseline-129
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: environment_id
+        baseTableName: sandbox_executions
+        constraintName: fk_sandbox_executions_environment
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: execution_environments
+        validate: true
+- changeSet:
+    id: 001-baseline-130
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: model_provider_id
+        baseTableName: sandbox_executions
+        constraintName: fk_sandbox_executions_model_provider
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: RESTRICT
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: model_providers
+        validate: true
+- changeSet:
+    id: 001-baseline-131
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: new_repo_credential_id
+        baseTableName: sandbox_executions
+        constraintName: fk_sandbox_executions_new_repo_credential
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: SET NULL
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: repo_credentials
+        validate: true
+- changeSet:
+    id: 001-baseline-132
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: repository_id
+        baseTableName: sandbox_executions
+        constraintName: fk_sandbox_executions_repository
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: SET NULL
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: repositories
+        validate: true
+- changeSet:
+    id: 001-baseline-133
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: team_id
+        baseTableName: sandbox_permission_rules
+        constraintName: fk_sandbox_permission_rules_team
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: teams
+        validate: true
+- changeSet:
+    id: 001-baseline-134
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: created_by_user_id
+        baseTableName: sandbox_permission_rules
+        constraintName: fk_sandbox_permission_rules_user
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: SET NULL
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: users
+        validate: true
+- changeSet:
+    id: 001-baseline-135
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: team_id
+        baseTableName: team_members
+        constraintName: fk_team_members_team
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: teams
+        validate: true
+- changeSet:
+    id: 001-baseline-136
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: user_id
+        baseTableName: team_members
+        constraintName: fk_team_members_user
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: users
+        validate: true
+- changeSet:
+    id: 001-baseline-137
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: embedding_provider_id
+        baseTableName: teams
+        constraintName: fk_teams_embedding_provider
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: NO ACTION
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: model_providers
+        validate: true
+- changeSet:
+    id: 001-baseline-138
+    author: kratis
+    changes:
+    - addForeignKeyConstraint:
+        baseColumnNames: ingestion_provider_id
+        baseTableName: teams
+        constraintName: fk_teams_ingestion_provider
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: NO ACTION
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: model_providers
+        validate: true
+

@@ -1,0 +1,14 @@
+{
+  "type": "execution_hitl_required",
+  "executionId": "00000000-0000-0000-0000-000000000006",
+  "hitlId": "tool-call-1",
+  "kind": "approval",
+  "message": "Allow command 'rm -rf /tmp/x'?",
+  "command": "rm -rf /tmp/x",
+  "title": "Remove temp directory",
+  "toolKind": "execute",
+  "options": [
+    { "optionId": "allow-once", "name": "Allow once", "kind": "allow_once" },
+    { "optionId": "reject-once", "name": "Reject", "kind": "reject_once" }
+  ]
+}

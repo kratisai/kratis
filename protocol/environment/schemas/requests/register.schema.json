@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RegisterParams",
+  "type": "object",
+  "required": ["token"],
+  "properties": {
+    "token": { "type": "string" },
+    "containerId": { "type": "string" },
+    "isReconnect": { "type": "boolean" },
+    "activeAcpSessionId": { "type": "string" },
+    "hasActiveAgent": { "type": "boolean" },
+    "lastEventSequence": { "type": "integer" },
+    "pendingHitlIds": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "protocolVersion": { "type": "integer" },
+    "connectorVersion": { "type": "string" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CanvasResult",
+  "type": "object",
+  "required": [
+    "type",
+    "event"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "canvas",
+      "enum": [
+        "canvas"
+      ]
+    },
+    "event": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "documentId",
+            "chatId",
+            "title",
+            "content",
+            "canvasType",
+            "isNewRepo"
+          ],
+          "properties": {
+            "documentId": {
+              "type": "string"
+            },
+            "chatId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "title": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "canvasType": {
+              "type": "string",
+              "enum": [
+                "SPEC",
+                "DOCUMENT"
+              ]
+            },
+            "repoLabel": {
+              "type": "string"
+            },
+            "isNewRepo": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "documentId",
+            "chatId",
+            "title",
+            "content",
+            "version",
+            "canvasType",
+            "isNewRepo"
+          ],
+          "properties": {
+            "documentId": {
+              "type": "string"
+            },
+            "chatId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "title": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "canvasType": {
+              "type": "string",
+              "enum": [
+                "SPEC",
+                "DOCUMENT"
+              ]
+            },
+            "repoLabel": {
+              "type": "string"
+            },
+            "isNewRepo": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "documentId",
+            "chatId",
+            "version"
+          ],
+          "properties": {
+            "documentId": {
+              "type": "string"
+            },
+            "chatId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "version": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "documentId",
+            "chatId"
+          ],
+          "properties": {
+            "documentId": {
+              "type": "string"
+            },
+            "chatId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "documentId",
+            "chatId",
+            "errorMessage"
+          ],
+          "properties": {
+            "documentId": {
+              "type": "string"
+            },
+            "chatId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "errorMessage": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AcpPromptResult",
+  "type": "object",
+  "required": ["status"],
+  "properties": {
+    "status": { "type": "string", "enum": ["completed", "failed"] },
+    "stopReason": { "type": ["string", "null"], "enum": ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled", null] },
+    "error": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

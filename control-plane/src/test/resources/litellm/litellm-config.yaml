@@ -1,0 +1,20 @@
+# LiteLLM configuration for integration tests.
+# This provides a minimal config that allows the admin API to work
+# without requiring real provider API keys.
+general_settings:
+  master_key: sk-test-master
+
+litellm_settings:
+  # Drop unsupported parameters instead of failing. Some agents (e.g., Mistral Vibe)
+  # send parameters like 'reasoning_effort' that are not supported by all providers.
+  drop_params: true
+
+router_settings:
+  # Disable cooldowns so that a single failed request does not block subsequent
+  # requests for 5 minutes.  In test environments the upstream mock may be
+  # temporarily unreachable during container startup, and we must not let that
+  # poison the router state for the rest of the test run.
+  cooldown_time: 0
+  enable_pre_call_checks: false
+
+model_list: []

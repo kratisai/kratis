@@ -1,0 +1,87 @@
+# Stage 1: Build web assets
+FROM node:20-alpine AS web
+WORKDIR /web
+COPY web/package*.json ./
+RUN npm install --legacy-peer-deps
+COPY web/ .
+RUN npm run build
+
+# Stage 1.5: Build Go sidecar
+FROM golang:1.22-alpine AS sidecar-builder
+WORKDIR /sidecar
+COPY sidecar/go.mod sidecar/go.sum* ./
+RUN go mod download
+COPY sidecar/ .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o kratis-connector main.go
+
+# Stage 2: GraalVM native image build
+# GraalVM CE 25.0.2 on Oracle Linux 9.
+FROM ghcr.io/graalvm/native-image-community:25.0.2-ol9-20260120 AS builder
+
+WORKDIR /app
+
+COPY control-plane/mvnw ./mvnw
+COPY control-plane/.mvn .mvn
+COPY control-plane/pom.xml pom.xml
+RUN ./mvnw dependency:go-offline -B
+
+# Copy web assets into resources before native compilation
+COPY --from=web /web/dist src/main/resources/static/
+COPY control-plane/src src/
+
+# Build native image (web assets embedded in binary).
+#   1. Code hygiene is enforced in the dev/CI workflow, not the release build.
+#   2. google-java-format is incompatible with the JDK 25 compiler APIs in GraalVM 25.x.
+#
+# Resource caps (-Ob, --parallelism, -J-Xmx, --gc=epsilon) are defined in
+# pom.xml native profile buildArgs so they apply both here and in local builds.
+# 
+# ── Scaling Rules ────────────────────────────────────────────────────────────
+# NATIVE_PARALLELISM: Scales with available heap. The true constraint is memory-per-thread.
+#   Aim for ~3-4GB of heap per thread. If parallelism is too high for the available heap
+#   (e.g., 8 threads on a 16g heap = 2GB/thread), ForkJoin workers will hammer the GC.
+#   The resulting safepoint contention stalls JVMCI native calls and triggers GraalVM's watchdog.
+# NATIVE_HEAP: 12g OOMs during the StrengthenGraphs phase; 16g is the observed minimum for 4 threads.
+# ─────────────────────────────────────────────────────────────────────────────
+# Override at build time to bypass defaults in pom.xml:
+#   docker build --build-arg NATIVE_PARALLELISM=8 --build-arg NATIVE_HEAP=32g
+# ARG NATIVE_PARALLELISM
+# ARG NATIVE_HEAP
+ARG NATIVE_PARALLELISM
+ARG NATIVE_HEAP
+RUN ./mvnw -Pnative native:compile \
+    -Dmaven.test.skip=true \
+    -Dspotless.skip=true \
+    -Dcheckstyle.skip=true \
+    -Dpmd.skip=true \
+    ${NATIVE_PARALLELISM:+-Dnative.parallelism=$NATIVE_PARALLELISM} \
+    ${NATIVE_HEAP:+-Dnative.jvm.maxheap=$NATIVE_HEAP}
+
+# Stage 3: Minimal runtime
+FROM alpine:3.20
+
+ARG VERSION=unknown
+ARG BUILD_TAG=unknown
+ARG TARGETARCH
+
+RUN apk add --no-cache git curl tar gcompat libgcc libstdc++ zlib scc docker-cli \
+    && curl -L https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.8.1/codebase-memory-mcp-linux-${TARGETARCH}.tar.gz -o cbm.tar.gz \
+    && tar -xzf cbm.tar.gz -C /usr/local/bin/ \
+    && chmod +x /usr/local/bin/codebase-memory-mcp \
+    && rm cbm.tar.gz
+
+COPY --from=builder /app/target/kratis /usr/local/bin/kratis
+COPY --from=sidecar-builder /sidecar/kratis-connector /usr/local/bin/kratis-connector
+
+ENV KRATIS_PARSER_BINARY_PATH=/usr/local/bin/codebase-memory-mcp
+ENV KRATIS_SCC_BINARY_PATH=/usr/bin/scc
+ENV KRATIS_VERSION=$VERSION
+ENV KRATIS_BUILD_TAG=$BUILD_TAG
+
+# Create non-root user
+RUN addgroup -S kratis && adduser -S kratis -G kratis
+USER kratis
+
+EXPOSE 8080
+
+ENTRYPOINT ["kratis"]

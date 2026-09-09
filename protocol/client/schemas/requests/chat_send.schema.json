@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ChatSendParams",
+  "type": "object",
+  "required": ["chatId", "message", "teamId", "providerId", "modelName"],
+  "properties": {
+    "chatId": { "type": "string" },
+    "message": { "type": "string" },
+    "teamId": { "type": "string" },
+    "providerId": { "type": "string" },
+    "modelName": { "type": "string" }
+  },
+  "additionalProperties": false
+}

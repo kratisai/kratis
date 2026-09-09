@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "method": "unsubscribe",
+  "params": {
+    "teamId": "team-888"
+  },
+  "id": 3
+}

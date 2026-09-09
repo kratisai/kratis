@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AcpPromptCompleteParams",
+  "type": "object",
+  "required": ["sessionId", "stopReason", "executionId"],
+  "properties": {
+    "sessionId": { "type": "string" },
+    "stopReason": {
+      "type": "string",
+      "enum": ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"]
+    },
+    "executionId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

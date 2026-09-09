@@ -1,0 +1,83 @@
+# Development Docker Compose — used by spring-boot-docker-compose during `./mvnw spring-boot:run`.
+# spring-boot-docker-compose runs `docker compose up` on every startup
+# (spring.docker.compose.start.skip=NEVER in application.properties), so any stopped
+# service here is restarted automatically. For production deployment, see deploy/compose.yaml.
+services:
+  kratis-db:
+    image: 'pgvector/pgvector:pg16'
+    environment:
+      - 'POSTGRES_DB=kratis'
+      - 'POSTGRES_PASSWORD=kratis'
+      - 'POSTGRES_USER=kratis'
+    ports:
+      - '5432:5432'
+    volumes:
+      # not ./data; the control-plane needs write, clashing with Docker directory creation
+      - ./postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U kratis']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  litellm:
+    # main-stable tracks the latest official LiteLLM release (currently 1.98.0) — the same image
+    # used by the control-plane test suite (PostgresTestInitializer) and deploy/compose.yaml.
+    # pull_policy: always ensures the moving tag is refreshed on every `docker compose up`,
+    # preventing the local cache from drifting behind the registry.
+    image: 'ghcr.io/berriai/litellm:main-stable'
+    pull_policy: always
+    environment:
+      - 'LITELLM_MASTER_KEY=sk-litellm-master'
+      - 'LITELLM_SALT_KEY=sk-litellm-salt'
+      - 'LITELLM_LOG=DEBUG'
+      - 'STORE_MODEL_IN_DB=True'
+      - 'LITELLM_DROP_PARAMS=True'
+      # Schema separation via the `?schema=` query param on DATABASE_URL — the DATABASE_SCHEMA
+      # env var is unreliable when DATABASE_URL is also set (see BerriAI/litellm#15175).
+      - 'DATABASE_URL=postgresql://kratis:kratis@kratis-db:5432/kratis?schema=litellm'
+    ports:
+      - '4000:4000'
+    volumes:
+      # Apply the one-shot fixes for the open LiteLLM spend-log bugs (BerriAI/litellm#29913 and
+      # #28595/#28943) before the proxy starts — without them Responses-API traffic (Codex, Claude
+      # Code) records zero usage. The script is idempotent and a no-op once an upstream release
+      # contains the fixes.
+      - ../deploy/litellm/patch_response_logging.py:/tmp/patch_response_logging.py:ro
+    depends_on:
+      kratis-db:
+        condition: service_healthy
+    healthcheck:
+      # The litellm image is built on the "wolfi" distro, which has neither `curl` nor `wget`.
+      # `python3` is always present since it's the runtime the proxy itself runs on.
+      test:
+        [
+          'CMD-SHELL',
+          "python3 -c \"import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:4000/health/readiness', timeout=3).status == 200 else 1)\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    # Patch the module before litellm imports it (patching the .py file after launch has no effect),
+    # then start the proxy. Replaces the image's default `docker/prod_entrypoint.sh` (which only
+    # execs `litellm "$@"` when USE_DDTRACE is unset).
+    entrypoint:
+      [
+        '/bin/sh',
+        '-c',
+        '/app/.venv/bin/python3 /tmp/patch_response_logging.py && exec /app/.venv/bin/litellm --port 4000',
+      ]
+
+  registry-cache:
+    image: 'registry:2'
+    restart: unless-stopped
+    ports:
+      - '${REGISTRY_CACHE_PORT:-5001}:5000'
+    environment:
+      - 'REGISTRY_PROXY_REMOTEURL=https://registry-1.docker.io'
+    volumes:
+      - kratis-image-cache:/var/lib/registry
+
+volumes:
+  kratis-image-cache:

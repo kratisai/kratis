@@ -1,0 +1,379 @@
+{
+  "openrpc": "1.3.2",
+  "info": {
+    "title": "Kratis Environment WebSocket Protocol",
+    "version": "1.0.0",
+    "description": "Bidirectional JSON-RPC 2.0 protocol between Kratis Control Plane and Sidecar Connector"
+  },
+  "methods": [
+    {
+      "name": "env.register",
+      "summary": "Register sidecar environment session with control plane",
+      "x-kratis-direction": "connector-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/register.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/register.schema.json"
+        }
+      }
+    },
+    {
+      "name": "env.heartbeat",
+      "summary": "Periodic sidecar heartbeat",
+      "x-kratis-direction": "connector-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/heartbeat.schema.json"
+        }
+      }
+    },
+    {
+      "name": "env.git_token",
+      "summary": "Fetch a fresh git credential token from the control plane",
+      "x-kratis-direction": "connector-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/git_token.schema.json"
+        }
+      }
+    },
+    {
+      "name": "env.output",
+      "summary": "Stream execution stdout/stderr line",
+      "x-kratis-direction": "connector-to-control-plane",
+      "x-kratis-message-kind": "notification",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/output.schema.json"
+          }
+        }
+      ]
+    },
+    {
+      "name": "env.activity",
+      "summary": "Stream execution activity event",
+      "x-kratis-direction": "connector-to-control-plane",
+      "x-kratis-message-kind": "notification",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/activity.schema.json"
+          }
+        }
+      ]
+    },
+    {
+      "name": "env.sidecar_error",
+      "summary": "Report a connector-side failure (unexpected close, dropped frame) to the control plane",
+      "x-kratis-direction": "connector-to-control-plane",
+      "x-kratis-message-kind": "notification",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/sidecar_error.schema.json"
+          }
+        }
+      ]
+    },
+    {
+      "name": "env.complete",
+      "summary": "Signal command execution completion",
+      "x-kratis-direction": "connector-to-control-plane",
+      "x-kratis-message-kind": "notification",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/complete.schema.json"
+          }
+        }
+      ]
+    },
+    {
+      "name": "env.checkout_complete",
+      "summary": "Signal git checkout completion",
+      "x-kratis-direction": "connector-to-control-plane",
+      "x-kratis-message-kind": "notification",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/checkout_complete.schema.json"
+          }
+        }
+      ]
+    },
+    {
+      "name": "env.acp_initialized",
+      "summary": "Signal ACP agent initialization",
+      "x-kratis-direction": "connector-to-control-plane",
+      "x-kratis-message-kind": "notification",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/acp_initialized.schema.json"
+          }
+        }
+      ]
+    },
+    {
+      "name": "env.acp_prompt_complete",
+      "summary": "Signal ACP task completion",
+      "x-kratis-direction": "connector-to-control-plane",
+      "x-kratis-message-kind": "notification",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/acp_prompt_complete.schema.json"
+          }
+        }
+      ]
+    },
+    {
+      "name": "env.hitl_request",
+      "summary": "Request a human decision: authorize a command (approval) or answer a structured question (question)",
+      "x-kratis-direction": "connector-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/hitl_request.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/hitl_request.schema.json"
+        }
+      }
+    },
+    {
+      "name": "env.exec",
+      "summary": "Execute a shell command in the sidecar workspace",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/exec.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/exec.schema.json"
+        }
+      }
+    },
+    {
+      "name": "env.registerGitAuth",
+      "summary": "Register git credentials in sidecar",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/register_git_auth.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/register_git_auth.schema.json"
+        }
+      }
+    },
+    {
+      "name": "env.checkout",
+      "summary": "Dispatch git repository checkout to sidecar; completion arrives via env.checkout_complete",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "notification",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/checkout.schema.json"
+          }
+        }
+      ]
+    },
+    {
+      "name": "env.launch_acp_agent",
+      "summary": "Launch ACP harness agent in sidecar",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/launch_acp_agent.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/launch_acp_agent.schema.json"
+        }
+      }
+    },
+    {
+      "name": "env.acp_prompt",
+      "summary": "Send task prompt to running ACP agent",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/acp_prompt.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/acp_prompt.schema.json"
+        }
+      }
+    },
+    {
+      "name": "env.terminate",
+      "summary": "Terminate running environment execution",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "request",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/terminate.schema.json"
+        }
+      }
+    },
+    {
+      "name": "env.git_diff_summary",
+      "summary": "Retrieve git diff summary manifest for working tree / commits",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": false,
+          "schema": {
+            "$ref": "./schemas/requests/git_diff_summary.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/git_diff_summary.schema.json"
+        }
+      }
+    },
+    {
+      "name": "env.git_file_diff",
+      "summary": "Retrieve git unified diff patch for a single file",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/git_file_diff.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/git_file_diff.schema.json"
+        }
+      }
+    },
+    {
+      "name": "env.read_file_slice",
+      "summary": "Read slice of lines from a workspace file for hunk expansion",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/read_file_slice.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/read_file_slice.schema.json"
+        }
+      }
+    },
+    {
+      "name": "env.git_push",
+      "summary": "Stage, commit, and push branch to remote origin",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/git_push.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/git_push.schema.json"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AcpInitializedParams",
+  "type": "object",
+  "required": ["sessionId", "agentName", "agentVersion", "executionId"],
+  "properties": {
+    "sessionId": { "type": "string" },
+    "agentName": { "type": "string" },
+    "agentVersion": { "type": "string" },
+    "executionId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

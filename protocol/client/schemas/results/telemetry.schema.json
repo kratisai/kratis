@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TelemetryResult",
+  "type": "object",
+  "required": [
+    "type",
+    "chatId",
+    "event"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "telemetry",
+      "enum": [
+        "telemetry"
+      ]
+    },
+    "chatId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "event": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "taskId",
+            "toolName",
+            "thought"
+          ],
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "toolName": {
+              "type": "string"
+            },
+            "thought": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "taskId",
+            "status"
+          ],
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "taskId",
+            "status"
+          ],
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "taskId",
+            "error"
+          ],
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

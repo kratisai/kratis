@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OutputParams",
+  "type": "object",
+  "required": ["line", "stream", "executionId"],
+  "properties": {
+    "line": { "type": "string" },
+    "stream": { "type": "string", "enum": ["stdout", "stderr"] },
+    "executionId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

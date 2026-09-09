@@ -1,0 +1,9 @@
+id: ts_file_import
+valid:
+  - "import React from 'react'"
+  - "import { useState, useEffect } from './hooks'"
+  - "import * as fs from 'fs'"
+  - "import 'bootstrap/dist/css/bootstrap.css'"
+invalid:
+  - "const x = 5;"
+  - "export default x;"

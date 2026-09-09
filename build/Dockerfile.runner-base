@@ -1,0 +1,39 @@
+FROM debian:trixie-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    bzip2 \
+    curl \
+    netcat-openbsd \
+    openssh-client \
+    tar \
+    python3 \
+    python3-pip \
+    python3-setuptools \
+    python3-dev \
+    build-essential \
+    rustc \
+    cargo \
+    sudo \
+    git \
+    ca-certificates \
+    gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_26.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update && apt-get install -y --no-install-recommends nodejs docker-ce-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create the standard non-root user 'kratis' with UID 1000
+RUN groupadd -g 1000 kratis && \
+    useradd -u 1000 -g kratis -m -d /home/kratis -s /bin/bash kratis
+
+# Passwordless sudo for 'kratis' so agents can install packages at runtime
+RUN echo 'kratis ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/kratis && \
+    chmod 440 /etc/sudoers.d/kratis
+
+RUN mkdir -p /kratis/workspace /kratis/logs && chown -R kratis:kratis /kratis
+USER kratis
+WORKDIR /kratis/workspace

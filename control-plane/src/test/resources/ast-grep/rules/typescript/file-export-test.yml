@@ -1,0 +1,9 @@
+id: ts_file_export
+valid:
+  - "export const Dashboard = (props: Props) => { return <div />; }"
+  - "export default function UserProfile({ id }) { return <span />; }"
+  - "export class HttpClient {}"
+  - "export interface User { id: string }"
+invalid:
+  - "const x = 5;"
+  - "import React from 'react';"

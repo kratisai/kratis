@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AuthResult",
+  "type": "object",
+  "required": [
+    "type",
+    "status",
+    "userId"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "auth",
+      "enum": [
+        "auth"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "authenticated"
+      ]
+    },
+    "userId": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

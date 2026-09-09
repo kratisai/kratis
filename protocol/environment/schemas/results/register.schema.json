@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RegisterResult",
+  "type": "object",
+  "required": [
+    "type",
+    "status",
+    "environmentId"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "env_register"
+      ],
+      "const": "env_register"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "registered",
+        "reconnected"
+      ]
+    },
+    "environmentId": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

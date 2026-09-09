@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "IngestionResult",
+  "type": "object",
+  "required": [
+    "type",
+    "event"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "ingestion",
+      "enum": [
+        "ingestion"
+      ]
+    },
+    "event": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "repositoryId",
+            "batchId",
+            "status"
+          ],
+          "properties": {
+            "repositoryId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "batchId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "QUEUED",
+                "PROCESSING",
+                "SUCCESS",
+                "FAILED"
+              ]
+            },
+            "commitHash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "completedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "additionalProperties": true
+}

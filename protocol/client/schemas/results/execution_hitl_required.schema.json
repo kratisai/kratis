@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionHitlRequiredResult",
+  "type": "object",
+  "required": ["type", "executionId", "hitlId", "kind", "message"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "execution_hitl_required",
+      "enum": ["execution_hitl_required"]
+    },
+    "executionId": { "type": "string", "format": "uuid" },
+    "hitlId": { "type": "string", "description": "Correlation ID (ACP toolCallId for approval, question id for question)." },
+    "kind": { "type": "string", "enum": ["approval", "question"] },
+    "message": { "type": "string", "description": "The question or instruction shown to the user." },
+    "command": { "type": "string", "description": "The command to authorize (kind=approval)." },
+    "title": { "type": "string" },
+    "toolKind": { "type": "string", "description": "Tool kind of the requesting action (kind=approval)." },
+    "options": {
+      "type": "array",
+      "description": "Selectable options (kind=approval).",
+      "items": {
+        "type": "object",
+        "required": ["optionId", "name", "kind"],
+        "properties": {
+          "optionId": { "type": "string" },
+          "name": { "type": "string" },
+          "kind": { "type": "string", "enum": ["allow_once", "allow_always", "reject_once", "reject_always"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "diff": {
+      "type": "object",
+      "description": "Before/after text for edit-kind approvals.",
+      "properties": {
+        "oldText": { "type": "string" },
+        "newText": { "type": "string" },
+        "path": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "form": { "type": "object", "description": "JSON Schema for the expected answer (kind=question)." }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,50 @@
+name: Go Sidecar CI (PR)
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'sidecar/**'
+      - '.github/workflows/pr-sidecar.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-sidecar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sidecar
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go 1.22
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: sidecar/go.sum
+
+      - name: Install Dependencies
+        run: go mod download
+
+      - name: Run Linter (golangci-lint)
+        uses: golangci/golangci-lint-action@v7
+        with:
+          # Pinned to the same version as the documented local workflow (AGENTS.md,
+          # sidecar/README.md) and the Docker fallback - see sidecar/.golangci.yml.
+          version: v2.13.1
+          working-directory: sidecar
+
+      - name: Run Tests with Coverage
+        run: |
+          go test -v -coverprofile=coverage.out -covermode=atomic ./...
+          echo "### Go Sidecar Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          go tool cover -func=coverage.out >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Build Binary
+        run: go build -v -o kratis-connector main.go

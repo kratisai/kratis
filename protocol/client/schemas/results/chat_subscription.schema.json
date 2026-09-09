@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ChatSubscriptionResult",
+  "type": "object",
+  "required": [
+    "type",
+    "status",
+    "chatId"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "chat_subscription",
+      "enum": [
+        "chat_subscription"
+      ]
+    },
+    "status": {
+      "type": "string"
+    },
+    "chatId": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": true
+}

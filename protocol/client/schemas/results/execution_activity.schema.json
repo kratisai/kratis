@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionActivityResult",
+  "type": "object",
+  "required": ["type", "executionId", "activityType", "description", "status"],
+  "properties": {
+    "type": { "type": "string", "const": "execution_activity", "enum": ["execution_activity"] },
+    "executionId": { "type": "string", "format": "uuid" },
+    "activityType": { "type": "string", "enum": ["THINKING", "RESEARCH", "EDITED", "COMMAND", "MESSAGE", "ELICITATION", "PLAN"] },
+    "description": { "type": "string" },
+    "actionId": { "type": "string", "description": "Correlation ID for the agent action this activity belongs to (ACP toolCallId, or messageId for message/thought chunks). Messages sharing an actionId render as one activity record." },
+    "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "failed"], "description": "ACP ToolCallStatus lifecycle: pending → in_progress → completed | failed." },
+    "detail": {
+      "type": "object",
+      "description": "Structured accumulated tool/message state for the expandable activity record.",
+      "properties": {
+        "kind": { "type": "string", "enum": ["read", "edit", "delete", "move", "search", "execute", "think", "fetch", "switch_mode", "other"] },
+        "title": { "type": "string" },
+        "locations": { "type": "array", "items": { "type": "object", "properties": { "path": { "type": "string" }, "line": { "type": "integer" } } } },
+        "input": { "type": "object" },
+        "output": { "type": "string" },
+        "diff": { "type": "object", "properties": { "oldText": { "type": "string" }, "newText": { "type": "string" }, "path": { "type": "string" } } },
+        "exitCode": { "type": "integer" },
+        "truncated": { "type": "boolean" },
+        "meta": { "type": "object" },
+        "messageId": { "type": "string" },
+        "role": { "type": "string" },
+        "plan": {
+          "type": "array",
+          "description": "ACP execution plan entries (replace-all per update).",
+          "items": {
+            "type": "object",
+            "required": ["content", "priority", "status"],
+            "properties": {
+              "content": { "type": "string" },
+              "priority": { "type": "string", "enum": ["high", "medium", "low"] },
+              "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] }
+            },
+            "additionalProperties": true
+          }
+        },
+        "rawUpdate": { "type": "object" },
+        "hitl": {
+          "type": "object",
+          "description": "HITL state for approval/question activities.",
+          "properties": {
+            "hitlId": { "type": "string" },
+            "kind": { "type": "string", "enum": ["approval", "question"] },
+            "message": { "type": "string" },
+            "command": { "type": "string" },
+            "title": { "type": "string" },
+            "toolKind": { "type": "string" },
+            "options": {
+              "type": "array",
+              "items": { "type": "object", "required": ["optionId", "name", "kind"], "properties": { "optionId": { "type": "string" }, "name": { "type": "string" }, "kind": { "type": "string", "enum": ["allow_once", "allow_always", "reject_once", "reject_always"] } } }
+            },
+            "diff": { "type": "object", "properties": { "oldText": { "type": "string" }, "newText": { "type": "string" }, "path": { "type": "string" } } },
+            "form": { "type": "object" },
+            "response": { "type": "string", "enum": ["approved", "answered", "declined", "cancelled"] },
+            "optionId": { "type": "string" },
+            "content": { "type": "object" },
+            "approved": { "type": "boolean" },
+            "cancelled": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

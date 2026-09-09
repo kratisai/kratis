@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HitlResult",
+  "type": "object",
+  "required": ["response"],
+  "properties": {
+    "response": {
+      "type": "string",
+      "enum": ["approved", "answered", "declined", "cancelled"],
+      "description": "The user's answer: approved (selected option), answered (submitted form), declined, or cancelled."
+    },
+    "optionId": {
+      "type": "string",
+      "description": "Selected option (response=approved only)."
+    },
+    "content": {
+      "type": "object",
+      "description": "Submitted form payload (response=answered only)."
+    }
+  },
+  "additionalProperties": false
+}

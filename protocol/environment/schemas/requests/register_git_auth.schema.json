@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RegisterGitAuthParams",
+  "type": "object",
+  "required": ["credentialType", "userName", "userEmail"],
+  "properties": {
+    "credentialType": {
+      "type": "string",
+      "enum": ["GITHUB_APP", "PAT", "SSH_KEY"]
+    },
+    "privateKey": { "type": "string" },
+    "userName": { "type": "string" },
+    "userEmail": { "type": "string" }
+  },
+  "additionalProperties": false
+}

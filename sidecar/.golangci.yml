@@ -1,0 +1,65 @@
+# golangci-lint configuration.
+# Version pinned to v2.13.1 across local dev, CI (pr-sidecar.yml), and the
+# Docker fallback commands in AGENTS.md / README.md. A different major or
+# minor version locally is a configuration defect - keep them in lock-step.
+#
+# The linter set is deliberately explicit so behaviour is deterministic. It
+# mirrors the inspections GoLand (and modern IDEs) surface by default:
+#   - errcheck / errorlint: unhandled errors, error-wrapping best practices
+#   - govet: suspicious constructs (go vet)
+#   - ineffassign: dead / ineffectual assignments
+#   - staticcheck: broad static analysis incl. unreachable/unused code
+#   - unused: unused functions, types, fields, variables
+#   - gosec: security problems (G104 is excluded by default - errcheck covers it)
+#   - gocritic: code-quality diagnostics
+#   - revive: curated quality rules (subset of GoLand's inspections)
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - errorlint
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+    - unused
+
+  exclusions:
+    rules:
+      # Test fixtures are excluded from gosec only: fake credentials, conventional
+      # fixture permissions, and subprocess/ssh stubs are intentional in tests and
+      # would otherwise force noise. All other linters still run on test sources.
+      - path: _test\.go$
+        linters:
+          - gosec
+
+  settings:
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: if-return
+        - name: increment-decrement
+        # var-naming is intentionally NOT enabled: the team prefers JsonRpc* / openRpc* /
+        # GitHttp* naming over Go's ALL-CAPS initialism convention (JSONRPC, openRPC, GitHTTP).
+        - name: var-declaration
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id

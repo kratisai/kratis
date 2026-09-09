@@ -1,0 +1,27 @@
+{
+  "baseCommit": "3a8f12c",
+  "headCommit": "9b1e45d",
+  "totalAdditions": 42,
+  "totalDeletions": 5,
+  "commitsAhead": 1,
+  "stagedFiles": 1,
+  "unstagedFiles": 0,
+  "hasChanges": true,
+  "commitMessages": [
+    {
+      "sha": "9b1e45d",
+      "subject": "feat: add JwtFilter",
+      "body": "Detailed commit body"
+    }
+  ],
+  "files": [
+    {
+      "path": "src/main/java/com/kratis/auth/JwtFilter.java",
+      "status": "MODIFIED",
+      "additions": 42,
+      "deletions": 5,
+      "isCollapsedByDefault": false
+    }
+  ]
+}
+

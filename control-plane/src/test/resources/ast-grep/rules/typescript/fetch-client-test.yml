@@ -1,0 +1,8 @@
+id: ts_rest_client
+valid:
+  - "fetch('https://api.github.com/users')"
+  - "axios.get('/api/v1/payments', { headers })"
+  - "axios.post('/api/v1/payments', payload)"
+invalid:
+  - "console.log('fetch')"
+  - "const get = () => {}"

@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.register",
+  "params": {
+    "token": "secret-register-token-123",
+    "containerId": "docker-container-abc",
+    "isReconnect": false,
+    "activeAcpSessionId": "",
+    "hasActiveAgent": false,
+    "lastEventSequence": 0,
+    "pendingHitlIds": [],
+    "protocolVersion": 1,
+    "connectorVersion": "0.1.0"
+  },
+  "id": 1
+}

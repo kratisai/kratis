@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.read_file_slice",
+  "params": {
+    "path": "src/main/java/com/kratis/auth/JwtFilter.java",
+    "startLine": 10,
+    "endLine": 30,
+    "executionId": "123e4567-e89b-12d3-a456-426614174000"
+  },
+  "id": 13
+}

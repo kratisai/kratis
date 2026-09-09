@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.registerGitAuth",
+  "params": {
+    "credentialType": "PAT",
+    "privateKey": "",
+    "userName": "Kratis",
+    "userEmail": "kratis@control-plane-host"
+  },
+  "id": 11
+}

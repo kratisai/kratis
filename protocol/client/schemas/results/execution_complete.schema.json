@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionCompleteResult",
+  "type": "object",
+  "required": [
+    "type",
+    "executionId",
+    "exitCode",
+    "status"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "execution_complete",
+      "enum": [
+        "execution_complete"
+      ]
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "exitCode": {
+      "type": "integer"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "RUNNING",
+        "IDLE",
+        "COMPLETED",
+        "FAILED"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

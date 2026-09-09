@@ -1,0 +1,2 @@
+org.springframework.context.ApplicationContextInitializer=com.kratisai.controlplane.PostgresTestInitializer
+org.springframework.test.context.ContextCustomizerFactory=com.kratisai.controlplane.ThreadBoundContextCustomizerFactory

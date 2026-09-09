@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CompleteResult",
+  "type": "object",
+  "required": [
+    "type",
+    "messageCount"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "complete",
+      "enum": [
+        "complete"
+      ]
+    },
+    "messageId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "chatId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "messageCount": {
+      "type": "integer"
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ChatErrorResult",
+  "type": "object",
+  "required": [
+    "type",
+    "chatId",
+    "messageId",
+    "code",
+    "message"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "chat_error",
+      "enum": [
+        "chat_error"
+      ]
+    },
+    "chatId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "messageId": {
+      "type": "string"
+    },
+    "code": {
+      "type": "integer"
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

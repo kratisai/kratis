@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionHitlResolvedResult",
+  "type": "object",
+  "required": ["type", "executionId", "hitlId", "kind", "response"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "execution_hitl_resolved",
+      "enum": ["execution_hitl_resolved"]
+    },
+    "executionId": { "type": "string", "format": "uuid" },
+    "hitlId": { "type": "string" },
+    "kind": { "type": "string", "enum": ["approval", "question"] },
+    "response": { "type": "string", "enum": ["approved", "answered", "declined", "cancelled"] },
+    "optionId": { "type": ["string", "null"], "description": "Selected optionId (response=approved)." },
+    "content": { "type": "object", "description": "Submitted form payload (response=answered)." },
+    "resolvedByUserId": { "type": ["string", "null"], "format": "uuid" },
+    "resolvedByDisplayName": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}

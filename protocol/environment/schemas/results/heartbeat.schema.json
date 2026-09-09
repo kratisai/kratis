@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HeartbeatResult",
+  "type": "object",
+  "required": [
+    "type",
+    "status"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "env_heartbeat"
+      ],
+      "const": "env_heartbeat"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ok"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

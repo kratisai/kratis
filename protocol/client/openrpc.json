@@ -1,0 +1,287 @@
+{
+  "openrpc": "1.3.2",
+  "info": {
+    "title": "Kratis Client WebSocket Protocol",
+    "version": "1.1.0",
+    "description": "Bidirectional JSON-RPC 2.0 protocol between Control Plane and Web UI Client. Request results are correlated by id; server-push payloads (x-kratis-notifications) use the same result envelope with id=null."
+  },
+  "methods": [
+    {
+      "name": "auth",
+      "summary": "Authenticate WebSocket connection",
+      "x-kratis-direction": "web-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/auth.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/auth.schema.json"
+        }
+      }
+    },
+    {
+      "name": "ping",
+      "summary": "Client keepalive ping",
+      "x-kratis-direction": "web-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/ping.schema.json"
+        }
+      }
+    },
+    {
+      "name": "subscribe",
+      "summary": "Subscribe to team event updates",
+      "x-kratis-direction": "web-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/subscribe.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/subscription.schema.json"
+        }
+      }
+    },
+    {
+      "name": "unsubscribe",
+      "summary": "Unsubscribe from team event updates",
+      "x-kratis-direction": "web-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/subscribe.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/subscription.schema.json"
+        }
+      }
+    },
+    {
+      "name": "chat.send",
+      "summary": "Send chat prompt message; result is a stream of chat payloads correlated with the request id",
+      "x-kratis-direction": "web-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "x-kratis-streaming": true,
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/chat_send.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "oneOf": [
+            {
+              "$ref": "./schemas/results/message_chunk.schema.json"
+            },
+            {
+              "$ref": "./schemas/results/telemetry.schema.json"
+            },
+            {
+              "$ref": "./schemas/results/complete.schema.json"
+            },
+            {
+              "$ref": "./schemas/results/chat_error.schema.json"
+            },
+            {
+              "$ref": "./schemas/results/canvas.schema.json"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "chat.subscribe",
+      "summary": "Subscribe to chat; result replays history then streams live payloads, correlated with the request id",
+      "x-kratis-direction": "web-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "x-kratis-streaming": true,
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/chat_subscribe.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "oneOf": [
+            {
+              "$ref": "./schemas/results/message.schema.json"
+            },
+            {
+              "$ref": "./schemas/results/message_chunk.schema.json"
+            },
+            {
+              "$ref": "./schemas/results/telemetry.schema.json"
+            },
+            {
+              "$ref": "./schemas/results/complete.schema.json"
+            },
+            {
+              "$ref": "./schemas/results/chat_error.schema.json"
+            },
+            {
+              "$ref": "./schemas/results/canvas.schema.json"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "chat.unsubscribe",
+      "summary": "Unsubscribe from chat updates",
+      "x-kratis-direction": "web-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/chat_unsubscribe.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/chat_subscription.schema.json"
+        }
+      }
+    },
+    {
+      "name": "execution.replay_activities",
+      "summary": "Replay persisted activities for an execution; result is a stream of execution_activity payloads plus a final execution_replay_complete marker",
+      "x-kratis-direction": "web-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "x-kratis-streaming": true,
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/execution_replay_activities.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "oneOf": [
+            {
+              "$ref": "./schemas/results/execution_activity.schema.json"
+            },
+            {
+              "$ref": "./schemas/results/execution_replay_complete.schema.json"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "x-kratis-notifications": [
+    {
+      "name": "team_entity_changed",
+      "summary": "Team-scoped entity update pushed to team subscribers",
+      "schema": {
+        "$ref": "./schemas/results/team_entity_changed.schema.json"
+      }
+    },
+    {
+      "name": "user_entity_changed",
+      "summary": "User-scoped entity update pushed to the owning user's sessions",
+      "schema": {
+        "$ref": "./schemas/results/user_entity_changed.schema.json"
+      }
+    },
+    {
+      "name": "execution_hitl_required",
+      "summary": "HITL request (approval or question) for an execution",
+      "schema": {
+        "$ref": "./schemas/results/execution_hitl_required.schema.json"
+      }
+    },
+    {
+      "name": "execution_hitl_resolved",
+      "summary": "HITL resolution (approved/answered/declined/cancelled) for an execution",
+      "schema": {
+        "$ref": "./schemas/results/execution_hitl_resolved.schema.json"
+      }
+    },
+    {
+      "name": "execution_output",
+      "summary": "Streamed stdout/stderr line from an execution",
+      "schema": {
+        "$ref": "./schemas/results/execution_output.schema.json"
+      }
+    },
+    {
+      "name": "execution_complete",
+      "summary": "Execution lifecycle completion signal",
+      "schema": {
+        "$ref": "./schemas/results/execution_complete.schema.json"
+      }
+    },
+    {
+      "name": "execution_status_changed",
+      "summary": "Execution status or usage change for a chat's executions; receivers invalidate the chat execution list",
+      "schema": {
+        "$ref": "./schemas/results/execution_status_changed.schema.json"
+      }
+    },
+    {
+      "name": "execution_activity",
+      "summary": "Agent activity event from an execution",
+      "schema": {
+        "$ref": "./schemas/results/execution_activity.schema.json"
+      }
+    },
+    {
+      "name": "execution_acp_initialized",
+      "summary": "ACP handshake completed for an execution (sessionId, agent name/version)",
+      "schema": {
+        "$ref": "./schemas/results/execution_acp_initialized.schema.json"
+      }
+    },
+    {
+      "name": "ingestion",
+      "summary": "Repository ingestion status update",
+      "schema": {
+        "$ref": "./schemas/results/ingestion.schema.json"
+      }
+    }
+  ]
+}
