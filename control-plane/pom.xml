@@ -633,6 +633,17 @@
 							</systemPropertyVariables>
 						</configuration>
 					</plugin>
+					<!-- Does not honour jacoco.skip and crashes on the missing exec data. -->
+					<plugin>
+						<groupId>io.github.svaningelgem</groupId>
+						<artifactId>jacoco-console-reporter</artifactId>
+						<executions>
+							<execution>
+								<id>default</id>
+								<phase>none</phase>
+							</execution>
+						</executions>
+					</plugin>
 				</plugins>
 			</build>
 		</profile>
