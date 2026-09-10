@@ -107,5 +107,9 @@ public class AotHints implements RuntimeHintsRegistrar {
         // unregistered resources, failing startup with "no changelog could be found".
         hints.resources().registerPattern("db/changelog-master.yaml");
         hints.resources().registerPattern("db/changelog/.*");
+
+        // Register entity ID array types for Hibernate MultiIdEntityLoaderArrayParam
+        hints.reflection().registerType(java.util.UUID[].class, MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS);
+        hints.reflection().registerType(Long[].class, MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS);
     }
 }
