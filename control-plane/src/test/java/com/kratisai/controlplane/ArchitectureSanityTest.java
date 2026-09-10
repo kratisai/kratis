@@ -33,8 +33,21 @@ import org.springframework.web.socket.WebSocketSession;
 
 @AnalyzeClasses(
         packages = "com.kratisai.controlplane",
-        importOptions = {ImportOption.DoNotIncludeTests.class, ImportOption.DoNotIncludeJars.class})
+        importOptions = {
+            ImportOption.DoNotIncludeTests.class,
+            ImportOption.DoNotIncludeJars.class,
+            ArchitectureSanityTest.DoNotIncludeAotGeneratedClasses.class
+        })
 public class ArchitectureSanityTest {
+
+    static final class DoNotIncludeAotGeneratedClasses implements ImportOption {
+        @Override
+        public boolean includes(com.tngtech.archunit.core.importer.Location location) {
+            return !location.contains("__BeanDefinitions")
+                    && !location.contains("__BeanFactoryRegistrations")
+                    && !location.contains("__AotProcessor");
+        }
+    }
 
     @ArchTest
     public static final ArchRule NO_FIELD_INJECTION = GeneralCodingRules.NO_CLASSES_SHOULD_USE_FIELD_INJECTION;

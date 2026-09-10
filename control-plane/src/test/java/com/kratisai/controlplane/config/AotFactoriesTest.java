@@ -12,7 +12,7 @@ import org.springframework.core.io.support.SpringFactoriesLoader;
 class AotFactoriesTest {
 
     @Test
-    @DisplayName("registers AotHints and SqliteRuntimeHintsRegistrar in aot.factories")
+    @DisplayName("registers AotHints, SqliteRuntimeHintsRegistrar, and LiquibaseRuntimeHintsRegistrar in aot.factories")
     void loadsRuntimeHintsRegistrarsFromAotFactories() {
         List<RuntimeHintsRegistrar> registrars = SpringFactoriesLoader.forResourceLocation(
                         "META-INF/spring/aot.factories")
@@ -20,6 +20,7 @@ class AotFactoriesTest {
 
         assertThat(registrars)
                 .hasAtLeastOneElementOfType(AotHints.class)
-                .hasAtLeastOneElementOfType(SqliteRuntimeHintsRegistrar.class);
+                .hasAtLeastOneElementOfType(SqliteRuntimeHintsRegistrar.class)
+                .hasAtLeastOneElementOfType(LiquibaseRuntimeHintsRegistrar.class);
     }
 }

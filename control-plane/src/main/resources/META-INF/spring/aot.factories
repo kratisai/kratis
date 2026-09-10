@@ -1,3 +1,4 @@
 org.springframework.aot.hint.RuntimeHintsRegistrar=\
   com.kratisai.controlplane.config.AotHints,\
-  com.kratisai.controlplane.config.SqliteRuntimeHintsRegistrar
+  com.kratisai.controlplane.config.SqliteRuntimeHintsRegistrar,\
+  com.kratisai.controlplane.config.LiquibaseRuntimeHintsRegistrar

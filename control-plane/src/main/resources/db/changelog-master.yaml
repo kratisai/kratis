@@ -3,3 +3,4 @@ databaseChangeLog:
       path: changelog
       relativeToChangelogFile: true
       errorIfMissingOrEmpty: true
+      endsWithFilter: ".yaml"
