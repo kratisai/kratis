@@ -63,7 +63,7 @@ To run from source without building a Docker image (JVM mode), use the dev quick
 | `KRATIS_GITHUB_PRIVATE_KEY_PATH` | empty | no | PEM path inside the container |
 | `KRATIS_TELEMETRY_DISABLED` | `0` | no | Set `1` to disable anonymous usage telemetry |
 | `MEM_LIMIT` | `512m` | no | Memory cap for the kratis container |
-| `LITELLM_MEM_LIMIT` | `512m` | no | Memory cap for the LiteLLM container |
+| `LITELLM_MEM_LIMIT` | `2g` | no | Memory cap for the LiteLLM container |
 
 
 ## Commands

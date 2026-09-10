@@ -100,7 +100,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${LITELLM_MEM_LIMIT:-512m}
+          memory: ${LITELLM_MEM_LIMIT:-2g}
 
   registry-cache:
     image: 'registry:2'
