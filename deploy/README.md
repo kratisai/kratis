@@ -51,7 +51,7 @@ To run from source without building a Docker image (JVM mode), use the dev quick
 |----------|---------|----------|-------------|
 | `DB_USERNAME` | `kratis` | no | PostgreSQL user |
 | `DB_PASSWORD` | `kratis` | yes in production | PostgreSQL password |
-| `DB_PORT` | `5432` | no | PostgreSQL host port |
+| `DB_PORT` | `5432` | no | PostgreSQL host port (when port mapping is enabled in compose.yaml) |
 | `API_PORT` | `8080` | no | Control plane host port |
 | `DOCKER_GID` | `0` | no | Group id of the host `/var/run/docker.sock` (the installer detects it) |
 | `JWT_SECRET` | empty | yes | JWT signing secret, 32+ characters |

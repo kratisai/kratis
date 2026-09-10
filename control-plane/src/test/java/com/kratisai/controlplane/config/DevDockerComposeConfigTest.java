@@ -71,6 +71,24 @@ class DevDockerComposeConfigTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void composeFile_overridesDevelopmentContainerNames() {
+        Map<String, Object> root = loadComposeFile();
+        assertThat(root.get("name")).isEqualTo("kratis-dev");
+
+        Map<String, Object> services = (Map<String, Object>) root.get("services");
+        Map<String, Object> db = (Map<String, Object>) services.get("kratis-db");
+        assertThat(db.get("container_name"))
+                .as("kratis-db container name should be overridden to kratis-dev-postgres")
+                .isEqualTo("kratis-dev-postgres");
+
+        Map<String, Object> litellm = (Map<String, Object>) services.get("litellm");
+        assertThat(litellm.get("container_name"))
+                .as("litellm container name should be overridden to kratis-dev-litellm")
+                .isEqualTo("kratis-dev-litellm");
+    }
+
+    @Test
     void applicationProperties_definesHostAndSandboxLiteLLMUrls() throws IOException {
         Properties props = new Properties();
         try (InputStream in =

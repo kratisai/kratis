@@ -68,6 +68,25 @@ class DeployComposeConfigTest {
                 .contains("KRATIS_SANDBOX_RUNNER_IMAGE=ghcr.io/kratisai/kratis-runner-base:latest");
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void kratisDbService_overridesContainerName_andDoesNotExposePortsByDefault() {
+        try (InputStream in = Files.newInputStream(DEPLOY_COMPOSE)) {
+            Map<String, Object> root = new Yaml().load(in);
+            Map<String, Object> services = (Map<String, Object>) root.get("services");
+            Map<String, Object> db = (Map<String, Object>) services.get("kratis-db");
+
+            assertThat(db.get("container_name"))
+                    .as("deploy compose sets container_name to kratis-postgres")
+                    .isEqualTo("kratis-postgres");
+            assertThat(db.get("ports"))
+                    .as("database port should not be published to the host by default in deploy stack")
+                    .isNull();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Object> kratisService() {
         try (InputStream in = Files.newInputStream(DEPLOY_COMPOSE)) {
