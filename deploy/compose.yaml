@@ -1,12 +1,14 @@
 services:
   kratis-db:
     image: 'pgvector/pgvector:pg16'
+    container_name: kratis-postgres
     environment:
       - 'POSTGRES_DB=kratis'
       - 'POSTGRES_PASSWORD=${DB_PASSWORD:-kratis}'
       - 'POSTGRES_USER=${DB_USERNAME:-kratis}'
-    ports:
-      - '${DB_PORT:-5432}:5432'
+    # Uncomment to expose PostgreSQL to the host (e.g. for psql, DBeaver, or external backups).
+    # ports:
+    #   - '127.0.0.1:${DB_PORT:-5432}:5432'
     volumes:
       - kratis-data:/var/lib/postgresql/data
     healthcheck:

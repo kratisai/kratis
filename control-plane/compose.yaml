@@ -2,9 +2,12 @@
 # spring-boot-docker-compose runs `docker compose up` on every startup
 # (spring.docker.compose.start.skip=NEVER in application.properties), so any stopped
 # service here is restarted automatically. For production deployment, see deploy/compose.yaml.
+name: kratis-dev
+
 services:
   kratis-db:
     image: 'pgvector/pgvector:pg16'
+    container_name: kratis-dev-postgres
     environment:
       - 'POSTGRES_DB=kratis'
       - 'POSTGRES_PASSWORD=kratis'
@@ -26,6 +29,7 @@ services:
     # pull_policy: always ensures the moving tag is refreshed on every `docker compose up`,
     # preventing the local cache from drifting behind the registry.
     image: 'ghcr.io/berriai/litellm:main-stable'
+    container_name: kratis-dev-litellm
     pull_policy: always
     environment:
       - 'LITELLM_MASTER_KEY=sk-litellm-master'
@@ -71,6 +75,7 @@ services:
 
   registry-cache:
     image: 'registry:2'
+    container_name: kratis-dev-registry-cache
     restart: unless-stopped
     ports:
       - '${REGISTRY_CACHE_PORT:-5001}:5000'
