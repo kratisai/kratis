@@ -8,6 +8,7 @@ description: Control-plane Java conventions. Use when changing control-plane Jav
 - Constructor injection only.
 - Record compact constructors (`Objects.requireNonNull(...)`) for DTO and RPC validation. Do not use Jakarta validation annotations on WebSocket DTOs.
 - Third-party reflection or classloading needs an explicit `RuntimeHintsRegistrar`.
+- GraalVM native images set Hibernate `BytecodeProvider` to `none`, so lazy to-one associations cannot use runtime `HibernateProxy` subclasses. Keep the `hibernate-maven-plugin` enhance execution (model package only). Do not add `JOIN FETCH` to derived queries to paper over that; use a separately named method only for an exceptional fetch graph.
 
 ## Liquibase
 
