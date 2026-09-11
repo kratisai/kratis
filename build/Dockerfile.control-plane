@@ -78,10 +78,16 @@ ENV KRATIS_SCC_BINARY_PATH=/usr/bin/scc
 ENV KRATIS_VERSION=$VERSION
 ENV KRATIS_BUILD_TAG=$BUILD_TAG
 
-# Create non-root user
-RUN addgroup -S kratis && adduser -S kratis -G kratis
+# Non-root user 'kratis'; writable mounted volumes.
+RUN addgroup -S -g 1000 kratis \
+    && adduser -S -u 1000 -G kratis kratis \
+    && mkdir -p /data/config \
+    && chown -R kratis:kratis /data
 USER kratis
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=5s --timeout=5s --start-period=30s --retries=12 \
+    CMD curl -fsS http://localhost:8080/actuator/health || exit 1
 
 ENTRYPOINT ["kratis"]

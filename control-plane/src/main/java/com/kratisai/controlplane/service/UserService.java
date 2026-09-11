@@ -11,7 +11,6 @@ import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -40,7 +39,7 @@ public class UserService {
             PasswordEncoder passwordEncoder,
             EntityManager entityManager,
             PlatformTransactionManager transactionManager,
-            @Lazy TeamService teamService,
+            TeamService teamService,
             @Value("${kratis.auth.jwt.refresh-expiration}") long refreshTokenExpirationMs) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
