@@ -39,6 +39,6 @@ fi
 
 echo
 echo "Kratis is ready in $(pwd). Review .env, then start the stack:"
-echo "  docker compose up -d"
+echo "  docker compose up -d --wait"
 echo
 echo "UI and API: http://localhost:8080"

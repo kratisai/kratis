@@ -78,8 +78,15 @@ public class SecurityConfig {
                                 "/api-docs/**",
                                 "/actuator/**")
                         .permitAll()
+                        // Every data endpoint lives under /api and needs a JWT. Everything
+                        // else is the public SPA shell (/index.html and /assets/**), its
+                        // client-side routes forwarded by WebUiConfig, and /error. The SPA
+                        // renders its own login dialog, so the shell must load before a
+                        // token exists.
+                        .requestMatchers("/api/**")
+                        .authenticated()
                         .anyRequest()
-                        .authenticated())
+                        .permitAll())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }

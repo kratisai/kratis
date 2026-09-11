@@ -38,6 +38,14 @@ services:
       - 'KRATIS_GITHUB_PRIVATE_KEY_PATH=${KRATIS_GITHUB_PRIVATE_KEY_PATH:-}'
     ports:
       - '${API_PORT:-8080}:8080'
+    healthcheck:
+      # Aggregate health, so a failed Liquibase migration or lost DB connection keeps the
+      # container unhealthy instead of leaving it "started". curl is in the runtime image.
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:8080/actuator/health']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     volumes:
       - kratis-config:/data/config
       - /var/run/docker.sock:/var/run/docker.sock

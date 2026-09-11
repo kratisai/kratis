@@ -16,7 +16,7 @@ Requires Docker, `curl`, and `openssl`.
 mkdir kratis && cd kratis
 curl -fsSL https://raw.githubusercontent.com/kratisai/kratis/main/deploy/install.sh | sh
 # Review / edit the .env file
-docker compose up -d
+docker compose up -d --wait
 ```
 
 ### Option 2 — from a repository checkout - x86 only
@@ -25,7 +25,7 @@ docker compose up -d
 git clone https://github.com/kratisai/kratis && cd kratis/deploy
 cp .env.example .env
 # Set JWT_SECRET (32+ characters) and DB_PASSWORD
-docker compose up -d
+docker compose up -d --wait
 ```
 
 ### Option 3 — build from source - x86 or arm64 (untested)
@@ -38,7 +38,7 @@ docker build -f build/Dockerfile.runner-base -t ghcr.io/kratisai/kratis-runner-b
 docker build -f build/Dockerfile.control-plane -t ghcr.io/kratisai/kratis:latest .
 cd deploy
 cp .env.example .env   # set JWT_SECRET (32+ characters) and DB_PASSWORD
-docker compose up -d   # uses the locally built image
+docker compose up -d --wait   # uses the locally built image
 ```
 
 The native-compile step needs ~16 GB of heap by default and can take 40+ minutes to build. Tune it on larger machines with `--build-arg NATIVE_PARALLELISM=8 --build-arg NATIVE_HEAP=32g`. Details: [`build/README.md`](../build/README.md).
@@ -69,11 +69,16 @@ To run from source without building a Docker image (JVM mode), use the dev quick
 ## Commands
 
 ```bash
-docker compose up -d
+docker compose up -d --wait
 docker compose logs -f
 docker compose down          # keep volumes
 docker compose down -v       # drop data
 ```
+
+`--wait` blocks until every container reports healthy, so a control-plane that fails to boot
+(including a failed Liquibase migration) fails the command instead of leaving a "started" container.
+Plain `docker compose up` returns as soon as containers are created, before the healthcheck has run.
+Use `--wait-timeout <seconds>` to bound the wait.
 
 ## Stack
 

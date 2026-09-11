@@ -29,7 +29,7 @@
 		<spring-ai.version>2.0.0-M6</spring-ai.version>
 		<!-- Native image resource caps - override on the CLI: -Dnative.parallelism=8 -->
 		<native.parallelism>4</native.parallelism>
-		<native.jvm.maxheap>16g</native.jvm.maxheap>
+		<native.jvm.maxheap>24g</native.jvm.maxheap>
 		<!-- JVM flags for tests; JaCoCo's prepare-agent appends its -javaagent to this property -->
 		<argLine>-Xmx2g -XX:+UseG1GC</argLine>
 	</properties>
@@ -498,13 +498,10 @@
 						<artifactId>native-maven-plugin</artifactId>
 						<configuration>
 							<buildArgs>
-								<!--
-								  ── Quick Build Mode ──────────────────────────────────────────
-								  -Ob skips expensive global optimisations (inlining, devirt) in
-								  exchange for a much faster and lighter build. The resulting
-								  binary is slightly larger and ~10-20% slower at runtime.
-								-->
+								<!-- Optimise for build-speed -->
 								<buildArg>-Ob</buildArg>
+								<!-- Optimise for size-->
+								<!--<buildArg>-Os</buildArg>-->
 								<!--
 								  ── Resource caps ─────────────────────────────────────────────
 								  By default native-image uses all available vCPUs and up to ~80%

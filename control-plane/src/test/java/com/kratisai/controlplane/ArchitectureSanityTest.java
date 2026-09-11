@@ -12,9 +12,11 @@ import com.kratisai.controlplane.websocket.environment.EnvironmentRpcHandler;
 import com.kratisai.controlplane.websocket.environment.EnvironmentWebSocketHandler;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaConstructor;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
 import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaMethodCall;
+import com.tngtech.archunit.core.domain.JavaParameter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
@@ -26,6 +28,7 @@ import com.tngtech.archunit.library.GeneralCodingRules;
 import com.tngtech.archunit.library.dependencies.SlicesRuleDefinition;
 import java.util.Set;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.socket.WebSocketMessage;
@@ -73,6 +76,33 @@ public class ArchitectureSanityTest {
                 }
             })
             .because("Classes should throw specific subclass exceptions, not raw Exception or Throwable.");
+
+    /**
+     * {@code @Lazy} on a constructor parameter makes Spring generate a CGLIB lazy-resolution proxy
+     * at run time. GraalVM's build-time generated subclass cannot reconcile that proxy's callbacks,
+     * so the native image aborts during context refresh with a {@code ClassCastException}. Break the
+     * cycle with an {@code ObjectProvider} or restructure the dependency instead.
+     */
+    @ArchTest
+    public static final ArchRule NO_LAZY_CONSTRUCTOR_INJECTION = noClasses()
+            .should(new ArchCondition<JavaClass>("not use @Lazy on constructor parameters") {
+                @Override
+                public void check(JavaClass javaClass, ConditionEvents events) {
+                    for (JavaConstructor constructor : javaClass.getConstructors()) {
+                        for (JavaParameter parameter : constructor.getParameters()) {
+                            if (parameter.isAnnotatedWith(Lazy.class)) {
+                                events.add(SimpleConditionEvent.violated(
+                                        parameter,
+                                        constructor.getFullName() + " uses @Lazy on parameter of type "
+                                                + parameter.getRawType().getName()
+                                                + "; lazy CGLIB proxies are unsupported in GraalVM native images"));
+                            }
+                        }
+                    }
+                }
+            })
+            .because("GraalVM native images cannot build the CGLIB lazy-resolution proxy that @Lazy triggers;"
+                    + " break dependency cycles with ObjectProvider or restructure instead");
 
     @ArchTest
     public static final ArchRule NO_CIRCULAR_DEPENDENCIES = SlicesRuleDefinition.slices()
