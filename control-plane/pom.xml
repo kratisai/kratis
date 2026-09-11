@@ -293,6 +293,34 @@
 				<configuration>
 					<excludes>
 						<exclude>com/kratisai/controlplane/config/**/*</exclude>
+						<!-- Hibernate enhance injects $$_hibernate_* methods into @Entity classes. -->
+						<exclude>com/kratisai/controlplane/model/CanvasEntity.class</exclude>
+						<exclude>com/kratisai/controlplane/model/ChatEntity.class</exclude>
+						<exclude>com/kratisai/controlplane/model/ChatMemoryEntity.class</exclude>
+						<exclude>com/kratisai/controlplane/model/ChatUsageSession.class</exclude>
+						<exclude>com/kratisai/controlplane/model/CtxArchitecturePattern.class</exclude>
+						<exclude>com/kratisai/controlplane/model/CtxDimension.class</exclude>
+						<exclude>com/kratisai/controlplane/model/CtxEdge.class</exclude>
+						<exclude>com/kratisai/controlplane/model/CtxEmbedding.class</exclude>
+						<exclude>com/kratisai/controlplane/model/CtxNode.class</exclude>
+						<exclude>com/kratisai/controlplane/model/CtxNodeDimension.class</exclude>
+						<exclude>com/kratisai/controlplane/model/CtxWikiPage.class</exclude>
+						<exclude>com/kratisai/controlplane/model/EnvironmentProvider.class</exclude>
+						<exclude>com/kratisai/controlplane/model/ExecutionEnvironment.class</exclude>
+						<exclude>com/kratisai/controlplane/model/IngestionBatch.class</exclude>
+						<exclude>com/kratisai/controlplane/model/IngestionBatchLog.class</exclude>
+						<exclude>com/kratisai/controlplane/model/KratisInstallation.class</exclude>
+						<exclude>com/kratisai/controlplane/model/ModelProvider.class</exclude>
+						<exclude>com/kratisai/controlplane/model/RefreshToken.class</exclude>
+						<exclude>com/kratisai/controlplane/model/RepoCredential.class</exclude>
+						<exclude>com/kratisai/controlplane/model/Repository.class</exclude>
+						<exclude>com/kratisai/controlplane/model/SandboxExecution.class</exclude>
+						<exclude>com/kratisai/controlplane/model/SandboxExecutionActivity.class</exclude>
+						<exclude>com/kratisai/controlplane/model/SandboxPermissionRule.class</exclude>
+						<exclude>com/kratisai/controlplane/model/ScratchpadEntity.class</exclude>
+						<exclude>com/kratisai/controlplane/model/Team.class</exclude>
+						<exclude>com/kratisai/controlplane/model/TeamMember.class</exclude>
+						<exclude>com/kratisai/controlplane/model/User.class</exclude>
 					</excludes>
 					<rules>
 						<rule>
@@ -404,6 +432,33 @@
 				<configuration>
 					<source>21</source>
 					<target>21</target>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.hibernate.orm</groupId>
+				<artifactId>hibernate-maven-plugin</artifactId>
+				<version>7.0.2.Final</version>
+				<executions>
+					<execution>
+						<id>enhance</id>
+						<goals>
+							<goal>enhance</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<enableAssociationManagement>false</enableAssociationManagement>
+					<enableDirtyTracking>true</enableDirtyTracking>
+					<enableExtendedEnhancement>false</enableExtendedEnhancement>
+					<enableLazyInitialization>true</enableLazyInitialization>
+					<fileSets>
+						<fileSet>
+							<directory>${project.build.directory}/classes</directory>
+							<includes>
+								<include>com/kratisai/controlplane/model/**/*.class</include>
+							</includes>
+						</fileSet>
+					</fileSets>
 				</configuration>
 			</plugin>
 
