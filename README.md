@@ -82,7 +82,7 @@ Module READMEs: [`control-plane/`](control-plane/README.md), [`web/`](web/README
 
 ## Next Steps
 
-Feedback, bug reports and feature requests are all incredibly welcome. There is much we've considered adding, and would love to add, but the landscape is evolving quickly, and we're not ready to commit to what comes next! Some ideas include:
+Feedback, bug reports and feature requests are all incredibly welcome. There is much we've considered adding, and would love to add, but the landscape is evolving quickly, and we're not ready to commit to what comes next. Some ideas include:
 
 - More agent harnesses, and a way to register your own
 - Integrations — Slack, MS Teams, Signal, Jira, Linear, Trello, and the issue boards on the supported repository providers
