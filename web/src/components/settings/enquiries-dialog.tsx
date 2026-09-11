@@ -1,4 +1,4 @@
-import { Building2, ExternalLink, Loader2 } from 'lucide-react'
+import { ExternalLink, Loader2, MessageCircle } from 'lucide-react'
 import { useState } from 'react'
 
 import {
@@ -11,7 +11,7 @@ import {
 import { useInstallationInfo } from '@/hooks/use-config'
 import { useAuthStore } from '@/store/auth-store'
 
-interface EnterpriseAccessDialogProps {
+interface EnquiriesDialogProps {
   formId?: string
   onOpenChange: (open: boolean) => void
   open: boolean
@@ -19,11 +19,11 @@ interface EnterpriseAccessDialogProps {
 
 const DEFAULT_TALLY_FORM_ID = 'Npjy0Q'
 
-export function EnterpriseAccessDialog({
+export function EnquiriesDialog({
   formId = DEFAULT_TALLY_FORM_ID,
   onOpenChange,
   open,
-}: EnterpriseAccessDialogProps) {
+}: EnquiriesDialogProps) {
   const { user } = useAuthStore()
   const { data: installationInfo } = useInstallationInfo(open)
   const [isLoading, setIsLoading] = useState(true)
@@ -54,8 +54,8 @@ export function EnterpriseAccessDialog({
         <DialogHeader className="border-b px-6 py-4">
           <div className="flex items-center justify-between pr-6">
             <div className="flex items-center gap-2">
-              <Building2 className="text-primary h-5 w-5" />
-              <DialogTitle>Request Enterprise Access</DialogTitle>
+              <MessageCircle className="text-primary h-5 w-5" />
+              <DialogTitle>Send an enquiry</DialogTitle>
             </div>
             <a
               className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition-colors"
@@ -67,8 +67,7 @@ export function EnterpriseAccessDialog({
             </a>
           </div>
           <DialogDescription className="mt-1.5 text-left text-sm">
-            Scale Kratis across your engineering team with dedicated VPC sandboxes, SAML/SSO, custom
-            RBAC, and priority SLA.
+            Tell us your use case. We can also discuss paid options for support or features.
           </DialogDescription>
         </DialogHeader>
 
@@ -88,7 +87,7 @@ export function EnterpriseAccessDialog({
             loading="lazy"
             onLoad={() => setIsLoading(false)}
             src={embedUrl}
-            title="Request Enterprise Access"
+            title="Send an enquiry"
           />
         </div>
       </DialogContent>

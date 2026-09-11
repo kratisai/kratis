@@ -288,7 +288,7 @@ describe('SettingsView', () => {
     })
   })
 
-  it('opens Request Enterprise Access dialog when clicked from the enterprise banner', async () => {
+  it('opens enquiry dialog when clicked from the enquiries banner', async () => {
     vi.mocked(teamApi.listTeams).mockResolvedValue(mockTeams)
     vi.mocked(teamApi.getTeam).mockResolvedValue(mockTeamDetail)
 
@@ -299,30 +299,28 @@ describe('SettingsView', () => {
       expect(screen.getByRole('tab', { name: /account/i })).toBeInTheDocument()
     })
 
-    const enterpriseBanner = screen.getByTestId('enterprise-access-banner')
-    expect(enterpriseBanner).toBeInTheDocument()
+    const enquiriesBanner = screen.getByTestId('enquiries-banner')
+    expect(enquiriesBanner).toBeInTheDocument()
     expect(
       screen.getByText(
-        /scale kratis across your engineering team with dedicated vpc sandboxes, saml\/sso, custom rbac, and priority sla\./i,
+        /let us know your use case, or discuss paid options for support or features\./i,
       ),
     ).toBeInTheDocument()
 
-    const enterpriseButton = screen.getByRole('button', {
-      name: /request enterprise access/i,
+    const enquiryButton = screen.getByRole('button', {
+      name: /send an enquiry/i,
     })
-    expect(enterpriseButton).toBeInTheDocument()
+    expect(enquiryButton).toBeInTheDocument()
 
-    await user.click(enterpriseButton)
+    await user.click(enquiryButton)
 
     await waitFor(() => {
-      expect(
-        screen.getByRole('heading', { name: /request enterprise access/i }),
-      ).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: /send an enquiry/i })).toBeInTheDocument()
       expect(screen.getByTestId('tally-iframe')).toBeInTheDocument()
     })
   })
 
-  it('maintains enterprise banner visible when switching tabs', async () => {
+  it('maintains enquiries banner visible when switching tabs', async () => {
     vi.mocked(teamApi.listTeams).mockResolvedValue(mockTeams)
     vi.mocked(teamApi.getTeam).mockResolvedValue(mockTeamDetail)
 
@@ -333,12 +331,12 @@ describe('SettingsView', () => {
       expect(screen.getByRole('tab', { name: /team/i })).toBeInTheDocument()
     })
 
-    expect(screen.getByTestId('enterprise-access-banner')).toBeInTheDocument()
+    expect(screen.getByTestId('enquiries-banner')).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: /team/i }))
-    expect(screen.getByTestId('enterprise-access-banner')).toBeInTheDocument()
+    expect(screen.getByTestId('enquiries-banner')).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: /permissions/i }))
-    expect(screen.getByTestId('enterprise-access-banner')).toBeInTheDocument()
+    expect(screen.getByTestId('enquiries-banner')).toBeInTheDocument()
   })
 })
