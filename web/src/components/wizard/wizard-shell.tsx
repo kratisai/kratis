@@ -110,7 +110,7 @@ export function WizardShell({
   )
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="fixed inset-0 top-0 left-0 z-50 flex h-screen w-screen max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-none border-none p-4 sm:top-[50%] sm:left-[50%] sm:h-auto sm:max-h-[90vh] sm:w-full sm:max-w-[720px] sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:border sm:p-6 sm:shadow-lg md:max-w-[800px]">
+      <DialogContent className="fixed inset-0 top-0 left-0 z-50 flex h-screen w-screen max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-none border-none p-4 sm:top-[50%] sm:left-[50%] sm:h-[min(85vh,40rem)] sm:w-full sm:max-w-[720px] sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:border sm:p-6 sm:shadow-lg md:max-w-[800px]">
         <DialogHeader className="shrink-0 border-b pb-2">
           <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>
           <DialogDescription className="text-xs">{description}</DialogDescription>

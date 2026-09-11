@@ -145,4 +145,74 @@ describe('ReposView', () => {
     })
   })
 
+  it('filters repositories as the user types in the search box', async () => {
+    vi.mocked(repoApi.listRepositories).mockResolvedValue(mockRepositories)
+    const user = userEvent.setup()
+
+    renderWithProviders(<ReposView />)
+
+    await waitFor(() => {
+      expect(screen.getByText('frontend-app')).toBeInTheDocument()
+      expect(screen.getByText('api-service')).toBeInTheDocument()
+    })
+
+    const searchInput = screen.getByRole('textbox', { name: /search repositories/i })
+    await user.type(searchInput, 'api')
+
+    expect(screen.getByText('api-service')).toBeInTheDocument()
+    expect(screen.queryByText('frontend-app')).not.toBeInTheDocument()
+
+    await user.clear(searchInput)
+
+    expect(screen.getByText('api-service')).toBeInTheDocument()
+    expect(screen.getByText('frontend-app')).toBeInTheDocument()
+  })
+
+  it('filters repositories by URL', async () => {
+    vi.mocked(repoApi.listRepositories).mockResolvedValue(mockRepositories)
+    const user = userEvent.setup()
+
+    renderWithProviders(<ReposView />)
+
+    await waitFor(() => {
+      expect(screen.getByText('frontend-app')).toBeInTheDocument()
+    })
+
+    const searchInput = screen.getByRole('textbox', { name: /search repositories/i })
+    await user.type(searchInput, 'api-service.git')
+
+    expect(screen.getByText('api-service')).toBeInTheDocument()
+    expect(screen.queryByText('frontend-app')).not.toBeInTheDocument()
+  })
+
+  it('shows a no-results message when the filter matches nothing', async () => {
+    vi.mocked(repoApi.listRepositories).mockResolvedValue(mockRepositories)
+    const user = userEvent.setup()
+
+    renderWithProviders(<ReposView />)
+
+    await waitFor(() => {
+      expect(screen.getByText('frontend-app')).toBeInTheDocument()
+    })
+
+    const searchInput = screen.getByRole('textbox', { name: /search repositories/i })
+    await user.type(searchInput, 'nonexistent')
+
+    expect(screen.queryByText('frontend-app')).not.toBeInTheDocument()
+    expect(screen.queryByText('api-service')).not.toBeInTheDocument()
+    expect(screen.getByText(/no repositories match/i)).toBeInTheDocument()
+  })
+
+  it('does not render the search box when there are no repositories', async () => {
+    vi.mocked(repoApi.listRepositories).mockResolvedValue([])
+
+    renderWithProviders(<ReposView />)
+
+    await waitFor(() => {
+      expect(screen.getByText('No repositories yet')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByRole('textbox', { name: /search repositories/i })).not.toBeInTheDocument()
+  })
+
 })

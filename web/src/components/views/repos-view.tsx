@@ -1,7 +1,7 @@
 'use client'
 
 import { useNavigate } from '@tanstack/react-router'
-import { GitBranch, Loader2, Plus } from 'lucide-react'
+import { GitBranch, Loader2, Plus, Search } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 
 import type { RepositorySubmitPayload } from '@/components/repos/repository-form-types'
@@ -11,6 +11,7 @@ import { DeleteConfirmDialog } from '@/components/repos/delete-confirm-dialog'
 import { RepositoryCard } from '@/components/repos/repository-card'
 import { RepositoryFormDialog } from '@/components/repos/repository-form-dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   useCreateRepository,
   useDeleteRepository,
@@ -27,6 +28,16 @@ export function ReposView() {
       a.name.toLowerCase().localeCompare(b.name.toLowerCase()),
     )
   }, [repositories])
+
+  const [filter, setFilter] = useState('')
+
+  const filteredRepositories = useMemo(() => {
+    const query = filter.trim().toLowerCase()
+    if (!query) return sortedRepositories
+    return sortedRepositories.filter(
+      (repo) => repo.name.toLowerCase().includes(query) || repo.url.toLowerCase().includes(query),
+    )
+  }, [filter, sortedRepositories])
 
   const createMutation = useCreateRepository()
   const updateMutation = useUpdateRepository()
@@ -110,8 +121,28 @@ export function ReposView() {
           </div>
         )}
 
+        {!isLoading && sortedRepositories.length > 0 && (
+          <div className="relative">
+            <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+            <Input
+              aria-label="Search repositories"
+              className="pl-9"
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Search repositories..."
+              value={filter}
+            />
+          </div>
+        )}
+
+        {!isLoading && sortedRepositories.length > 0 && filteredRepositories.length === 0 && (
+          <div className="text-muted-foreground rounded-lg border border-dashed p-12 text-center">
+            <p className="text-lg font-medium">No repositories match &quot;{filter}&quot;</p>
+            <p className="mt-1 text-sm">Try a different search term</p>
+          </div>
+        )}
+
         <div className="grid gap-4">
-          {sortedRepositories.map((repo) => (
+          {filteredRepositories.map((repo) => (
             <RepositoryCard
               key={repo.id}
               onEdit={handleOpenForm}

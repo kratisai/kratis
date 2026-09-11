@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { EnquiriesDialog } from '@/components/settings/enquiries-dialog'
+import { useInstallationInfo } from '@/hooks/use-config'
 import { useAuthStore } from '@/store/auth-store'
 
 vi.mock('@/hooks/use-config', () => ({
@@ -88,5 +89,21 @@ describe('EnquiriesDialog', () => {
     await user.click(closeButton)
 
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('omits email, name, and install_id when they are absent', () => {
+    useAuthStore.setState({
+      currentTeamId: 'team-1',
+      isAuthenticated: true,
+      user: null,
+    })
+    vi.mocked(useInstallationInfo).mockReturnValue({ data: undefined } as never)
+
+    render(<EnquiriesDialog onOpenChange={vi.fn()} open={true} />)
+
+    const src = screen.getByTestId('tally-iframe').getAttribute('src') || ''
+    expect(src).not.toContain('email=')
+    expect(src).not.toContain('name=')
+    expect(src).not.toContain('install_id=')
   })
 })

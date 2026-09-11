@@ -140,6 +140,7 @@ describe('SettingsView', () => {
     await waitFor(() => {
       expect(screen.getByText('Settings')).toBeInTheDocument()
       expect(screen.getByText('Profile')).toBeInTheDocument()
+      expect(screen.getByTestId('enquiries-banner')).toBeInTheDocument()
     })
 
     // Team settings section should not be visible
