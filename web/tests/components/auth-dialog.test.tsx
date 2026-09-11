@@ -84,6 +84,19 @@ describe('AuthDialog', () => {
     expect(screen.getByLabelText('Password')).toBeInTheDocument()
   })
 
+  it('reveals and hides the password with the toggle', () => {
+    renderWithQueryClient(<AuthDialog open={true} />)
+
+    const passwordInput = screen.getByLabelText('Password')
+    expect(passwordInput).toHaveAttribute('type', 'password')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show password' }))
+    expect(passwordInput).toHaveAttribute('type', 'text')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide password' }))
+    expect(passwordInput).toHaveAttribute('type', 'password')
+  })
+
   it('switches between login and register tabs', () => {
     renderWithQueryClient(<AuthDialog open={true} />)
     

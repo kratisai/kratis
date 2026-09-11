@@ -54,7 +54,7 @@ class DevDockerComposeConfigTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void composeFile_litellmStartsOnlyAfterDatabaseIsHealthy_andPublishesPort4000() {
+    void composeFile_litellmStartsOnlyAfterDatabaseIsHealthy_andPublishesPortForLocalProfile() {
         Map<String, Object> root = loadComposeFile();
         Map<String, Object> services = (Map<String, Object>) root.get("services");
         Map<String, Object> litellm = (Map<String, Object>) services.get("litellm");
@@ -66,8 +66,9 @@ class DevDockerComposeConfigTest {
         assertThat(dbCondition.get("condition")).isEqualTo("service_healthy");
 
         assertThat((List<String>) litellm.get("ports"))
-                .as("kratis.litellm.base-url defaults to http://localhost:4000")
-                .contains("4000:4000");
+                .as("control-plane/compose.yaml must publish LiteLLM on 4001 by default, so the dev "
+                        + "stack can run alongside deploy/compose.yaml on 4000")
+                .contains("${LITELLM_DEV_PORT:-4001}:4000");
     }
 
     @Test
@@ -97,7 +98,8 @@ class DevDockerComposeConfigTest {
         }
 
         assertThat(props.getProperty("kratis.litellm.base-url"))
-                .as("Host-side URL used by the control plane (matches the 4000:4000 port published in compose.yaml)")
+                .as("Host-side URL used by the control plane (matches the default host port "
+                        + "deploy/compose.yaml publishes)")
                 .isEqualTo("${KRATIS_LITELLM_BASE_URL:http://localhost:4000}");
         assertThat(props.getProperty("kratis.litellm.sandbox-base-url"))
                 .as("URL injected into sandbox containers, which reach the host via host.docker.internal; "

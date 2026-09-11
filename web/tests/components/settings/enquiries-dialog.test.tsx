@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { EnterpriseAccessDialog } from '@/components/settings/enterprise-access-dialog'
+import { EnquiriesDialog } from '@/components/settings/enquiries-dialog'
 import { useAuthStore } from '@/store/auth-store'
 
 vi.mock('@/hooks/use-config', () => ({
@@ -11,14 +11,14 @@ vi.mock('@/hooks/use-config', () => ({
   }),
 }))
 
-describe('EnterpriseAccessDialog', () => {
+describe('EnquiriesDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useAuthStore.setState({
       currentTeamId: 'team-1',
       isAuthenticated: true,
       user: {
-        email: 'developer@enterprise.com',
+        email: 'developer@example.com',
         id: 'user-1',
         name: 'Jane Doe',
       },
@@ -26,11 +26,13 @@ describe('EnterpriseAccessDialog', () => {
   })
 
   it('renders correctly when open with title, description, and external link', () => {
-    render(<EnterpriseAccessDialog onOpenChange={vi.fn()} open={true} />)
+    render(<EnquiriesDialog onOpenChange={vi.fn()} open={true} />)
 
-    expect(screen.getByRole('heading', { name: /request enterprise access/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /send an enquiry/i })).toBeInTheDocument()
     expect(
-      screen.getByText(/scale kratis across your engineering team/i),
+      screen.getByText(
+        /tell us your use case\. we can also discuss paid options for support or features\./i,
+      ),
     ).toBeInTheDocument()
 
     const openInNewTab = screen.getByRole('link', { name: /open in new tab/i })
@@ -41,24 +43,22 @@ describe('EnterpriseAccessDialog', () => {
   })
 
   it('embeds Tally iframe with user email, name, and install_id pre-filled', () => {
-    render(<EnterpriseAccessDialog onOpenChange={vi.fn()} open={true} />)
+    render(<EnquiriesDialog onOpenChange={vi.fn()} open={true} />)
 
     const iframe = screen.getByTestId('tally-iframe')
     expect(iframe).toBeInTheDocument()
-    expect(iframe).toHaveAttribute('title', 'Request Enterprise Access')
+    expect(iframe).toHaveAttribute('title', 'Send an enquiry')
 
     const src = iframe.getAttribute('src') || ''
     expect(src).toContain('https://tally.so/embed/')
-    expect(src).toContain('email=developer%40enterprise.com')
+    expect(src).toContain('email=developer%40example.com')
     expect(src).toContain('name=Jane+Doe')
     expect(src).toContain('install_id=inst-999-abc')
     expect(src).toContain('transparentBackground=1')
   })
 
   it('uses custom formId when passed as prop', () => {
-    render(
-      <EnterpriseAccessDialog formId="custom-form-123" onOpenChange={vi.fn()} open={true} />,
-    )
+    render(<EnquiriesDialog formId="custom-form-123" onOpenChange={vi.fn()} open={true} />)
 
     const iframe = screen.getByTestId('tally-iframe')
     expect(iframe.getAttribute('src')).toContain('https://tally.so/embed/custom-form-123')
@@ -68,7 +68,7 @@ describe('EnterpriseAccessDialog', () => {
   })
 
   it('shows loading spinner until iframe onLoad fires', () => {
-    render(<EnterpriseAccessDialog onOpenChange={vi.fn()} open={true} />)
+    render(<EnquiriesDialog onOpenChange={vi.fn()} open={true} />)
 
     expect(screen.getByTestId('tally-loading')).toBeInTheDocument()
 
@@ -82,7 +82,7 @@ describe('EnterpriseAccessDialog', () => {
     const onOpenChange = vi.fn()
     const user = userEvent.setup()
 
-    render(<EnterpriseAccessDialog onOpenChange={onOpenChange} open={true} />)
+    render(<EnquiriesDialog onOpenChange={onOpenChange} open={true} />)
 
     const closeButton = screen.getByRole('button', { name: /close/i })
     await user.click(closeButton)

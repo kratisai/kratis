@@ -61,7 +61,7 @@ cd web && npm install && npm run dev
 ## Telemetry
 
 Kratis reports anonymous daily aggregate counts (active teams, repos, executions, and spend). No repository names, user PII, or prompts are sent. See deploy/README.md to disable.
-If you submit an Enterprise Access request, your installation ID is included so our team can correlate deployment diagnostics and scale with your inquiry.
+If you send an enquiry, we include your installation ID so we can match deployment diagnostics with your request.
 
 ## Docs
 

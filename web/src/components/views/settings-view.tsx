@@ -3,8 +3,8 @@ import { useState } from 'react'
 
 import { CreateTeamDialog } from '@/components/settings/create-team-dialog'
 import { CredentialsPanel } from '@/components/settings/credentials-panel'
-import { EnterpriseAccessBanner } from '@/components/settings/enterprise-access-banner'
-import { EnterpriseAccessDialog } from '@/components/settings/enterprise-access-dialog'
+import { EnquiriesBanner } from '@/components/settings/enquiries-banner'
+import { EnquiriesDialog } from '@/components/settings/enquiries-dialog'
 import { EnvironmentList } from '@/components/settings/environment-list'
 import { ModelDefaultsSettings } from '@/components/settings/model-defaults-settings'
 import { ModelProviderList } from '@/components/settings/model-provider-list'
@@ -25,7 +25,7 @@ export function SettingsView() {
   const { currentTeamId } = useAuthStore()
   const { data: teams } = useTeams()
   const [createTeamOpen, setCreateTeamOpen] = useState(false)
-  const [enterpriseOpen, setEnterpriseOpen] = useState(false)
+  const [enquiriesOpen, setEnquiriesOpen] = useState(false)
   const createTeam = useCreateTeam()
 
   const handleCreateTeam = (data: { description?: string; name: string }) => {
@@ -48,7 +48,7 @@ export function SettingsView() {
 
           {!currentTeam ? (
             <div className="space-y-6">
-              <EnterpriseAccessBanner onRequestAccess={() => setEnterpriseOpen(true)} />
+              <EnquiriesBanner onEnquire={() => setEnquiriesOpen(true)} />
               <ProfileForm />
             </div>
           ) : (
@@ -81,7 +81,7 @@ export function SettingsView() {
               </TabsList>
 
               <div className="mt-6">
-                <EnterpriseAccessBanner onRequestAccess={() => setEnterpriseOpen(true)} />
+                <EnquiriesBanner onEnquire={() => setEnquiriesOpen(true)} />
               </div>
 
               <TabsContent className="mt-6" value="account">
@@ -126,7 +126,7 @@ export function SettingsView() {
         onSubmit={handleCreateTeam}
         open={createTeamOpen}
       />
-      <EnterpriseAccessDialog onOpenChange={setEnterpriseOpen} open={enterpriseOpen} />
+      <EnquiriesDialog onOpenChange={setEnquiriesOpen} open={enquiriesOpen} />
     </>
   )
 }
