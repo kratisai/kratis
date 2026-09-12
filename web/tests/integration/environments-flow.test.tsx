@@ -1,5 +1,5 @@
 import { within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   addFetchHandler,
@@ -24,6 +24,10 @@ describe('Environments Flow', () => {
 
   beforeEach(() => {
     setUnauthenticated()
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
   })
 
   it('renders environments section in settings', async () => {
@@ -96,6 +100,8 @@ describe('Environments Flow', () => {
   })
 
   it('creates a new connector environment', async () => {
+    vi.stubEnv('VITE_ENABLE_ENVIRONMENT_FEATURES', 'true')
+
     mockListTeams([
       {
         createdAt: '2024-01-01T00:00:00Z',
@@ -120,41 +126,26 @@ describe('Environments Flow', () => {
     await user.click(screen.getByRole('tab', { name: /runtime/i }))
 
     await waitFor(() => {
-      const elements = screen.getAllByText(/Environments/i)
-      expect(elements.length).toBeGreaterThan(0)
+      expect(screen.getByText('Execution Environments')).toBeInTheDocument()
     })
 
-    // Look for "Add Connector" or "Add Environment" button
-    const addButton =
-      screen.queryByRole('button', { name: /add connector/i }) ||
-      screen.queryByRole('button', { name: /add environment/i }) ||
-      screen.queryByRole('button', { name: /new connector/i })
+    await user.click(screen.getByRole('button', { name: /add workspace connector/i }))
 
-    if (addButton) {
-      await user.click(addButton)
+    await waitFor(() => {
+      expect(screen.getByTestId('connector-name-field')).toBeInTheDocument()
+    })
 
-      // Fill in name
-      await waitFor(() => {
-        const nameInputs = screen.getAllByLabelText(/name/i)
-        expect(nameInputs.length).toBeGreaterThan(0)
-      })
+    const nameField = screen.getByTestId('connector-name-field')
+    expect(nameField).toHaveClass('grid-cols-1')
+    expect(nameField).toHaveClass('sm:grid-cols-4')
 
-      const nameField = screen.getByTestId('connector-name-field')
-      expect(nameField).toHaveClass('grid-cols-1')
-      expect(nameField).toHaveClass('sm:grid-cols-4')
+    await user.type(screen.getByLabelText(/name/i), 'New Connector')
 
-      const nameInput = screen.getAllByLabelText(/name/i)[0]
-      await user.type(nameInput, 'New Connector')
+    await user.click(screen.getByRole('button', { name: 'Create Connector' }))
 
-      // Submit
-      const submitButtons = screen.getAllByRole('button', { name: /create/i })
-      await user.click(submitButtons[0])
-
-      // Success toast
-      await waitFor(() => {
-        expect(screen.getByText('Connector created successfully')).toBeInTheDocument()
-      })
-    }
+    await waitFor(() => {
+      expect(screen.getByText('Connector created successfully')).toBeInTheDocument()
+    })
   })
 
   it('shows environment status badges correctly', async () => {
@@ -423,6 +414,8 @@ describe('Environments Flow', () => {
   })
 
   it('shows connector created dialog with install command after creation', async () => {
+    vi.stubEnv('VITE_ENABLE_ENVIRONMENT_FEATURES', 'true')
+
     mockListTeams([
       {
         createdAt: '2024-01-01T00:00:00Z',
@@ -449,40 +442,54 @@ describe('Environments Flow', () => {
     await user.click(screen.getByRole('tab', { name: /runtime/i }))
 
     await waitFor(() => {
-      const elements = screen.getAllByText(/Environments/i)
-      expect(elements.length).toBeGreaterThan(0)
+      expect(screen.getByText('Execution Environments')).toBeInTheDocument()
     })
 
-    // Find and click the add connector button
-    const addButton =
-      screen.queryByRole('button', { name: /add connector/i }) ||
-      screen.queryByRole('button', { name: /add environment/i }) ||
-      screen.queryByRole('button', { name: /new connector/i })
+    await user.click(screen.getByRole('button', { name: /add workspace connector/i }))
 
-    if (addButton) {
-      await user.click(addButton)
+    await waitFor(() => {
+      expect(screen.getByLabelText(/name/i)).toBeInTheDocument()
+    })
 
-      // Fill in name
-      await waitFor(() => {
-        const nameInputs = screen.getAllByLabelText(/name/i)
-        expect(nameInputs.length).toBeGreaterThan(0)
-      })
+    await user.type(screen.getByLabelText(/name/i), 'Test Connector')
 
-      const nameInput = screen.getAllByLabelText(/name/i)[0]
-      await user.type(nameInput, 'Test Connector')
+    await user.click(screen.getByRole('button', { name: 'Create Connector' }))
 
-      // Submit
-      const submitButtons = screen.getAllByRole('button', { name: /create/i })
-      await user.click(submitButtons[0])
+    await waitFor(() => {
+      expect(screen.getByText('Workspace Connector Created')).toBeInTheDocument()
+    })
+    expect(screen.getByText(/kratis-connector --mode=daemon/)).toBeInTheDocument()
+  })
 
-      // Connector created dialog should appear with install command
-      await waitFor(() => {
-        expect(screen.getByText('Workspace Connector Created')).toBeInTheDocument()
-      })
-      expect(
-        screen.getByText(/kratis-connector --mode=daemon/),
-      ).toBeInTheDocument()
-    }
+  it('hides the Add Workspace Connector button when environment features are disabled', async () => {
+    mockListTeams([
+      {
+        createdAt: '2024-01-01T00:00:00Z',
+        id: 'team-1',
+        isDefault: true,
+        name: 'Test Team',
+        role: 'owner',
+        tavilyApiKeyConfigured: false,
+      },
+    ])
+    mockListEnvironments([])
+    mockListModelProvidersEmpty()
+    mockListCredentialsEmpty()
+
+    setAuthenticated({ teamId: 'team-1' })
+    const { user } = renderIntegration(['/settings'])
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /runtime/i })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('tab', { name: /runtime/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Execution Environments')).toBeInTheDocument()
+    })
+    expect(
+      screen.queryByRole('button', { name: /add workspace connector/i }),
+    ).not.toBeInTheDocument()
   })
 })
 

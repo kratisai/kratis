@@ -32,6 +32,7 @@ import {
   useTerminateEnvironment,
 } from '@/hooks/use-environments'
 import { copyToClipboard } from '@/lib/clipboard'
+import { isEnvironmentFeaturesEnabled } from '@/lib/feature-flags'
 
 interface EnvironmentListProps {
   isOwner: boolean
@@ -42,6 +43,7 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
   const deleteEnvironment = useDeleteEnvironment()
   const terminateEnvironment = useTerminateEnvironment()
   const createConnector = useCreateConnector()
+  const environmentFeaturesEnabled = isEnvironmentFeaturesEnabled()
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [connectorName, setConnectorName] = useState('')
@@ -102,12 +104,14 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="mb-4 flex justify-end">
-            <Button onClick={() => setIsDialogOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Workspace Connector
-            </Button>
-          </div>
+          {environmentFeaturesEnabled && (
+            <div className="mb-4 flex justify-end">
+              <Button onClick={() => setIsDialogOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Workspace Connector
+              </Button>
+            </div>
+          )}
           {isLoading ? (
             <p className="text-muted-foreground text-sm">Loading environments...</p>
           ) : !environments || environments.length === 0 ? (
