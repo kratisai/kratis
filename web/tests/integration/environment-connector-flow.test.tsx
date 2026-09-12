@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   createMockTeam,
@@ -22,6 +22,11 @@ describe('Environment Connector Flow (Flow C)', () => {
 
   beforeEach(() => {
     setUnauthenticated()
+    vi.stubEnv('VITE_ENABLE_ENVIRONMENT_FEATURES', 'true')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
   })
 
   it('completes the full environment connector lifecycle: create connector, view install command, and simulate WebSocket heartbeat', async () => {
@@ -126,7 +131,7 @@ describe('Environment Connector Flow (Flow C)', () => {
       expect(screen.getByText('Execution Environments')).toBeInTheDocument()
     })
 
-    // 4. User clicks "Add Environment" to open the create environment dialog.
+    // 4. User clicks "Add Workspace Connector" to open the create connector dialog.
     const addButton = screen.getByRole('button', { name: /add workspace connector/i })
     await user.click(addButton)
 

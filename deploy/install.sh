@@ -37,8 +37,22 @@ if [ -S /var/run/docker.sock ]; then
 	sed -i.bak "s|^DOCKER_GID=.*|DOCKER_GID=$sock_gid|" .env && rm -f .env.bak
 fi
 
+if command -v docker >/dev/null 2>&1; then
+	project=$(printf '%s' "${PWD##*/}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+	db_volume="${project}_kratis-data"
+	if docker volume inspect "$db_volume" >/dev/null 2>&1; then
+		echo
+		echo "WARNING: existing DB volume '$db_volume'. New DB_PASSWORD won't match it."
+		echo "Either set DB_PASSWORD in .env to your old password, or start fresh:"
+		echo "  docker volume rm $db_volume"
+	fi
+fi
+
 echo
 echo "Kratis is ready in $(pwd). Review .env, then start the stack:"
 echo "  docker compose up -d --wait"
+echo
+echo "To upgrade to the latest:"
+echo "  docker compose pull"
 echo
 echo "UI and API: http://localhost:8080"
