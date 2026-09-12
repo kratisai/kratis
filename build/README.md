@@ -15,6 +15,9 @@ See the [root README](../README.md) for product context. Deploy: [`deploy/README
 
 `codebase-memory-mcp` is a parser binary, not an MCP server. The control plane shells out to it during ingestion.
 
+The Alpine runtime image uses the fully-static `-portable` release asset. The standard
+Linux build links glibc 2.38+ and exits 127 under musl/gcompat.
+
 ## Parser binaries (dev)
 
 ```bash

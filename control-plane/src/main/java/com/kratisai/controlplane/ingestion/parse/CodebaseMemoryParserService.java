@@ -13,6 +13,7 @@ import com.kratisai.controlplane.repository.CtxEdgeRepository;
 import com.kratisai.controlplane.repository.CtxNodeRepository;
 import com.kratisai.controlplane.service.ProcessExecutor;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.sql.*;
 import java.util.*;
@@ -26,6 +27,9 @@ import org.springframework.stereotype.Service;
 public class CodebaseMemoryParserService {
 
     private static final Logger logger = LoggerFactory.getLogger(CodebaseMemoryParserService.class);
+
+    // Cap on how much of the binary's captured output is embedded in the error message
+    private static final int MAX_CAPTURED_OUTPUT_CHARS = 4000;
 
     // All node labels to import from codebase-memory SQLite
     private static final Set<String> IMPORT_NODE_LABELS =
@@ -86,7 +90,7 @@ public class CodebaseMemoryParserService {
             ProcessExecutor.ProcessResult result = processExecutor.execute(command, cloneDirectory.toFile(), env);
 
             if (result.exitCode() != 0) {
-                logger.warn("codebase-memory execution completed with non-zero exit code: {}", result.exitCode());
+                throw codebaseMemoryExitFailure(result.exitCode(), result.output());
             }
             if (!sqlitePath.toFile().exists()) {
                 throw new RuntimeException("SQLite database not found at: " + sqlitePath);
@@ -112,6 +116,25 @@ public class CodebaseMemoryParserService {
     private String deriveProjectName(Path cloneDirectory) {
         String absolutePath = cloneDirectory.toAbsolutePath().toString();
         return absolutePath.replaceAll("^/+", "").replace("/", "-").replace("\\", "-");
+    }
+
+    /** Build a failure message carrying the exit code and the binary's captured output. */
+    private static RuntimeException codebaseMemoryExitFailure(int exitCode, byte[] output) {
+        String message = "codebase-memory exited with code " + exitCode;
+        if (output != null && output.length > 0) {
+            String captured = new String(output, StandardCharsets.UTF_8).trim();
+            if (!captured.isEmpty()) {
+                message += ": " + truncateOutput(captured);
+            }
+        }
+        return new RuntimeException(message);
+    }
+
+    private static String truncateOutput(String value) {
+        if (value.length() <= MAX_CAPTURED_OUTPUT_CHARS) {
+            return value;
+        }
+        return value.substring(0, MAX_CAPTURED_OUTPUT_CHARS) + "\n... (output truncated)";
     }
 
     private void etlFromSqlite(IngestionBatch batch, Path sqlitePath) {

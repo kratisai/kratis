@@ -65,7 +65,7 @@ ARG BUILD_TAG=unknown
 ARG TARGETARCH
 
 RUN apk add --no-cache git curl tar gcompat libgcc libstdc++ zlib scc docker-cli \
-    && curl -L https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.8.1/codebase-memory-mcp-linux-${TARGETARCH}.tar.gz -o cbm.tar.gz \
+    && curl -fsSL https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.8.1/codebase-memory-mcp-linux-${TARGETARCH}-portable.tar.gz -o cbm.tar.gz \
     && tar -xzf cbm.tar.gz -C /usr/local/bin/ \
     && chmod +x /usr/local/bin/codebase-memory-mcp \
     && rm cbm.tar.gz
