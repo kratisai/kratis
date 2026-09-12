@@ -1,6 +1,6 @@
 # Kratis
 
-Self-host-friendly, multi-harness agent-orchestration platform for software development.
+Self-host-friendly, multi-harness agent-orchestration platform for software development., solo - or with a team.
 
 Connect Git repositories, get a living wiki and code graph, plan with an architect agent, then run a pluggable ACP harness in a Docker sandbox. Approve privileged actions, steer a running agent, review the diff, and publish a pull request. Bring your own LLM providers & Keys.
 

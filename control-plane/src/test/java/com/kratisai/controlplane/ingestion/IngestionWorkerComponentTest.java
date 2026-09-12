@@ -203,6 +203,45 @@ class IngestionWorkerComponentTest {
     }
 
     @Test
+    void shouldFailIngestionAndReportNonZeroParserExitCode() throws Exception {
+        String loaderError = "Error relocating /usr/local/bin/codebase-memory-mcp: __printf_chk: symbol not found";
+        Mockito.doAnswer(invocation -> {
+                    List<String> command = invocation.getArgument(0);
+                    if (command != null && command.size() >= 3 && "index_repository".equals(command.get(2))) {
+                        return new ProcessExecutor.ProcessResult(
+                                127, loaderError.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    }
+                    return invocation.callRealMethod();
+                })
+                .when(processExecutor)
+                .execute(Mockito.anyList(), Mockito.any(File.class), Mockito.any());
+
+        // Create and save a pending batch
+        IngestionBatch batch = new IngestionBatch(repository);
+        ingestionBatchRepository.saveAndFlush(batch);
+
+        // Run the worker
+        ingestionWorker.runIngestion(batch.getId());
+
+        // Wait and assert the batch failed with the exit code and captured output
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(15))
+                .pollInterval(Duration.ofMillis(50))
+                .untilAsserted(() -> {
+                    IngestionBatch finishedBatch =
+                            ingestionBatchRepository.findById(batch.getId()).orElseThrow();
+                    assertThat(finishedBatch.getStatus()).isEqualTo(IngestionStatus.FAILED);
+                    assertThat(finishedBatch.getErrorMessage())
+                            .contains("codebase-memory exited with code 127")
+                            .contains("__printf_chk");
+                    assertThat(finishedBatch.isActive()).isFalse();
+                });
+
+        // No nodes should have been saved
+        assertThat(ctxNodeRepository.findAll()).isEmpty();
+    }
+
+    @Test
     void shouldHandleMissingBatchGracefully() {
         // Run with an invalid ID
         UUID fakeId = java.util.UUID.randomUUID();
