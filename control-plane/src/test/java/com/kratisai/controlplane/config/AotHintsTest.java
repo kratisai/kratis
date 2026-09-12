@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.kratisai.controlplane.api.wsdto.ActivityKind;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.client.ModelDiscoveryClient;
+import com.kratisai.controlplane.ingestion.parse.DimensionDiscoveryResult;
+import com.kratisai.controlplane.ingestion.research.ArchitecturePatternResult;
 import com.kratisai.controlplane.planningagent.AgentThinking;
 import com.kratisai.controlplane.planningagent.DimensionTool.DimensionDetail;
 import com.kratisai.controlplane.planningagent.DimensionTool.DimensionOverview;
@@ -101,6 +103,30 @@ class AotHintsTest {
                 .accepts(hints);
         assertThat(RuntimeHintsPredicates.reflection()
                         .onType(TelemetryEvent.Thought.class)
+                        .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
+                .accepts(hints);
+    }
+
+    @Test
+    @DisplayName("registers binding hints for LLM structured-output records")
+    void registersRecordBindingHints() {
+        RuntimeHints hints = new RuntimeHints();
+        AotHints aotHints = new AotHints();
+
+        aotHints.registerHints(hints, getClass().getClassLoader());
+
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onType(DimensionDiscoveryResult.class)
+                        .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
+                .accepts(hints);
+        assertThat(RuntimeHintsPredicates.reflection().onMethod(DimensionDiscoveryResult.class, "domains"))
+                .accepts(hints);
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onType(DimensionDiscoveryResult.DimensionResult.class)
+                        .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
+                .accepts(hints);
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onType(ArchitecturePatternResult.class)
                         .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
                 .accepts(hints);
     }

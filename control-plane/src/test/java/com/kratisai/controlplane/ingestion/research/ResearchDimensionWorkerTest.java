@@ -127,7 +127,7 @@ class ResearchDimensionWorkerTest {
         DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
 
         assertThat(result).isNotNull();
-        assertThat(result.getSynopsis()).contains("test dimension synopsis");
+        assertThat(result.synopsis()).contains("test dimension synopsis");
     }
 
     @Test
@@ -157,7 +157,7 @@ class ResearchDimensionWorkerTest {
         DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
 
         assertThat(result).isNotNull();
-        assertThat(result.getSynopsis()).contains("test domain synopsis");
+        assertThat(result.synopsis()).contains("test domain synopsis");
     }
 
     @Test
@@ -187,7 +187,7 @@ class ResearchDimensionWorkerTest {
         DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
 
         assertThat(result).isNotNull();
-        assertThat(result.getSynopsis()).contains("test archetype synopsis");
+        assertThat(result.synopsis()).contains("test archetype synopsis");
     }
 
     @Test
@@ -217,7 +217,7 @@ class ResearchDimensionWorkerTest {
         DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
 
         assertThat(result).isNotNull();
-        assertThat(result.getSynopsis()).contains("test cross-cutting synopsis");
+        assertThat(result.synopsis()).contains("test cross-cutting synopsis");
     }
 
     @Test
@@ -247,7 +247,7 @@ class ResearchDimensionWorkerTest {
         DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
 
         assertThat(result).isNotNull();
-        assertThat(result.getSynopsis()).contains("Retried successfully");
+        assertThat(result.synopsis()).contains("Retried successfully");
         assertThat(callCount.get()).isEqualTo(3);
     }
 
@@ -320,7 +320,7 @@ class ResearchDimensionWorkerTest {
         DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
 
         assertThat(result).isNotNull();
-        assertThat(result.getSynopsis()).contains("Retried after resource access exception");
+        assertThat(result.synopsis()).contains("Retried after resource access exception");
         assertThat(callCount.get()).isEqualTo(2);
     }
 }

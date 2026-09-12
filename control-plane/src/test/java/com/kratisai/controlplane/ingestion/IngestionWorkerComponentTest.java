@@ -242,6 +242,41 @@ class IngestionWorkerComponentTest {
     }
 
     @Test
+    void shouldFailIngestionWhenPhaseThrowsError() throws Exception {
+        String errorMessage = "Simulated native-image reflection Error";
+        Mockito.doAnswer(invocation -> {
+                    List<String> command = invocation.getArgument(0);
+                    if (command != null && command.size() >= 3 && "index_repository".equals(command.get(2))) {
+                        throw new AssertionError(errorMessage);
+                    }
+                    return invocation.callRealMethod();
+                })
+                .when(processExecutor)
+                .execute(Mockito.anyList(), Mockito.any(File.class), Mockito.any());
+
+        IngestionBatch batch = new IngestionBatch(repository);
+        ingestionBatchRepository.saveAndFlush(batch);
+
+        ingestionWorker.runIngestion(batch.getId());
+
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(15))
+                .pollInterval(Duration.ofMillis(50))
+                .untilAsserted(() -> {
+                    IngestionBatch finishedBatch =
+                            ingestionBatchRepository.findById(batch.getId()).orElseThrow();
+                    assertThat(finishedBatch.getStatus()).isEqualTo(IngestionStatus.FAILED);
+                    assertThat(finishedBatch.getErrorMessage()).contains(errorMessage);
+                    assertThat(finishedBatch.isActive()).isFalse();
+                });
+
+        assertThat(ingestionBatchLogService.getLogsForBatch(batch.getId()))
+                .anyMatch(log -> "ERROR".equals(log.getLevel())
+                        && "FAILED".equals(log.getStep())
+                        && log.getMessage().contains(errorMessage));
+    }
+
+    @Test
     void shouldHandleMissingBatchGracefully() {
         // Run with an invalid ID
         UUID fakeId = java.util.UUID.randomUUID();
