@@ -34,6 +34,7 @@ public class AotHints implements RuntimeHintsRegistrar {
         hints.proxies().registerJdkProxy(ModelDiscoveryClient.class);
 
         registerWebSocketPayloadHints(hints, classLoader);
+        registerRecordBindingHints(hints, classLoader);
 
         hints.reflection()
                 .registerType(
@@ -173,6 +174,29 @@ public class AotHints implements RuntimeHintsRegistrar {
         // TelemetryEvent is a sealed hierarchy from another package embedded in
         // ClientPayload.TelemetryResult, so the wire-DTO scan does not reach its records.
         registerBindingHierarchy(hints, registrar, TelemetryEvent.class);
+    }
+
+    /**
+     * LLM structured-output types are deserialized at runtime by Jackson through Spring AI's
+     * {@code BeanOutputConverter} and {@code ReActLoop.structured}, an indirection the AOT engine
+     * cannot see. Record classes need their record-component accessors registered or Jackson
+     * fails in the native image with {@code UnsupportedFeatureError: Record components not available}.
+     *
+     * <p>Scanning the application's own base package keeps every current and future record covered
+     * automatically, including nested records such as {@code DimensionDiscoveryResult.DimensionResult}.
+     */
+    private void registerRecordBindingHints(RuntimeHints hints, ClassLoader classLoader) {
+        BindingReflectionHintsRegistrar registrar = new BindingReflectionHintsRegistrar();
+        ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false);
+        scanner.addIncludeFilter((metadataReader, metadataReaderFactory) -> true);
+        Set<Class<?>> recordTypes = new LinkedHashSet<>();
+        for (BeanDefinition candidate : scanner.findCandidateComponents("com.kratisai.controlplane")) {
+            Class<?> type = ClassUtils.resolveClassName(candidate.getBeanClassName(), classLoader);
+            if (type.isRecord()) {
+                recordTypes.add(type);
+            }
+        }
+        registrar.registerReflectionHints(hints.reflection(), recordTypes.toArray(new Type[0]));
     }
 
     private void registerBindingHierarchy(

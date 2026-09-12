@@ -258,7 +258,7 @@ public class ArchitectureSanityTest {
                                 "com.kratisai.controlplane.ingestion.IngestionWorker.runIngestion(java.util.UUID)",
                                 "com.kratisai.controlplane.ingestion.IngestionWorker.markBatchStarted(java.util.UUID)",
                                 "com.kratisai.controlplane.ingestion.IngestionWorker.markBatchFailed(java.util.UUID,"
-                                        + " java.lang.Exception,"
+                                        + " java.lang.Throwable,"
                                         + " com.kratisai.controlplane.ingestion.IngestionBatchLogService$BatchLogger)");
 
                         // Methods that publish an event with no @TransactionalEventListener consumer at all —

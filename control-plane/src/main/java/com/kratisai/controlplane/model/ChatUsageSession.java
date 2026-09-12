@@ -51,13 +51,13 @@ public class ChatUsageSession {
     public ChatUsageSession(ChatEntity chat, String virtualKey) {
         this.chat = chat;
         this.startedAt = Instant.now();
-        this.usage.setVirtualKey(virtualKey);
+        this.usage = LlmUsage.withKey(virtualKey);
     }
 
     public ChatUsageSession(ChatEntity chat, String virtualKey, String model) {
         this.chat = chat;
         this.startedAt = Instant.now();
-        this.usage.setVirtualKey(virtualKey);
+        this.usage = LlmUsage.withKey(virtualKey);
         this.model = model;
     }
 

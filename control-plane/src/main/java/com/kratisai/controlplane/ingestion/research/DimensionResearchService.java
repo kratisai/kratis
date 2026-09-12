@@ -77,8 +77,8 @@ public class DimensionResearchService {
                     CtxDimension dimension = entry.getKey();
                     DimensionSynopsisResult result = entry.getValue();
 
-                    if (result.getSynopsis() != null && !result.getSynopsis().isBlank()) {
-                        dimension.setSynopsis(result.getSynopsis());
+                    if (result.synopsis() != null && !result.synopsis().isBlank()) {
+                        dimension.setSynopsis(result.synopsis());
                         ctxDimensionRepository.save(dimension);
                     } else {
                         batchLogger.error(

@@ -110,7 +110,9 @@ public class IngestionWorker {
 
             // Perform ingestion with phase-level transactions
             cloneResult = performIngestion(batchId, batchLogger);
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // Catch Throwable (not just Exception) so Errors such as GraalVM's
+            // UnsupportedFeatureError still abort the pipeline and mark the batch FAILED.
             logger.error("Ingestion batch {} failed during execution", batchId, e);
             transactionTemplate.execute(txStatus -> markBatchFailed(batchId, e, batchLogger));
         } finally {
@@ -299,7 +301,7 @@ public class IngestionWorker {
     }
 
     public @Nullable Object markBatchFailed(
-            UUID batchId, Exception e, IngestionBatchLogService.BatchLogger batchLogger) {
+            UUID batchId, Throwable e, IngestionBatchLogService.BatchLogger batchLogger) {
         IngestionBatch batch = loadBatch(batchId);
         batch.setStatus(IngestionStatus.FAILED);
         batch.setErrorMessage(e.getMessage());
