@@ -5,6 +5,7 @@ import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.model.event.UserEntityChangedEvent;
 import com.kratisai.controlplane.model.event.UserEntityType;
 import com.kratisai.controlplane.repository.*;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
@@ -106,7 +107,14 @@ public class TeamService {
     }
 
     public List<TeamDto> listTeamsForUser(UUID userId) {
-        return teamMemberRepository.findByUserId(userId).stream()
+        // Deterministic order (default team first, then creation time) so the API
+        // response and its consumers don't depend on unordered repository results.
+        List<TeamMember> members = teamMemberRepository.findByUserId(userId);
+        members.sort(Comparator.comparing((TeamMember tm) -> tm.getTeam().isDefault())
+                .reversed()
+                .thenComparing(tm -> tm.getTeam().getCreatedAt())
+                .thenComparing(tm -> tm.getTeam().getId()));
+        return members.stream()
                 .map(tm -> new TeamDto(
                         tm.getTeam().getId(),
                         tm.getTeam().getName(),

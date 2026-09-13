@@ -2,6 +2,8 @@ package com.kratisai.controlplane.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.anthropic.core.JsonValue;
+import com.anthropic.models.messages.Message;
 import com.kratisai.controlplane.api.wsdto.ActivityKind;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.client.ModelDiscoveryClient;
@@ -19,6 +21,9 @@ import com.kratisai.controlplane.planningagent.WikiTool.WikiSearchResponse;
 import com.kratisai.controlplane.planningagent.WikiTool.WikiSearchResult;
 import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
 import com.kratisai.controlplane.validation.ValidPasswordValidator;
+import com.openai.models.FunctionParameters;
+import com.openai.models.completions.CompletionUsage;
+import com.openai.models.embeddings.CreateEmbeddingResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.aot.hint.MemberCategory;
@@ -129,6 +134,46 @@ class AotHintsTest {
                         .onType(ArchitecturePatternResult.class)
                         .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
                 .accepts(hints);
+    }
+
+    @Test
+    @DisplayName("registers binding hints for OpenAI SDK model classes")
+    void registersOpenAiModelHints() {
+        RuntimeHints hints = new RuntimeHints();
+        AotHints aotHints = new AotHints();
+
+        aotHints.registerHints(hints, getClass().getClassLoader());
+
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onType(CreateEmbeddingResponse.Usage.class)
+                        .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
+                .accepts(hints);
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onMethod(CreateEmbeddingResponse.Usage.class, "putAdditionalProperty"))
+                .accepts(hints);
+        assertThat(RuntimeHintsPredicates.reflection().onType(CreateEmbeddingResponse.class))
+                .accepts(hints);
+        assertThat(RuntimeHintsPredicates.reflection().onType(CompletionUsage.class))
+                .accepts(hints);
+        assertThat(RuntimeHintsPredicates.reflection().onType(FunctionParameters.class))
+                .accepts(hints);
+    }
+
+    @Test
+    @DisplayName("registers binding hints for Anthropic SDK model classes")
+    void registersAnthropicModelHints() {
+        RuntimeHints hints = new RuntimeHints();
+        AotHints aotHints = new AotHints();
+
+        aotHints.registerHints(hints, getClass().getClassLoader());
+
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onType(Message.class)
+                        .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
+                .accepts(hints);
+        assertThat(RuntimeHintsPredicates.reflection().onMethod(Message.class, "putAdditionalProperty"))
+                .accepts(hints);
+        assertThat(RuntimeHintsPredicates.reflection().onType(JsonValue.class)).accepts(hints);
     }
 
     @Test

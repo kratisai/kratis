@@ -77,6 +77,8 @@ class LocalDockerSandboxProviderTest {
                                 && cmd.contains("kratis.role=dind")
                                 && cmd.contains("--security-opt")
                                 && cmd.contains("seccomp=unconfined")
+                                && cmd.contains("--device")
+                                && cmd.contains("/dev/net/tun")
                                 && cmd.contains("dockerd-entrypoint.sh")),
                         any(),
                         any());
@@ -685,5 +687,41 @@ class LocalDockerSandboxProviderTest {
 
         List<String> activeIds = provider.getActiveSandboxIds();
         assertThat(activeIds).isEmpty();
+    }
+
+    @Test
+    void testIsSysctlEnabled() throws Exception {
+        Path enabled = Files.createTempFile("kratis-sysctl-enabled", ".txt");
+        Files.writeString(enabled, "1\n");
+        Path disabled = Files.createTempFile("kratis-sysctl-disabled", ".txt");
+        Files.writeString(disabled, "0\n");
+        try {
+            assertThat(LocalDockerSandboxProvider.isSysctlEnabled(enabled)).isTrue();
+            assertThat(LocalDockerSandboxProvider.isSysctlEnabled(disabled)).isFalse();
+            assertThat(LocalDockerSandboxProvider.isSysctlEnabled(Path.of("/proc/kratis-missing-sysctl")))
+                    .isFalse();
+        } finally {
+            Files.deleteIfExists(enabled);
+            Files.deleteIfExists(disabled);
+        }
+    }
+
+    @Test
+    void testSpawnSandboxGrantsRootlesskitApparmorProfileOnlyWhenUsernsRestricted() throws Exception {
+        ExecutionEnvironment env = new ExecutionEnvironment();
+        env.setId(java.util.UUID.randomUUID());
+
+        when(mockProcessExecutor.execute(any(), any(), any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
+
+        provider.spawnSandbox(env, "test-token");
+
+        boolean restricted = LocalDockerSandboxProvider.apparmorRestrictsUnprivilegedUserns();
+        verify(mockProcessExecutor)
+                .execute(
+                        argThat(cmd -> cmd.contains("docker:dind-rootless")
+                                && cmd.contains("apparmor=rootlesskit") == restricted),
+                        any(),
+                        any());
     }
 }

@@ -24,6 +24,9 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
 
     private static final List<String> REQUIRED_SANDBOX_DIRECTORIES = List.of("/kratis/workspace", "/kratis/logs");
 
+    private static final Path APPARMOR_USERNS_RESTRICTION_SYSCTL =
+            Path.of("/proc/sys/kernel/apparmor_restrict_unprivileged_userns");
+
     /**
      * Capabilities re-granted so the sandbox user can install packages through
      * sudo (apt-get/dpkg need to write system paths, chown/chmod files, create
@@ -135,6 +138,14 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 networkName,
                 "--security-opt",
                 "seccomp=unconfined",
+                //  /dev/net/tun needed for rootlesskit's slirp4netns network driver
+                "--device",
+                "/dev/net/tun"));
+        if (apparmorRestrictsUnprivilegedUserns()) {
+            // enable unprivileged userns_create needed for rootlesskit.
+            command.addAll(List.of("--security-opt", "apparmor=rootlesskit"));
+        }
+        command.addAll(List.of(
                 "--add-host",
                 "host.docker.internal:host-gateway",
                 "-e",
@@ -151,6 +162,20 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             command.add("--registry-mirror=" + registryMirror);
         }
         executeCommand("Spawning dind container", command);
+    }
+
+    // Check whether userns is allowed for unprivileged users
+    static boolean apparmorRestrictsUnprivilegedUserns() {
+        return isSysctlEnabled(APPARMOR_USERNS_RESTRICTION_SYSCTL);
+    }
+
+    static boolean isSysctlEnabled(Path sysctl) {
+        try {
+            return Files.isReadable(sysctl)
+                    && "1".equals(Files.readString(sysctl).trim());
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     private String spawnRunnerContainer(

@@ -27,9 +27,10 @@ public class ZombieContainerCollector {
     private final String instanceId;
     private final long gracePeriodSeconds;
 
-    // Track when orphans and delinquent environments were first seen to respect the grace period
+    // Track when resources were first seen to respect the grace period
     private final Map<String, Instant> orphanFirstSeen = new ConcurrentHashMap<>();
     private final Map<UUID, Instant> delinquentFirstSeen = new ConcurrentHashMap<>();
+    private final Map<String, Instant> danglingNetworkFirstSeen = new ConcurrentHashMap<>();
 
     public ZombieContainerCollector(
             ExecutionEnvironmentRepository environmentRepository,
@@ -142,6 +143,7 @@ public class ZombieContainerCollector {
         }
         try {
             ProcessExecutor executor = processExecutor.get();
+            Instant now = Instant.now();
             // List networks created by this instance with role=network
             List<String> listCmd = List.of(
                     "docker",
@@ -158,26 +160,44 @@ public class ZombieContainerCollector {
                 return;
             }
             String output = new String(listResult.output()).trim();
-            if (output.isEmpty()) {
-                return;
-            }
-            String[] networkNames = output.split("\\s+");
-            for (String netName : networkNames) {
-                if (netName.isBlank()) {
-                    continue;
-                }
-                // Check if any containers are attached to this network
-                List<String> inspectCmd =
-                        List.of("docker", "network", "inspect", "--format", "{{len .Containers}}", netName);
-                ProcessExecutor.ProcessResult inspectResult = executor.execute(inspectCmd, null, null);
-                if (inspectResult.exitCode() == 0) {
+            Set<String> listedNetworks = new HashSet<>();
+            if (!output.isEmpty()) {
+                String[] networkNames = output.split("\\s+");
+                for (String netName : networkNames) {
+                    if (netName.isBlank()) {
+                        continue;
+                    }
+                    listedNetworks.add(netName);
+                    // Check if any containers are attached to this network
+                    List<String> inspectCmd =
+                            List.of("docker", "network", "inspect", "--format", "{{len .Containers}}", netName);
+                    ProcessExecutor.ProcessResult inspectResult = executor.execute(inspectCmd, null, null);
+                    if (inspectResult.exitCode() != 0) {
+                        continue;
+                    }
                     String countStr = new String(inspectResult.output()).trim();
                     if ("0".equals(countStr)) {
-                        logger.info("Pruning dangling kratis network with 0 attached containers: {}", netName);
-                        executor.execute(List.of("docker", "network", "rm", netName), null, null);
+                        Instant firstSeen = danglingNetworkFirstSeen.computeIfAbsent(netName, k -> now);
+                        long elapsed = Duration.between(firstSeen, now).toSeconds();
+                        if (elapsed >= gracePeriodSeconds) {
+                            logger.info("Pruning dangling kratis network with 0 attached containers: {}", netName);
+                            executor.execute(List.of("docker", "network", "rm", netName), null, null);
+                            danglingNetworkFirstSeen.remove(netName);
+                        } else {
+                            logger.debug(
+                                    "Dangling kratis network {} tracked ({}s elapsed / {}s grace)",
+                                    netName,
+                                    elapsed,
+                                    gracePeriodSeconds);
+                        }
+                    } else {
+                        // Network has attached containers; clear any dangling tracking
+                        danglingNetworkFirstSeen.remove(netName);
                     }
                 }
             }
+            // Drop tracking for networks that no longer exist
+            danglingNetworkFirstSeen.keySet().removeIf(name -> !listedNetworks.contains(name));
         } catch (Exception e) {
             logger.debug("Failed during orphan network pruning: {}", e.getMessage());
         }

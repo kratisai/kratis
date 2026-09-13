@@ -334,13 +334,72 @@ class ZombieContainerCollectorTest {
                 List.of(mockSandboxProvider),
                 java.util.Optional.of(mockProcessExecutor),
                 "test-instance",
-                30);
+                1);
 
+        // Cycle 1: dangling network is first seen, but the grace period has not elapsed
+        collector.collectZombies();
+        verify(mockProcessExecutor, never())
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-dangling")), any(), any());
+
+        Thread.sleep(1100);
+
+        // Cycle 2: grace period elapsed, dangling network is pruned
         collector.collectZombies();
 
         verify(mockProcessExecutor)
                 .execute(eq(List.of("docker", "network", "rm", "kratis-net-dangling")), any(), any());
         verify(mockProcessExecutor, never())
                 .execute(eq(List.of("docker", "network", "rm", "kratis-net-active")), any(), any());
+    }
+
+    @Test
+    void testPruneOrphanNetworksDoesNotPruneRecentlyProvisionedNetwork() throws Exception {
+        SandboxProvider mockSandboxProvider = mock(SandboxProvider.class);
+        when(mockSandboxProvider.getProviderType()).thenReturn(ExecutionProviderType.DOCKER);
+        when(mockSandboxProvider.getActiveSandboxIds()).thenReturn(List.of());
+
+        ProcessExecutor mockProcessExecutor = mock(ProcessExecutor.class);
+        when(mockProcessExecutor.execute(
+                        argThat(cmd -> cmd != null && cmd.contains("network") && cmd.contains("ls")), any(), any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(0, "kratis-net-provisioning\n".getBytes()));
+
+        // Cycle 1: the network is empty because the dind sibling has not attached yet
+        when(mockProcessExecutor.execute(
+                        argThat(cmd -> cmd != null
+                                && cmd.contains("network")
+                                && cmd.contains("inspect")
+                                && cmd.contains("kratis-net-provisioning")),
+                        any(),
+                        any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(0, "0\n".getBytes()));
+
+        ZombieContainerCollector collector = new ZombieContainerCollector(
+                environmentRepository,
+                List.of(mockSandboxProvider),
+                java.util.Optional.of(mockProcessExecutor),
+                "test-instance",
+                1);
+
+        // Cycle 1: tracks the empty network but does not prune it
+        collector.collectZombies();
+        verify(mockProcessExecutor, never())
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-provisioning")), any(), any());
+
+        // The dind sibling is now attached to the network
+        when(mockProcessExecutor.execute(
+                        argThat(cmd -> cmd != null
+                                && cmd.contains("network")
+                                && cmd.contains("inspect")
+                                && cmd.contains("kratis-net-provisioning")),
+                        any(),
+                        any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(0, "1\n".getBytes()));
+
+        Thread.sleep(1100);
+
+        // Cycle 2: network now has an attached container, so it must not be pruned
+        collector.collectZombies();
+        verify(mockProcessExecutor, never())
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-provisioning")), any(), any());
     }
 }

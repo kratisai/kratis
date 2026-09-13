@@ -126,6 +126,8 @@ class SandboxTestcontainersIntegrationTest {
                                 && cmd.contains("--network")
                                 && cmd.contains(expectedNet)
                                 && cmd.contains("seccomp=unconfined")
+                                && cmd.contains("--device")
+                                && cmd.contains("/dev/net/tun")
                                 && cmd.contains("DOCKER_TLS_CERTDIR=")
                                 && cmd.contains("--registry-mirror=http://host.docker.internal:5001")
                                 && cmd.contains("kratis.role=dind")
