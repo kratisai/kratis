@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { useRefreshToken } from '@/hooks/use-auth'
 import { useAuthStore } from '@/store/auth-store'
 
-// Refresh tokens 5 minutes before expiry
 const REFRESH_BUFFER_MS = 5 * 60 * 1000
 
 export function useTokenRefresh() {
@@ -11,52 +10,24 @@ export function useTokenRefresh() {
   const { mutate: refresh } = useRefreshToken()
   const timerRef = useRef<null | ReturnType<typeof setTimeout>>(null)
 
-  const scheduleRefresh = useCallback(
-    (expiryTime: number) => {
-      // Clear any existing timer
-      if (timerRef.current) {
-        clearTimeout(timerRef.current)
-      }
-
-      const timeUntilExpiry = expiryTime - Date.now()
-      const refreshIn = Math.max(0, timeUntilExpiry - REFRESH_BUFFER_MS)
-
-      if (refreshIn > 0 && refreshToken) {
-        timerRef.current = setTimeout(() => {
-          refresh({ refreshToken })
-        }, refreshIn)
-      }
-    },
-    [refreshToken, refresh],
-  )
-
   useEffect(() => {
-    // If not authenticated, nothing to do
-    if (!refreshToken) {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current)
-        timerRef.current = null
-      }
-      return
-    }
+    if (!refreshToken) return
 
-    // Check if token is already expired
     if (isTokenExpired()) {
-      // Try to refresh immediately
       refresh({ refreshToken })
       return
     }
 
-    // Schedule refresh for when token is about to expire
     if (tokenExpiry) {
-      scheduleRefresh(tokenExpiry)
+      const refreshIn = Math.max(0, tokenExpiry - Date.now() - REFRESH_BUFFER_MS)
+      timerRef.current = setTimeout(() => refresh({ refreshToken }), refreshIn)
     }
 
-    // Cleanup timer on unmount
     return () => {
       if (timerRef.current) {
         clearTimeout(timerRef.current)
+        timerRef.current = null
       }
     }
-  }, [refreshToken, isTokenExpired, tokenExpiry, refresh, scheduleRefresh])
+  }, [refreshToken, isTokenExpired, tokenExpiry, refresh])
 }

@@ -37,10 +37,12 @@ public class ClientAuthRpcHandler implements ClientRpcHandler<ClientRpcPayload.A
     @Override
     public Flux<ClientPayload.AuthResult> handle(String sessionId, Object requestId, ClientRpcPayload.Auth params) {
         if (params.token() == null || params.token().isBlank()) {
+            logger.warn("Rejecting client auth for session {}: token missing", sessionId);
             throw new RpcErrorException(JsonRpcError.InvalidParams("Token is required"));
         }
         String token = params.token();
         if (!jwtService.isTokenValid(token)) {
+            logger.warn("Rejecting client auth for session {}: invalid or expired token", sessionId);
             throw new RpcErrorException(JsonRpcError.InvalidToken());
         }
 

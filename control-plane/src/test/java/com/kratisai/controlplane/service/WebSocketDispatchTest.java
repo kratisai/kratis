@@ -113,6 +113,17 @@ class WebSocketDispatchTest {
     }
 
     @Test
+    void broadcastNotificationToTeam_noSubscribers_isDroppedWithoutError() {
+        UUID teamId = UUID.randomUUID();
+        doReturn(Set.of()).when(subscriptionRegistry).getSubscribers(teamId);
+
+        dispatch.broadcastNotificationToTeam(
+                teamId, new ClientPayload.TeamEntityChangedResult(teamId, TeamEntityType.REPOSITORIES));
+
+        verify(sessionRegistry, never()).getSession(any());
+    }
+
+    @Test
     void broadcastNotificationToTeam_sendFailureLoggedNotPropagatedToCaller() throws Exception {
         UUID teamId = UUID.randomUUID();
         String failingSessionId = "session-1";

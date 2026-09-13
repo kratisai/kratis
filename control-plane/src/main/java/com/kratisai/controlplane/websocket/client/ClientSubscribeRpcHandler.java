@@ -8,16 +8,12 @@ import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import com.kratisai.controlplane.service.SubscriptionRegistry;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 @Component
 public class ClientSubscribeRpcHandler
         implements ClientRpcHandler<ClientRpcPayload.Subscribe, ClientPayload.SubscriptionResult> {
-
-    private static final Logger logger = LoggerFactory.getLogger(ClientSubscribeRpcHandler.class);
 
     private final ClientSessionRegistry sessionRegistry;
     private final SubscriptionRegistry subscriptionRegistry;
@@ -69,7 +65,6 @@ public class ClientSubscribeRpcHandler
         boolean added = subscriptionRegistry.subscribe(sessionId, teamId);
         String message = added ? "Subscribed to team " + teamIdStr : "Already subscribed to team " + teamIdStr;
 
-        logger.debug("Session {} subscribed to team {}: {}", sessionId, teamIdStr, message);
         return Flux.just(new ClientPayload.SubscriptionResult(teamIdStr, message));
     }
 }

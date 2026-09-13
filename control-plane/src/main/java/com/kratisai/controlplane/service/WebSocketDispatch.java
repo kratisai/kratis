@@ -69,6 +69,19 @@ public class WebSocketDispatch {
     <P extends ClientPayload> void broadcastNotificationToTeam(UUID teamId, P payload) {
         JsonRpcResponse<P> notification = new JsonRpcResponse<>(payload, null);
         Set<String> sessionIds = subscriptionRegistry.getSubscribers(teamId);
+        if (sessionIds.isEmpty()) {
+            // Zero-subscriber broadcasts are the observable symptom of a lost subscription.
+            logger.warn(
+                    "Team broadcast has no subscribers; event dropped (team={}, payload={})",
+                    teamId,
+                    payload.getClass().getSimpleName());
+            return;
+        }
+        logger.debug(
+                "Broadcasting {} to {} session(s) for team {}",
+                payload.getClass().getSimpleName(),
+                sessionIds.size(),
+                teamId);
         for (String sessionId : sessionIds) {
             WebSocketSession session = clientSessionRegistry.getSession(sessionId);
             if (session != null && session.isOpen()) {

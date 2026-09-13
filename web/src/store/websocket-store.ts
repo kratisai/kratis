@@ -31,6 +31,8 @@ import { useExecutionStore } from '@/store/execution-store'
 
 const WS_URL = import.meta.env.VITE_WS_URL || '/ws/client'
 const HEARTBEAT_INTERVAL_MS = 5 * 60_000
+const PONG_TIMEOUT_MS = 30_000
+const MAX_RECONNECT_DELAY_MS = 30_000
 
 const REPOSITORIES_QUERY_KEY = 'repositories'
 const CHAT_EXECUTIONS_QUERY_KEY = 'chat-executions'
@@ -83,7 +85,10 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
   let reconnectAttempts = 0
   let subscribedTeamId: null | string = null
   let heartbeatTimer: null | ReturnType<typeof setInterval> = null
+  let pongTimeoutTimer: null | ReturnType<typeof setTimeout> = null
+  let lastInboundAt = 0
   let lastAuthToken: null | string = null
+  let hasConnectedOnce = false
   const messageQueue: { method: string; params: Record<string, unknown> }[] = []
   const inboundBuffer: JsonRpcResponse[] = []
   let flushTimer: null | number = null
@@ -278,19 +283,44 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
     )
   }
 
+  function clearPongTimeout() {
+    if (pongTimeoutTimer !== null) {
+      clearTimeout(pongTimeoutTimer)
+      pongTimeoutTimer = null
+    }
+  }
+
   function startHeartbeat() {
     if (heartbeatTimer !== null) return
     heartbeatTimer = setInterval(() => {
       if (!ws || ws.readyState !== WebSocket.OPEN) return
       const requestId = ++messageIdCounter
-      ws.send(
-        JSON.stringify({
-          id: requestId,
-          jsonrpc: '2.0',
-          method: 'ping',
-          params: {},
-        }),
-      )
+      const sentAt = Date.now()
+      try {
+        ws.send(
+          JSON.stringify({
+            id: requestId,
+            jsonrpc: '2.0',
+            method: 'ping',
+            params: {},
+          }),
+        )
+      } catch (error) {
+        console.warn('WebSocket heartbeat send failed; forcing reconnect', error)
+        ws.close()
+        return
+      }
+
+      // A half-open socket keeps ws.OPEN while the server has already dropped the
+      // session, so detect a missed pong and reconnect.
+      clearPongTimeout()
+      pongTimeoutTimer = setTimeout(() => {
+        pongTimeoutTimer = null
+        if (lastInboundAt <= sentAt) {
+          console.warn('WebSocket heartbeat timed out; forcing reconnect')
+          ws?.close()
+        }
+      }, PONG_TIMEOUT_MS)
     }, HEARTBEAT_INTERVAL_MS)
   }
 
@@ -299,6 +329,7 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
       clearInterval(heartbeatTimer)
       heartbeatTimer = null
     }
+    clearPongTimeout()
   }
 
   function cleanup() {
@@ -345,6 +376,14 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
       ws.onopen = () => {
         set({ error: null, isConnected: true, isConnecting: false })
         reconnectAttempts = 0
+        lastInboundAt = Date.now()
+        clearPongTimeout()
+
+        if (hasConnectedOnce) {
+          // Broadcasts are not replayed, so refetch to recover events missed while down.
+          void queryClient.invalidateQueries()
+        }
+        hasConnectedOnce = true
 
         const token = useAuthStore.getState().accessToken
         lastAuthToken = token
@@ -397,6 +436,8 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
       }
 
       ws.onmessage = (event) => {
+        lastInboundAt = Date.now()
+        clearPongTimeout()
         try {
           bufferInbound(JSON.parse(event.data) as JsonRpcResponse)
         } catch (error) {
@@ -414,13 +455,15 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
 
         useChatStore.getState().handleDisconnect()
 
-        if (reconnectAttempts < 5) {
-          reconnectAttempts++
-          const timeout = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000)
-          reconnectTimer = setTimeout(connect, timeout)
-        } else {
-          messageQueue.length = 0
-          set({ error: 'Connection lost. Please refresh the page.' })
+        // Giving up left the UI permanently without broadcasts while REST still worked.
+        reconnectAttempts++
+        const timeout = Math.min(
+          1000 * Math.pow(2, Math.min(reconnectAttempts, 6)),
+          MAX_RECONNECT_DELAY_MS,
+        )
+        reconnectTimer = setTimeout(connect, timeout)
+        if (reconnectAttempts >= 5) {
+          set({ error: 'Connection lost. Reconnecting…' })
         }
       }
     } catch (error) {
@@ -432,6 +475,7 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
   function disconnect() {
     cleanup()
     reconnectAttempts = 0
+    hasConnectedOnce = false
     messageQueue.length = 0
     set({ error: null, isConnected: false, isConnecting: false })
   }

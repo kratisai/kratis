@@ -176,4 +176,23 @@ describe('useTokenRefresh', () => {
     // Should not have called refresh
     expect(mockRefresh).not.toHaveBeenCalled()
   })
+
+  it('refreshes immediately when the token is already inside the refresh buffer', async () => {
+    // Token expires in 1 minute - inside the 5 minute buffer but not yet expired.
+    useAuthStore.getState().login(
+      { email: 'test@test.com', id: '1', name: 'Test' },
+      'valid-access',
+      'valid-refresh',
+      60
+    )
+    useAuthStore.getState().setCurrentTeamId('1')
+
+    act(() => {
+      renderHook(() => useTokenRefresh(), { wrapper: createWrapper() })
+    })
+
+    await vi.runAllTimersAsync()
+
+    expect(mockRefresh).toHaveBeenCalledWith({ refreshToken: 'valid-refresh' })
+  })
 })

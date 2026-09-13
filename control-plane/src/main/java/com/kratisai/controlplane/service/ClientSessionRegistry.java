@@ -73,10 +73,14 @@ public class ClientSessionRegistry {
 
     /** Remove a client session (both authenticated and pending). */
     public void removeSession(String wsSessionId) {
+        UUID teamId = subscriptionRegistry.getSubscription(wsSessionId);
         authenticatedSessions.remove(wsSessionId);
         sessionUserIds.remove(wsSessionId);
         pendingAuthSessions.remove(wsSessionId);
         subscriptionRegistry.removeSession(wsSessionId);
+        if (teamId != null) {
+            logger.info("Removed client session {} (was subscribed to team {})", wsSessionId, teamId);
+        }
     }
 
     /** Get the authenticated user ID for a session. */
@@ -144,7 +148,11 @@ public class ClientSessionRegistry {
         authenticatedSessions.entrySet().removeIf(entry -> {
             if (!entry.getValue().isOpen()) {
                 String sessionId = entry.getKey();
-                logger.info("Cleaning up unexpectedly closed client session {}", sessionId);
+                UUID teamId = subscriptionRegistry.getSubscription(sessionId);
+                logger.info(
+                        "Cleaning up unexpectedly closed client session {} (was subscribed to team {})",
+                        sessionId,
+                        teamId);
                 sessionUserIds.remove(sessionId);
                 subscriptionRegistry.removeSession(sessionId);
                 return true;

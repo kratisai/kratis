@@ -36,6 +36,13 @@ public class ClientRealtimeEventListeners {
             IngestionEvent.StatusUpdate statusEvent = new IngestionEvent.StatusUpdate(
                     repositoryId, batch.getId(), batch.getStatus(), batch.getCommitHash(), batch.getCompletedAt());
 
+            logger.info(
+                    "Publishing ingestion status update {} for batch {} (repository {}, team {})",
+                    batch.getStatus(),
+                    batch.getId(),
+                    repositoryId,
+                    team.getId());
+
             dispatch.broadcastNotificationToTeam(team.getId(), new IngestionResult(statusEvent));
         } catch (Exception e) {
             logger.error("Failed to publish ingestion status update for batch {}", batch.getId(), e);

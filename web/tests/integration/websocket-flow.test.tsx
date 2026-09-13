@@ -367,7 +367,7 @@ describe('WebSocket Integration Flow', () => {
     })
   })
 
-  it('limits reconnect attempts to 5 and shows a permanent connection loss message', async () => {
+  it('keeps retrying with capped backoff after repeated disconnects', async () => {
     mockListTeams([
       {
         createdAt: '2024-01-01T00:00:00Z',
@@ -391,9 +391,10 @@ describe('WebSocket Integration Flow', () => {
     vi.useFakeTimers()
 
     setupConnected()
+    const instancesAfterConnect = allInstances.length
 
-    // Trigger onclose and run timers 6 times on the latest WebSocket instance
-    for (let i = 0; i < 6; i++) {
+    // Trigger onclose and run the scheduled reconnect well past the old 5-attempt limit
+    for (let i = 0; i < 8; i++) {
       act(() => {
         const latestWs = allInstances[allInstances.length - 1]
         latestWs.onclose?.({} as CloseEvent)
@@ -404,10 +405,32 @@ describe('WebSocket Integration Flow', () => {
     // Now restore real timers so waitFor can poll
     vi.useRealTimers()
 
-    // Now, after 5 attempts, it should stop reconnecting and show the permanent message
-    await waitFor(() => {
-      expect(screen.getByText('Connection lost. Please refresh the page.')).toBeInTheDocument()
+    // Reconnection continues beyond the previous limit instead of giving up permanently
+    expect(allInstances.length).toBeGreaterThan(instancesAfterConnect + 5)
+    expect(useWebSocketStore.getState().error).toBe('Connection lost. Reconnecting…')
+  })
+
+  it('refetches active queries after a reconnect to recover missed broadcasts', () => {
+    setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    const first = setupConnected()
+    invalidateSpy.mockClear()
+
+    // Drop the connection and establish a new one.
+    act(() => {
+      first.onclose?.({} as CloseEvent)
     })
+    act(() => {
+      useWebSocketStore.getState().connect()
+    })
+
+    const reconnected = allInstances[allInstances.length - 1]
+    act(() => {
+      reconnected.onopen?.()
+    })
+
+    expect(invalidateSpy).toHaveBeenCalled()
   })
 
   it('handles edge cases for subscription, telemetry, canvas, and error events', async () => {

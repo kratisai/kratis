@@ -129,4 +129,31 @@ describe('WebSocket Token Refresh', () => {
 
     expect(sentMethods(ws).filter((m) => m.method === 'ping')).toEqual([])
   })
+
+  it('forces a reconnect when a heartbeat ping is not answered', () => {
+    vi.useFakeTimers()
+    useAuthStore.getState().login(USER, 'token-1', 'refresh-1', 3600)
+    const ws = setupConnected()
+    const instanceCount = allInstances.length
+
+    // Fire the heartbeat and let the pong timeout elapse with no inbound frame.
+    act(() => {
+      vi.advanceTimersByTime(5 * 60_000)
+    })
+    act(() => {
+      vi.advanceTimersByTime(30_000)
+    })
+
+    expect(ws.close).toHaveBeenCalled()
+
+    // Simulate the browser dispatching the close event, then let the reconnect fire.
+    act(() => {
+      ws.onclose?.({} as CloseEvent)
+    })
+    act(() => {
+      vi.advanceTimersByTime(5000)
+    })
+
+    expect(allInstances.length).toBeGreaterThan(instanceCount)
+  })
 })

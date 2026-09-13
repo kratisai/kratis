@@ -1,5 +1,5 @@
 import { RouterProvider } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { AuthDialog } from '@/components/auth/auth-dialog'
 import { useTokenRefresh } from '@/hooks/use-token-refresh'
@@ -11,18 +11,19 @@ export default function App() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const connect = useWebSocketStore((state) => state.connect)
   const disconnect = useWebSocketStore((state) => state.disconnect)
+  const prevAuthRef = useRef<boolean | null>(null)
 
   // Automatically refresh tokens when they're about to expire
   useTokenRefresh()
 
-  // Manage WebSocket connection lifecycle globally when authenticated
+  // Drive the socket from auth-state transitions rather than mount/unmount, so
+  // StrictMode's double-invoked effects don't tear down and recreate the connection.
   useEffect(() => {
-    if (isAuthenticated) {
-      connect()
-      return () => {
-        disconnect()
-      }
-    }
+    const prevAuth = prevAuthRef.current
+    prevAuthRef.current = isAuthenticated
+
+    if (isAuthenticated && !prevAuth) connect()
+    else if (!isAuthenticated && prevAuth) disconnect()
   }, [isAuthenticated, connect, disconnect])
 
   return (
