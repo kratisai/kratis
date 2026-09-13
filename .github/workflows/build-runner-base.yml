@@ -6,11 +6,6 @@ on:
     paths:
       - 'build/Dockerfile.runner-base'
       - '.github/workflows/build-runner-base.yml'
-  pull_request:
-    branches: [ "main" ]
-    paths:
-      - 'build/Dockerfile.runner-base'
-      - '.github/workflows/build-runner-base.yml'
   workflow_dispatch:
 
 permissions:

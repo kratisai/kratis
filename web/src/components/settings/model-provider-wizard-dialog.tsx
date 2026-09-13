@@ -19,6 +19,7 @@ import {
   useSupportedProviderTypes,
   useTestConnection,
 } from '@/hooks/use-model-providers'
+import { getFieldErrors } from '@/lib/auth-api'
 import { classifyDiscoveredModels } from '@/lib/model-classification'
 import { discoverModels } from '@/lib/model-provider-api'
 
@@ -162,6 +163,24 @@ export function ModelProviderWizardDialog({
     })
   }
 
+  const applyServerFieldErrors = (fieldErrors: Record<string, string>): boolean => {
+    let applied = false
+    for (const field of ['apiKey', 'baseUrl', 'displayName'] as const) {
+      const message = fieldErrors[field]
+      if (message) {
+        form.setError(field, { message })
+        applied = true
+      }
+    }
+    return applied
+  }
+
+  const serverErrorSummary = (error: unknown, fallback: string): string => {
+    const detail = Object.values(getFieldErrors(error)).join(' ')
+    if (detail) return detail
+    return error instanceof Error ? error.message : fallback
+  }
+
   const handleConnect = async () => {
     const values = form.getValues()
     if (!selectedProviderType) return
@@ -213,7 +232,11 @@ export function ModelProviderWizardDialog({
       actions.setConnected(discovered, fingerprint)
       actions.goToStep('models')
     } catch (error) {
-      actions.setConnectionError(error instanceof Error ? error.message : 'Connection failed')
+      if (applyServerFieldErrors(getFieldErrors(error))) {
+        actions.setConnectionError('Please fix the highlighted fields.')
+        return
+      }
+      actions.setConnectionError(serverErrorSummary(error, 'Connection failed'))
     }
   }
 
@@ -286,9 +309,13 @@ export function ModelProviderWizardDialog({
           'Provider saved, but updating team defaults failed. You can retry the defaults update.',
         )
       }
-    } catch {
+    } catch (error) {
       setSaving(false)
-      setSaveError('Failed to save the provider. Please try again.')
+      if (applyServerFieldErrors(getFieldErrors(error))) {
+        goToStep('configure')
+        return
+      }
+      setSaveError(serverErrorSummary(error, 'Failed to save the provider. Please try again.'))
     }
   }
 

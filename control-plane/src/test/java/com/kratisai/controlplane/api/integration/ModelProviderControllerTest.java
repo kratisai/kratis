@@ -21,6 +21,7 @@ import com.kratisai.controlplane.api.restdto.SupportedProviderTypeDto;
 import com.kratisai.controlplane.api.restdto.TestConnectionRequest;
 import com.kratisai.controlplane.api.restdto.UpdateModelProviderRequest;
 import com.kratisai.controlplane.model.ModelKind;
+import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.TeamMember;
@@ -111,6 +112,40 @@ class ModelProviderControllerTest {
                 .andExpect(jsonPath("$.providerType").value("OPENAI"))
                 .andExpect(jsonPath("$.baseUrl").value("https://api.openai.com/v1"))
                 .andExpect(jsonPath("$.isActive").value(true));
+    }
+
+    @Test
+    void createModelProvider_longBedrockApiKey_shouldReturn201() throws Exception {
+        String longKey = "k".repeat(2000);
+        CreateModelProviderRequest request = new CreateModelProviderRequest(
+                "Bedrock Provider",
+                ProviderType.BEDROCK,
+                longKey,
+                "https://bedrock-runtime.us-east-1.amazonaws.com",
+                null);
+
+        mockMvc.perform(post("/api/v1/model-providers/teams/{teamId}", teamId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + authToken)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.providerType").value("BEDROCK"));
+    }
+
+    @Test
+    void createModelProvider_apiKeyTooLong_shouldReturn400WithFieldError() throws Exception {
+        String tooLongKey = "k".repeat(ModelProvider.API_KEY_MAX_LENGTH + 1);
+        CreateModelProviderRequest request =
+                new CreateModelProviderRequest("Long Key Provider", ProviderType.OPENAI, tooLongKey, null, null);
+
+        mockMvc.perform(post("/api/v1/model-providers/teams/{teamId}", teamId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + authToken)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Validation failed"))
+                .andExpect(jsonPath("$.errors.apiKey")
+                        .value("API key must be at most " + ModelProvider.API_KEY_MAX_LENGTH + " characters"));
     }
 
     @Test
@@ -601,6 +636,43 @@ class ModelProviderControllerTest {
                         .header("Authorization", "Bearer " + authToken)
                         .content("{\"apiKey\":\"sk-test-key\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void testConnection_longBedrockApiKey_shouldNotBeRejectedByValidation() throws Exception {
+        String longKey = "k".repeat(2000);
+        modelDiscoveryServer
+                .expect(requestTo("https://bedrock-runtime.us-east-1.amazonaws.com/models"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer " + longKey))
+                .andRespond(withSuccess("{\"data\": [{\"id\": \"anthropic.claude-3\"}]}", MediaType.APPLICATION_JSON));
+
+        TestConnectionRequest request = new TestConnectionRequest(
+                ProviderType.BEDROCK, longKey, "https://bedrock-runtime.us-east-1.amazonaws.com");
+
+        mockMvc.perform(post("/api/v1/model-providers/test-connection")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + authToken)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.models[0]").value("anthropic.claude-3"));
+
+        modelDiscoveryServer.verify();
+    }
+
+    @Test
+    void testConnection_apiKeyTooLong_shouldReturn400WithFieldError() throws Exception {
+        TestConnectionRequest request =
+                new TestConnectionRequest(ProviderType.OPENAI, "k".repeat(ModelProvider.API_KEY_MAX_LENGTH + 1), null);
+
+        mockMvc.perform(post("/api/v1/model-providers/test-connection")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + authToken)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.apiKey")
+                        .value("API key must be at most " + ModelProvider.API_KEY_MAX_LENGTH + " characters"));
     }
 
     @Test

@@ -46,6 +46,12 @@ export async function fetchWithAuth(url: string, options: RequestInit = {}): Pro
   return response
 }
 
+export function getFieldErrors(error: unknown): Record<string, string> {
+  if (!(error instanceof ApiError)) return {}
+  const data = error.data as null | undefined | { errors?: Record<string, string> }
+  return data?.errors ?? {}
+}
+
 export async function login(data: LoginRequest): Promise<AuthTokensResponse> {
   const response = await fetchWithAuth('/api/v1/auth/login', {
     body: JSON.stringify(data),

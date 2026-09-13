@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 
 import type { CreateModelProviderRequest, UpdateModelProviderRequest } from '@/types/auth-types'
 
+import { getFieldErrors } from '@/lib/auth-api'
 import {
   createModelProvider,
   deleteModelProvider,
@@ -27,7 +28,7 @@ export function useCreateModelProvider() {
       return createModelProvider(teamId, data)
     },
     onError: (error: Error) => {
-      toast.error(error.message || 'Failed to add model provider')
+      toast.error(withFieldErrors(error, 'Failed to add model provider'))
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -107,7 +108,7 @@ export function useUpdateModelProvider() {
       return updateModelProvider(teamId, providerId, data)
     },
     onError: (error: Error) => {
-      toast.error(error.message || 'Failed to update model provider')
+      toast.error(withFieldErrors(error, 'Failed to update model provider'))
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({
@@ -116,4 +117,12 @@ export function useUpdateModelProvider() {
       toast.success('Model provider updated successfully')
     },
   })
+}
+
+function withFieldErrors(error: Error, fallback: string): string {
+  const details = Object.values(getFieldErrors(error))
+  if (details.length > 0) {
+    return `${error.message}: ${details.join(' ')}`
+  }
+  return error.message || fallback
 }

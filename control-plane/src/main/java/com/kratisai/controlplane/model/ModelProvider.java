@@ -16,6 +16,12 @@ import java.util.UUID;
         })
 public class ModelProvider {
 
+    /**
+     * AWS Bedrock short-term API keys are base64-encoded presigned URLs and exceed 1000
+     * characters. The cap stays below typical HTTP header limits while accepting them.
+     */
+    public static final int API_KEY_MAX_LENGTH = 8192;
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -27,7 +33,7 @@ public class ModelProvider {
     @Column(name = "provider_type", nullable = false, length = 50)
     private ProviderType providerType;
 
-    @Column(name = "api_key", length = 500)
+    @Column(name = "api_key", length = API_KEY_MAX_LENGTH)
     private String apiKey;
 
     @Column(name = "base_url", length = 500)
