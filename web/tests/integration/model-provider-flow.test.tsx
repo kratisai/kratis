@@ -447,6 +447,73 @@ describe('Model Provider Flow', () => {
     expect(teamUpdateAttempts).toBe(2)
   })
 
+  it('shows the server validation message when the connection test rejects the API key', async () => {
+    mockListModelProviders([])
+    addFetchHandler((url, options) => {
+      if (url.includes('/model-providers/test-connection') && options.method === 'POST') {
+        return jsonResponse(
+          {
+            errors: { apiKey: 'API key must be at most 8192 characters' },
+            message: 'Validation failed',
+          },
+          400,
+        )
+      }
+      return null
+    })
+
+    setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
+    const { user } = renderList()
+    await openWizard(user)
+
+    await selectProvider(user, /^OpenAI/)
+    await connectFromConfigure(user, undefined, 'sk-test-key')
+
+    await waitFor(() => {
+      expect(dialog().getByText('API key must be at most 8192 characters')).toBeInTheDocument()
+    })
+    expect(dialog().getByRole('heading', { name: 'Add Model Provider' })).toBeInTheDocument()
+  })
+
+  it('shows the server validation message when creating the provider is rejected', async () => {
+    mockListModelProviders([])
+    mockTestConnection({ models: ['gpt-4'], success: true })
+    addFetchHandler((url, options) => {
+      if (url.includes('/model-providers/teams/') && options.method === 'POST') {
+        return jsonResponse(
+          {
+            errors: { apiKey: 'API key must be at most 8192 characters' },
+            message: 'Validation failed',
+          },
+          400,
+        )
+      }
+      return null
+    })
+
+    setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
+    const { user } = renderList()
+    await openWizard(user)
+
+    await selectProvider(user, /^OpenAI/)
+    await connectFromConfigure(user, undefined, 'sk-test-key')
+    await waitFor(() => {
+      expect(dialog().getByRole('checkbox', { name: 'gpt-4' })).toBeInTheDocument()
+    })
+    await user.click(dialog().getByRole('checkbox', { name: 'gpt-4' }))
+    await user.click(dialog().getByRole('button', { name: /^next$/i }))
+    await waitFor(() => {
+      expect(dialog().getAllByLabelText(/^Use OpenAI/)).toHaveLength(2)
+    })
+    await user.click(dialog().getByRole('button', { name: /add provider/i }))
+
+    // The wizard returns to the configure step so the message is shown against the field
+    await waitFor(() => {
+      expect(dialog().getByText('API key must be at most 8192 characters')).toBeInTheDocument()
+    })
+    expect(dialog().getByLabelText('Name')).toBeInTheDocument()
+  })
+
   it('filters models within a section on step 3', async () => {
     mockListModelProviders([])
     mockTestConnection({

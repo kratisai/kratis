@@ -64,38 +64,34 @@ export function ModelProviderList({ isOwner, team }: ModelProviderListProps) {
     payload: ModelProviderSubmitPayload,
     retryDefaultsOnly = false,
   ): Promise<boolean> => {
-    try {
-      if (!retryDefaultsOnly) {
-        if (payload.mode === 'create') {
-          savedProviderRef.current = await createProvider.mutateAsync(payload.data)
-        } else {
-          savedProviderRef.current = await updateProvider.mutateAsync({
-            data: payload.data,
-            providerId: payload.providerId,
-          })
-        }
+    if (!retryDefaultsOnly) {
+      if (payload.mode === 'create') {
+        savedProviderRef.current = await createProvider.mutateAsync(payload.data)
+      } else {
+        savedProviderRef.current = await updateProvider.mutateAsync({
+          data: payload.data,
+          providerId: payload.providerId,
+        })
       }
-
-      if (payload.defaults) {
-        const savedProvider = savedProviderRef.current
-        if (!savedProvider) return false
-        try {
-          await updateTeam.mutateAsync({
-            embeddingModel: payload.defaults.embedding?.model,
-            embeddingProvider: payload.defaults.embedding ? savedProvider.id : undefined,
-            ingestionModel: payload.defaults.ingestion?.model,
-            ingestionProvider: payload.defaults.ingestion ? savedProvider.id : undefined,
-            teamId,
-          })
-          return true
-        } catch {
-          return false
-        }
-      }
-      return true
-    } catch {
-      return false
     }
+
+    if (payload.defaults) {
+      const savedProvider = savedProviderRef.current
+      if (!savedProvider) return false
+      try {
+        await updateTeam.mutateAsync({
+          embeddingModel: payload.defaults.embedding?.model,
+          embeddingProvider: payload.defaults.embedding ? savedProvider.id : undefined,
+          ingestionModel: payload.defaults.ingestion?.model,
+          ingestionProvider: payload.defaults.ingestion ? savedProvider.id : undefined,
+          teamId,
+        })
+        return true
+      } catch {
+        return false
+      }
+    }
+    return true
   }
 
   return (

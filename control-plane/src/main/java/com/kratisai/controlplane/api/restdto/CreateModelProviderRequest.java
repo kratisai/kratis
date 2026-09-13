@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.api.restdto;
 
+import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
@@ -18,7 +19,9 @@ public record CreateModelProviderRequest(
         ProviderType providerType,
 
         @Schema(description = "API key for authentication", example = "sk-...")
-        @Size(max = 500, message = "API key must be at most 500 characters")
+        @Size(
+                max = ModelProvider.API_KEY_MAX_LENGTH,
+                message = "API key must be at most " + ModelProvider.API_KEY_MAX_LENGTH + " characters")
         String apiKey,
 
         @Schema(description = "Base URL for API", example = "https://api.openai.com/v1")
