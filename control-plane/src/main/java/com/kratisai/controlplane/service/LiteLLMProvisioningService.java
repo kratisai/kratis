@@ -48,7 +48,7 @@ public class LiteLLMProvisioningService {
             Map.entry(ProviderType.DEEPSEEK, "deepseek"),
             Map.entry(ProviderType.OLLAMA, "ollama"),
             Map.entry(ProviderType.AZURE_OPENAI, "azure"),
-            Map.entry(ProviderType.BEDROCK, "bedrock"));
+            Map.entry(ProviderType.BEDROCK, "openai"));
 
     private final LiteLLMClient liteLLMClient;
     private final ModelProviderRepository modelProviderRepository;

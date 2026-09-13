@@ -43,15 +43,6 @@ class LiteLLMProvisioningIntegrationTest {
     @Autowired
     private VirtualKeyService virtualKeyService;
 
-    @Autowired
-    private ExecutionEnvironmentRepository executionEnvironmentRepository;
-
-    @Autowired
-    private SandboxExecutionRepository sandboxExecutionRepository;
-
-    @Autowired
-    private ChatRepository chatRepository;
-
     @BeforeEach
     void setUp() {
         databaseCleaner.cleanAll();
@@ -165,7 +156,7 @@ class LiteLLMProvisioningIntegrationTest {
         assertThat(provisioningService.resolveLiteLLMProvider(ProviderType.AZURE_OPENAI))
                 .isEqualTo("azure");
         assertThat(provisioningService.resolveLiteLLMProvider(ProviderType.BEDROCK))
-                .isEqualTo("bedrock");
+                .isEqualTo("openai");
     }
 
     @Test

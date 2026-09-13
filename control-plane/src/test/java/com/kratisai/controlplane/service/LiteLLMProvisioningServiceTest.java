@@ -159,7 +159,7 @@ class LiteLLMProvisioningServiceTest {
     }
 
     @Test
-    void provisionModel_bedrock_shouldPassBearerTokenAsApiKey() {
+    void provisionModel_bedrock_shouldRegisterAsOpenAiCompatibleWithBearerToken() {
         ModelProvider provider = new ModelProvider(
                 "Bedrock",
                 ProviderType.BEDROCK,
@@ -173,7 +173,7 @@ class LiteLLMProvisioningServiceTest {
         ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
         verify(liteLLMClient).addModel(requestCaptor.capture());
         LiteLLMParams params = requestCaptor.getValue().litellmParams();
-        assertThat(params.customLlmProvider()).isEqualTo("bedrock");
+        assertThat(params.customLlmProvider()).isEqualTo("openai");
         assertThat(params.apiKey()).isEqualTo("bedrock-bearer-token");
         assertThat(params.apiBase()).isEqualTo("https://bedrock-runtime.us-east-1.amazonaws.com/v1");
     }
