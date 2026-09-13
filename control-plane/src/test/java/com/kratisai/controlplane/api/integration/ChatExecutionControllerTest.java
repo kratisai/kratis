@@ -230,6 +230,8 @@ class ChatExecutionControllerTest {
                         "--network",
                         "--security-opt",
                         "seccomp=unconfined",
+                        "--device",
+                        "/dev/net/tun",
                         "--add-host",
                         "host.docker.internal:host-gateway",
                         "-e",

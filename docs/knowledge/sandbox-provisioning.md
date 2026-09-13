@@ -80,7 +80,7 @@ sandbox it creates three labelled resources:
 
 1. A Docker network (`kratis-net-<envId>`).
 2. A rootless Docker-in-Docker sibling (`kratis-dind-<envId>`, `docker:dind-rootless`,
-   `seccomp=unconfined`).
+   `seccomp=unconfined`) with`/dev/net/tun` and unprivileged user namespaces.
 3. The runner container (`kratis-sandbox-<envId>`) with
    `DOCKER_HOST=tcp://<dind>:2375` so the agent can run Docker/Testcontainers against the
    rootless daemon, isolated from the host.

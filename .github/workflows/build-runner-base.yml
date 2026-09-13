@@ -19,6 +19,7 @@ permissions:
 
 jobs:
   publish-runner-base:
+    if: github.repository == 'kratisai/kratis'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
