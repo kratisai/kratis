@@ -269,7 +269,7 @@ export function AuthStep({
               </h3>
               <p className="text-muted-foreground text-xs leading-relaxed">
                 Make sure you've added this key to your repository settings (as a Deploy Key /
-                Access Key with read-only access) on GitHub, GitLab, or Bitbucket.
+                Access Key with write access) on GitHub, GitLab, or Bitbucket.
               </p>
             </div>
 

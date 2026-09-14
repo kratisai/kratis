@@ -36,7 +36,8 @@ export function TavilySettings({ isOwner, team }: TavilySettingsProps) {
           <CardTitle>Web Search (Tavily API)</CardTitle>
         </div>
         <CardDescription>
-          Configure Tavily API key for web search capabilities in the planning agent
+          Configure Tavily API key for web search capabilities in the planning agent. A Tavily
+          account lets Kratis check live docs instead of guessing
         </CardDescription>
       </CardHeader>
       <CardContent>

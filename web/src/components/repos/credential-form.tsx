@@ -11,6 +11,14 @@ import type { AuthMode, NewCredentialFormData, ProviderType } from './repository
 
 import { newCredentialSchema } from './repository-form-types'
 
+const PAT_PERMISSION_HINTS: Partial<Record<ProviderType, string>> = {
+  azure: 'The PAT needs Code: Read & write.',
+  bitbucket: 'The token needs Repositories: Read & write and Pull requests: Read & write.',
+  github:
+    'A fine-grained PAT needs Contents: Read & write, Metadata: Read-only, and Pull requests: Read & write.',
+  gitlab: 'The token needs the api and write_repository scopes.',
+}
+
 interface CredentialFormProps {
   authMode: AuthMode
   githubAppEnabled: boolean
@@ -193,6 +201,11 @@ export function CredentialForm({
                 type={showSecret ? 'text' : 'password'}
               />
               {errors.secret && <p className="text-destructive text-xs">{errors.secret.message}</p>}
+              {PAT_PERMISSION_HINTS[selectedProvider] && (
+                <p className="text-muted-foreground text-xs">
+                  {PAT_PERMISSION_HINTS[selectedProvider]}
+                </p>
+              )}
             </div>
             {selectedProvider === 'gitlab' && (
               <div className="space-y-3">

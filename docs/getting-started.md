@@ -30,13 +30,22 @@ Your provider key stays in the control plane. Kratis registers the models with L
 | Host | Credential | What to supply |
 |------|-----------|----------------|
 | Public repository | None | Git URL, display name, default branch |
-| Git with SSH key | Kratis generates a 4096-bit RSA key pair; the private key never leaves the server | Add the displayed public key to the host as a read-only deploy key |
-| GitHub | GitHub App (recommended) or fine-grained PAT | App: Installation ID. PAT: Contents and Metadata, read-write |
-| GitLab | Group or personal access token, or service account token | `read_api` + `read_repository`; numeric Group ID for group scope; optional self-hosted URL |
-| Bitbucket | App password or workspace access token | Repositories: Read; optional workspace scope |
-| Azure DevOps | PAT | Code: Read; organization required, project optional; server base URL for self-hosted |
+| Git with SSH key | Kratis generates a 4096-bit RSA key pair; the private key never leaves the server | Add the displayed public key to the host as a deploy key with write access. No PR API: publish pushes a branch, then download the patch or open the PR manually |
+| GitHub | GitHub App (recommended) or fine-grained PAT | App: Installation ID. PAT: Contents Read & write, Metadata Read-only, Pull requests Read & write |
+| GitLab | Group or personal access token, or service account token | `api` + `write_repository`; numeric Group ID for group scope; optional self-hosted URL |
+| Bitbucket | App password or workspace access token | Repositories Read & write, Pull requests Read & write; optional workspace scope |
+| Azure DevOps | PAT | Code Read & write; organization required, project optional; server base URL for self-hosted |
 
 The GitHub App choice only appears when `KRATIS_GITHUB_APP_ID`, `KRATIS_GITHUB_APP_NAME`, and `KRATIS_GITHUB_PRIVATE_KEY_PATH` are all set in e.g. the compose `.env` file. Otherwise GitHub falls back to PAT.
+
+### GitHub App setup
+
+Create your own personal GitHub app under GitHub → Settings → Developer settings → GitHub Apps:
+
+1. Permissions: Contents Read & write, Pull requests Read & write, Metadata Read-only. No webhook needed.
+2. Generate a private key (.pem); note the App ID and the App slug from the URL.
+3. Set `KRATIS_GITHUB_APP_ID`, `KRATIS_GITHUB_APP_NAME`, and `KRATIS_GITHUB_PRIVATE_KEY_PATH` (PEM path inside the container), then restart the stack.
+4. Install the App on the target organization or repositories. In **Repos → Add Repository**, follow **Install GitHub App** and copy the Installation ID from the resulting GitHub URL.
 
 A GitLab service account must also be invited to the group as Reporter or Developer, or every request returns `404 Group Not Found`.
 
@@ -52,12 +61,16 @@ Kratis clones the repository, parses it into a code graph, then writes wiki page
 |-------|-------|-----|
 | `401 Unauthorized` | Token expired, revoked, or mis-pasted | Generate a fresh token and update the credential |
 | `403` account blocked | Host anti-abuse flagged a bot or service account, or the billing tier rejects that token type | Use a PAT from a normal user account |
+| `403` on push or PR creation | Token lacks a write or pull-request permission from the table above | Grant the permission and update the credential |
 | `404 Group Not Found` | Missing `read_api`, service account not a group member, or a path used instead of the numeric Group ID | Add the scope, invite the service account as Reporter, enter the numeric ID |
 | SSH authentication fails | Public key not registered for that repository | Add the exact public key Kratis displayed as a deploy key on the repository |
 
 ## 4. Planning - Ask Kratis
 
 **Ask Kratis** starts a planning chat grounded in your wiki and code graph. Pick a template — **Free-form**, **Plan & Grill**, **Investigate Error**, **Architecture Audit** — choose a model, and send.
+
+The agent can search the web when the team has a Tavily API key (**Settings → Integrations**) — A free Tavily account lets Kratis check 
+live docs instead of guessing: real API signatures, library options / upgrades, known issues behind your error messages, and upstream code paths.
 
 The agent streams its answer and writes canvas documents alongside the chat:
 
@@ -93,6 +106,7 @@ When the agent has finished, those changes can be reviewed and **Published**  or
 | Where | Purpose |
 |-------|---------|
 | Settings → Permissions | Pre-approve or block commands team-wide |
+| Settings → Integrations | Tavily web-search key, repository credentials |
 | Settings → Runtime | Environment providers, base-images |
 | Settings → Team | Members, team name, additional teams |
 | Usage | Token spend and activity per run |
