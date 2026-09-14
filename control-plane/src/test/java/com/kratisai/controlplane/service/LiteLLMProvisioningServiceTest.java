@@ -17,6 +17,7 @@ import com.kratisai.controlplane.repository.ModelProviderRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -179,6 +180,155 @@ class LiteLLMProvisioningServiceTest {
     }
 
     @Test
+    void provisionModel_bedrock_shouldAttachRegionalPricingFromLiteLLMCostMap() {
+        ModelProvider provider = new ModelProvider(
+                "Bedrock MiniMax",
+                ProviderType.BEDROCK,
+                "bedrock-bearer-token",
+                "https://bedrock-mantle.eu-west-2.api.aws");
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("minimax.minimax-m2.5", ModelKind.CHAT)));
+        when(liteLLMClient.modelCostMap())
+                .thenReturn(Map.of("bedrock/eu-west-2/minimax.minimax-m2.5", new ModelCostEntry(4.7e-07, 1.86e-06)));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        ModelInfo modelInfo = requestCaptor.getValue().modelInfo();
+        assertThat(modelInfo.mode()).isEqualTo("chat");
+        assertThat(modelInfo.inputCostPerToken()).isEqualTo(4.7e-07);
+        assertThat(modelInfo.outputCostPerToken()).isEqualTo(1.86e-06);
+    }
+
+    @Test
+    void provisionModel_bedrock_shouldFallBackToGlobalCostEntry_whenRegionEntryIsAbsent() {
+        ModelProvider provider = new ModelProvider(
+                "Bedrock MiniMax",
+                ProviderType.BEDROCK,
+                "bedrock-bearer-token",
+                "https://bedrock-runtime.us-east-1.amazonaws.com");
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("minimax.minimax-m2.1", ModelKind.CHAT)));
+        when(liteLLMClient.modelCostMap())
+                .thenReturn(Map.of("minimax.minimax-m2.1", new ModelCostEntry(3.0e-07, 1.2e-06)));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        ModelInfo modelInfo = requestCaptor.getValue().modelInfo();
+        assertThat(modelInfo.inputCostPerToken()).isEqualTo(3.0e-07);
+        assertThat(modelInfo.outputCostPerToken()).isEqualTo(1.2e-06);
+    }
+
+    @Test
+    void provisionModel_bedrock_shouldResolveWithoutRegionKey_whenBaseUrlHasNoRegion() {
+        ModelProvider provider = new ModelProvider(
+                "Bedrock MiniMax", ProviderType.BEDROCK, "bedrock-bearer-token", "https://bedrock-proxy.example.com");
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("minimax.minimax-m2.5", ModelKind.CHAT)));
+        when(liteLLMClient.modelCostMap())
+                .thenReturn(Map.of("minimax.minimax-m2.5", new ModelCostEntry(3.0e-07, 1.2e-06)));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().modelInfo().inputCostPerToken()).isEqualTo(3.0e-07);
+    }
+
+    @Test
+    void provisionModel_bedrock_shouldNotAttachPricing_whenCostMapHasNoEntry() {
+        ModelProvider provider = new ModelProvider(
+                "Bedrock",
+                ProviderType.BEDROCK,
+                "bedrock-bearer-token",
+                "https://bedrock-runtime.us-east-1.amazonaws.com");
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("us.anthropic.claude-sonnet-4-6", ModelKind.CHAT)));
+        when(liteLLMClient.modelCostMap())
+                .thenReturn(Map.of("bedrock/eu-west-2/minimax.minimax-m2.5", new ModelCostEntry(4.7e-07, 1.86e-06)));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        ModelInfo modelInfo = requestCaptor.getValue().modelInfo();
+        assertThat(modelInfo.mode()).isEqualTo("chat");
+        assertThat(modelInfo.inputCostPerToken()).isNull();
+        assertThat(modelInfo.outputCostPerToken()).isNull();
+    }
+
+    @Test
+    void provisionModel_shouldFetchCostMapOncePerProvisioningPass() {
+        ModelProvider provider = new ModelProvider(
+                "Bedrock",
+                ProviderType.BEDROCK,
+                "bedrock-bearer-token",
+                "https://bedrock-runtime.us-east-1.amazonaws.com");
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(
+                new ProviderModel("minimax.minimax-m2.5", ModelKind.CHAT),
+                new ProviderModel("qwen.qwen3-coder-480b-a35b-instruct", ModelKind.CHAT)));
+        when(liteLLMClient.modelCostMap())
+                .thenReturn(Map.of("minimax.minimax-m2.5", new ModelCostEntry(3.0e-07, 1.2e-06)));
+
+        provisioningService.provisionModel(provider);
+
+        verify(liteLLMClient, times(1)).modelCostMap();
+        verify(liteLLMClient, times(2)).addModel(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void provisionModel_nonBedrockProvider_shouldNotAttachPricingOrFetchCostMap() {
+        provisioningService.provisionModel(testProvider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient, times(2)).addModel(requestCaptor.capture());
+        for (AddModelRequest request : requestCaptor.getAllValues()) {
+            assertThat(request.modelInfo().inputCostPerToken()).isNull();
+            assertThat(request.modelInfo().outputCostPerToken()).isNull();
+        }
+        verify(liteLLMClient, times(0)).modelCostMap();
+    }
+
+    @Test
+    void provisionModel_shouldPassBaseModelToLiteLLM() {
+        ModelProvider provider = new ModelProvider(
+                "Azure", ProviderType.AZURE_OPENAI, "azure-key", "https://my-resource.openai.azure.com");
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("gpt-4o-deployment", "gpt-4o", ModelKind.CHAT)));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().litellmParams().baseModel()).isEqualTo("gpt-4o");
+    }
+
+    @Test
+    void provisionModel_bedrock_shouldStillProvision_whenCostMapIsUnavailable() {
+        ModelProvider provider = new ModelProvider(
+                "Bedrock MiniMax",
+                ProviderType.BEDROCK,
+                "bedrock-bearer-token",
+                "https://bedrock-mantle.eu-west-2.api.aws");
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("minimax.minimax-m2.5", ModelKind.CHAT)));
+        when(liteLLMClient.modelCostMap()).thenThrow(new ResourceAccessException("connection refused"));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        ModelInfo modelInfo = requestCaptor.getValue().modelInfo();
+        assertThat(modelInfo.mode()).isEqualTo("chat");
+        assertThat(modelInfo.inputCostPerToken()).isNull();
+        assertThat(modelInfo.outputCostPerToken()).isNull();
+    }
+
+    @Test
     void provisionModel_setsModelInfoModeToChat_forChatModels() {
         // Given: A provider with a CHAT model
         ModelProvider chatProvider = new ModelProvider("Chat Provider", ProviderType.OPENAI, "sk-test-key", null);
@@ -311,6 +461,54 @@ class LiteLLMProvisioningServiceTest {
         provisioningService.reconcileOnStartup();
 
         // Then: no re-provisioning is necessary since both models are already registered.
+        verify(liteLLMClient, times(0)).addModel(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void reconcileOnStartup_reprovisionsBedrockModel_whenLiteLLMCanPriceIt() {
+        ModelProvider bedrockProvider = new ModelProvider(
+                "Bedrock MiniMax",
+                ProviderType.BEDROCK,
+                "bedrock-bearer-token",
+                "https://bedrock-mantle.eu-west-2.api.aws");
+        bedrockProvider.setTeam(testTeam);
+        bedrockProvider.setModels(List.of(new ProviderModel("minimax.minimax-m2.5", ModelKind.CHAT)));
+        String litellmName = provisioningService.buildLiteLLMModelName(bedrockProvider, "minimax.minimax-m2.5");
+
+        when(liteLLMClient.listModels())
+                .thenReturn(new ListModelsResponse(List.of(new ModelConfig(
+                        litellmName,
+                        new LiteLLMParams("minimax.minimax-m2.5", "bedrock-bearer-token", "openai", null)))));
+        when(liteLLMClient.modelCostMap())
+                .thenReturn(Map.of("bedrock/eu-west-2/minimax.minimax-m2.5", new ModelCostEntry(4.7e-07, 1.86e-06)));
+        when(modelProviderRepository.findAll()).thenReturn(List.of(bedrockProvider));
+        when(teamRepository.findAllWithIngestionAndEmbeddingProviders()).thenReturn(List.of());
+
+        provisioningService.reconcileOnStartup();
+
+        ArgumentCaptor<AddModelRequest> captor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(captor.capture());
+        assertThat(captor.getValue().modelInfo().inputCostPerToken()).isEqualTo(4.7e-07);
+        assertThat(captor.getValue().modelInfo().outputCostPerToken()).isEqualTo(1.86e-06);
+    }
+
+    @Test
+    void reconcileOnStartup_doesNotReprovisionAlreadyRegisteredNonCatalogModels() {
+        // Given: a non-cataloged model already registered in LiteLLM.
+        String litellmName = provisioningService.buildLiteLLMModelName(testProvider, "gpt-4");
+        when(liteLLMClient.listModels())
+                .thenReturn(new ListModelsResponse(List.of(
+                        new ModelConfig(litellmName, new LiteLLMParams("gpt-4", "sk-key", "openai", null)),
+                        new ModelConfig(
+                                provisioningService.buildLiteLLMModelName(testProvider, "gpt-3.5-turbo"),
+                                new LiteLLMParams("gpt-3.5-turbo", "sk-key", "openai", null)))));
+        when(modelProviderRepository.findAll()).thenReturn(List.of(testProvider));
+        when(teamRepository.findAllWithIngestionAndEmbeddingProviders()).thenReturn(List.of());
+
+        // When
+        provisioningService.reconcileOnStartup();
+
+        // Then: no re-provisioning happens.
         verify(liteLLMClient, times(0)).addModel(org.mockito.ArgumentMatchers.any());
     }
 

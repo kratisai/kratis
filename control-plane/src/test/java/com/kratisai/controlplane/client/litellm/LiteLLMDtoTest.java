@@ -22,6 +22,7 @@ import com.kratisai.controlplane.client.litellm.LiteLLMDto.ListModelsResponse;
 import com.kratisai.controlplane.client.litellm.LiteLLMDto.ListModelsV2Response;
 import com.kratisai.controlplane.client.litellm.LiteLLMDto.LiteLLMParams;
 import com.kratisai.controlplane.client.litellm.LiteLLMDto.ModelConfig;
+import com.kratisai.controlplane.client.litellm.LiteLLMDto.ModelCostEntry;
 import com.kratisai.controlplane.client.litellm.LiteLLMDto.ModelInfo;
 import com.kratisai.controlplane.client.litellm.LiteLLMDto.SpendLogEntry;
 import java.util.List;
@@ -91,5 +92,66 @@ class LiteLLMDtoTest {
         assertThat(rows.getFirst().totalTokens()).isEqualTo(150L);
         assertThat(rows.getFirst().promptTokens()).isEqualTo(90L);
         assertThat(rows.getFirst().completionTokens()).isEqualTo(60L);
+    }
+
+    @Test
+    void modelConfig_mapsPricingFromV2ModelInfoResponse() throws Exception {
+        String entry = """
+                {"model_name":"bedrock-aws-bedrock-minimax-minimax-m2-5-838d9bd6",
+                 "litellm_params":{"model":"minimax.minimax-m2.5","custom_llm_provider":"openai"},
+                 "model_info":{"mode":"chat","input_cost_per_token":4.7E-7,"output_cost_per_token":1.86E-6,
+                               "id":"abc","db_model":true,"blocked":false}}""";
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        ModelConfig config = objectMapper.readValue(entry, ModelConfig.class);
+
+        assertThat(config.modelName()).isEqualTo("bedrock-aws-bedrock-minimax-minimax-m2-5-838d9bd6");
+        assertThat(config.modelInfo()).isNotNull();
+        assertThat(config.modelInfo().mode()).isEqualTo("chat");
+        assertThat(config.modelInfo().inputCostPerToken()).isEqualTo(4.7e-07);
+        assertThat(config.modelInfo().outputCostPerToken()).isEqualTo(1.86e-06);
+    }
+
+    @Test
+    void modelInfo_serializesPricingWithLiteLLMFieldNames() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        String json = objectMapper.writeValueAsString(new ModelInfo("chat", 3.0e-07, 1.2e-06));
+
+        Map<?, ?> map = objectMapper.readValue(json, Map.class);
+        assertThat(map.get("mode")).isEqualTo("chat");
+        assertThat(map.get("input_cost_per_token")).isEqualTo(3.0e-07);
+        assertThat(map.get("output_cost_per_token")).isEqualTo(1.2e-06);
+    }
+
+    @Test
+    void liteLLMParams_serializesBaseModel() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        String json = objectMapper.writeValueAsString(
+                new LiteLLMParams("deploy", "key", "azure", "https://r.openai.azure.com", "gpt-4o"));
+
+        Map<?, ?> map = objectMapper.readValue(json, Map.class);
+        assertThat(map.get("model")).isEqualTo("deploy");
+        assertThat(map.get("custom_llm_provider")).isEqualTo("azure");
+        assertThat(map.get("base_model")).isEqualTo("gpt-4o");
+    }
+
+    @Test
+    void modelCostEntry_mapsRatesByKeyFromCostMapResponse() throws Exception {
+        String json = """
+                {"bedrock/eu-west-2/minimax.minimax-m2.5":
+                 {"input_cost_per_token":4.7E-7,"output_cost_per_token":1.86E-6,
+                  "litellm_provider":"bedrock_converse","mode":"chat","max_tokens":1000000}}""";
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        Map<String, ModelCostEntry> map =
+                objectMapper.readValue(json, new TypeReference<Map<String, ModelCostEntry>>() {});
+
+        assertThat(map).containsOnlyKeys("bedrock/eu-west-2/minimax.minimax-m2.5");
+        assertThat(map.get("bedrock/eu-west-2/minimax.minimax-m2.5").inputCostPerToken())
+                .isEqualTo(4.7e-07);
+        assertThat(map.get("bedrock/eu-west-2/minimax.minimax-m2.5").outputCostPerToken())
+                .isEqualTo(1.86e-06);
     }
 }

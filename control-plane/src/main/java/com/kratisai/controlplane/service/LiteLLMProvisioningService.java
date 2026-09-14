@@ -13,6 +13,8 @@ import jakarta.annotation.PostConstruct;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -33,6 +35,9 @@ public class LiteLLMProvisioningService {
     // LiteLLM returns an HTTP 500 (rather than an empty list) from `/model/info` when no models
     // have been configured on the proxy yet -  This is expected
     private static final String EMPTY_MODEL_LIST_ERROR_MARKER = "Model List not loaded in";
+
+    // bedrock-runtime.us-east-1.amazonaws.com, bedrock-mantle.eu-west-2.api.aws, ...
+    private static final Pattern AWS_REGION_PATTERN = Pattern.compile("[a-z]{2}-[a-z]+-[0-9]+");
 
     public enum VirtualKeyScope {
         SANDBOX,
@@ -78,30 +83,39 @@ public class LiteLLMProvisioningService {
         }
         try {
             Set<String> existingModels = listExistingLiteLLMModels();
+            ModelCostLookup costLookup = new ModelCostLookup();
             for (ModelProvider provider : modelProviderRepository.findAll()) {
                 for (ProviderModel providerModel : provider.getModels()) {
                     String modelName = providerModel.getModelName();
                     String litellmName = buildLiteLLMModelName(provider, modelName);
-                    if (!existingModels.contains(litellmName)) {
-                        logger.info("Reconciling missing model '{}' on startup", litellmName);
-                        provisionSingleModel(provider, modelName, providerModel.getKind());
+                    if (!existingModels.contains(litellmName)
+                            || needsPricingOverride(provider, modelName, costLookup)) {
+                        logger.info("Reconciling model '{}' on startup", litellmName);
+                        provisionSingleModel(provider, providerModel, costLookup);
                     }
                 }
             }
 
             for (Team team : teamRepository.findAllWithIngestionAndEmbeddingProviders()) {
                 ensureModelRegistered(
-                        team.getIngestionProvider(), team.getIngestionModel(), ModelKind.CHAT, existingModels);
+                        team.getIngestionProvider(),
+                        team.getIngestionModel(),
+                        ModelKind.CHAT,
+                        existingModels,
+                        costLookup);
                 ensureModelRegistered(
-                        team.getEmbeddingProvider(), team.getEmbeddingModel(), ModelKind.EMBEDDING, existingModels);
+                        team.getEmbeddingProvider(),
+                        team.getEmbeddingModel(),
+                        ModelKind.EMBEDDING,
+                        existingModels,
+                        costLookup);
             }
 
             reconciliationSettled.set(true);
             logger.info("LiteLLM startup reconciliation complete");
         } catch (RestClientException e) {
-            // LiteLLM may not be reachable yet. Spring's Docker Compose integration only waits for a
-            // TCP-level probe on the published port, so the container can be running while the LiteLLM
-            // HTTP gateway is still booting. Startup must not fail because of it; retryReconciliation()
+            // LiteLLM may not be reachable yet. The container can be running while the LiteLLM
+            // is still booting. Startup must not fail because of it; retryReconciliation()
             // keeps trying until LiteLLM is reachable.
             int failureCount = reconcileFailures.incrementAndGet();
             logger.warn(
@@ -131,13 +145,14 @@ public class LiteLLMProvisioningService {
     }
 
     public void ensureModelRegistered(ModelProvider provider, String modelName, ModelKind kind) {
-        ensureModelRegistered(provider, modelName, kind, null);
+        ensureModelRegistered(provider, modelName, kind, null, new ModelCostLookup());
     }
 
     public void ensureModelsRegistered(
             ModelProvider chatProvider, String chatModel, ModelProvider embeddingProvider, String embeddingModel) {
-        ensureModelRegistered(chatProvider, chatModel, ModelKind.CHAT, null);
-        ensureModelRegistered(embeddingProvider, embeddingModel, ModelKind.EMBEDDING, null);
+        ModelCostLookup costLookup = new ModelCostLookup();
+        ensureModelRegistered(chatProvider, chatModel, ModelKind.CHAT, null, costLookup);
+        ensureModelRegistered(embeddingProvider, embeddingModel, ModelKind.EMBEDDING, null, costLookup);
     }
 
     private Set<String> listExistingLiteLLMModels() {
@@ -176,17 +191,26 @@ public class LiteLLMProvisioningService {
     }
 
     private void ensureModelRegistered(
-            ModelProvider provider, String modelName, ModelKind kind, Set<String> knownExistingLiteLLMModels) {
+            ModelProvider provider,
+            String modelName,
+            ModelKind kind,
+            @Nullable Set<String> knownExistingLiteLLMModels,
+            ModelCostLookup costLookup) {
         if (provider == null || modelName == null || modelName.isBlank()) {
             return;
         }
 
-        boolean alreadyOnProvider = provider.getModels().stream()
-                .anyMatch(pm -> pm.getModelName().equals(modelName) && pm.getKind() == kind);
+        ProviderModel providerModel = provider.getModels().stream()
+                .filter(pm -> pm.getModelName().equals(modelName) && pm.getKind() == kind)
+                .findFirst()
+                .orElse(null);
 
-        if (!alreadyOnProvider) {
+        boolean alreadyOnProvider = providerModel != null;
+
+        if (providerModel == null) {
+            providerModel = new ProviderModel(modelName, kind);
             List<ProviderModel> updatedModels = new ArrayList<>(provider.getModels());
-            updatedModels.add(new ProviderModel(modelName, kind));
+            updatedModels.add(providerModel);
             provider.setModels(updatedModels);
             modelProviderRepository.save(provider);
         }
@@ -195,11 +219,12 @@ public class LiteLLMProvisioningService {
                 ? knownExistingLiteLLMModels.contains(buildLiteLLMModelName(provider, modelName))
                 : isModelRegisteredInLiteLLM(buildLiteLLMModelName(provider, modelName));
 
-        // Re-provision if the model was just added, OR if LiteLLM doesn't actually have it
-        // registered despite it already being on the provider's persisted model list (self-heal
-        // against lost LiteLLM state / pre-existing misconfigured teams).
-        if (!alreadyOnProvider || !registeredInLiteLLM) {
-            provisionSingleModel(provider, modelName, kind);
+        // Self-heal: LiteLLM lost the model, or (on startup) the deployment is missing the
+        // Bedrock cost override LiteLLM cannot apply itself.
+        if (!alreadyOnProvider
+                || !registeredInLiteLLM
+                || (knownExistingLiteLLMModels != null && needsPricingOverride(provider, modelName, costLookup))) {
+            provisionSingleModel(provider, providerModel, costLookup);
         }
     }
 
@@ -219,12 +244,15 @@ public class LiteLLMProvisioningService {
             return;
         }
 
+        ModelCostLookup costLookup = new ModelCostLookup();
         for (ProviderModel providerModel : models) {
-            provisionSingleModel(provider, providerModel.getModelName(), providerModel.getKind());
+            provisionSingleModel(provider, providerModel, costLookup);
         }
     }
 
-    private void provisionSingleModel(ModelProvider provider, String modelName, ModelKind kind) {
+    private void provisionSingleModel(ModelProvider provider, ProviderModel providerModel, ModelCostLookup costLookup) {
+        String modelName = providerModel.getModelName();
+        ModelKind kind = providerModel.getKind();
         String litellmProvider = resolveLiteLLMProvider(provider.getProviderType());
         String litellmName = buildLiteLLMModelName(provider, modelName);
 
@@ -238,8 +266,9 @@ public class LiteLLMProvisioningService {
             apiBase = apiBase + "/v1";
         }
 
-        LiteLLMParams params = new LiteLLMParams(modelName, provider.getApiKey(), litellmProvider, apiBase);
-        ModelInfo modelInfo = new ModelInfo(kind == ModelKind.EMBEDDING ? "embedding" : "chat");
+        LiteLLMParams params = new LiteLLMParams(
+                modelName, provider.getApiKey(), litellmProvider, apiBase, providerModel.getBaseModel());
+        ModelInfo modelInfo = buildModelInfo(provider, modelName, kind, costLookup);
         AddModelRequest request = new AddModelRequest(litellmName, params, modelInfo);
 
         // Delete existing model first to clear any cooldown state from previous failed deployments
@@ -312,5 +341,80 @@ public class LiteLLMProvisioningService {
         Objects.requireNonNull(scope, "scope is required");
         Objects.requireNonNull(ownerId, "ownerId is required");
         return "kratis-" + scope.name().toLowerCase() + "-" + ownerId;
+    }
+
+    private ModelInfo buildModelInfo(
+            ModelProvider provider, String modelName, ModelKind kind, ModelCostLookup costLookup) {
+        String mode = kind == ModelKind.EMBEDDING ? "embedding" : "chat";
+        ModelCostEntry entry = resolveModelCost(provider, modelName, costLookup);
+        if (entry == null || (entry.inputCostPerToken() == null && entry.outputCostPerToken() == null)) {
+            return new ModelInfo(mode);
+        }
+        return new ModelInfo(mode, entry.inputCostPerToken(), entry.outputCostPerToken());
+    }
+
+    private boolean needsPricingOverride(ModelProvider provider, String modelName, ModelCostLookup costLookup) {
+        return resolveModelCost(provider, modelName, costLookup) != null;
+    }
+
+    // Kratis uses bedrock-mantis openai-api, auth via API key. LiteLLM doesn't price bedrock-mantis calls.
+    private @Nullable ModelCostEntry resolveModelCost(
+            ModelProvider provider, String modelName, ModelCostLookup costLookup) {
+        if (provider.getProviderType() != ProviderType.BEDROCK) {
+            return null;
+        }
+        Map<String, ModelCostEntry> entries = costLookup.entries();
+        for (String candidate : bedrockPricingCandidates(provider, modelName)) {
+            ModelCostEntry entry = entries.get(candidate);
+            if (entry != null) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    private List<String> bedrockPricingCandidates(ModelProvider provider, String modelName) {
+        List<String> candidates = new ArrayList<>(3);
+        String region = extractAwsRegion(provider.getBaseUrl());
+        if (region != null) {
+            candidates.add("bedrock/" + region + "/" + modelName);
+        }
+        candidates.add("bedrock/" + modelName);
+        candidates.add(modelName);
+        return candidates;
+    }
+
+    private Map<String, ModelCostEntry> fetchModelCostMap() {
+        try {
+            Map<String, ModelCostEntry> entries = liteLLMClient.modelCostMap();
+            return entries != null ? entries : Map.of();
+        } catch (RestClientException e) {
+            logger.warn(
+                    "Could not fetch LiteLLM's model cost map; affected models log $0 spend until the next "
+                            + "provisioning. Cause: {}",
+                    e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private static @Nullable String extractAwsRegion(@Nullable String apiBase) {
+        if (apiBase == null) {
+            return null;
+        }
+        Matcher matcher = AWS_REGION_PATTERN.matcher(apiBase);
+        return matcher.find() ? matcher.group() : null;
+    }
+
+    // short-lived lazy lookup of LiteLLM's model-costs
+    private final class ModelCostLookup {
+
+        private @Nullable Map<String, ModelCostEntry> entries;
+
+        private Map<String, ModelCostEntry> entries() {
+            if (entries == null) {
+                entries = fetchModelCostMap();
+            }
+            return entries;
+        }
     }
 }

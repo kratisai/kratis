@@ -9,7 +9,15 @@ public final class LiteLLMDto {
 
     private LiteLLMDto() {}
 
-    public record ModelInfo(@JsonProperty("mode") String mode) {}
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ModelInfo(
+            @JsonProperty("mode") String mode,
+            @JsonProperty("input_cost_per_token") Double inputCostPerToken,
+            @JsonProperty("output_cost_per_token") Double outputCostPerToken) {
+        public ModelInfo(String mode) {
+            this(mode, null, null);
+        }
+    }
 
     public record AddModelRequest(
             @JsonProperty("model_name") String modelName,
@@ -25,7 +33,12 @@ public final class LiteLLMDto {
             String model,
             @JsonProperty("api_key") String apiKey,
             @JsonProperty("custom_llm_provider") String customLlmProvider,
-            @JsonProperty("api_base") String apiBase) {}
+            @JsonProperty("api_base") String apiBase,
+            @JsonProperty("base_model") String baseModel) {
+        public LiteLLMParams(String model, String apiKey, String customLlmProvider, String apiBase) {
+            this(model, apiKey, customLlmProvider, apiBase, null);
+        }
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record AddModelResponse(Map<String, Object> data) {}
@@ -37,9 +50,19 @@ public final class LiteLLMDto {
     public record ListModelsV2Response(List<ModelConfig> data) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ModelCostEntry(
+            @JsonProperty("input_cost_per_token") Double inputCostPerToken,
+            @JsonProperty("output_cost_per_token") Double outputCostPerToken) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record ModelConfig(
             @JsonProperty("model_name") String modelName,
-            @JsonProperty("litellm_params") LiteLLMParams litellmParams) {}
+            @JsonProperty("litellm_params") LiteLLMParams litellmParams,
+            @JsonProperty("model_info") ModelInfo modelInfo) {
+        public ModelConfig(String modelName, LiteLLMParams litellmParams) {
+            this(modelName, litellmParams, null);
+        }
+    }
 
     public record DeleteModelRequest(String id) {}
 

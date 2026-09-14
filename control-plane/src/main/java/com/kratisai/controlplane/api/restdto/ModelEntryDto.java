@@ -9,4 +9,13 @@ public record ModelEntryDto(
         String modelName,
 
         @Schema(description = "Model kind (CHAT or EMBEDDING)", example = "CHAT")
-        ModelKind kind) {}
+        ModelKind kind,
+
+        @Schema(
+                description = "Base model for pricing/type detection when it differs from the model name",
+                example = "gpt-4o")
+        String baseModel) {
+    public ModelEntryDto(String modelName, ModelKind kind) {
+        this(modelName, kind, null);
+    }
+}

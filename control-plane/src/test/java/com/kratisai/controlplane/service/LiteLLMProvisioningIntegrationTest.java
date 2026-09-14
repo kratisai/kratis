@@ -9,6 +9,7 @@ import com.kratisai.controlplane.client.litellm.LiteLLMDto.*;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -135,6 +136,45 @@ class LiteLLMProvisioningIntegrationTest {
 
         String teamSuffix = team.getId().toString().substring(0, 8);
         assertThat(modelName).isEqualTo("anthropic-my-anthropic-provider-claude-sonnet-4-20250514-" + teamSuffix);
+    }
+
+    @Test
+    void shouldFetchModelCostMapFromLiteLLM() {
+        Map<String, ModelCostEntry> costMap = liteLLMClient.modelCostMap();
+
+        assertThat(costMap).isNotEmpty();
+        assertThat(costMap.get("bedrock/eu-west-2/minimax.minimax-m2.5").inputCostPerToken())
+                .isEqualTo(4.7e-07);
+        assertThat(costMap.get("bedrock/eu-west-2/minimax.minimax-m2.5").outputCostPerToken())
+                .isEqualTo(1.86e-06);
+    }
+
+    @Test
+    void shouldProvisionBedrockMiniMaxWithRegionalPricing() {
+        TestDataFactory.TestContext ctx = testDataFactory.createUserAndTeam();
+        Team team = teamRepository.findById(ctx.team().getId()).orElseThrow();
+
+        ModelProvider provider = new ModelProvider(
+                "Bedrock MiniMax",
+                ProviderType.BEDROCK,
+                "bedrock-bearer-token",
+                "https://bedrock-mantle.eu-west-2.api.aws");
+        provider.setTeam(team);
+        provider.setModels(List.of(new ProviderModel("minimax.minimax-m2.5", ModelKind.CHAT)));
+        provider = modelProviderRepository.save(provider);
+
+        provisioningService.provisionModel(provider);
+
+        String litellmName = provisioningService.buildLiteLLMModelName(provider, "minimax.minimax-m2.5");
+        ListModelsV2Response response = liteLLMClient.listModelByName(litellmName);
+        ModelConfig config = response.data().stream()
+                .filter(c -> litellmName.equals(c.modelName()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(config.modelInfo()).isNotNull();
+        assertThat(config.modelInfo().mode()).isEqualTo("chat");
+        assertThat(config.modelInfo().inputCostPerToken()).isEqualTo(4.7e-07);
+        assertThat(config.modelInfo().outputCostPerToken()).isEqualTo(1.86e-06);
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.kratisai.controlplane;
 import com.kratisai.controlplane.client.litellm.LiteLLMClient;
 import com.kratisai.controlplane.client.litellm.LiteLLMDto.*;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -74,6 +75,11 @@ public class TestLiteLLMClient implements LiteLLMClient {
     @Override
     public List<SpendLogEntry> spendLogs(String apiKey) {
         return delegate.spendLogs(apiKey);
+    }
+
+    @Override
+    public Map<String, ModelCostEntry> modelCostMap() {
+        return delegate.modelCostMap();
     }
 
     public void cleanupTrackedModels() {

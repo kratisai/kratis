@@ -279,12 +279,15 @@ class ModelEntityCoverageTest {
     void providerModelCoverage() {
         ProviderModel model = new ProviderModel("gpt-4o", ModelKind.CHAT);
         model.setModelName("claude");
+        model.setBaseModel("claude-3-5-sonnet");
         model.setKind(ModelKind.EMBEDDING);
 
         assertThat(model.getModelName()).isEqualTo("claude");
+        assertThat(model.getBaseModel()).isEqualTo("claude-3-5-sonnet");
         assertThat(model.getKind()).isEqualTo(ModelKind.EMBEDDING);
-        assertThat(model).isEqualTo(new ProviderModel("claude", ModelKind.EMBEDDING));
-        assertThat(model.hashCode()).isEqualTo(new ProviderModel("claude", ModelKind.EMBEDDING).hashCode());
+        assertThat(model).isEqualTo(new ProviderModel("claude", "claude-3-5-sonnet", ModelKind.EMBEDDING));
+        assertThat(model.hashCode())
+                .isEqualTo(new ProviderModel("claude", "claude-3-5-sonnet", ModelKind.EMBEDDING).hashCode());
     }
 
     @Test

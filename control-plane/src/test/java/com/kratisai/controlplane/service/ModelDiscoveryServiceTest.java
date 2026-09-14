@@ -46,6 +46,7 @@ class ModelDiscoveryServiceTest {
         assertThat(models)
                 .extracting(ModelEntryDto::modelName)
                 .containsExactly("gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo");
+        assertThat(models).extracting(ModelEntryDto::baseModel).containsOnlyNulls();
     }
 
     @Test
@@ -365,9 +366,9 @@ class ModelDiscoveryServiceTest {
     }
 
     @Test
-    void discoverModels_azureOpenAi_shouldReturnDeployments() {
+    void discoverModels_azureOpenAi_shouldReturnDeploymentsWithBaseModels() {
         String response = """
-                {"value":[{"id":"gpt-4o-deployment"},{"id":"text-embedding-3-small-deployment"}]}
+                {"data":[{"id":"gpt-4o-deployment","model":"gpt-4o"},{"id":"text-embedding-3-small-deployment","model":"text-embedding-3-small"}]}
                 """;
         when(modelDiscoveryClient.getModelsWithApiKeyHeader(any(), any())).thenReturn(response);
 
@@ -377,13 +378,14 @@ class ModelDiscoveryServiceTest {
         assertThat(models)
                 .extracting(ModelEntryDto::modelName)
                 .containsExactly("gpt-4o-deployment", "text-embedding-3-small-deployment");
+        assertThat(models).extracting(ModelEntryDto::baseModel).containsExactly("gpt-4o", "text-embedding-3-small");
         assertThat(models).extracting(ModelEntryDto::kind).containsExactly(ModelKind.CHAT, ModelKind.EMBEDDING);
     }
 
     @Test
     void discoverModels_azureOpenAiWithBaseUrl_shouldHitDeploymentsUrl() {
         String response = """
-                {"value":[{"id":"deployment-1"}]}
+                {"data":[{"id":"deployment-1","model":"gpt-4o"}]}
                 """;
         when(modelDiscoveryClient.getModelsWithApiKeyHeader(any(), any())).thenReturn(response);
 
@@ -392,7 +394,8 @@ class ModelDiscoveryServiceTest {
         ArgumentCaptor<URI> uriCaptor = ArgumentCaptor.forClass(URI.class);
         verify(modelDiscoveryClient).getModelsWithApiKeyHeader(uriCaptor.capture(), eq("test-key"));
         assertThat(uriCaptor.getValue().toString())
-                .isEqualTo("https://my-resource.openai.azure.com/openai/openai/deployments?api-version=2024-10-21");
+                .isEqualTo(
+                        "https://my-resource.openai.azure.com/openai/openai/deployments?api-version=2023-03-15-preview");
     }
 
     @Test
@@ -403,7 +406,7 @@ class ModelDiscoveryServiceTest {
     }
 
     @Test
-    void discoverModels_azureOpenAiNoValueField_shouldReturnEmptyList() {
+    void discoverModels_azureOpenAiNoDataField_shouldReturnEmptyList() {
         String response = """
                 {"other":"field"}
                 """;

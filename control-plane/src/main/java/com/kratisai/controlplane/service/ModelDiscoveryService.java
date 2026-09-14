@@ -25,7 +25,7 @@ public class ModelDiscoveryService {
     private static final String DEFAULT_OLLAMA_URL = "http://localhost:11434";
 
     private static final String ANTHROPIC_VERSION = "2023-06-01";
-    private static final String AZURE_OPENAI_API_VERSION = "2024-10-21";
+    private static final String AZURE_OPENAI_API_VERSION = "2023-03-15-preview";
 
     private final ModelDiscoveryClient modelDiscoveryClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -96,7 +96,7 @@ public class ModelDiscoveryService {
         try {
             URI uri = URI.create(modelsUrl);
             String response = modelDiscoveryClient.getModelsWithApiKeyHeader(uri, apiKey);
-            return parseValueArrayModels(response);
+            return parseAzureDeployments(response);
         } catch (RestClientException e) {
             throw new RuntimeException("Failed to discover Azure OpenAI models: " + e.getMessage(), e);
         } catch (Exception e) {
@@ -191,19 +191,24 @@ public class ModelDiscoveryService {
                 .toList();
     }
 
-    private List<ModelEntryDto> parseValueArrayModels(String response) throws JsonProcessingException {
+    private List<ModelEntryDto> parseAzureDeployments(String response) throws JsonProcessingException {
         JsonNode root = objectMapper.readTree(response);
-        JsonNode value = root.get("value");
-        if (value == null) {
+        JsonNode data = root.get("data");
+        if (data == null || !data.isArray()) {
             return List.of();
         }
 
-        List<?> list = objectMapper.convertValue(value, List.class);
+        List<?> list = objectMapper.convertValue(data, List.class);
         return list.stream()
                 .map(m -> {
-                    String deploymentName = ((Map<?, ?>) m).get("id").toString();
-                    ModelKind kind = looksLikeEmbeddingModel(deploymentName) ? ModelKind.EMBEDDING : ModelKind.CHAT;
-                    return new ModelEntryDto(deploymentName, kind);
+                    Map<?, ?> entry = (Map<?, ?>) m;
+                    String deploymentName = entry.get("id").toString();
+                    String baseModel =
+                            entry.get("model") != null ? entry.get("model").toString() : null;
+                    ModelKind kind = looksLikeEmbeddingModel(baseModel != null ? baseModel : deploymentName)
+                            ? ModelKind.EMBEDDING
+                            : ModelKind.CHAT;
+                    return new ModelEntryDto(deploymentName, kind, baseModel);
                 })
                 .toList();
     }

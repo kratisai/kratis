@@ -2,6 +2,7 @@ package com.kratisai.controlplane.client.litellm;
 
 import com.kratisai.controlplane.client.litellm.LiteLLMDto.*;
 import java.util.List;
+import java.util.Map;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.service.annotation.GetExchange;
@@ -41,4 +42,7 @@ public interface LiteLLMClient {
 
     @GetExchange("/spend/logs")
     List<SpendLogEntry> spendLogs(@RequestParam("api_key") String apiKey);
+
+    @GetExchange("/public/litellm_model_cost_map")
+    Map<String, ModelCostEntry> modelCostMap();
 }

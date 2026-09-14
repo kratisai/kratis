@@ -145,9 +145,11 @@ class ModelDiscoveryIntegrationTest {
 
     @Test
     void shouldDiscoverAzureOpenAiModels() {
-        String responseBody = "{\"value\": [{\"id\": \"gpt-4o-deployment\"}, {\"id\": \"embedding-deployment\"}]}";
-        server.expect(requestTo(
-                        "https://my-resource.openai.azure.com/openai/openai/deployments?api-version=2024-10-21"))
+        String responseBody = "{\"data\": [{\"id\": \"gpt-4o-deployment\", \"model\": \"gpt-4o\"}, "
+                + "{\"id\": \"embedding-deployment\", \"model\": \"text-embedding-3-small\"}]}";
+        server.expect(
+                        requestTo(
+                                "https://my-resource.openai.azure.com/openai/openai/deployments?api-version=2023-03-15-preview"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(responseBody, MediaType.APPLICATION_JSON));
 
@@ -157,6 +159,7 @@ class ModelDiscoveryIntegrationTest {
         assertThat(models)
                 .extracting(ModelEntryDto::modelName)
                 .containsExactly("gpt-4o-deployment", "embedding-deployment");
+        assertThat(models).extracting(ModelEntryDto::baseModel).containsExactly("gpt-4o", "text-embedding-3-small");
         server.verify();
     }
 

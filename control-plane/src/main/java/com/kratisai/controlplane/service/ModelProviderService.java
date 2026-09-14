@@ -157,7 +157,7 @@ public class ModelProviderService {
 
     private ModelProviderDto toDto(ModelProvider provider) {
         List<ModelEntryDto> models = provider.getModels().stream()
-                .map(pm -> new ModelEntryDto(pm.getModelName(), pm.getKind()))
+                .map(pm -> new ModelEntryDto(pm.getModelName(), pm.getKind(), pm.getBaseModel()))
                 .toList();
         return new ModelProviderDto(
                 provider.getId(),
@@ -194,7 +194,7 @@ public class ModelProviderService {
                 new ModelProvider(request.displayName(), request.providerType(), request.apiKey(), request.baseUrl());
         List<ProviderModel> models = request.models() != null
                 ? new ArrayList<>(request.models().stream()
-                        .map(dto -> new ProviderModel(dto.modelName(), dto.kind()))
+                        .map(dto -> new ProviderModel(dto.modelName(), dto.baseModel(), dto.kind()))
                         .toList())
                 : new ArrayList<>();
         provider.setModels(models);
@@ -236,7 +236,7 @@ public class ModelProviderService {
         }
         if (request.models() != null) {
             List<ProviderModel> models = new ArrayList<>(request.models().stream()
-                    .map(dto -> new ProviderModel(dto.modelName(), dto.kind()))
+                    .map(dto -> new ProviderModel(dto.modelName(), dto.baseModel(), dto.kind()))
                     .toList());
             provider.setModels(models);
         }
