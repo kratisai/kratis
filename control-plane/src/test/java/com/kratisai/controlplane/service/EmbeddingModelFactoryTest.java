@@ -119,6 +119,50 @@ class EmbeddingModelFactoryTest {
     }
 
     @Test
+    void shouldThrowExceptionForAzureOpenAiWithoutBaseUrl() {
+        ModelProvider provider = new ModelProvider("Azure Account", ProviderType.AZURE_OPENAI, "sk-fake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        assertThatThrownBy(() -> embeddingModelFactory.createEmbeddingModel(provider, "text-embedding-3-small"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Azure OpenAI requires a base URL");
+    }
+
+    @Test
+    void shouldThrowExceptionForBedrockWithoutBaseUrl() {
+        ModelProvider provider = new ModelProvider("Bedrock Account", ProviderType.BEDROCK, "sk-fake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        assertThatThrownBy(() -> embeddingModelFactory.createEmbeddingModel(provider, "amazon.titan-embed-text-v1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("AWS Bedrock requires a base URL");
+    }
+
+    @Test
+    void shouldThrowExceptionForOllamaWithoutBaseUrl() {
+        ModelProvider provider = new ModelProvider("Ollama Account", ProviderType.OLLAMA, "sk-fake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        assertThatThrownBy(() -> embeddingModelFactory.createEmbeddingModel(provider, "nomic-embed-text"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Ollama requires a base URL");
+    }
+
+    @Test
+    void shouldThrowExceptionForOtherWithoutBaseUrl() {
+        ModelProvider provider = new ModelProvider("Other Account", ProviderType.OTHER, "sk-fake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        assertThatThrownBy(() -> embeddingModelFactory.createEmbeddingModel(provider, "custom-embedding"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Other (OpenAI-compatible) requires a base URL");
+    }
+
+    @Test
     void shouldRouteGoogleProviderThroughLiteLLMToOpenAiCompatibleModel() {
         // When using LiteLLM, even Google providers must be routed through the
         // OpenAI-compatible endpoint, not the native Google GenAI client

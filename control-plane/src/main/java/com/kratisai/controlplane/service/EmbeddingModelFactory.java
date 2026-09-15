@@ -22,8 +22,6 @@ public class EmbeddingModelFactory {
 
     private static final Logger logger = LoggerFactory.getLogger(EmbeddingModelFactory.class);
 
-    private static final String DEFAULT_OPENAI_URL = "https://api.openai.com/v1";
-
     private final LiteLLMProperties liteLLMProperties;
 
     public record EmbeddingModelSpec(ProviderType providerType, String modelName, String apiKey, String baseUrl) {}
@@ -51,32 +49,29 @@ public class EmbeddingModelFactory {
 
     private EmbeddingModel createEmbeddingModel(EmbeddingModelSpec spec) {
         logger.debug("Creating {} Embedding model via {}", spec.providerType(), spec.baseUrl());
-        return switch (spec.providerType()) {
-            case GOOGLE -> createGoogleEmbeddingModel(spec);
-            default -> createOpenAiCompatibleEmbeddingModel(spec);
-        };
+        if (spec.providerType().equals(ProviderType.GOOGLE)) {
+            return createGoogleEmbeddingModel(spec);
+        }
+        return createOpenAiCompatibleEmbeddingModel(spec);
     }
 
     private EmbeddingModelSpec buildDirectSpec(ModelProvider provider, String modelName) {
-        if (StringUtils.hasText(provider.getBaseUrl()) && !DEFAULT_OPENAI_URL.equals(provider.getBaseUrl())) {
-            return new EmbeddingModelSpec(ProviderType.OPENAI, modelName, provider.getApiKey(), provider.getBaseUrl());
+        String baseUrl = ModelProviderUrlResolver.resolveDirectBaseUrl(provider);
+        if (StringUtils.hasText(baseUrl) && !ModelProviderUrlResolver.DEFAULT_OPENAI_URL.equals(baseUrl)) {
+            return new EmbeddingModelSpec(ProviderType.OPENAI, modelName, provider.getApiKey(), baseUrl);
         }
-
-        String baseUrl =
-                switch (provider.getProviderType()) {
-                    case OPENAI, AZURE_OPENAI -> getBaseUrl(provider, DEFAULT_OPENAI_URL);
-                    default -> provider.getBaseUrl();
-                };
         return new EmbeddingModelSpec(provider.getProviderType(), modelName, provider.getApiKey(), baseUrl);
     }
 
     private EmbeddingModelSpec buildLiteLLMSpec(String modelName, String virtualKey) {
-        String baseUrl = liteLLMProperties.getBaseUrl() + "/v1";
+        String baseUrl =
+                ModelProviderUrlResolver.resolveLiteLLMBaseUrl(ProviderType.OPENAI, liteLLMProperties.getBaseUrl());
         return new EmbeddingModelSpec(ProviderType.OPENAI, modelName, virtualKey, baseUrl);
     }
 
     private EmbeddingModel createOpenAiCompatibleEmbeddingModel(EmbeddingModelSpec spec) {
-        String baseUrl = StringUtils.hasText(spec.baseUrl()) ? spec.baseUrl() : DEFAULT_OPENAI_URL;
+        String baseUrl =
+                StringUtils.hasText(spec.baseUrl()) ? spec.baseUrl() : ModelProviderUrlResolver.DEFAULT_OPENAI_URL;
         OpenAiEmbeddingOptions options = OpenAiEmbeddingOptions.builder()
                 .model(spec.modelName())
                 .apiKey(spec.apiKey())
@@ -99,10 +94,6 @@ public class EmbeddingModelFactory {
                 .model(spec.modelName())
                 .build();
         return new GoogleGenAiTextEmbeddingModel(details, options);
-    }
-
-    private String getBaseUrl(ModelProvider provider, String defaultUrl) {
-        return StringUtils.hasText(provider.getBaseUrl()) ? provider.getBaseUrl() : defaultUrl;
     }
 
     private void validate(ModelProvider provider, String modelName, String fieldName) {

@@ -131,6 +131,39 @@ class ChatModelFactoryTest {
                 .hasMessageContaining("Azure OpenAI requires a base URL");
     }
 
+    @Test
+    void shouldThrowExceptionForBedrockWithoutBaseUrl() {
+        ModelProvider provider = new ModelProvider("Bedrock Account", ProviderType.BEDROCK, "sk-fake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        assertThatThrownBy(() -> chatModelFactory.createChatModel(provider, "anthropic.claude-v2"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("AWS Bedrock requires a base URL");
+    }
+
+    @Test
+    void shouldThrowExceptionForOllamaWithoutBaseUrl() {
+        ModelProvider provider = new ModelProvider("Ollama Account", ProviderType.OLLAMA, "sk-fake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        assertThatThrownBy(() -> chatModelFactory.createChatModel(provider, "llama3"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Ollama requires a base URL");
+    }
+
+    @Test
+    void shouldThrowExceptionForOtherWithoutBaseUrl() {
+        ModelProvider provider = new ModelProvider("Other Account", ProviderType.OTHER, "sk-fake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        assertThatThrownBy(() -> chatModelFactory.createChatModel(provider, "custom-model"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Other (OpenAI-compatible) requires a base URL");
+    }
+
     /**
      * Regression test for an intermittent NullPointerException seen in production ingestion runs:
      * {@code Cannot invoke "ProviderType.ordinal()" because the return value of
