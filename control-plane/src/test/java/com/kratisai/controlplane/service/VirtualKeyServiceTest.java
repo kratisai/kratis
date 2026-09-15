@@ -9,6 +9,7 @@ import com.kratisai.controlplane.client.litellm.LiteLLMClient;
 import com.kratisai.controlplane.client.litellm.LiteLLMDto.*;
 import com.kratisai.controlplane.model.LlmUsageSnapshot;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -156,6 +157,74 @@ class VirtualKeyServiceTest {
         when(liteLLMClient.spendLogs("sk-test")).thenThrow(new RestClientException("LiteLLM unavailable"));
 
         assertThatThrownBy(() -> virtualKeyService.fetchUsage("sk-test")).isInstanceOf(RestClientException.class);
+    }
+
+    @Test
+    void fetchUsageByModel_shouldGroupRowsByAliasAndSumUsage() {
+        when(liteLLMClient.spendLogs("sk-test"))
+                .thenReturn(List.of(
+                        new SpendLogEntry(100L, 60L, 40L, 0.01, "raw-chat", "team-chat-alias"),
+                        new SpendLogEntry(50L, 50L, 0L, 0.001, "raw-embed", "team-embed-alias"),
+                        new SpendLogEntry(10L, 10L, 0L, 0.002, "raw-chat", "team-chat-alias")));
+
+        Map<String, LlmUsageSnapshot> usageByAlias = virtualKeyService.fetchUsageByModel("sk-test");
+
+        assertThat(usageByAlias).containsOnlyKeys("team-chat-alias", "team-embed-alias");
+        assertThat(usageByAlias.get("team-chat-alias").spend()).isEqualTo(0.012);
+        assertThat(usageByAlias.get("team-chat-alias").totalTokens()).isEqualTo(110L);
+        assertThat(usageByAlias.get("team-chat-alias").promptTokens()).isEqualTo(70L);
+        assertThat(usageByAlias.get("team-chat-alias").completionTokens()).isEqualTo(40L);
+        assertThat(usageByAlias.get("team-embed-alias").spend()).isEqualTo(0.001);
+        assertThat(usageByAlias.get("team-embed-alias").totalTokens()).isEqualTo(50L);
+    }
+
+    @Test
+    void fetchUsageByModel_shouldFallBackToRawModelNameWhenGroupMissing() {
+        when(liteLLMClient.spendLogs("sk-test"))
+                .thenReturn(List.of(new SpendLogEntry(10L, 10L, 0L, null, "raw-embed", null)));
+
+        Map<String, LlmUsageSnapshot> usageByAlias = virtualKeyService.fetchUsageByModel("sk-test");
+
+        assertThat(usageByAlias).containsOnlyKeys("raw-embed");
+    }
+
+    @Test
+    void fetchUsageByModel_shouldSkipRowsWithoutAnyModelName() {
+        when(liteLLMClient.spendLogs("sk-test"))
+                .thenReturn(List.of(
+                        new SpendLogEntry(null, null, null, null, null, null),
+                        new SpendLogEntry(5L, 5L, 0L, 0.0, "", " ")));
+
+        assertThat(virtualKeyService.fetchUsageByModel("sk-test")).isEmpty();
+    }
+
+    @Test
+    void fetchUsageByModel_shouldReturnEmptyMapWhenNoRows() {
+        when(liteLLMClient.spendLogs("sk-test")).thenReturn(List.of());
+
+        assertThat(virtualKeyService.fetchUsageByModel("sk-test")).isEmpty();
+    }
+
+    @Test
+    void fetchUsageByModel_shouldSumNullSpendAndTokensAsZero() {
+        when(liteLLMClient.spendLogs("sk-test"))
+                .thenReturn(List.of(new SpendLogEntry(null, null, null, null, "raw", "group")));
+
+        Map<String, LlmUsageSnapshot> usageByAlias = virtualKeyService.fetchUsageByModel("sk-test");
+
+        assertThat(usageByAlias).containsOnlyKeys("group");
+        assertThat(usageByAlias.get("group").spend()).isZero();
+        assertThat(usageByAlias.get("group").totalTokens()).isZero();
+        assertThat(usageByAlias.get("group").promptTokens()).isZero();
+        assertThat(usageByAlias.get("group").completionTokens()).isZero();
+    }
+
+    @Test
+    void fetchUsageByModel_shouldPropagateClientErrors() {
+        when(liteLLMClient.spendLogs("sk-test")).thenThrow(new RestClientException("LiteLLM unavailable"));
+
+        assertThatThrownBy(() -> virtualKeyService.fetchUsageByModel("sk-test"))
+                .isInstanceOf(RestClientException.class);
     }
 
     @Test

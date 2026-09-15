@@ -177,6 +177,38 @@ public class TestDataFactory {
         return new TestContext(team, user, repository, batch, provider);
     }
 
+    /**
+     * Points an existing context's ingestion and embedding providers at a WireMock upstream base
+     * URL, so OpenAI-compatible traffic flows through the real LiteLLM proxy exactly as in
+     * production. The provider type stays OPENAI so Spring AI builds the standard OpenAI clients;
+     * only the upstream base URL changes. Re-registers the team's deployments so LiteLLM routes at
+     * the new address.
+     */
+    @Transactional
+    public TestContext createContextWithWireMockUpstream(Team team, String wireMockBaseUrl) {
+        ModelProvider ingestionProvider = team.getIngestionProvider();
+        ingestionProvider.setBaseUrl(wireMockBaseUrl);
+        modelProviderRepository.save(ingestionProvider);
+        ModelProvider embeddingProvider = team.getEmbeddingProvider();
+        embeddingProvider.setBaseUrl(wireMockBaseUrl);
+        modelProviderRepository.save(embeddingProvider);
+        if (liteLLMProvisioningService != null) {
+            liteLLMProvisioningService.ensureModelsRegistered(
+                    ingestionProvider, team.getIngestionModel(), embeddingProvider, team.getEmbeddingModel());
+        }
+
+        Repository repository = repositoryRepository.findAll().stream()
+                .filter(r -> r.getTeam() != null && r.getTeam().getId().equals(team.getId()))
+                .findFirst()
+                .orElseThrow();
+        IngestionBatch batch = ingestionBatchRepository.findAll().stream()
+                .filter(b ->
+                        b.getRepository() != null && b.getRepository().getId().equals(repository.getId()))
+                .findFirst()
+                .orElseGet(() -> ingestionBatchRepository.save(new IngestionBatch(repository)));
+        return new TestContext(team, null, repository, batch, ingestionProvider);
+    }
+
     @Transactional
     public TestContext createUserAndTeam() {
         return createUserAndTeam(true);
@@ -264,7 +296,18 @@ public class TestDataFactory {
         return chatRepository.save(new ChatEntity(team, user, title));
     }
 
-    @Transactional
+    /**
+     * Reloads a team with its ingestion and embedding providers initialized, for assertions
+     * outside a persistence context.
+     */
+    @Transactional(readOnly = true)
+    public Team getTeamWithProviders(UUID teamId) {
+        Team team = teamRepository.findById(teamId).orElseThrow();
+        team.getIngestionProvider().getDisplayName();
+        team.getEmbeddingProvider().getDisplayName();
+        return team;
+    }
+
     public IngestionBatch createBatchForRepository(Repository repository) {
         // Ensure the team has an ingestion provider before creating the batch
         Team team = repository.getTeam();

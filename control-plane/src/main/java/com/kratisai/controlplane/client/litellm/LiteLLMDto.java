@@ -120,5 +120,12 @@ public final class LiteLLMDto {
     public record SpendLogEntry(
             @JsonProperty("total_tokens") Long totalTokens,
             @JsonProperty("prompt_tokens") Long promptTokens,
-            @JsonProperty("completion_tokens") Long completionTokens) {}
+            @JsonProperty("completion_tokens") Long completionTokens,
+            Double spend,
+            String model,
+            @JsonProperty("model_group") String modelGroup) {
+        public SpendLogEntry(Long totalTokens, Long promptTokens, Long completionTokens) {
+            this(totalTokens, promptTokens, completionTokens, null, null, null);
+        }
+    }
 }

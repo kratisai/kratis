@@ -384,7 +384,13 @@ class IngestionStatsServiceTest {
 
     @Test
     void shouldReturnUsageStatsWhenUsageIsRecorded() {
-        batch.getUsage().apply(new LlmUsageSnapshot(0.0123, 1500L, 1000L, 500L));
+        IngestionModelUsage chatUsage = new IngestionModelUsage(batch, ModelKind.CHAT, "gpt-4o", "team-chat-alias");
+        chatUsage.apply(new LlmUsageSnapshot(0.01, 1000L, 900L, 100L));
+        batch.getModelUsage().add(chatUsage);
+        IngestionModelUsage embeddingUsage =
+                new IngestionModelUsage(batch, ModelKind.EMBEDDING, "text-embedding-3-small", "team-embed-alias");
+        embeddingUsage.apply(new LlmUsageSnapshot(0.0023, 500L, 100L, 400L));
+        batch.getModelUsage().add(embeddingUsage);
         batch.setTotalToolCalls(42L);
         ingestionBatchRepository.saveAndFlush(batch);
 
@@ -416,7 +422,13 @@ class IngestionStatsServiceTest {
 
     @Test
     void shouldReturnUsageStatsViaLatestBatchEndpoint() {
-        batch.getUsage().apply(new LlmUsageSnapshot(0.25, 4200L, 3000L, 1200L));
+        IngestionModelUsage chatUsage = new IngestionModelUsage(batch, ModelKind.CHAT, "gpt-4o", "team-chat-alias");
+        chatUsage.apply(new LlmUsageSnapshot(0.2, 3000L, 2500L, 500L));
+        batch.getModelUsage().add(chatUsage);
+        IngestionModelUsage embeddingUsage =
+                new IngestionModelUsage(batch, ModelKind.EMBEDDING, "text-embedding-3-small", "team-embed-alias");
+        embeddingUsage.apply(new LlmUsageSnapshot(0.05, 1200L, 500L, 700L));
+        batch.getModelUsage().add(embeddingUsage);
         batch.setTotalToolCalls(7L);
         ingestionBatchRepository.saveAndFlush(batch);
 

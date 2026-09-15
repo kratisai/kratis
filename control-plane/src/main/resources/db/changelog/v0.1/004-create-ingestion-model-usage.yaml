@@ -1,0 +1,63 @@
+databaseChangeLog:
+- changeSet:
+    id: 004-create-ingestion-model-usage
+    author: kratis
+    changes:
+    - createTable:
+        tableName: ingestion_model_usage
+        columns:
+        - column:
+            name: id
+            type: UUID
+            defaultValueComputed: gen_random_uuid()
+            constraints:
+              primaryKey: true
+              primaryKeyName: pk_ingestion_model_usage
+              nullable: false
+        - column:
+            name: batch_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: model_kind
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: model_identifier
+            type: VARCHAR(255)
+            constraints:
+              nullable: false
+        - column:
+            name: litellm_alias
+            type: VARCHAR(255)
+        - column:
+            name: total_spend
+            type: DOUBLE PRECISION
+        - column:
+            name: total_tokens
+            type: BIGINT
+        - column:
+            name: prompt_tokens
+            type: BIGINT
+        - column:
+            name: completion_tokens
+            type: BIGINT
+    - addForeignKeyConstraint:
+        baseTableName: ingestion_model_usage
+        baseColumnNames: batch_id
+        referencedTableName: ingestion_batches
+        referencedColumnNames: id
+        constraintName: fk_ingestion_model_usage_batch
+        onDelete: CASCADE
+    - addUniqueConstraint:
+        tableName: ingestion_model_usage
+        columnNames: batch_id, model_kind
+        constraintName: uk_ingestion_model_usage_batch_kind
+    - createIndex:
+        tableName: ingestion_model_usage
+        indexName: idx_ingestion_model_usage_batch_id
+        columns:
+        - column:
+            name: batch_id

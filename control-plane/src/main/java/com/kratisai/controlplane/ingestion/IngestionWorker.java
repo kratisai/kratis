@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.ingestion;
 
 import com.kratisai.controlplane.api.wsdto.IngestionStatusEvent;
+import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.ingestion.parse.CodebaseMemoryParserService;
 import com.kratisai.controlplane.ingestion.parse.DependencyLinkerService;
 import com.kratisai.controlplane.ingestion.parse.DimensionDiscoveryService;
@@ -10,16 +11,17 @@ import com.kratisai.controlplane.ingestion.research.SubgraphRankingService;
 import com.kratisai.controlplane.ingestion.write.SemanticIndexingService;
 import com.kratisai.controlplane.ingestion.write.WikiGenerationService;
 import com.kratisai.controlplane.model.IngestionBatch;
+import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.IngestionStatus;
-import com.kratisai.controlplane.model.LlmUsage;
 import com.kratisai.controlplane.model.LlmUsageSnapshot;
+import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.VirtualKeyService;
 import java.io.IOException;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -52,6 +54,7 @@ public class IngestionWorker {
     private final PatternResearchService patternResearchService;
     private final VirtualKeyService virtualKeyService;
     private final LiteLLMProvisioningService litellmProvisioningService;
+    private final LiteLLMProperties litellmProperties;
     private final IngestionUsageTracker usageTracker;
 
     public IngestionWorker(
@@ -70,6 +73,7 @@ public class IngestionWorker {
             PatternResearchService patternResearchService,
             VirtualKeyService virtualKeyService,
             LiteLLMProvisioningService litellmProvisioningService,
+            LiteLLMProperties litellmProperties,
             IngestionUsageTracker usageTracker) {
         this.ingestionBatchRepository = ingestionBatchRepository;
         this.gitCloneService = gitCloneService;
@@ -89,6 +93,7 @@ public class IngestionWorker {
         this.patternResearchService = patternResearchService;
         this.virtualKeyService = virtualKeyService;
         this.litellmProvisioningService = litellmProvisioningService;
+        this.litellmProperties = litellmProperties;
         this.usageTracker = usageTracker;
     }
 
@@ -319,6 +324,65 @@ public class IngestionWorker {
                 .orElseThrow(() -> new IllegalStateException("Ingestion batch not found: " + batchId));
     }
 
+    /**
+     * Fills each per-model row from this batch's LiteLLM spend-log grouping. LiteLLM is the
+     * single source of truth for tokens and spend; a model with no rows keeps its zeroed
+     * initial state. Spend rows flush asynchronously, so poll until every expected alias has
+     * appeared or the finalize budget elapses. Step-by-step to avoid holding a transaction
+     * open while we wait.
+     */
+    private void applyPerModelUsage(UUID batchId, String token, List<String> expectedAliases) {
+        Map<String, LlmUsageSnapshot> usageByAlias = fetchUntilComplete(batchId, token, expectedAliases);
+        if (usageByAlias == null) {
+            return;
+        }
+        if (!usageByAlias.keySet().containsAll(expectedAliases)) {
+            logger.warn(
+                    "Per-model usage incomplete for batch {} after finalize delay; missing aliases will stay zero",
+                    batchId);
+        }
+        transactionTemplate.executeWithoutResult(status -> {
+            IngestionBatch batch = loadBatch(batchId);
+            for (IngestionModelUsage modelUsage : batch.getModelUsage()) {
+                if (modelUsage.getLitellmAlias() == null) {
+                    continue;
+                }
+                LlmUsageSnapshot perModel = usageByAlias.get(modelUsage.getLitellmAlias());
+                if (perModel != null) {
+                    modelUsage.apply(perModel);
+                }
+            }
+            ingestionBatchRepository.saveAndFlush(batch);
+        });
+    }
+
+    // Returns the spend-log grouping once every expected alias has appeared, the last-seen
+    // grouping when the finalize budget elapses, or null when fetching or waiting failed.
+    private @Nullable Map<String, LlmUsageSnapshot> fetchUntilComplete(
+            UUID batchId, String token, List<String> expectedAliases) {
+        long deadline = System.currentTimeMillis()
+                + litellmProperties.getUsageFinalizeDelay().toMillis();
+        while (true) {
+            Map<String, LlmUsageSnapshot> usageByAlias;
+            try {
+                usageByAlias = virtualKeyService.fetchUsageByModel(token);
+            } catch (Exception e) {
+                logger.warn("Failed to fetch per-model usage for batch {}: {}", batchId, e.getMessage());
+                return null;
+            }
+            if (usageByAlias.keySet().containsAll(expectedAliases) || System.currentTimeMillis() >= deadline) {
+                return usageByAlias;
+            }
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                logger.warn("Interrupted while awaiting per-model usage for batch {}", batchId);
+                return null;
+            }
+        }
+    }
+
     private Object generateBatchVirtualKey(UUID batchId) {
         IngestionBatch batch = loadBatch(batchId);
         var team = batch.getRepository().getTeam();
@@ -337,15 +401,20 @@ public class IngestionWorker {
                     "Team {} has no embedding provider/model configured; embedding model is required for ingestion.");
         }
 
-        List<String> grantedModels = new ArrayList<>();
-        grantedModels.add(litellmProvisioningService.buildLiteLLMModelName(chatProvider, chatModel));
-        grantedModels.add(litellmProvisioningService.buildLiteLLMModelName(embeddingProvider, embeddingModel));
+        String chatAlias = litellmProvisioningService.buildLiteLLMModelName(chatProvider, chatModel);
+        String embeddingAlias = litellmProvisioningService.buildLiteLLMModelName(embeddingProvider, embeddingModel);
 
         String keyAlias = litellmProvisioningService.buildVirtualKeyAlias(
                 LiteLLMProvisioningService.VirtualKeyScope.INGESTION, batchId);
-        String token = virtualKeyService.generateKey(keyAlias, grantedModels);
+        String token = virtualKeyService.generateKey(keyAlias, List.of(chatAlias, embeddingAlias));
 
-        batch.setUsage(LlmUsage.withKey(token));
+        IngestionModelUsage chatUsage = new IngestionModelUsage(batch, ModelKind.CHAT, chatModel, chatAlias);
+        chatUsage.setVirtualKey(token);
+        batch.getModelUsage().add(chatUsage);
+        IngestionModelUsage embeddingUsage =
+                new IngestionModelUsage(batch, ModelKind.EMBEDDING, embeddingModel, embeddingAlias);
+        embeddingUsage.setVirtualKey(token);
+        batch.getModelUsage().add(embeddingUsage);
         ingestionBatchRepository.saveAndFlush(batch);
 
         logger.info("Generated virtual key for ingestion batch {}", batchId);
@@ -353,43 +422,39 @@ public class IngestionWorker {
     }
 
     private Object finalizeBatchUsageAndRevokeKey(UUID batchId) {
-        IngestionBatch batch = loadBatch(batchId);
-        String token = batch.getUsage().getVirtualKey();
-
-        if (token != null) {
-            try {
-                var litellmSnapshot = virtualKeyService.fetchUsage(token);
-                var tracked = usageTracker.snapshotAndClear(batchId);
-                LlmUsageSnapshot mergedSnapshot;
-                if (tracked.isPresent()) {
-                    var counters = tracked.get();
-                    mergedSnapshot = new LlmUsageSnapshot(
-                            litellmSnapshot.spend(),
-                            counters.totalTokens(),
-                            counters.promptTokens(),
-                            counters.completionTokens());
-                    batch.setTotalToolCalls(counters.toolCalls());
-                } else {
-                    mergedSnapshot = litellmSnapshot;
-                }
-                batch.getUsage().apply(mergedSnapshot);
+        // Step-by-step to avoid holding a transaction open while we wait.
+        String token;
+        List<String> expectedAliases;
+        try {
+            IngestionBatch batch = loadBatch(batchId);
+            token = batch.modelUsageFor(ModelKind.CHAT)
+                    .map(IngestionModelUsage::getVirtualKey)
+                    .orElse(null);
+            expectedAliases = batch.getModelUsage().stream()
+                    .map(IngestionModelUsage::getLitellmAlias)
+                    .filter(alias -> alias != null && !alias.isBlank())
+                    .toList();
+            var tracked = usageTracker.snapshotAndClear(batchId);
+            if (tracked.isPresent()) {
+                batch.setTotalToolCalls(tracked.get().toolCalls());
                 ingestionBatchRepository.saveAndFlush(batch);
-                logger.info(
-                        "Refreshed usage for ingestion batch {}: tokens={}, spend={}, toolCalls={}",
-                        batchId,
-                        mergedSnapshot.totalTokens(),
-                        mergedSnapshot.spend(),
-                        batch.getTotalToolCalls());
-            } catch (Exception e) {
-                logger.warn("Failed to refresh final usage for batch {}: {}", batchId, e.getMessage());
             }
+        } catch (Exception e) {
+            logger.warn("Failed to retrieve virtual key for batch {}: {}", batchId, e.getMessage());
+            return null;
+        }
 
-            try {
-                virtualKeyService.revokeKey(token);
-                logger.info("Revoked virtual key for ingestion batch {}", batchId);
-            } catch (Exception e) {
-                logger.warn("Failed to revoke virtual key for batch {}: {}", batchId, e.getMessage());
-            }
+        if (token == null) {
+            return null;
+        }
+
+        applyPerModelUsage(batchId, token, expectedAliases);
+
+        try {
+            virtualKeyService.revokeKey(token);
+            logger.info("Revoked virtual key for ingestion batch {}", batchId);
+        } catch (Exception e) {
+            logger.warn("Failed to revoke virtual key for batch {}: {}", batchId, e.getMessage());
         }
 
         return null;

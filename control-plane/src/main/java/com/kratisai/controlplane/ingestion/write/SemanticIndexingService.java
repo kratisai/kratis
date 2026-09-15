@@ -1,6 +1,12 @@
 package com.kratisai.controlplane.ingestion.write;
 
-import com.kratisai.controlplane.model.*;
+import com.kratisai.controlplane.model.CtxEmbedding;
+import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.IngestionBatch;
+import com.kratisai.controlplane.model.IngestionModelUsage;
+import com.kratisai.controlplane.model.ModelKind;
+import com.kratisai.controlplane.model.ModelProvider;
+import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.repository.CtxEmbeddingRepository;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.service.EmbeddingModelFactory;
@@ -52,7 +58,9 @@ public class SemanticIndexingService {
         }
 
         String litellmModelName = litellmProvisioningService.buildLiteLLMModelName(provider, embeddingModelName);
-        String virtualKey = batch.getUsage().getVirtualKey();
+        String virtualKey = batch.modelUsageFor(ModelKind.EMBEDDING)
+                .map(IngestionModelUsage::getVirtualKey)
+                .orElse(null);
         EmbeddingModel embeddingModel =
                 embeddingModelFactory.createEmbeddingModelViaLiteLLM(provider, litellmModelName, virtualKey);
 

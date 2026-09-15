@@ -443,16 +443,10 @@ class WikiGenerationServiceTest {
                 AssistantMessage.builder().toolCalls(List.of(toolCall1)).build();
         AssistantMessage turn2Message = new AssistantMessage("Wiki generation complete.");
 
-        fakeChatModel.addMatcher(PromptMatcher.builder()
-                .response(turn1Message)
-                .usage(new org.springframework.ai.chat.model.MessageAggregator.DefaultUsage(100, 50, 150))
-                .maxMatches(1)
-                .build());
-        fakeChatModel.addMatcher(PromptMatcher.builder()
-                .response(turn2Message)
-                .usage(new org.springframework.ai.chat.model.MessageAggregator.DefaultUsage(60, 30, 90))
-                .maxMatches(1)
-                .build());
+        fakeChatModel.addMatcher(
+                PromptMatcher.builder().response(turn1Message).maxMatches(1).build());
+        fakeChatModel.addMatcher(
+                PromptMatcher.builder().response(turn2Message).maxMatches(1).build());
 
         wikiGenerationService.generateWiki(batch);
 

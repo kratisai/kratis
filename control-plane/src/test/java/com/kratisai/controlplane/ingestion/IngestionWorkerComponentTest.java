@@ -7,10 +7,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.kratisai.controlplane.*;
 import com.kratisai.controlplane.model.CtxNode;
 import com.kratisai.controlplane.model.IngestionBatch;
+import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.IngestionStatus;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.repository.CtxNodeRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
+import com.kratisai.controlplane.repository.IngestionModelUsageRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ProcessExecutor;
@@ -37,6 +39,9 @@ class IngestionWorkerComponentTest {
 
     @Autowired
     private IngestionBatchRepository ingestionBatchRepository;
+
+    @Autowired
+    private IngestionModelUsageRepository ingestionModelUsageRepository;
 
     @Autowired
     private IngestionBatchLogService ingestionBatchLogService;
@@ -285,5 +290,37 @@ class IngestionWorkerComponentTest {
         assertThatThrownBy(() -> ingestionWorker.performIngestion(fakeId, batchLogger))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Ingestion batch not found: " + fakeId);
+    }
+
+    @Test
+    void shouldCreatePerModelUsageRowsWithVirtualKey() {
+        IngestionBatch batch = new IngestionBatch(repository);
+        ingestionBatchRepository.saveAndFlush(batch);
+
+        ingestionWorker.runIngestion(batch.getId());
+
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(20))
+                .pollInterval(Duration.ofMillis(100))
+                .untilAsserted(() -> {
+                    List<IngestionModelUsage> modelUsages = ingestionModelUsageRepository.findByBatchId(batch.getId());
+                    assertThat(modelUsages)
+                            .extracting(m -> m.getModelKind().name())
+                            .containsExactlyInAnyOrder("CHAT", "EMBEDDING");
+                    assertThat(modelUsages)
+                            .extracting(IngestionModelUsage::getVirtualKey)
+                            .allSatisfy(key -> assertThat(key).startsWith("sk-"));
+                    assertThat(modelUsages)
+                            .filteredOn(m -> m.getModelKind().name().equals("CHAT"))
+                            .singleElement()
+                            .satisfies(m -> {
+                                assertThat(m.getModelIdentifier()).isNotBlank();
+                                assertThat(m.getLitellmAlias()).isNotBlank();
+                            });
+                    assertThat(modelUsages)
+                            .filteredOn(m -> m.getModelKind().name().equals("EMBEDDING"))
+                            .singleElement()
+                            .satisfies(m -> assertThat(m.getModelIdentifier()).isNotBlank());
+                });
     }
 }

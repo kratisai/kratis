@@ -21,8 +21,7 @@ class DimensionDiscoveryServiceTest {
 
     @BeforeEach
     void setUp() {
-        service =
-                new DimensionDiscoveryService(null, null, null, null, null, null, null, null, null, tempDir.toString());
+        service = new DimensionDiscoveryService(null, null, null, null, null, null, null, null, tempDir.toString());
 
         Team team = new Team();
         team.setId(UUID.randomUUID());

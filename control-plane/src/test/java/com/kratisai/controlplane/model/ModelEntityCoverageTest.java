@@ -1,9 +1,11 @@
 package com.kratisai.controlplane.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.kratisai.controlplane.api.restdto.InstallationInfoDto;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -307,7 +309,8 @@ class ModelEntityCoverageTest {
         batch.setEdges(new ArrayList<>());
         batch.setLogs(new ArrayList<>());
         batch.setWikiPages(new ArrayList<>());
-        batch.setUsage(new LlmUsage());
+        batch.setEmbeddings(new ArrayList<>());
+        batch.setModelUsage(new ArrayList<>());
 
         assertThat(batch.getId()).isNotNull();
         assertThat(batch.getRepository()).isEqualTo(repo);
@@ -322,7 +325,82 @@ class ModelEntityCoverageTest {
         assertThat(batch.getEdges()).isEmpty();
         assertThat(batch.getLogs()).isEmpty();
         assertThat(batch.getWikiPages()).isEmpty();
-        assertThat(batch.getUsage()).isNotNull();
+        assertThat(batch.getEmbeddings()).isEmpty();
+        assertThat(batch.getModelUsage()).isEmpty();
+        assertThat(batch.modelUsageFor(ModelKind.CHAT)).isEmpty();
+    }
+
+    @Test
+    void ingestionModelUsageCoverage() {
+        IngestionBatch batch = new IngestionBatch();
+        IngestionModelUsage usage =
+                new IngestionModelUsage(batch, ModelKind.CHAT, "gpt-4o", "openai-openai-gpt-4o-838d9bd6");
+        usage.setId(UUID.randomUUID());
+        usage.setBatch(batch);
+        usage.setModelKind(ModelKind.EMBEDDING);
+        usage.setModelIdentifier("text-embedding-3-small");
+        usage.setLitellmAlias("openai-openai-text-embedding-3-small-838d9bd6");
+        usage.setVirtualKey("sk-test-virtual-key");
+        usage.setTotalSpend(0.01);
+        usage.setTotalTokens(500L);
+        usage.setPromptTokens(500L);
+        usage.setCompletionTokens(0L);
+        usage.setUsageLastUpdatedAt(Instant.EPOCH);
+        usage.apply(new LlmUsageSnapshot(0.02, 600L, 550L, 50L));
+
+        assertThat(usage.getId()).isNotNull();
+        assertThat(usage.getBatch()).isEqualTo(batch);
+        assertThat(usage.getModelKind()).isEqualTo(ModelKind.EMBEDDING);
+        assertThat(usage.getModelIdentifier()).isEqualTo("text-embedding-3-small");
+        assertThat(usage.getLitellmAlias()).isEqualTo("openai-openai-text-embedding-3-small-838d9bd6");
+        assertThat(usage.getVirtualKey()).isEqualTo("sk-test-virtual-key");
+        assertThat(usage.getTotalSpend()).isEqualTo(0.02);
+        assertThat(usage.getTotalTokens()).isEqualTo(600L);
+        assertThat(usage.getPromptTokens()).isEqualTo(550L);
+        assertThat(usage.getCompletionTokens()).isEqualTo(50L);
+        assertThat(usage.getUsageLastUpdatedAt()).isNotNull();
+
+        // Null-tolerant apply defaults to zeros
+        usage.apply(new LlmUsageSnapshot(null, null, null, null));
+        assertThat(usage.getTotalSpend()).isZero();
+        assertThat(usage.getTotalTokens()).isZero();
+        assertThat(usage.getPromptTokens()).isZero();
+        assertThat(usage.getCompletionTokens()).isZero();
+    }
+
+    @Test
+    void ingestionBatch_modelUsageFor_returnsRowByKind() {
+        IngestionBatch batch = new IngestionBatch();
+        IngestionModelUsage chatUsage = new IngestionModelUsage(batch, ModelKind.CHAT, "gpt-4o", "chat-alias");
+        batch.getModelUsage().add(chatUsage);
+
+        assertThat(batch.modelUsageFor(ModelKind.CHAT)).contains(chatUsage);
+        assertThat(batch.modelUsageFor(ModelKind.EMBEDDING)).isEmpty();
+    }
+
+    @Test
+    void ingestionModelUsage_constructorRejectsNulls() {
+        IngestionBatch batch = new IngestionBatch();
+        assertThatThrownBy(ModelEntityCoverageTest::nullBatchUsage).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> nullKindUsage(batch)).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> nullIdentifierUsage(batch)).isInstanceOf(NullPointerException.class);
+        assertThat(new IngestionModelUsage(batch, ModelKind.CHAT, "gpt-4o", null).getLitellmAlias())
+                .isNull();
+    }
+
+    @SuppressFBWarnings("NP_NULL_PARAM_DEREF_NONVIRTUAL")
+    private static void nullBatchUsage() {
+        new IngestionModelUsage(null, ModelKind.CHAT, "gpt-4o", "alias");
+    }
+
+    @SuppressFBWarnings("NP_NULL_PARAM_DEREF_NONVIRTUAL")
+    private static void nullKindUsage(IngestionBatch batch) {
+        new IngestionModelUsage(batch, null, "gpt-4o", "alias");
+    }
+
+    @SuppressFBWarnings("NP_NULL_PARAM_DEREF_NONVIRTUAL")
+    private static void nullIdentifierUsage(IngestionBatch batch) {
+        new IngestionModelUsage(batch, ModelKind.CHAT, null, "alias");
     }
 
     @Test

@@ -63,7 +63,8 @@ public class DimensionResearchService {
                 futures.add(executor.submit(() -> {
                     researchConcurrency.acquire();
                     try {
-                        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
+                        DimensionSynopsisResult result =
+                                researchDimensionWorker.research(task, batchLogger, batch.getId());
                         return Map.entry(dimension, result);
                     } finally {
                         researchConcurrency.release();

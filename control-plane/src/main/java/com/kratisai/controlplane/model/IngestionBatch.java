@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Entity
@@ -58,16 +59,8 @@ public class IngestionBatch {
     @OneToMany(mappedBy = "batch", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private List<CtxEmbedding> embeddings = new ArrayList<>();
 
-    @Embedded
-    @AttributeOverrides({
-        @AttributeOverride(name = "virtualKey", column = @Column(name = "virtual_key", columnDefinition = "TEXT")),
-        @AttributeOverride(name = "totalSpend", column = @Column(name = "total_spend")),
-        @AttributeOverride(name = "totalTokens", column = @Column(name = "total_tokens")),
-        @AttributeOverride(name = "promptTokens", column = @Column(name = "prompt_tokens")),
-        @AttributeOverride(name = "completionTokens", column = @Column(name = "completion_tokens")),
-        @AttributeOverride(name = "usageLastUpdatedAt", column = @Column(name = "usage_last_updated_at"))
-    })
-    private LlmUsage usage = new LlmUsage();
+    @OneToMany(mappedBy = "batch", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<IngestionModelUsage> modelUsage = new ArrayList<>();
 
     @PrePersist
     protected void onCreate() {
@@ -191,11 +184,23 @@ public class IngestionBatch {
         this.wikiPages = wikiPages;
     }
 
-    public LlmUsage getUsage() {
-        return usage;
+    public List<CtxEmbedding> getEmbeddings() {
+        return embeddings;
     }
 
-    public void setUsage(LlmUsage usage) {
-        this.usage = usage;
+    public void setEmbeddings(List<CtxEmbedding> embeddings) {
+        this.embeddings = embeddings;
+    }
+
+    public List<IngestionModelUsage> getModelUsage() {
+        return modelUsage;
+    }
+
+    public void setModelUsage(List<IngestionModelUsage> modelUsage) {
+        this.modelUsage = modelUsage;
+    }
+
+    public Optional<IngestionModelUsage> modelUsageFor(ModelKind kind) {
+        return modelUsage.stream().filter(usage -> usage.getModelKind() == kind).findFirst();
     }
 }

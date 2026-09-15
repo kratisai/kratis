@@ -12,7 +12,7 @@ vi.mock('@/hooks/use-usage', () => ({
           agentName: 'OpenCode',
           durationSeconds: 5,
           id: 'exec-1',
-          modelIdentifier: 'gpt-4o',
+          modelIdentifiers: ['gpt-4o'],
           status: 'COMPLETED',
           timestamp: new Date().toISOString(),
           totalSpend: 0.03,
@@ -63,5 +63,11 @@ describe('UsageView', () => {
     expect(screen.getByText('Total Tokens Used')).toBeDefined()
     expect(screen.getByText('15,000')).toBeDefined()
     expect(screen.getByText('Test Agent Task')).toBeDefined()
+  })
+
+  it('renders every model behind a multi-model ingestion entry', () => {
+    render(<UsageView />)
+
+    expect(screen.getAllByText('gpt-4o').length).toBeGreaterThan(0)
   })
 })

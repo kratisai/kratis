@@ -44,7 +44,4 @@ public interface IngestionBatchRepository extends JpaRepository<IngestionBatch, 
 
     @Query("SELECT ib.id FROM IngestionBatch ib WHERE ib.status = 'PROCESSING'")
     List<UUID> findProcessingBatchIds();
-
-    @Query("SELECT COALESCE(SUM(ib.usage.totalSpend), 0.0) FROM IngestionBatch ib")
-    double sumTotalSpend();
 }

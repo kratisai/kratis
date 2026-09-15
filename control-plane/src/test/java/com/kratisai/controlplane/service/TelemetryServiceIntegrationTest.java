@@ -137,7 +137,9 @@ class TelemetryServiceIntegrationTest {
 
         IngestionBatch batch = new IngestionBatch(repository);
         batch.setStatus(IngestionStatus.SUCCESS);
-        batch.getUsage().setTotalSpend(2.25);
+        IngestionModelUsage usage = new IngestionModelUsage(batch, ModelKind.CHAT, "gpt-4o", "team-chat-alias");
+        usage.apply(new LlmUsageSnapshot(2.25, 1000L, 800L, 200L));
+        batch.getModelUsage().add(usage);
         ingestionBatchRepository.save(batch);
 
         SandboxExecution execution = new SandboxExecution();

@@ -37,6 +37,9 @@ public class IngestionWorkerIntegrationTest {
     private IngestionBatchRepository ingestionBatchRepository;
 
     @Autowired
+    private IngestionModelUsageRepository ingestionModelUsageRepository;
+
+    @Autowired
     private CtxNodeRepository ctxNodeRepository;
 
     @Autowired
@@ -328,6 +331,7 @@ public class IngestionWorkerIntegrationTest {
         TestDataFactory.TestContext ctx = testDataFactory.createContextWithCustomRepo(
                 "Test Team", "test-repo", tempRepoDir.toUri().toString());
         registerTeamModels(ctx);
+        Team team = ctx.team();
 
         IngestionBatch batch = ctx.batch();
         batch.setStatus(IngestionStatus.QUEUED);
@@ -345,19 +349,28 @@ public class IngestionWorkerIntegrationTest {
                             .orElseThrow();
                     assertThat(updatedBatch.getStatus()).isEqualTo(IngestionStatus.SUCCESS);
 
-                    // Verify virtual key was generated and set
-                    assertThat(updatedBatch.getUsage()).isNotNull();
-                    assertThat(updatedBatch.getUsage().getVirtualKey()).isNotNull();
-                    assertThat(updatedBatch.getUsage().getVirtualKey()).startsWith("sk-");
-
-                    // Verify usage was refreshed from tracked model responses (LiteLLM
-                    // /key/info does not report token counts)
-                    assertThat(updatedBatch.getUsage().getUsageLastUpdatedAt()).isNotNull();
-                    assertThat(updatedBatch.getUsage().getTotalTokens()).isGreaterThan(0);
-                    assertThat(updatedBatch.getUsage().getPromptTokens()).isGreaterThan(0);
-                    assertThat(updatedBatch.getUsage().getCompletionTokens()).isGreaterThan(0);
-
-                    // Verify tool calls from the wiki generation ReAct loop were counted
+                    // FakeChatModel bypasses the LiteLLM proxy, so no spend rows exist and both
+                    // rows keep their zeroed initial state; per-model token attribution is
+                    // covered by IngestionUsageAttributionTest on the real path.
+                    List<IngestionModelUsage> modelUsages =
+                            ingestionModelUsageRepository.findByBatchId(savedBatch.getId());
+                    assertThat(modelUsages).hasSize(2);
+                    assertThat(modelUsages)
+                            .extracting(IngestionModelUsage::getVirtualKey)
+                            .allSatisfy(key -> assertThat(key).startsWith("sk-"));
+                    assertThat(modelUsages)
+                            .extracting(IngestionModelUsage::getLitellmAlias)
+                            .allSatisfy(alias -> assertThat(alias).isNotBlank());
+                    assertThat(modelUsages)
+                            .filteredOn(usage -> usage.getModelKind() == ModelKind.CHAT)
+                            .singleElement()
+                            .satisfies(usage ->
+                                    assertThat(usage.getModelIdentifier()).isEqualTo(team.getIngestionModel()));
+                    assertThat(modelUsages)
+                            .filteredOn(usage -> usage.getModelKind() == ModelKind.EMBEDDING)
+                            .singleElement()
+                            .satisfies(usage ->
+                                    assertThat(usage.getModelIdentifier()).isEqualTo(team.getEmbeddingModel()));
                     assertThat(updatedBatch.getTotalToolCalls()).isGreaterThanOrEqualTo(1);
                 });
     }
@@ -386,12 +399,11 @@ public class IngestionWorkerIntegrationTest {
                     assertThat(updatedBatch.getStatus()).isEqualTo(IngestionStatus.FAILED);
                     assertThat(updatedBatch.getErrorMessage()).contains("Failed to clone repository");
 
-                    // Verify virtual key was generated before failure
-                    assertThat(updatedBatch.getUsage()).isNotNull();
-                    assertThat(updatedBatch.getUsage().getVirtualKey()).isNotNull();
-
-                    // Verify usage refresh was attempted even on failure
-                    assertThat(updatedBatch.getUsage().getUsageLastUpdatedAt()).isNotNull();
+                    // Verify the per-model rows were created with the virtual key before failure
+                    assertThat(ingestionModelUsageRepository.findByBatchId(savedBatch.getId()))
+                            .hasSize(2)
+                            .extracting(IngestionModelUsage::getVirtualKey)
+                            .allSatisfy(key -> assertThat(key).startsWith("sk-"));
                 });
     }
 

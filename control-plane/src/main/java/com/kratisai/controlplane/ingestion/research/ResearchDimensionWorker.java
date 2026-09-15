@@ -3,20 +3,22 @@ package com.kratisai.controlplane.ingestion.research;
 import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.ingestion.IngestionPipelineAbortException;
-import com.kratisai.controlplane.ingestion.IngestionUsageTracker;
 import com.kratisai.controlplane.ingestion.ReadFileTool;
 import com.kratisai.controlplane.model.CtxDimension;
 import com.kratisai.controlplane.model.CtxNode;
 import com.kratisai.controlplane.model.CtxNodeDimension;
-import com.kratisai.controlplane.model.IngestionBatch;
+import com.kratisai.controlplane.model.IngestionModelUsage;
+import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.NodeType;
 import com.kratisai.controlplane.repository.CtxNodeDimensionRepository;
+import com.kratisai.controlplane.repository.IngestionModelUsageRepository;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,22 +41,22 @@ public class ResearchDimensionWorker {
     private final LiteLLMProvisioningService litellmProvisioningService;
     private final ReadFileTool readFileTool;
     private final CtxNodeDimensionRepository ctxNodeDimensionRepository;
+    private final IngestionModelUsageRepository ingestionModelUsageRepository;
     private final IngestionProperties ingestionProperties;
-    private final IngestionUsageTracker usageTracker;
 
     public ResearchDimensionWorker(
             ChatModelFactory chatModelFactory,
             LiteLLMProvisioningService litellmProvisioningService,
             ReadFileTool readFileTool,
             CtxNodeDimensionRepository ctxNodeDimensionRepository,
-            IngestionProperties ingestionProperties,
-            IngestionUsageTracker usageTracker) {
+            IngestionModelUsageRepository ingestionModelUsageRepository,
+            IngestionProperties ingestionProperties) {
         this.chatModelFactory = chatModelFactory;
         this.litellmProvisioningService = litellmProvisioningService;
         this.readFileTool = readFileTool;
         this.ctxNodeDimensionRepository = ctxNodeDimensionRepository;
+        this.ingestionModelUsageRepository = ingestionModelUsageRepository;
         this.ingestionProperties = ingestionProperties;
-        this.usageTracker = usageTracker;
     }
 
     // NOT transactional - we mustn't hold onto long-lived transactions in the worker thread.
@@ -62,7 +64,7 @@ public class ResearchDimensionWorker {
     // AI; SpotBugs cannot see those contracts and assumes nullable.
     @SuppressFBWarnings("NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE")
     public DimensionSynopsisResult research(
-            ResearchDimensionTask task, IngestionBatchLogService.BatchLogger batchLogger, IngestionBatch batch) {
+            ResearchDimensionTask task, IngestionBatchLogService.BatchLogger batchLogger, UUID batchId) {
 
         CtxDimension dimension = task.dimension();
         StringBuilder fileSnippets = buildFileSnippets(task.batchId(), dimension);
@@ -75,7 +77,10 @@ public class ResearchDimensionWorker {
                         new BeanOutputConverter<>(DimensionSynopsisResult.class).getFormat());
 
         String litellmModelName = litellmProvisioningService.buildLiteLLMModelName(task.provider(), task.modelName());
-        String virtualKey = batch.getUsage().getVirtualKey();
+        String virtualKey = ingestionModelUsageRepository
+                .findByBatchIdAndModelKind(batchId, ModelKind.CHAT)
+                .map(IngestionModelUsage::getVirtualKey)
+                .orElse(null);
         ChatModel chatModel =
                 chatModelFactory.createChatModelViaLiteLLM(task.provider(), litellmModelName, virtualKey, false);
 
@@ -102,7 +107,6 @@ public class ResearchDimensionWorker {
                     throw new IngestionPipelineAbortException("LLM returned null result", null);
                 }
                 String text = response.getResult().getOutput().getText();
-                usageTracker.recordTokens(batch.getId(), response.getMetadata().getUsage());
 
                 BeanOutputConverter<DimensionSynopsisResult> converter =
                         new BeanOutputConverter<>(DimensionSynopsisResult.class);

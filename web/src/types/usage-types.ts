@@ -25,7 +25,7 @@ export interface UsageLogEntry {
   agentName: null | string
   durationSeconds: null | number
   id: string
-  modelIdentifier: string
+  modelIdentifiers: string[]
   status: 'COMPLETED' | 'FAILED' | 'IDLE' | 'RUNNING' | null
   timestamp: string
   totalSpend: number

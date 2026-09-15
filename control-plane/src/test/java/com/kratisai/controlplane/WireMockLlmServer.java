@@ -87,6 +87,12 @@ public final class WireMockLlmServer {
         return matchers.stream().mapToInt(HttpRequestMatcher::getMatchCount).sum();
     }
 
+    public int countPostRequests(String path) {
+        return wireMockServer
+                .findAll(WireMock.postRequestedFor(WireMock.urlEqualTo(path)))
+                .size();
+    }
+
     public String getBaseUrl() {
         return baseUrl;
     }

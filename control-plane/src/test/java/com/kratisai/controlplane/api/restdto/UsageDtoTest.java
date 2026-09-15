@@ -1,12 +1,18 @@
 package com.kratisai.controlplane.api.restdto;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
+// The null-rejection test deliberately passes null to a record whose
+// parameters are non-null, which SpotBugs flags as NP_NULL_PARAM_DEREF_NONVIRTUAL.
+@SuppressFBWarnings("NP_NULL_PARAM_DEREF_NONVIRTUAL")
 class UsageDtoTest {
 
     @Test
@@ -20,7 +26,7 @@ class UsageDtoTest {
                 "Agent",
                 SandboxExecutionStatus.COMPLETED,
                 "user@example.com",
-                "gpt-4o",
+                Set.of("gpt-4o"),
                 "EXECUTION",
                 100L,
                 0.05);
@@ -31,10 +37,44 @@ class UsageDtoTest {
         assertThat(dto.agentName()).isEqualTo("Agent");
         assertThat(dto.status()).isEqualTo(SandboxExecutionStatus.COMPLETED);
         assertThat(dto.userEmail()).isEqualTo("user@example.com");
-        assertThat(dto.modelIdentifier()).isEqualTo("gpt-4o");
+        assertThat(dto.modelIdentifiers()).containsExactly("gpt-4o");
         assertThat(dto.usageType()).isEqualTo("EXECUTION");
         assertThat(dto.totalTokens()).isEqualTo(100L);
         assertThat(dto.totalSpend()).isEqualTo(0.05);
+    }
+
+    @Test
+    void usageLogEntryDto_sortsModelIdentifiersCaseInsensitively() {
+        UsageLogEntryDto dto = new UsageLogEntryDto(
+                "id-2",
+                Instant.now(),
+                null,
+                "Ingestion",
+                "Ingestion Worker",
+                SandboxExecutionStatus.COMPLETED,
+                "system@kratis.ai",
+                Set.of("text-embedding-3-small", "gpt-4o"),
+                "INGESTION",
+                500L,
+                0.01);
+        assertThat(dto.modelIdentifiers()).containsExactly("gpt-4o", "text-embedding-3-small");
+    }
+
+    @Test
+    void usageLogEntryDto_rejectsNullModelIdentifiers() {
+        assertThatThrownBy(() -> new UsageLogEntryDto(
+                        "id-3",
+                        Instant.now(),
+                        null,
+                        "Ingestion",
+                        "Ingestion Worker",
+                        SandboxExecutionStatus.COMPLETED,
+                        "system@kratis.ai",
+                        null,
+                        "INGESTION",
+                        0L,
+                        0.0))
+                .isInstanceOf(NullPointerException.class);
     }
 
     @Test

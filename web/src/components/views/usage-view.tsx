@@ -404,8 +404,15 @@ export function UsageView() {
 
                         {/* 4. Model */}
                         <td>
-                          <div className="text-muted-foreground bg-muted/50 w-fit rounded px-2 py-0.5 font-mono text-sm text-xs">
-                            {entry.modelIdentifier}
+                          <div className="flex flex-wrap gap-1">
+                            {entry.modelIdentifiers.map((model) => (
+                              <div
+                                className="text-muted-foreground bg-muted/50 w-fit rounded px-2 py-0.5 font-mono text-sm text-xs"
+                                key={model}
+                              >
+                                {model}
+                              </div>
+                            ))}
                           </div>
                         </td>
 

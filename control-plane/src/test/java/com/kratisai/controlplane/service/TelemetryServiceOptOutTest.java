@@ -26,6 +26,7 @@ class TelemetryServiceOptOutTest {
     private ChatRepository chatRepository;
     private ChatUsageSessionRepository chatUsageSessionRepository;
     private IngestionBatchRepository ingestionBatchRepository;
+    private IngestionModelUsageRepository ingestionModelUsageRepository;
     private SandboxExecutionRepository sandboxExecutionRepository;
     private PostHogClient postHogClient;
 
@@ -37,6 +38,7 @@ class TelemetryServiceOptOutTest {
         chatRepository = mock(ChatRepository.class);
         chatUsageSessionRepository = mock(ChatUsageSessionRepository.class);
         ingestionBatchRepository = mock(IngestionBatchRepository.class);
+        ingestionModelUsageRepository = mock(IngestionModelUsageRepository.class);
         sandboxExecutionRepository = mock(SandboxExecutionRepository.class);
         postHogClient = mock(PostHogClient.class);
     }
@@ -50,6 +52,7 @@ class TelemetryServiceOptOutTest {
                 chatRepository,
                 chatUsageSessionRepository,
                 ingestionBatchRepository,
+                ingestionModelUsageRepository,
                 sandboxExecutionRepository,
                 postHogClient);
     }
@@ -69,6 +72,7 @@ class TelemetryServiceOptOutTest {
                 chatRepository,
                 chatUsageSessionRepository,
                 ingestionBatchRepository,
+                ingestionModelUsageRepository,
                 sandboxExecutionRepository,
                 postHogClient);
     }
@@ -88,6 +92,7 @@ class TelemetryServiceOptOutTest {
                 chatRepository,
                 chatUsageSessionRepository,
                 ingestionBatchRepository,
+                ingestionModelUsageRepository,
                 sandboxExecutionRepository,
                 postHogClient);
     }
@@ -108,6 +113,7 @@ class TelemetryServiceOptOutTest {
                 chatRepository,
                 chatUsageSessionRepository,
                 ingestionBatchRepository,
+                ingestionModelUsageRepository,
                 sandboxExecutionRepository,
                 postHogClient);
     }
@@ -132,7 +138,7 @@ class TelemetryServiceOptOutTest {
         when(chatRepository.count()).thenReturn(11L);
         when(chatUsageSessionRepository.sumTotalSpend()).thenReturn(4.56789);
         when(ingestionBatchRepository.count()).thenReturn(7L);
-        when(ingestionBatchRepository.sumTotalSpend()).thenReturn(0.0001);
+        when(ingestionModelUsageRepository.sumTotalSpend()).thenReturn(0.0001);
         when(sandboxExecutionRepository.count()).thenReturn(42L);
         when(sandboxExecutionRepository.sumTotalSpend()).thenReturn(12.34567);
 

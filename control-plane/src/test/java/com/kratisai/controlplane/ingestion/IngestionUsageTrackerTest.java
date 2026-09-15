@@ -12,8 +12,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.chat.metadata.Usage;
-import org.springframework.ai.chat.model.MessageAggregator;
 
 class IngestionUsageTrackerTest {
 
@@ -22,52 +20,6 @@ class IngestionUsageTrackerTest {
     @BeforeEach
     void setUp() {
         tracker = new IngestionUsageTracker();
-    }
-
-    @Test
-    void recordTokens_accumulatesAcrossCalls() {
-        UUID batchId = UUID.randomUUID();
-
-        tracker.recordTokens(batchId, usage(100, 50, 150));
-        tracker.recordTokens(batchId, usage(200, 100, 300));
-
-        Optional<IngestionUsageTracker.Counters> counters = tracker.snapshotAndClear(batchId);
-
-        assertThat(counters).isPresent();
-        assertThat(counters.get().promptTokens()).isEqualTo(300);
-        assertThat(counters.get().completionTokens()).isEqualTo(150);
-        assertThat(counters.get().totalTokens()).isEqualTo(450);
-        assertThat(counters.get().toolCalls()).isZero();
-    }
-
-    @Test
-    void recordTokens_nullUsage_shouldBeIgnored() {
-        UUID batchId = UUID.randomUUID();
-
-        tracker.recordTokens(batchId, null);
-
-        assertThat(tracker.snapshotAndClear(batchId)).isEmpty();
-    }
-
-    @Test
-    void recordTokens_zeroValueUsage_shouldBeIgnored() {
-        UUID batchId = UUID.randomUUID();
-
-        tracker.recordTokens(batchId, usage(0, 0, 0));
-
-        assertThat(tracker.snapshotAndClear(batchId)).isEmpty();
-    }
-
-    @Test
-    void recordTokens_totalDerivedWhenTotalMissing() {
-        UUID batchId = UUID.randomUUID();
-
-        tracker.recordTokens(batchId, usage(100, 50, null));
-
-        Optional<IngestionUsageTracker.Counters> counters = tracker.snapshotAndClear(batchId);
-
-        assertThat(counters).isPresent();
-        assertThat(counters.get().totalTokens()).isEqualTo(150);
     }
 
     @Test
@@ -81,7 +33,6 @@ class IngestionUsageTrackerTest {
 
         assertThat(counters).isPresent();
         assertThat(counters.get().toolCalls()).isEqualTo(5);
-        assertThat(counters.get().totalTokens()).isZero();
     }
 
     @Test
@@ -116,21 +67,21 @@ class IngestionUsageTrackerTest {
         UUID batchA = UUID.randomUUID();
         UUID batchB = UUID.randomUUID();
 
-        tracker.recordTokens(batchA, usage(10, 10, 20));
+        tracker.recordToolCalls(batchA, 3);
         tracker.recordToolCalls(batchB, 4);
 
         assertThat(tracker.snapshotAndClear(batchA))
                 .get()
-                .extracting(IngestionUsageTracker.Counters::totalTokens, IngestionUsageTracker.Counters::toolCalls)
-                .containsExactly(20L, 0L);
+                .extracting(IngestionUsageTracker.Counters::toolCalls)
+                .isEqualTo(3L);
         assertThat(tracker.snapshotAndClear(batchB))
                 .get()
-                .extracting(IngestionUsageTracker.Counters::totalTokens, IngestionUsageTracker.Counters::toolCalls)
-                .containsExactly(0L, 4L);
+                .extracting(IngestionUsageTracker.Counters::toolCalls)
+                .isEqualTo(4L);
     }
 
     @Test
-    void recordTokens_isThreadSafe() throws Exception {
+    void recordToolCalls_isThreadSafe() throws Exception {
         UUID batchId = UUID.randomUUID();
         int threads = 8;
         int callsPerThread = 250;
@@ -145,7 +96,6 @@ class IngestionUsageTrackerTest {
                 try {
                     start.await();
                     for (int j = 0; j < callsPerThread; j++) {
-                        tracker.recordTokens(batchId, usage(1, 1, 2));
                         tracker.recordToolCalls(batchId, 1);
                     }
                 } catch (InterruptedException e) {
@@ -161,27 +111,12 @@ class IngestionUsageTrackerTest {
 
         Optional<IngestionUsageTracker.Counters> counters = tracker.snapshotAndClear(batchId);
         assertThat(counters).isPresent();
-        long expected = (long) threads * callsPerThread;
-        assertThat(counters.get().promptTokens()).isEqualTo(expected);
-        assertThat(counters.get().completionTokens()).isEqualTo(expected);
-        assertThat(counters.get().totalTokens()).isEqualTo(2 * expected);
-        assertThat(counters.get().toolCalls()).isEqualTo(expected);
+        assertThat(counters.get().toolCalls()).isEqualTo((long) threads * callsPerThread);
         assertThat(failure.get()).isNull();
     }
 
     @Test
     void counters_rejectsNegativeValues() {
-        assertThatThrownBy(() -> new IngestionUsageTracker.Counters(-1, 0, 0, 0))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new IngestionUsageTracker.Counters(0, -1, 0, 0))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new IngestionUsageTracker.Counters(0, 0, -1, 0))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new IngestionUsageTracker.Counters(0, 0, 0, -1))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    private static Usage usage(Integer prompt, Integer completion, Integer total) {
-        return new MessageAggregator.DefaultUsage(prompt, completion, total);
+        assertThatThrownBy(() -> new IngestionUsageTracker.Counters(-1)).isInstanceOf(IllegalArgumentException.class);
     }
 }

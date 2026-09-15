@@ -583,7 +583,13 @@ class IngestionControllerTest {
         batch.setStartedAt(Instant.now().minusSeconds(60));
         batch.setCompletedAt(Instant.now());
         batch.setStatus(IngestionStatus.SUCCESS);
-        batch.getUsage().apply(new LlmUsageSnapshot(0.0456, 2500L, 1500L, 1000L));
+        IngestionModelUsage chatUsage = new IngestionModelUsage(batch, ModelKind.CHAT, "gpt-4o", "team-chat-alias");
+        chatUsage.apply(new LlmUsageSnapshot(0.04, 2000L, 1200L, 800L));
+        batch.getModelUsage().add(chatUsage);
+        IngestionModelUsage embeddingUsage =
+                new IngestionModelUsage(batch, ModelKind.EMBEDDING, "text-embedding-3-small", "team-embed-alias");
+        embeddingUsage.apply(new LlmUsageSnapshot(0.0056, 500L, 300L, 200L));
+        batch.getModelUsage().add(embeddingUsage);
         batch.setTotalToolCalls(9L);
         ingestionBatchRepository.saveAndFlush(batch);
 

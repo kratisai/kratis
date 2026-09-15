@@ -76,6 +76,14 @@ class LiteLLMDtoTest {
         assertThat(entry.totalTokens()).isEqualTo(100L);
         assertThat(entry.promptTokens()).isEqualTo(60L);
         assertThat(entry.completionTokens()).isEqualTo(40L);
+        assertThat(entry.spend()).isNull();
+        assertThat(entry.model()).isNull();
+        assertThat(entry.modelGroup()).isNull();
+
+        SpendLogEntry priced = new SpendLogEntry(200L, 150L, 50L, 0.02, "raw-model", "model-group");
+        assertThat(priced.spend()).isEqualTo(0.02);
+        assertThat(priced.model()).isEqualTo("raw-model");
+        assertThat(priced.modelGroup()).isEqualTo("model-group");
     }
 
     @Test
@@ -83,7 +91,8 @@ class LiteLLMDtoTest {
         String row = """
                 {"request_id":"chatcmpl-abc","call_type":"acompletion","api_key":"abc123hash",
                  "spend":0.01,"total_tokens":150,"prompt_tokens":90,"completion_tokens":60,
-                 "model":"gpt-4o","user":"u1","startTime":"2026-08-23T00:00:00Z","status":"success"}""";
+                 "model":"gemini-flash-latest","model_group":"google-google-gemini-flash-latest-838d9bd6",
+                 "user":"u1","startTime":"2026-08-23T00:00:00Z","status":"success"}""";
         ObjectMapper objectMapper = new ObjectMapper();
 
         List<SpendLogEntry> rows = objectMapper.readValue("[" + row + "]", new TypeReference<List<SpendLogEntry>>() {});
@@ -92,6 +101,26 @@ class LiteLLMDtoTest {
         assertThat(rows.getFirst().totalTokens()).isEqualTo(150L);
         assertThat(rows.getFirst().promptTokens()).isEqualTo(90L);
         assertThat(rows.getFirst().completionTokens()).isEqualTo(60L);
+        assertThat(rows.getFirst().spend()).isEqualTo(0.01);
+        assertThat(rows.getFirst().model()).isEqualTo("gemini-flash-latest");
+        assertThat(rows.getFirst().modelGroup()).isEqualTo("google-google-gemini-flash-latest-838d9bd6");
+    }
+
+    @Test
+    void spendLogEntry_toleratesLegacyRowsWithoutModelFields() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        List<SpendLogEntry> rows = objectMapper.readValue(
+                "[{\"total_tokens\":10,\"prompt_tokens\":8,\"completion_tokens\":2}]",
+                new TypeReference<List<SpendLogEntry>>() {});
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().totalTokens()).isEqualTo(10L);
+        assertThat(rows.getFirst().promptTokens()).isEqualTo(8L);
+        assertThat(rows.getFirst().completionTokens()).isEqualTo(2L);
+        assertThat(rows.getFirst().spend()).isNull();
+        assertThat(rows.getFirst().model()).isNull();
+        assertThat(rows.getFirst().modelGroup()).isNull();
     }
 
     @Test

@@ -4,7 +4,10 @@ import com.kratisai.controlplane.client.litellm.LiteLLMClient;
 import com.kratisai.controlplane.client.litellm.LiteLLMDto.*;
 import com.kratisai.controlplane.model.LlmUsageSnapshot;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -98,8 +101,46 @@ public class VirtualKeyService {
         return new LlmUsageSnapshot(spend, totalTokens, promptTokens, completionTokens);
     }
 
+    public Map<String, LlmUsageSnapshot> fetchUsageByModel(String virtualKeyToken) {
+        logger.debug("Fetching usage by model for virtual key token");
+        Map<String, List<SpendLogEntry>> rowsByAlias = new LinkedHashMap<>();
+        for (SpendLogEntry entry : liteLLMClient.spendLogs(virtualKeyToken)) {
+            String alias =
+                    entry.modelGroup() != null && !entry.modelGroup().isBlank() ? entry.modelGroup() : entry.model();
+            if (alias == null || alias.isBlank()) {
+                continue;
+            }
+            rowsByAlias.computeIfAbsent(alias, key -> new ArrayList<>()).add(entry);
+        }
+        Map<String, LlmUsageSnapshot> usageByAlias = new LinkedHashMap<>();
+        for (Map.Entry<String, List<SpendLogEntry>> group : rowsByAlias.entrySet()) {
+            List<SpendLogEntry> rows = group.getValue();
+            usageByAlias.put(
+                    group.getKey(),
+                    new LlmUsageSnapshot(
+                            rows.stream()
+                                    .mapToDouble(row -> orZero(row.spend()))
+                                    .sum(),
+                            rows.stream()
+                                    .mapToLong(row -> orZero(row.totalTokens()))
+                                    .sum(),
+                            rows.stream()
+                                    .mapToLong(row -> orZero(row.promptTokens()))
+                                    .sum(),
+                            rows.stream()
+                                    .mapToLong(row -> orZero(row.completionTokens()))
+                                    .sum()));
+        }
+        logger.debug("Fetched usage by model for {} model group(s)", usageByAlias.size());
+        return usageByAlias;
+    }
+
     private static long orZero(Long value) {
         return value != null ? value : 0L;
+    }
+
+    private static double orZero(Double value) {
+        return value != null ? value : 0.0;
     }
 
     // deleteKey returns a response the client already validates by throwing on HTTP errors.

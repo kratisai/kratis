@@ -1,5 +1,5 @@
 import { Settings } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import type { TeamDto } from '@/types/auth-types'
 
@@ -18,6 +18,11 @@ export function TeamGeneralSettings({ isOwner, team }: TeamGeneralSettingsProps)
   const updateTeam = useUpdateTeam()
   const [name, setName] = useState(team.name)
   const [description, setDescription] = useState(team.description ?? '')
+
+  useEffect(() => {
+    setName(team.name)
+    setDescription(team.description ?? '')
+  }, [team.description, team.id, team.name])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()

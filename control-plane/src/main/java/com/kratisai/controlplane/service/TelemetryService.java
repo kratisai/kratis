@@ -32,6 +32,7 @@ public class TelemetryService {
     private final ChatRepository chatRepository;
     private final ChatUsageSessionRepository chatUsageSessionRepository;
     private final IngestionBatchRepository ingestionBatchRepository;
+    private final IngestionModelUsageRepository ingestionModelUsageRepository;
     private final SandboxExecutionRepository sandboxExecutionRepository;
     private final PostHogClient postHogClient;
 
@@ -43,6 +44,7 @@ public class TelemetryService {
             ChatRepository chatRepository,
             ChatUsageSessionRepository chatUsageSessionRepository,
             IngestionBatchRepository ingestionBatchRepository,
+            IngestionModelUsageRepository ingestionModelUsageRepository,
             SandboxExecutionRepository sandboxExecutionRepository,
             PostHogClient postHogClient) {
         this.properties = properties;
@@ -52,6 +54,7 @@ public class TelemetryService {
         this.chatRepository = chatRepository;
         this.chatUsageSessionRepository = chatUsageSessionRepository;
         this.ingestionBatchRepository = ingestionBatchRepository;
+        this.ingestionModelUsageRepository = ingestionModelUsageRepository;
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.postHogClient = postHogClient;
     }
@@ -81,7 +84,7 @@ public class TelemetryService {
         stats.put("planning_topic_count", chatRepository.count());
         stats.put("planning_cost", round4(chatUsageSessionRepository.sumTotalSpend()));
         stats.put("ingestion_job_count", ingestionBatchRepository.count());
-        stats.put("ingestion_cost", round4(ingestionBatchRepository.sumTotalSpend()));
+        stats.put("ingestion_cost", round4(ingestionModelUsageRepository.sumTotalSpend()));
         stats.put("execution_count", sandboxExecutionRepository.count());
         stats.put("execution_cost", round4(sandboxExecutionRepository.sumTotalSpend()));
         return stats;

@@ -455,13 +455,10 @@ class PatternResearchServiceTest {
         AssistantMessage toolCallMessage =
                 AssistantMessage.builder().toolCalls(List.of(toolCall)).build();
 
-        fakeChatModel.addMatcher(PromptMatcher.builder()
-                .response(toolCallMessage)
-                .usage(new org.springframework.ai.chat.model.MessageAggregator.DefaultUsage(120, 60, 180))
-                .maxMatches(1)
-                .build());
-        fakeChatModel.addMatcher(PromptMatcher.builder()
-                .response("""
+        fakeChatModel.addMatcher(
+                PromptMatcher.builder().response(toolCallMessage).maxMatches(1).build());
+        fakeChatModel.addMatcher(
+                PromptMatcher.builder().response("""
                         [
                           {
                             "name": "MVC Architecture",
@@ -469,10 +466,7 @@ class PatternResearchServiceTest {
                             "exemplarPaths": ["src/main/java/com/example/UserController.java"]
                           }
                         ]
-                        """)
-                .usage(new org.springframework.ai.chat.model.MessageAggregator.DefaultUsage(80, 40, 120))
-                .maxMatches(1)
-                .build());
+                        """).maxMatches(1).build());
 
         patternResearchService.researchPatterns(batch);
 

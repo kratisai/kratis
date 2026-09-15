@@ -1,9 +1,21 @@
 package com.kratisai.controlplane.ingestion.parse;
 
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
-import com.kratisai.controlplane.ingestion.IngestionUsageTracker;
-import com.kratisai.controlplane.model.*;
-import com.kratisai.controlplane.repository.*;
+import com.kratisai.controlplane.model.CtxDimension;
+import com.kratisai.controlplane.model.CtxEdge;
+import com.kratisai.controlplane.model.CtxNode;
+import com.kratisai.controlplane.model.CtxNodeDimension;
+import com.kratisai.controlplane.model.DimensionCategory;
+import com.kratisai.controlplane.model.IngestionBatch;
+import com.kratisai.controlplane.model.IngestionModelUsage;
+import com.kratisai.controlplane.model.ModelKind;
+import com.kratisai.controlplane.model.ModelProvider;
+import com.kratisai.controlplane.model.NodeType;
+import com.kratisai.controlplane.model.Team;
+import com.kratisai.controlplane.repository.CtxDimensionRepository;
+import com.kratisai.controlplane.repository.CtxEdgeRepository;
+import com.kratisai.controlplane.repository.CtxNodeDimensionRepository;
+import com.kratisai.controlplane.repository.CtxNodeRepository;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
@@ -43,7 +55,6 @@ public class DimensionDiscoveryService {
     private final ChatModelFactory chatModelFactory;
     private final LiteLLMProvisioningService litellmProvisioningService;
     private final IngestionBatchLogService ingestionBatchLogService;
-    private final IngestionUsageTracker usageTracker;
     private final TreeHelper treeHelper;
     private final String baseCloneDir;
 
@@ -55,7 +66,6 @@ public class DimensionDiscoveryService {
             ChatModelFactory chatModelFactory,
             LiteLLMProvisioningService litellmProvisioningService,
             IngestionBatchLogService ingestionBatchLogService,
-            IngestionUsageTracker usageTracker,
             TreeHelper treeHelper,
             @Value("${kratis.ingestion.clone-dir:${java.io.tmpdir}/kratis-ingest}") String baseCloneDir) {
         this.ctxNodeRepository = ctxNodeRepository;
@@ -65,7 +75,6 @@ public class DimensionDiscoveryService {
         this.chatModelFactory = chatModelFactory;
         this.litellmProvisioningService = litellmProvisioningService;
         this.ingestionBatchLogService = ingestionBatchLogService;
-        this.usageTracker = usageTracker;
         this.treeHelper = treeHelper;
         this.baseCloneDir = baseCloneDir;
     }
@@ -75,19 +84,14 @@ public class DimensionDiscoveryService {
         ModelProvider modelProvider = team.getIngestionProvider();
         String modelName = team.getIngestionModel();
         String litellmModelName = litellmProvisioningService.buildLiteLLMModelName(modelProvider, modelName);
-        String virtualKey = batch.getUsage().getVirtualKey();
+        String virtualKey = batch.modelUsageFor(ModelKind.CHAT)
+                .map(IngestionModelUsage::getVirtualKey)
+                .orElse(null);
         return chatModelFactory.createChatModelViaLiteLLM(modelProvider, litellmModelName, virtualKey, false);
     }
 
-    // ChatResponse.getMetadata() and Generation.getOutput() are contractually non-null in
-    // Spring AI (JSpecify-annotated, defaulted via requireNonNullElse); SpotBugs cannot see
-    // those contracts and assumes nullable.
-    @SuppressFBWarnings("NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE")
-    private static void recordTokensIfPresent(
-            IngestionUsageTracker usageTracker, IngestionBatch batch, ChatResponse response) {
-        usageTracker.recordTokens(batch.getId(), response.getMetadata().getUsage());
-    }
-
+    // Generation.getOutput() is contractually non-null in Spring AI (JSpecify-annotated,
+    // defaulted via requireNonNullElse); SpotBugs cannot see those contracts and assumes nullable.
     @SuppressFBWarnings("NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE")
     private static String responseText(ChatResponse response) {
         var result = response.getResult();
@@ -258,7 +262,6 @@ public class DimensionDiscoveryService {
             if (shot1Response == null) {
                 throw new DimensionDiscoveryException("LLM returned null response on first shot", null);
             }
-            recordTokensIfPresent(usageTracker, batch, shot1Response);
             String response1 = responseText(shot1Response);
             if (response1 == null) {
                 throw new DimensionDiscoveryException("LLM returned null response on first shot", null);
@@ -322,7 +325,6 @@ public class DimensionDiscoveryService {
                 if (shot2Response == null) {
                     throw new DimensionDiscoveryException("LLM returned null response on second shot", null);
                 }
-                recordTokensIfPresent(usageTracker, batch, shot2Response);
                 String response2 = responseText(shot2Response);
                 if (response2 == null) {
                     throw new DimensionDiscoveryException("LLM returned null response on second shot", null);

@@ -1,5 +1,5 @@
 import { Cpu } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import type { TeamDto } from '@/types/auth-types'
 
@@ -21,6 +21,19 @@ export function ModelDefaultsSettings({ isOwner, team }: ModelDefaultsSettingsPr
   const [ingestionModel, setIngestionModel] = useState(team.ingestionModel ?? '')
   const [embeddingProvider, setEmbeddingProvider] = useState(team.embeddingProvider ?? '')
   const [embeddingModel, setEmbeddingModel] = useState(team.embeddingModel ?? '')
+
+  useEffect(() => {
+    setIngestionProvider(team.ingestionProvider ?? '')
+    setIngestionModel(team.ingestionModel ?? '')
+    setEmbeddingProvider(team.embeddingProvider ?? '')
+    setEmbeddingModel(team.embeddingModel ?? '')
+  }, [
+    team.embeddingModel,
+    team.embeddingProvider,
+    team.id,
+    team.ingestionModel,
+    team.ingestionProvider,
+  ])
 
   const { data: discoveredEmbeddingModels = [], isLoading: isLoadingEmbeddingModels } =
     useDiscoverModels(embeddingProvider || null)

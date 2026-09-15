@@ -1,0 +1,63 @@
+databaseChangeLog:
+- changeSet:
+    id: 005-ingestion-usage-per-model
+    author: kratis
+    changes:
+    # Align ingestion_model_usage with the tracker (virtual_key, usage_last_updated_at) so
+    # batches no longer need the aggregate usage columns on ingestion_batches.
+    - addColumn:
+        tableName: ingestion_model_usage
+        columns:
+        - column:
+            name: virtual_key
+            type: TEXT
+        - column:
+            name: usage_last_updated_at
+            type: TIMESTAMP WITH TIME ZONE
+    # Backfill one CHAT and one EMBEDDING row per pre-existing batch. Identifiers come
+    # from the owning team's current configuration (the aliases LiteLLM registered for
+    # those models embed the team id, so current config matches historical rows).
+    - sql:
+        sql: >-
+          INSERT INTO ingestion_model_usage (id, batch_id, model_kind, model_identifier,
+          litellm_alias, virtual_key, total_spend, total_tokens, prompt_tokens,
+          completion_tokens, usage_last_updated_at)
+          SELECT gen_random_uuid(), b.id, 'CHAT', COALESCE(t.ingestion_model, 'unknown'),
+          b.virtual_key, b.virtual_key, 0.0, COALESCE(b.total_tokens, 0), COALESCE(b.prompt_tokens, 0),
+          COALESCE(b.completion_tokens, 0), b.usage_last_updated_at
+          FROM ingestion_batches b
+          JOIN repositories r ON r.id = b.repository_id
+          JOIN teams t ON t.id = r.team_id
+          WHERE NOT EXISTS (SELECT 1 FROM ingestion_model_usage mu WHERE mu.batch_id = b.id)
+        dbms: postgresql
+    - sql:
+        sql: >-
+          INSERT INTO ingestion_model_usage (id, batch_id, model_kind, model_identifier,
+          litellm_alias, virtual_key, total_spend, total_tokens, prompt_tokens,
+          completion_tokens, usage_last_updated_at)
+          SELECT gen_random_uuid(), b.id, 'EMBEDDING', COALESCE(t.embedding_model, 'unknown'),
+          b.virtual_key, b.virtual_key, COALESCE(b.total_spend, 0.0), 0, 0, 0, b.usage_last_updated_at
+          FROM ingestion_batches b
+          JOIN repositories r ON r.id = b.repository_id
+          JOIN teams t ON t.id = r.team_id
+          WHERE NOT EXISTS (SELECT 1 FROM ingestion_model_usage mu
+          WHERE mu.batch_id = b.id AND mu.model_kind = 'EMBEDDING')
+        dbms: postgresql
+    - dropColumn:
+        tableName: ingestion_batches
+        columnName: virtual_key
+    - dropColumn:
+        tableName: ingestion_batches
+        columnName: total_spend
+    - dropColumn:
+        tableName: ingestion_batches
+        columnName: total_tokens
+    - dropColumn:
+        tableName: ingestion_batches
+        columnName: prompt_tokens
+    - dropColumn:
+        tableName: ingestion_batches
+        columnName: completion_tokens
+    - dropColumn:
+        tableName: ingestion_batches
+        columnName: usage_last_updated_at

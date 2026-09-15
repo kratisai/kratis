@@ -11,6 +11,8 @@ import com.kratisai.controlplane.ingestion.ReadFileTool;
 import com.kratisai.controlplane.ingestion.ReadWikiPageTool;
 import com.kratisai.controlplane.ingestion.WriteWikiPageTool;
 import com.kratisai.controlplane.model.IngestionBatch;
+import com.kratisai.controlplane.model.IngestionModelUsage;
+import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.service.ChatModelFactory;
@@ -89,7 +91,9 @@ public class WikiGenerationService {
         ModelProvider modelProvider = team.getIngestionProvider();
         String modelName = team.getIngestionModel();
         String litellmModelName = litellmProvisioningService.buildLiteLLMModelName(modelProvider, modelName);
-        String virtualKey = batch.getUsage().getVirtualKey();
+        String virtualKey = batch.modelUsageFor(ModelKind.CHAT)
+                .map(IngestionModelUsage::getVirtualKey)
+                .orElse(null);
         return ChatClient.builder(
                         chatModelFactory.createChatModelViaLiteLLM(modelProvider, litellmModelName, virtualKey, false))
                 .build();

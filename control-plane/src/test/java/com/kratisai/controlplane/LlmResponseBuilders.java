@@ -846,6 +846,7 @@ public final class LlmResponseBuilders {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("id", "chatcmpl-" + UUID.randomUUID().toString().substring(0, 8));
         root.put("object", "chat.completion");
+        root.put("created", System.currentTimeMillis() / 1000);
         root.put("model", "gpt-4o");
 
         ObjectNode usage = objectMapper.createObjectNode();

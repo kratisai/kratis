@@ -6,8 +6,6 @@ import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
-import org.springframework.ai.chat.metadata.ChatResponseMetadata;
-import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -60,7 +58,6 @@ public final class PromptMatcher {
         private Function<Prompt, List<ChatResponse>> responseSupplier =
                 p -> List.of(new ChatResponse(List.of(new Generation(new AssistantMessage("{}")))));
         private int maxMatches = Integer.MAX_VALUE;
-        private Usage usage;
 
         public Builder condition(Predicate<Prompt> condition) {
             this.condition = condition;
@@ -149,20 +146,7 @@ public final class PromptMatcher {
             return this;
         }
 
-        public Builder usage(Usage usage) {
-            this.usage = usage;
-            return this;
-        }
-
         public PromptMatcher build() {
-            if (this.usage != null) {
-                ChatResponseMetadata metadata =
-                        ChatResponseMetadata.builder().usage(this.usage).build();
-                Function<Prompt, List<ChatResponse>> baseSupplier = this.responseSupplier;
-                this.responseSupplier = p -> baseSupplier.apply(p).stream()
-                        .map(r -> new ChatResponse(r.getResults(), metadata))
-                        .toList();
-            }
             return new PromptMatcher(this);
         }
     }

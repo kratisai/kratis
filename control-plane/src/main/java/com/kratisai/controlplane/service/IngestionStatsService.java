@@ -3,7 +3,12 @@ package com.kratisai.controlplane.service;
 import com.kratisai.controlplane.api.restdto.ArchitecturePatternDto;
 import com.kratisai.controlplane.api.restdto.DimensionStatDto;
 import com.kratisai.controlplane.api.restdto.IngestionBatchStatsDto;
-import com.kratisai.controlplane.model.*;
+import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.DimensionCategory;
+import com.kratisai.controlplane.model.IngestionBatch;
+import com.kratisai.controlplane.model.IngestionModelUsage;
+import com.kratisai.controlplane.model.NodeType;
+import com.kratisai.controlplane.model.RelationType;
 import com.kratisai.controlplane.repository.*;
 import java.time.Instant;
 import java.util.*;
@@ -98,18 +103,30 @@ public class IngestionStatsService {
                         .collect(Collectors.toList());
 
         // Get LiteLLM usage stats recorded when the ingestion completed
-        LlmUsage usage = batch.getUsage();
+        List<IngestionModelUsage> modelUsage = batch.getModelUsage();
         Double totalSpend = null;
         Long totalTokens = null;
         Long promptTokens = null;
         Long completionTokens = null;
         Long totalToolCalls = null;
-        Instant usageLastUpdatedAt = usage.getUsageLastUpdatedAt();
+        Instant usageLastUpdatedAt = modelUsage.stream()
+                .map(IngestionModelUsage::getUsageLastUpdatedAt)
+                .filter(Objects::nonNull)
+                .max(Instant::compareTo)
+                .orElse(null);
         if (usageLastUpdatedAt != null) {
-            totalSpend = usage.getTotalSpend();
-            totalTokens = usage.getTotalTokens();
-            promptTokens = usage.getPromptTokens();
-            completionTokens = usage.getCompletionTokens();
+            totalSpend = modelUsage.stream()
+                    .mapToDouble(usage -> usage.getTotalSpend() != null ? usage.getTotalSpend() : 0.0)
+                    .sum();
+            totalTokens = modelUsage.stream()
+                    .mapToLong(usage -> usage.getTotalTokens() != null ? usage.getTotalTokens() : 0L)
+                    .sum();
+            promptTokens = modelUsage.stream()
+                    .mapToLong(usage -> usage.getPromptTokens() != null ? usage.getPromptTokens() : 0L)
+                    .sum();
+            completionTokens = modelUsage.stream()
+                    .mapToLong(usage -> usage.getCompletionTokens() != null ? usage.getCompletionTokens() : 0L)
+                    .sum();
         }
         if (batch.getTotalToolCalls() != null) {
             totalToolCalls = batch.getTotalToolCalls();

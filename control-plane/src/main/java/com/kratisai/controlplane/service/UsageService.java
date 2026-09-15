@@ -2,11 +2,23 @@ package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.api.restdto.UsageLogEntryDto;
 import com.kratisai.controlplane.api.restdto.UsageSummaryDto;
-import com.kratisai.controlplane.model.*;
-import com.kratisai.controlplane.repository.*;
+import com.kratisai.controlplane.model.ChatEntity;
+import com.kratisai.controlplane.model.ChatUsageSession;
+import com.kratisai.controlplane.model.IngestionBatch;
+import com.kratisai.controlplane.model.IngestionModelUsage;
+import com.kratisai.controlplane.model.IngestionStatus;
+import com.kratisai.controlplane.model.SandboxExecution;
+import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.repository.ChatRepository;
+import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
+import com.kratisai.controlplane.repository.IngestionBatchRepository;
+import com.kratisai.controlplane.repository.IngestionModelUsageRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionRepository;
+import com.kratisai.controlplane.repository.TeamMemberRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -28,18 +40,21 @@ public class UsageService {
     private final IngestionBatchRepository ingestionBatchRepository;
     private final ChatRepository chatRepository;
     private final ChatUsageSessionRepository chatUsageSessionRepository;
+    private final IngestionModelUsageRepository ingestionModelUsageRepository;
 
     public UsageService(
             TeamMemberRepository teamMemberRepository,
             SandboxExecutionRepository sandboxExecutionRepository,
             IngestionBatchRepository ingestionBatchRepository,
             ChatRepository chatRepository,
-            ChatUsageSessionRepository chatUsageSessionRepository) {
+            ChatUsageSessionRepository chatUsageSessionRepository,
+            IngestionModelUsageRepository ingestionModelUsageRepository) {
         this.teamMemberRepository = teamMemberRepository;
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.ingestionBatchRepository = ingestionBatchRepository;
         this.chatRepository = chatRepository;
         this.chatUsageSessionRepository = chatUsageSessionRepository;
+        this.ingestionModelUsageRepository = ingestionModelUsageRepository;
     }
 
     private void validateMembership(UUID userId, UUID teamId) {
@@ -93,7 +108,10 @@ public class UsageService {
                 .toList();
 
         for (SandboxExecution exec : executions) {
-            String modelId = exec.getModelName() != null ? exec.getModelName() : "default";
+            Set<String> models =
+                    exec.getModelName() != null && !exec.getModelName().isBlank()
+                            ? Set.of(exec.getModelName())
+                            : Set.of("default");
             String agentName = exec.getHarness() != null ? exec.getHarness().getName() : "OpenCode";
             String userEmail = exec.getChat() != null && exec.getChat().getUser() != null
                     ? exec.getChat().getUser().getEmail()
@@ -116,7 +134,7 @@ public class UsageService {
                     agentName,
                     exec.getStatus(),
                     userEmail,
-                    modelId,
+                    models,
                     "EXECUTION",
                     exec.getTotalTokens() != null ? exec.getTotalTokens() : 0L,
                     exec.getTotalSpend() != null ? exec.getTotalSpend() : 0.0));
@@ -147,6 +165,10 @@ public class UsageService {
             } else if (batch.getStatus() == IngestionStatus.PROCESSING || batch.getStatus() == IngestionStatus.QUEUED) {
                 status = SandboxExecutionStatus.RUNNING;
             }
+            Set<String> models = batch.getModelUsage().stream()
+                    .map(IngestionModelUsage::getModelIdentifier)
+                    .filter(identifier -> identifier != null && !identifier.isBlank())
+                    .collect(Collectors.toCollection(() -> new TreeSet<>(String.CASE_INSENSITIVE_ORDER)));
 
             allEntries.add(new UsageLogEntryDto(
                     "ingest-" + batch.getId(),
@@ -156,14 +178,14 @@ public class UsageService {
                     "Ingestion Worker",
                     status,
                     "system@kratis.ai",
-                    "embedding-model",
+                    models,
                     "INGESTION",
-                    batch.getUsage() != null && batch.getUsage().getTotalTokens() != null
-                            ? batch.getUsage().getTotalTokens()
-                            : 0L,
-                    batch.getUsage() != null && batch.getUsage().getTotalSpend() != null
-                            ? batch.getUsage().getTotalSpend()
-                            : 0.0));
+                    batch.getModelUsage().stream()
+                            .mapToLong(usage -> usage.getTotalTokens() != null ? usage.getTotalTokens() : 0L)
+                            .sum(),
+                    batch.getModelUsage().stream()
+                            .mapToDouble(usage -> usage.getTotalSpend() != null ? usage.getTotalSpend() : 0.0)
+                            .sum()));
         }
 
         // 3. Fetch Chat Usage Sessions for team
@@ -184,7 +206,10 @@ public class UsageService {
                     double spend = session.getUsage().getTotalSpend() != null
                             ? session.getUsage().getTotalSpend()
                             : 0.0;
-                    String modelIdentifier = session.getModel() != null ? session.getModel() : "unknown";
+                    Set<String> models =
+                            session.getModel() != null && !session.getModel().isBlank()
+                                    ? Set.of(session.getModel())
+                                    : Set.of("unknown");
 
                     allEntries.add(new UsageLogEntryDto(
                             "chat-session-" + session.getId(),
@@ -194,7 +219,7 @@ public class UsageService {
                             null,
                             null,
                             userEmail,
-                            modelIdentifier,
+                            models,
                             "CHAT",
                             tokens,
                             spend));
@@ -210,9 +235,7 @@ public class UsageService {
                             && !e.usageType().equalsIgnoreCase(usageType)) {
                         return false;
                     }
-                    if (model != null
-                            && !model.isBlank()
-                            && !e.modelIdentifier().equalsIgnoreCase(model)) {
+                    if (model != null && !model.isBlank() && !containsModel(e.modelIdentifiers(), model)) {
                         return false;
                     }
                     if (agent != null && !agent.isBlank()) {
@@ -240,6 +263,8 @@ public class UsageService {
         validateMembership(userId, teamId);
         Page<UsageLogEntryDto> allEntries = getUsageLogs(
                 userId, teamId, timeframe, startDate, endDate, "all", null, null, PageRequest.of(0, 10000));
+        Map<UUID, List<IngestionModelUsage>> breakdownByBatch = ingestionModelUsageByBatch(
+                teamId, computeStartTime(timeframe, startDate), endDate != null ? endDate : Instant.now());
 
         double totalCost = 0.0;
         long totalTokens = 0L;
@@ -263,14 +288,30 @@ public class UsageService {
             totalCost += entry.totalSpend();
             totalTokens += entry.totalTokens();
 
-            // Model share
-            costByModel.put(
-                    entry.modelIdentifier(),
-                    costByModel.getOrDefault(entry.modelIdentifier(), 0.0) + entry.totalSpend());
-            tokensByModel.put(
-                    entry.modelIdentifier(),
-                    tokensByModel.getOrDefault(entry.modelIdentifier(), 0L) + entry.totalTokens());
-            countByModel.put(entry.modelIdentifier(), countByModel.getOrDefault(entry.modelIdentifier(), 0L) + 1L);
+            // Per-model statistics for ingestion come from the persisted per-model rows,
+            // so each model is attributed exactly its own spend and tokens.
+            if ("INGESTION".equalsIgnoreCase(entry.usageType())) {
+                UUID batchId = UUID.fromString(entry.id().substring("ingest-".length()));
+                for (IngestionModelUsage modelUsage : breakdownByBatch.getOrDefault(batchId, List.of())) {
+                    accumulateModel(
+                            costByModel,
+                            tokensByModel,
+                            countByModel,
+                            modelUsage.getModelIdentifier(),
+                            modelUsage.getTotalSpend() != null ? modelUsage.getTotalSpend() : 0.0,
+                            modelUsage.getTotalTokens() != null ? modelUsage.getTotalTokens() : 0L);
+                }
+            } else {
+                for (String modelName : entry.modelIdentifiers()) {
+                    accumulateModel(
+                            costByModel,
+                            tokensByModel,
+                            countByModel,
+                            modelName,
+                            entry.totalSpend(),
+                            entry.totalTokens());
+                }
+            }
 
             // Agent share by time (using duration or count) - only when agentName is present
             if (entry.agentName() != null) {
@@ -331,6 +372,27 @@ public class UsageService {
         }
         list.sort((a, b) -> Double.compare(b.cost(), a.cost()));
         return list;
+    }
+
+    private static void accumulateModel(
+            Map<String, Double> costByModel,
+            Map<String, Long> tokensByModel,
+            Map<String, Long> countByModel,
+            String modelName,
+            double cost,
+            long tokens) {
+        costByModel.put(modelName, costByModel.getOrDefault(modelName, 0.0) + cost);
+        tokensByModel.put(modelName, tokensByModel.getOrDefault(modelName, 0L) + tokens);
+        countByModel.put(modelName, countByModel.getOrDefault(modelName, 0L) + 1L);
+    }
+
+    private Map<UUID, List<IngestionModelUsage>> ingestionModelUsageByBatch(UUID teamId, Instant start, Instant end) {
+        return ingestionModelUsageRepository.findByTeamIdAndStartedAtBetween(teamId, start, end).stream()
+                .collect(Collectors.groupingBy(usage -> usage.getBatch().getId()));
+    }
+
+    private static boolean containsModel(Set<String> models, String model) {
+        return models.stream().anyMatch(model::equalsIgnoreCase);
     }
 
     private static class TimeSeriesAccumulator {

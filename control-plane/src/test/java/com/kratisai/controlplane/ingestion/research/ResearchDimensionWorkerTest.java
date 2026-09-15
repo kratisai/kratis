@@ -124,7 +124,7 @@ class ResearchDimensionWorkerTest {
                 new IngestionBatchLogService.BatchLogger(batch.getId(), team.getId(), ingestionBatchLogService);
         ResearchDimensionTask task = new ResearchDimensionTask(
                 batch.getId(), team.getIngestionProvider(), team.getIngestionModel(), dimension);
-        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
+        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch.getId());
 
         assertThat(result).isNotNull();
         assertThat(result.synopsis()).contains("test dimension synopsis");
@@ -154,7 +154,7 @@ class ResearchDimensionWorkerTest {
                 new IngestionBatchLogService.BatchLogger(batch.getId(), team.getId(), ingestionBatchLogService);
         ResearchDimensionTask task = new ResearchDimensionTask(
                 batch.getId(), team.getIngestionProvider(), team.getIngestionModel(), dimension);
-        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
+        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch.getId());
 
         assertThat(result).isNotNull();
         assertThat(result.synopsis()).contains("test domain synopsis");
@@ -184,7 +184,7 @@ class ResearchDimensionWorkerTest {
                 new IngestionBatchLogService.BatchLogger(batch.getId(), team.getId(), ingestionBatchLogService);
         ResearchDimensionTask task = new ResearchDimensionTask(
                 batch.getId(), team.getIngestionProvider(), team.getIngestionModel(), dimension);
-        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
+        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch.getId());
 
         assertThat(result).isNotNull();
         assertThat(result.synopsis()).contains("test archetype synopsis");
@@ -214,7 +214,7 @@ class ResearchDimensionWorkerTest {
                 new IngestionBatchLogService.BatchLogger(batch.getId(), team.getId(), ingestionBatchLogService);
         ResearchDimensionTask task = new ResearchDimensionTask(
                 batch.getId(), team.getIngestionProvider(), team.getIngestionModel(), dimension);
-        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
+        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch.getId());
 
         assertThat(result).isNotNull();
         assertThat(result.synopsis()).contains("test cross-cutting synopsis");
@@ -244,7 +244,7 @@ class ResearchDimensionWorkerTest {
                 new IngestionBatchLogService.BatchLogger(batch.getId(), team.getId(), ingestionBatchLogService);
         ResearchDimensionTask task = new ResearchDimensionTask(
                 batch.getId(), team.getIngestionProvider(), team.getIngestionModel(), dimension);
-        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
+        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch.getId());
 
         assertThat(result).isNotNull();
         assertThat(result.synopsis()).contains("Retried successfully");
@@ -267,7 +267,7 @@ class ResearchDimensionWorkerTest {
         ResearchDimensionTask task = new ResearchDimensionTask(
                 batch.getId(), team.getIngestionProvider(), team.getIngestionModel(), dimension);
 
-        assertThatThrownBy(() -> researchDimensionWorker.research(task, batchLogger, batch))
+        assertThatThrownBy(() -> researchDimensionWorker.research(task, batchLogger, batch.getId()))
                 .isInstanceOf(IngestionPipelineAbortException.class)
                 .hasMessageContaining("Authentication/Authorization failed");
     }
@@ -288,7 +288,7 @@ class ResearchDimensionWorkerTest {
         ResearchDimensionTask task = new ResearchDimensionTask(
                 batch.getId(), team.getIngestionProvider(), team.getIngestionModel(), dimension);
 
-        assertThatThrownBy(() -> researchDimensionWorker.research(task, batchLogger, batch))
+        assertThatThrownBy(() -> researchDimensionWorker.research(task, batchLogger, batch.getId()))
                 .isInstanceOf(IngestionPipelineAbortException.class)
                 .hasMessageContaining("Unexpected HTTP client error");
     }
@@ -317,7 +317,7 @@ class ResearchDimensionWorkerTest {
                 new IngestionBatchLogService.BatchLogger(batch.getId(), team.getId(), ingestionBatchLogService);
         ResearchDimensionTask task = new ResearchDimensionTask(
                 batch.getId(), team.getIngestionProvider(), team.getIngestionModel(), dimension);
-        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch);
+        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch.getId());
 
         assertThat(result).isNotNull();
         assertThat(result.synopsis()).contains("Retried after resource access exception");
