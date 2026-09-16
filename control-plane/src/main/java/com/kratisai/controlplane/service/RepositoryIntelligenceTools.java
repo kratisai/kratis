@@ -66,7 +66,8 @@ public class RepositoryIntelligenceTools {
             List<CtxDimension> dimensions = dimensionRepository.findByBatchId(batchId);
             var dimensionDescriptions = dimensions.stream()
                     .map(dim -> {
-                        List<CtxNodeDimension> nodeDimensions = nodeDimensionRepository.findByDimensionId(dim.getId());
+                        List<CtxNodeDimension> nodeDimensions =
+                                nodeDimensionRepository.findByDimensionIdWithNode(dim.getId());
                         List<String> topFiles = nodeDimensions.stream()
                                 .sorted((a, b) -> Double.compare(
                                         b.getRankScore() != null ? b.getRankScore() : 0.0,

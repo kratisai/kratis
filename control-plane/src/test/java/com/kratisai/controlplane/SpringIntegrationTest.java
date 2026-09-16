@@ -29,6 +29,7 @@ import org.springframework.test.context.TestExecutionListeners;
 @ActiveProfiles("test")
 @TestExecutionListeners(
         listeners = {
+            InheritedTransactionContextCleanupListener.class,
             DrainExecutorsTestExecutionListener.class,
             ResetChatModelTestExecutionListener.class,
             SlowTestTimingListener.class
