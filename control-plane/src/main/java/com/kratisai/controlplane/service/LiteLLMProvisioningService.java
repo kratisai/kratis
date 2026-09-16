@@ -250,6 +250,38 @@ public class LiteLLMProvisioningService {
         }
     }
 
+    private void deleteExistingDeployments(String litellmName) {
+        Set<String> deletedIds = new HashSet<>(); // Delete each ID only once.
+        try {
+            // LiteLLM pages at 50
+            while (true) {
+                ListModelsV2Response response = liteLLMClient.listModelByName(litellmName);
+                if (response == null
+                        || response.data() == null
+                        || response.data().isEmpty()) {
+                    return;
+                }
+                int deletedThisPass = 0;
+                for (ModelConfig config : response.data()) {
+                    if (!litellmName.equals(config.modelName())
+                            || config.modelInfo() == null
+                            || config.modelInfo().id() == null
+                            || !deletedIds.add(config.modelInfo().id())) {
+                        continue;
+                    }
+                    liteLLMClient.deleteModel(
+                            new DeleteModelRequest(config.modelInfo().id()));
+                    deletedThisPass++;
+                }
+                if (deletedThisPass == 0) {
+                    return;
+                }
+            }
+        } catch (RestClientException e) {
+            logger.debug("No existing deployments for '{}' in LiteLLM: {}", litellmName, e.getMessage());
+        }
+    }
+
     private void provisionSingleModel(ModelProvider provider, ProviderModel providerModel, ModelCostLookup costLookup) {
         String modelName = providerModel.getModelName();
         ModelKind kind = providerModel.getKind();
@@ -271,16 +303,7 @@ public class LiteLLMProvisioningService {
         ModelInfo modelInfo = buildModelInfo(provider, modelName, kind, costLookup);
         AddModelRequest request = new AddModelRequest(litellmName, params, modelInfo);
 
-        // Delete existing model first to clear any cooldown state from previous failed deployments
-        // This is important for test environments where LiteLLM containers are reused
-        try {
-            liteLLMClient.deleteModel(new DeleteModelRequest(litellmName));
-            logger.debug("Deleted existing model '{}' from LiteLLM to clear cooldown state", litellmName);
-        } catch (RestClientException e) {
-            // Model doesn't exist, which is fine
-            logger.debug("Model '{}' not found in LiteLLM (expected for new models): {}", litellmName, e.getMessage());
-        }
-
+        deleteExistingDeployments(litellmName);
         logger.info(
                 "Provisioning model '{}' as '{}' (provider: {}) to LiteLLM", modelName, litellmName, litellmProvider);
         liteLLMClient.addModel(request);
@@ -290,14 +313,8 @@ public class LiteLLMProvisioningService {
     public void removeModel(ModelProvider provider) {
         for (String modelName : provider.getModelNames()) {
             String litellmName = buildLiteLLMModelName(provider, modelName);
-            try {
-                logger.info("Removing model '{}' from LiteLLM", litellmName);
-                liteLLMClient.deleteModel(new DeleteModelRequest(litellmName));
-                logger.info("Successfully removed model '{}' from LiteLLM", litellmName);
-            } catch (RestClientException e) {
-                logger.warn(
-                        "Failed to remove model '{}' from LiteLLM (may not exist): {}", litellmName, e.getMessage());
-            }
+            logger.info("Removing model '{}' from LiteLLM", litellmName);
+            deleteExistingDeployments(litellmName);
         }
     }
 

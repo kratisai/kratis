@@ -24,12 +24,14 @@ describe('chat-store session loading and streaming', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
-    useAuthStore.getState().login(
-      { email: 'test@test.com', id: 'user-1', name: 'Test User' },
-      'test-access-token',
-      'test-refresh-token',
-      3600
-    )
+    useAuthStore
+      .getState()
+      .login(
+        { email: 'test@test.com', id: 'user-1', name: 'Test User' },
+        'test-access-token',
+        'test-refresh-token',
+        3600,
+      )
     useAuthStore.getState().setCurrentTeamId('team-1')
     useChatStore.getState().clearChats()
   })
@@ -47,11 +49,9 @@ describe('chat-store session loading and streaming', () => {
       subscribeChat('existing-session-id')
 
       // Verify chat.subscribe request was sent
+      expect(ws.send).toHaveBeenCalledWith(expect.stringContaining('"method":"chat.subscribe"'))
       expect(ws.send).toHaveBeenCalledWith(
-        expect.stringContaining('"method":"chat.subscribe"')
-      )
-      expect(ws.send).toHaveBeenCalledWith(
-        expect.stringContaining('"chatId":"existing-session-id"')
+        expect.stringContaining('"chatId":"existing-session-id"'),
       )
 
       // messages should NOT be populated yet
@@ -131,9 +131,18 @@ describe('chat-store session loading and streaming', () => {
       sendMessage('existing-session-id', 'Hello!')
 
       // Verify the chat.send request includes the sessionId
-      const sendCall = ws.send.mock.calls[0][0]
-      const request = JSON.parse(sendCall)
-      expect(request.params.chatId).toBe('existing-session-id')
+      const sendCall = ws.send.mock.calls
+        .map(
+          ([payload]) =>
+            JSON.parse(payload as string) as {
+              id: number
+              method: string
+              params: { chatId: string }
+            },
+        )
+        .find((request) => request.method === 'chat.send')
+      expect(sendCall).toBeDefined()
+      const request = sendCall!
 
       // Simulate response (new format - message + complete)
       ws.onmessage?.({

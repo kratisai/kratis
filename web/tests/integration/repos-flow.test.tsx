@@ -1140,11 +1140,6 @@ describe('Repositories Flow', () => {
           status: 'QUEUED',
         })
       }
-      if (url.includes('/ingestion-status')) {
-        return jsonResponse({
-          status: 'QUEUED',
-        })
-      }
       if (url.includes('/batches')) {
         return jsonResponse([])
       }

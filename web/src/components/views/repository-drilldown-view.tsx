@@ -27,7 +27,6 @@ import {
   useBatchHistory,
   useBatchLogs,
   useBatchStats,
-  useIngestionStatus,
   useRepositories,
   useTriggerIngestion,
 } from '@/hooks/use-repositories'
@@ -43,19 +42,16 @@ export function RepositoryDrilldownView() {
   const { data: repositories } = useRepositories()
   const repo = repositories?.find((r) => r.id === id)
 
-  const { data: statusData, isLoading: isStatusLoading } = useIngestionStatus(id, true)
-  const activeBatchId = statusData?.batchId ?? null
   const { data: batchHistory, isLoading: isHistoryLoading } = useBatchHistory(id)
+  const latestBatchId = repo?.latestBatchId ?? null
 
   const [selectedBatchId, setSelectedBatchId] = React.useState<null | string>(null)
 
   React.useEffect(() => {
-    if (activeBatchId) {
-      setSelectedBatchId(activeBatchId)
-    } else if (batchHistory && batchHistory.length > 0 && selectedBatchId === null) {
-      setSelectedBatchId(batchHistory[0].batchId)
+    if (latestBatchId) {
+      setSelectedBatchId(latestBatchId)
     }
-  }, [activeBatchId, batchHistory])
+  }, [latestBatchId])
 
   const { data: logs = [], isLoading: isLogsLoading } = useBatchLogs(id, selectedBatchId)
   const { data: batchStats, isLoading: isStatsLoading } = useBatchStats(id, selectedBatchId)
@@ -73,7 +69,7 @@ export function RepositoryDrilldownView() {
     }
   }, [logs])
 
-  const activeStatus = statusData?.status ?? 'INACTIVE'
+  const activeStatus = repo?.ingestionStatus ?? 'INACTIVE'
   const isRunning = activeStatus === 'QUEUED' || activeStatus === 'PROCESSING'
 
   if (!repo) {
@@ -202,12 +198,12 @@ export function RepositoryDrilldownView() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg">
-                {selectedBatchId === activeBatchId ? 'Live Logs' : 'Historical Logs'}
+                {selectedBatchId === latestBatchId ? 'Live Logs' : 'Historical Logs'}
               </CardTitle>
-              {selectedBatchId !== activeBatchId && (
+              {selectedBatchId !== latestBatchId && (
                 <Button
-                  disabled={!activeBatchId}
-                  onClick={() => setSelectedBatchId(activeBatchId)}
+                  disabled={!latestBatchId}
+                  onClick={() => setSelectedBatchId(latestBatchId)}
                   size="sm"
                   variant="outline"
                 >
@@ -235,9 +231,9 @@ export function RepositoryDrilldownView() {
                       Ingestion Status:{' '}
                       <span className="text-primary font-bold">{activeStatus}</span>
                     </p>
-                    {statusData?.commitHash && (
+                    {repo.commitHash && (
                       <p className="text-muted-foreground mt-0.5 font-mono text-xs">
-                        Commit: {statusData.commitHash}
+                        Commit: {repo.commitHash}
                       </p>
                     )}
                   </div>
@@ -267,7 +263,7 @@ export function RepositoryDrilldownView() {
                   className="h-80 w-full font-mono text-xs text-slate-300"
                   ref={scrollAreaRef}
                 >
-                  {isStatusLoading ? (
+                  {isHistoryLoading ? (
                     <div className="flex h-70 flex-col items-center justify-center gap-2 text-slate-500">
                       <Loader2 className="h-6 w-6 animate-spin text-slate-600" />
                       <span>Loading ingestion session...</span>

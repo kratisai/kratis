@@ -33,6 +33,7 @@ const WS_URL = import.meta.env.VITE_WS_URL || '/ws/client'
 const HEARTBEAT_INTERVAL_MS = 5 * 60_000
 const PONG_TIMEOUT_MS = 30_000
 const MAX_RECONNECT_DELAY_MS = 30_000
+const MAX_SUBSCRIPTION_RETRIES = 3
 
 const REPOSITORIES_QUERY_KEY = 'repositories'
 const CHAT_EXECUTIONS_QUERY_KEY = 'chat-executions'
@@ -92,6 +93,9 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
   const messageQueue: { method: string; params: Record<string, unknown> }[] = []
   const inboundBuffer: JsonRpcResponse[] = []
   let flushTimer: null | number = null
+  const pendingSubscriptionIds = new Set<number>()
+  let subscriptionRetries = 0
+  let subscriptionRetryTimer: null | ReturnType<typeof setTimeout> = null
 
   function flushInbound() {
     flushTimer = null
@@ -119,6 +123,9 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
         ws?.close()
         return
       }
+      if (typeof response.id === 'number' && pendingSubscriptionIds.delete(response.id)) {
+        scheduleSubscriptionRetry()
+      }
       const errorData = response.error.data as Record<string, unknown> | undefined
       const errorChatId = errorData?.chatId as string | undefined
       const currentChatId = useChatStore.getState().currentChatId
@@ -136,6 +143,9 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
       switch (type) {
         case 'auth':
           set({ isConnected: true })
+          // The socket is only usable once the server confirms the session, so
+          // (re)establish subscriptions here rather than speculatively on open.
+          resubscribe()
           break
         case 'canvas':
           handleCanvasResult(response.result)
@@ -144,6 +154,7 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
           handleChatErrorResult(response.result)
           break
         case 'chat_subscription':
+          confirmSubscription(response.id)
           break
         case 'complete':
           handleCompleteResult(response.result)
@@ -179,6 +190,7 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
           handleMessageChunkResult(response.result)
           break
         case 'subscription':
+          confirmSubscription(response.id)
           break
         case 'team_entity_changed':
           handleTeamEntityChangedResult(response.result)
@@ -260,6 +272,9 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
   function sendSubscription(teamId: string, method: 'subscribe' | 'unsubscribe') {
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     const requestId = ++messageIdCounter
+    if (method === 'subscribe') {
+      pendingSubscriptionIds.add(requestId)
+    }
     ws.send(
       JSON.stringify({
         id: requestId,
@@ -268,6 +283,57 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
         params: { teamId },
       }),
     )
+  }
+
+  function sendSubscriptions() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+
+    if (subscribedTeamId) {
+      sendSubscription(subscribedTeamId, 'subscribe')
+    }
+
+    const { subscribedChatIds } = useChatStore.getState()
+    const currentTeamId = useAuthStore.getState().currentTeamId
+    for (const chatId of subscribedChatIds) {
+      const requestId = ++messageIdCounter
+      pendingSubscriptionIds.add(requestId)
+      ws.send(
+        JSON.stringify({
+          id: requestId,
+          jsonrpc: '2.0',
+          method: 'chat.subscribe',
+          params: { chatId, teamId: currentTeamId || undefined },
+        }),
+      )
+    }
+  }
+
+  /**
+   * Re-issue every active subscription once the server confirms a session. The server treats
+   * repeated subscribe calls as idempotent, so this is safe to run on every (re)authentication
+   * and guarantees subscriptions survive reconnects and in-place token refreshes.
+   */
+  function resubscribe() {
+    subscriptionRetries = 0
+    sendSubscriptions()
+  }
+
+  function confirmSubscription(id: unknown) {
+    if (typeof id === 'number') {
+      pendingSubscriptionIds.delete(id)
+    }
+    subscriptionRetries = 0
+  }
+
+  function scheduleSubscriptionRetry() {
+    if (subscriptionRetries >= MAX_SUBSCRIPTION_RETRIES || subscriptionRetryTimer !== null) {
+      return
+    }
+    subscriptionRetries++
+    subscriptionRetryTimer = setTimeout(() => {
+      subscriptionRetryTimer = null
+      sendSubscriptions()
+    }, 1000 * subscriptionRetries)
   }
 
   function reauthenticate(token: string) {
@@ -347,6 +413,11 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
     }
+    if (subscriptionRetryTimer !== null) {
+      clearTimeout(subscriptionRetryTimer)
+      subscriptionRetryTimer = null
+    }
+    pendingSubscriptionIds.clear()
     if (flushTimer !== null) {
       if (typeof cancelAnimationFrame === 'function') {
         cancelAnimationFrame(flushTimer)
@@ -359,9 +430,26 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
     inboundBuffer.length = 0
   }
 
+  function scheduleReconnect() {
+    if (reconnectTimer !== null) return
+    reconnectAttempts++
+    const timeout = Math.min(
+      1000 * Math.pow(2, Math.min(reconnectAttempts, 6)),
+      MAX_RECONNECT_DELAY_MS,
+    )
+    reconnectTimer = setTimeout(connect, timeout)
+    if (reconnectAttempts >= 5) {
+      set({ error: 'Connection lost. Reconnecting…' })
+    }
+  }
+
   function connect() {
     if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) {
       return
+    }
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
     }
 
     set({ isConnecting: true })
@@ -400,23 +488,8 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
         }
         startHeartbeat()
 
-        if (subscribedTeamId) {
-          sendSubscription(subscribedTeamId, 'subscribe')
-        }
-
-        const subscribedChatIds = useChatStore.getState().subscribedChatIds
-        const currentTeamId = useAuthStore.getState().currentTeamId
-        for (const chatId of subscribedChatIds) {
-          const requestId = ++messageIdCounter
-          ws?.send(
-            JSON.stringify({
-              id: requestId,
-              jsonrpc: '2.0',
-              method: 'chat.subscribe',
-              params: { chatId, teamId: currentTeamId || undefined },
-            }),
-          )
-        }
+        // Subscriptions are (re)established from the auth confirmation, not here: an
+        // unauthenticated subscribe is rejected by the server and would be lost.
         resyncActiveExecution()
 
         while (messageQueue.length > 0 && ws) {
@@ -455,26 +528,19 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
 
         useChatStore.getState().handleDisconnect()
 
-        // Giving up left the UI permanently without broadcasts while REST still worked.
-        reconnectAttempts++
-        const timeout = Math.min(
-          1000 * Math.pow(2, Math.min(reconnectAttempts, 6)),
-          MAX_RECONNECT_DELAY_MS,
-        )
-        reconnectTimer = setTimeout(connect, timeout)
-        if (reconnectAttempts >= 5) {
-          set({ error: 'Connection lost. Reconnecting…' })
-        }
+        scheduleReconnect()
       }
     } catch (error) {
       set({ error: 'Failed to initialize connection', isConnecting: false })
       console.error('WebSocket connection error:', error)
+      scheduleReconnect()
     }
   }
 
   function disconnect() {
     cleanup()
     reconnectAttempts = 0
+    subscriptionRetries = 0
     hasConnectedOnce = false
     messageQueue.length = 0
     set({ error: null, isConnected: false, isConnecting: false })
@@ -564,17 +630,13 @@ export function handleExecutionStatusChangedResult(result: ExecutionStatusChange
 export function handleIngestionResult(result: IngestionResult): void {
   const teamId = useAuthStore.getState().currentTeamId
   const repoId = result.event.repositoryId
-  if (!teamId) return
-  void queryClient.invalidateQueries({ queryKey: [REPOSITORIES_QUERY_KEY, teamId] })
-  if (repoId) {
-    void queryClient.invalidateQueries({ queryKey: ['ingestion-status', teamId, repoId] })
-    void queryClient.invalidateQueries({ queryKey: ['batch-history', teamId, repoId] })
-    void queryClient.invalidateQueries({
-      queryKey: ['batch-stats', teamId, repoId, result.event.batchId],
-    })
-    for (const wikiKey of ['wiki-page', 'wiki-children', 'wiki-pages', 'wiki-tree'] as const) {
-      void queryClient.invalidateQueries({ queryKey: [wikiKey, teamId, repoId] })
-    }
+  if (!teamId || !repoId) return
+  void queryClient.invalidateQueries({ queryKey: ['batch-history', teamId, repoId] })
+  void queryClient.invalidateQueries({
+    queryKey: ['batch-stats', teamId, repoId, result.event.batchId],
+  })
+  for (const wikiKey of ['wiki-page', 'wiki-children', 'wiki-pages', 'wiki-tree'] as const) {
+    void queryClient.invalidateQueries({ queryKey: [wikiKey, teamId, repoId] })
   }
 }
 

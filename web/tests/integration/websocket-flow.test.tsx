@@ -19,10 +19,13 @@ import {
   setUnauthenticated,
   waitFor,
 } from '../support/test-render'
-import {
-  allInstances,
-  setupConnected,
-} from '../support/test-websocket'
+import { allInstances, type MockWebSocket, setupConnected } from '../support/test-websocket'
+
+function sentMethodNames(ws: MockWebSocket): string[] {
+  return ws.send.mock.calls.map(
+    ([payload]) => (JSON.parse(payload as string) as { method: string }).method,
+  )
+}
 
 describe('WebSocket Integration Flow', () => {
   setupFetchMock()
@@ -35,7 +38,8 @@ describe('WebSocket Integration Flow', () => {
   })
 
   afterEach(() => {
-    delete (globalThis as typeof globalThis & { mockWebSocketShouldThrow?: boolean }).mockWebSocketShouldThrow
+    delete (globalThis as typeof globalThis & { mockWebSocketShouldThrow?: boolean })
+      .mockWebSocketShouldThrow
     useWebSocketStore.getState().disconnect()
     useAuthStore.getState().logout()
     vi.useRealTimers()
@@ -159,7 +163,9 @@ describe('WebSocket Integration Flow', () => {
     await waitFor(() => {
       expect(screen.getByText('[Output] Executing build task...')).toBeInTheDocument()
       expect(screen.getByText('[Error] Deprecation warning occurred')).toBeInTheDocument()
-      expect(screen.getByText('[System] Command completed successfully with exit code 0.')).toBeInTheDocument()
+      expect(
+        screen.getByText('[System] Command completed successfully with exit code 0.'),
+      ).toBeInTheDocument()
     })
   })
 
@@ -284,7 +290,7 @@ describe('WebSocket Integration Flow', () => {
 
   it('displays a warning if WebSocket receives invalid JSON data', async () => {
     const ws = setupConnected()
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { })
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     act(() => {
       ws.onmessage?.({ data: 'invalid-json{' })
@@ -292,13 +298,15 @@ describe('WebSocket Integration Flow', () => {
 
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('Failed to parse WebSocket message:'),
-      expect.any(Error)
+      expect.any(Error),
     )
     consoleSpy.mockRestore()
   })
 
   it('handles WebSocket initialization failure and renders it in AskKratisView', async () => {
-    ;(globalThis as typeof globalThis & { mockWebSocketShouldThrow?: boolean }).mockWebSocketShouldThrow = true
+    ;(
+      globalThis as typeof globalThis & { mockWebSocketShouldThrow?: boolean }
+    ).mockWebSocketShouldThrow = true
 
     mockListTeams([
       {
@@ -325,7 +333,7 @@ describe('WebSocket Integration Flow', () => {
     })
   })
 
-  it('invalidates query cache on ingestion event', async () => {
+  it('invalidates ingestion-scoped query cache on ingestion event', async () => {
     mockListTeams([
       {
         createdAt: '2024-01-01T00:00:00Z',
@@ -359,11 +367,8 @@ describe('WebSocket Integration Flow', () => {
 
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: ['repositories', 'team-1'],
+        queryKey: ['batch-history', 'team-1', 'repo-1'],
       })
-    })
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ['ingestion-status', 'team-1', 'repo-1'],
     })
   })
 
@@ -433,9 +438,62 @@ describe('WebSocket Integration Flow', () => {
     expect(invalidateSpy).toHaveBeenCalled()
   })
 
+  it('re-establishes the team subscription after a reconnect once auth is confirmed', async () => {
+    setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
+
+    const { connect } = useWebSocketStore.getState()
+    connect()
+    const first = allInstances[allInstances.length - 1]
+    act(() => {
+      first.onopen?.()
+    })
+    act(() => {
+      first.onmessage?.({
+        data: JSON.stringify({
+          id: 1,
+          jsonrpc: '2.0',
+          result: { status: 'authenticated', type: 'auth', userId: 'user-1' },
+        }),
+      })
+    })
+    await waitFor(() => {
+      expect(sentMethodNames(first)).toContain('subscribe')
+    })
+
+    // Server restart: the socket drops and reconnects.
+    act(() => {
+      first.onclose?.({} as CloseEvent)
+    })
+    act(() => {
+      connect()
+    })
+
+    const reconnected = allInstances[allInstances.length - 1]
+    act(() => {
+      reconnected.onopen?.()
+    })
+
+    // The subscribe is not sent speculatively while auth is still unconfirmed.
+    expect(sentMethodNames(reconnected)).not.toContain('subscribe')
+
+    act(() => {
+      reconnected.onmessage?.({
+        data: JSON.stringify({
+          id: 1,
+          jsonrpc: '2.0',
+          result: { status: 'authenticated', type: 'auth', userId: 'user-1' },
+        }),
+      })
+    })
+
+    await waitFor(() => {
+      expect(sentMethodNames(reconnected)).toContain('subscribe')
+    })
+  })
+
   it('handles edge cases for subscription, telemetry, canvas, and error events', async () => {
     const ws = setupConnected()
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { })
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     // 1. WebSocket send error path
     ws.send.mockImplementationOnce(() => {
@@ -446,7 +504,7 @@ describe('WebSocket Integration Flow', () => {
     })
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('Failed to send request:'),
-      expect.any(Error)
+      expect.any(Error),
     )
     consoleSpy.mockRestore()
 
@@ -508,8 +566,8 @@ describe('WebSocket Integration Flow', () => {
         data: JSON.stringify({
           error: { code: -32000, message: 'Authentication failed' },
           id: 0,
-          jsonrpc: '2.0'
-        })
+          jsonrpc: '2.0',
+        }),
       })
     })
     await waitFor(() => {
@@ -523,11 +581,11 @@ describe('WebSocket Integration Flow', () => {
           error: {
             code: 500,
             data: { chatId: 'test-session' },
-            message: 'Session error'
+            message: 'Session error',
           },
           id: 1,
-          jsonrpc: '2.0'
-        })
+          jsonrpc: '2.0',
+        }),
       })
     })
 
@@ -538,11 +596,11 @@ describe('WebSocket Integration Flow', () => {
           error: {
             code: 500,
             data: { chatId: 'non-existent-session' },
-            message: 'Global error message'
+            message: 'Global error message',
           },
           id: 2,
-          jsonrpc: '2.0'
-        })
+          jsonrpc: '2.0',
+        }),
       })
     })
 
@@ -552,9 +610,9 @@ describe('WebSocket Integration Flow', () => {
         data: JSON.stringify({
           jsonrpc: '2.0',
           result: {
-            type: 'subscription'
-          }
-        })
+            type: 'subscription',
+          },
+        }),
       })
     })
   })

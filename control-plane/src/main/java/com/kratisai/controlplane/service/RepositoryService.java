@@ -75,6 +75,7 @@ public class RepositoryService {
                 repo.getCredential() != null ? repo.getCredential().getId() : null,
                 repo.getCreatedAt(),
                 repo.getUpdatedAt(),
+                latestBatch.map(IngestionBatch::getId).orElse(null),
                 latestBatch.map(IngestionBatch::getStatus).orElse(null),
                 latestBatch.map(IngestionBatch::getCompletedAt).orElse(null),
                 latestBatch.map(IngestionBatch::getCommitHash).orElse(null),

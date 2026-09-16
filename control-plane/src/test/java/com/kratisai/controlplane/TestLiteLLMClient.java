@@ -90,8 +90,20 @@ public class TestLiteLLMClient implements LiteLLMClient {
         logger.debug("Cleaning up {} tracked LiteLLM models", trackedModels.size());
         for (String modelName : trackedModels) {
             try {
-                delegate.deleteModel(new DeleteModelRequest(modelName));
-                logger.debug("Cleaned up tracked LiteLLM model: {}", modelName);
+                ListModelsV2Response response = delegate.listModelByName(modelName);
+                if (response == null || response.data() == null) {
+                    continue;
+                }
+                for (ModelConfig config : response.data()) {
+                    if (modelName.equals(config.modelName())
+                            && config.modelInfo() != null
+                            && config.modelInfo().id() != null) {
+                        // /model/delete requires the internal model id, not the model_name alias.
+                        delegate.deleteModel(
+                                new DeleteModelRequest(config.modelInfo().id()));
+                        logger.debug("Cleaned up tracked LiteLLM model: {}", modelName);
+                    }
+                }
             } catch (Exception e) {
                 logger.warn("Failed to cleanup tracked LiteLLM model {}: {}", modelName, e.getMessage());
             }

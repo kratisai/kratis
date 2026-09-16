@@ -136,6 +136,7 @@ class LiteLLMDtoTest {
 
         assertThat(config.modelName()).isEqualTo("bedrock-aws-bedrock-minimax-minimax-m2-5-838d9bd6");
         assertThat(config.modelInfo()).isNotNull();
+        assertThat(config.modelInfo().id()).isEqualTo("abc");
         assertThat(config.modelInfo().mode()).isEqualTo("chat");
         assertThat(config.modelInfo().inputCostPerToken()).isEqualTo(4.7e-07);
         assertThat(config.modelInfo().outputCostPerToken()).isEqualTo(1.86e-06);
@@ -151,6 +152,17 @@ class LiteLLMDtoTest {
         assertThat(map.get("mode")).isEqualTo("chat");
         assertThat(map.get("input_cost_per_token")).isEqualTo(3.0e-07);
         assertThat(map.get("output_cost_per_token")).isEqualTo(1.2e-06);
+    }
+
+    @Test
+    void deleteModelResponse_mapsLiteLLMMessageBody() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        DeleteModelResponse response =
+                objectMapper.readValue("{\"message\":\"Model: abc deleted successfully\"}", DeleteModelResponse.class);
+
+        assertThat(response.message()).isEqualTo("Model: abc deleted successfully");
+        assertThat(response.deleted()).isNull();
     }
 
     @Test

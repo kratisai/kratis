@@ -28,15 +28,6 @@ describe('Ingestion Flow', () => {
 
   function mockDrilldownExtras() {
     addFetchHandler((url) => {
-      if (url.includes('/ingestion-status')) {
-        return jsonResponse({
-          batchId: null,
-          commitHash: null,
-          lastIngestedAt: null,
-          queuePosition: null,
-          status: null,
-        })
-      }
       if (url.includes('/batches/') && url.includes('/logs')) {
         return jsonResponse([])
       }

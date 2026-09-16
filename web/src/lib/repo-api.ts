@@ -93,17 +93,6 @@ export async function getBatchStats(
   return response.json()
 }
 
-export async function getIngestionStatus(
-  teamId: string,
-  repoId: string,
-): Promise<IngestionStatusDto | null> {
-  const response = await fetchWithAuth(
-    `/api/v1/teams/${teamId}/repositories/${repoId}/ingestion-status`,
-  )
-  if (response.status === 204) return null
-  return response.json().catch(() => null)
-}
-
 export async function listRepositories(teamId: string): Promise<RepositoryDto[]> {
   const response = await fetchWithAuth(`/api/v1/teams/${teamId}/repositories`)
   return response.json()

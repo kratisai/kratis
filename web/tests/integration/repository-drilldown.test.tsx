@@ -43,6 +43,7 @@ describe('Repository Drilldown View', () => {
         id: 'repo-1',
         ingestionStatus: 'SUCCESS',
         lastIngestedAt: '2024-01-15T10:00:00Z',
+        latestBatchId: 'batch-1',
         name: 'frontend-app',
         repositoryType: 'GENERIC',
         teamId: 'team-1',
@@ -51,17 +52,7 @@ describe('Repository Drilldown View', () => {
       },
     ])
 
-    // Mock ingestion status endpoint
     addFetchHandler((url) => {
-      if (url.includes('/ingestion-status')) {
-        return jsonResponse({
-          batchId: 'batch-1',
-          commitHash: 'abc123def456',
-          lastIngestedAt: '2024-01-15T10:00:00Z',
-          queuePosition: null,
-          status: 'SUCCESS',
-        })
-      }
       // Mock batch logs endpoint (empty)
       if (url.includes('/batches/') && url.includes('/logs')) {
         return jsonResponse([])
@@ -206,6 +197,7 @@ describe('Repository Drilldown - Ingestion History', () => {
         id: 'repo-1',
         ingestionStatus: 'SUCCESS',
         lastIngestedAt: '2024-01-15T10:00:00Z',
+        latestBatchId: 'batch-1',
         name: 'frontend-app',
         repositoryType: 'GENERIC',
         teamId: 'team-1',
@@ -215,15 +207,6 @@ describe('Repository Drilldown - Ingestion History', () => {
     ])
 
     addFetchHandler((url) => {
-      if (url.includes('/ingestion-status')) {
-        return jsonResponse({
-          batchId: 'batch-1',
-          commitHash: 'abc123def456',
-          lastIngestedAt: '2024-01-15T10:00:00Z',
-          queuePosition: null,
-          status: 'SUCCESS',
-        })
-      }
       if (url.includes('/batches/') && url.includes('/logs')) {
         return jsonResponse([])
       }
@@ -352,6 +335,7 @@ describe('Repository Drilldown - Live Log Streaming', () => {
         id: 'repo-1',
         ingestionStatus: status,
         lastIngestedAt: '2024-01-15T10:00:00Z',
+        latestBatchId: batchId,
         name: 'frontend-app',
         repositoryType: 'GENERIC',
         teamId: 'team-1',
@@ -361,15 +345,6 @@ describe('Repository Drilldown - Live Log Streaming', () => {
     ])
 
     addFetchHandler((url) => {
-      if (url.includes('/ingestion-status')) {
-        return jsonResponse({
-          batchId,
-          commitHash: 'abc123def456',
-          lastIngestedAt: '2024-01-15T10:00:00Z',
-          queuePosition: null,
-          status,
-        })
-      }
       if (url.includes('/batches/') && url.includes('/logs')) {
         return jsonResponse(logs)
       }
@@ -653,6 +628,7 @@ describe('Repository Drilldown - Ingestion Statistics', () => {
         id: 'repo-1',
         ingestionStatus: status,
         lastIngestedAt: '2024-01-15T10:00:00Z',
+        latestBatchId: batchId,
         name: 'frontend-app',
         repositoryType: 'GENERIC',
         teamId: 'team-1',
@@ -662,15 +638,6 @@ describe('Repository Drilldown - Ingestion Statistics', () => {
     ])
 
     addFetchHandler((url) => {
-      if (url.includes('/ingestion-status')) {
-        return jsonResponse({
-          batchId,
-          commitHash: 'abc123def456',
-          lastIngestedAt: '2024-01-15T10:00:00Z',
-          queuePosition: null,
-          status,
-        })
-      }
       if (url.includes('/batches/') && url.includes('/logs')) {
         return jsonResponse(logs)
       }
@@ -1015,6 +982,7 @@ describe('Repository Drilldown - Batch Selection', () => {
         id: 'repo-1',
         ingestionStatus: activeBatchId ? 'SUCCESS' : 'SUCCESS',
         lastIngestedAt: '2024-01-15T10:00:00Z',
+        latestBatchId: activeBatchId,
         name: 'frontend-app',
         repositoryType: 'GENERIC',
         teamId: 'team-1',
@@ -1024,15 +992,6 @@ describe('Repository Drilldown - Batch Selection', () => {
     ])
 
     addFetchHandler((url) => {
-      if (url.includes('/ingestion-status')) {
-        return jsonResponse({
-          batchId: activeBatchId,
-          commitHash: 'abc123def456',
-          lastIngestedAt: '2024-01-15T10:00:00Z',
-          queuePosition: null,
-          status: activeBatchId ? 'SUCCESS' : 'SUCCESS',
-        })
-      }
       if (url.includes('/batches/') && url.includes('/logs')) {
         if (url.includes('batch-1')) return jsonResponse(logsForBatch1)
         if (url.includes('batch-2')) return jsonResponse(logsForBatch2)
@@ -1061,7 +1020,7 @@ describe('Repository Drilldown - Batch Selection', () => {
     })
   }
 
-  it('defaults to the first history batch when no active batch exists', async () => {
+  it('selects the latest batch reported by the repository projection', async () => {
     const mockHistory = [
       {
         batchId: 'batch-1',
@@ -1099,7 +1058,7 @@ describe('Repository Drilldown - Batch Selection', () => {
       },
     ]
 
-    setupMocksWithBatchSelection(null, mockHistory, mockLogs1, [], mockStats1, null)
+    setupMocksWithBatchSelection('batch-1', mockHistory, mockLogs1, [], mockStats1, null)
     setAuthenticated({ teamId: 'team-1' })
 
     renderWithRouter(['/repos/repo-1'])
@@ -1108,7 +1067,7 @@ describe('Repository Drilldown - Batch Selection', () => {
       expect(screen.getByText('frontend-app')).toBeInTheDocument()
     })
 
-    // Should default to batch-1 (first in history)
+    // Should select batch-1 (the repository's latest batch)
     await waitFor(() => {
       expect(screen.getByText('Batch 1 log')).toBeInTheDocument()
     })
@@ -1282,6 +1241,7 @@ describe('Repository Drilldown - Dimension Categories & Wiki Pages', () => {
         id: 'repo-1',
         ingestionStatus: 'SUCCESS',
         lastIngestedAt: '2024-01-15T10:00:00Z',
+        latestBatchId: 'batch-1',
         name: 'frontend-app',
         repositoryType: 'GENERIC',
         teamId: 'team-1',
@@ -1291,15 +1251,6 @@ describe('Repository Drilldown - Dimension Categories & Wiki Pages', () => {
     ])
 
     addFetchHandler((url) => {
-      if (url.includes('/ingestion-status')) {
-        return jsonResponse({
-          batchId: 'batch-1',
-          commitHash: 'abc123def456',
-          lastIngestedAt: '2024-01-15T10:00:00Z',
-          queuePosition: null,
-          status: 'SUCCESS',
-        })
-      }
       if (url.includes('/batches/') && url.includes('/logs')) {
         return jsonResponse([])
       }
@@ -1657,6 +1608,7 @@ describe('Repository Drilldown - Relative Time Formatting', () => {
         id: 'repo-1',
         ingestionStatus: 'SUCCESS',
         lastIngestedAt,
+        latestBatchId: 'batch-1',
         name: 'frontend-app',
         repositoryType: 'GENERIC',
         teamId: 'team-1',
@@ -1666,15 +1618,6 @@ describe('Repository Drilldown - Relative Time Formatting', () => {
     ])
 
     addFetchHandler((url) => {
-      if (url.includes('/ingestion-status')) {
-        return jsonResponse({
-          batchId: 'batch-1',
-          commitHash: 'abc123def456',
-          lastIngestedAt,
-          queuePosition: null,
-          status: 'SUCCESS',
-        })
-      }
       if (url.includes('/batches/') && url.includes('/logs')) {
         return jsonResponse([])
       }

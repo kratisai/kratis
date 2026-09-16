@@ -35,6 +35,12 @@ public record RepositoryDto(
         @Schema(description = "Last update timestamp", example = "2026-05-19T10:05:00Z")
         Instant updatedAt,
 
+        @Schema(
+                description = "ID of the latest ingestion batch, used to address batch logs and stats",
+                example = "550e8400-e29b-41d4-a716-446655440020",
+                nullable = true)
+        UUID latestBatchId,
+
         @Schema(description = "Current ingestion status from latest batch", example = "SUCCESS", nullable = true)
         IngestionStatus ingestionStatus,
 

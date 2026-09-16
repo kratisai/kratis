@@ -77,18 +77,16 @@ class LiteLLMProvisioningIntegrationTest {
         liteLLMClient.addModel(
                 new AddModelRequest(modelName, new LiteLLMParams("gpt-4", "sk-fake-key", "openai", null)));
 
-        ListModelsResponse beforeDelete = liteLLMClient.listModels();
-        assertThat(beforeDelete.data().stream().map(ModelConfig::modelName)).contains(modelName);
+        String modelId = liteLLMClient.listModelByName(modelName).data().stream()
+                .filter(config -> modelName.equals(config.modelName()))
+                .map(config -> config.modelInfo().id())
+                .findFirst()
+                .orElseThrow();
 
-        // Delete may return 400 if model isn't persisted to DB (in-memory only), which
-        // is acceptable
-        try {
-            DeleteModelResponse deleteResponse = liteLLMClient.deleteModel(new DeleteModelRequest(modelName));
-            assertThat(deleteResponse).isNotNull();
-        } catch (org.springframework.web.client.HttpClientErrorException e) {
-            // Model was visible in list but not in DB — acceptable in test environment
-            assertThat(e.getStatusCode().value()).isEqualTo(400);
-        }
+        // /model/delete only accepts LiteLLM's internal model id, not the model_name alias.
+        liteLLMClient.deleteModel(new DeleteModelRequest(modelId));
+
+        assertThat(liteLLMClient.listModelByName(modelName).data()).isEmpty();
     }
 
     @Test
@@ -167,6 +165,8 @@ class LiteLLMProvisioningIntegrationTest {
 
         String litellmName = provisioningService.buildLiteLLMModelName(provider, "minimax.minimax-m2.5");
         ListModelsV2Response response = liteLLMClient.listModelByName(litellmName);
+        // Re-provisioning must replace the existing deployment, not stack a duplicate.
+        assertThat(response.data()).hasSize(1);
         ModelConfig config = response.data().stream()
                 .filter(c -> litellmName.equals(c.modelName()))
                 .findFirst()

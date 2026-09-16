@@ -329,6 +329,91 @@ class LiteLLMProvisioningServiceTest {
     }
 
     @Test
+    void provisionModel_replacesStaleDeploymentByModelId() {
+        ModelProvider provider = new ModelProvider(
+                "AWS Bedrock",
+                ProviderType.BEDROCK,
+                "bedrock-bearer-token",
+                "https://bedrock-mantle.eu-west-2.api.aws");
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("minimax.minimax-m2", ModelKind.CHAT)));
+        String alias = provisioningService.buildLiteLLMModelName(provider, "minimax.minimax-m2");
+        // A registration left behind when BEDROCK still mapped to LiteLLM's native bedrock provider.
+        ModelConfig stale = new ModelConfig(
+                alias,
+                new LiteLLMParams(
+                        "minimax.minimax-m2",
+                        "bedrock-bearer-token",
+                        "bedrock",
+                        "https://bedrock-mantle.eu-west-2.api.aws/v1"),
+                new ModelInfo("stale-deployment-id", "chat", null, null));
+        when(liteLLMClient.listModelByName(alias))
+                .thenReturn(new ListModelsV2Response(List.of(stale)))
+                .thenReturn(new ListModelsV2Response(List.of()));
+
+        provisioningService.provisionModel(provider);
+
+        verify(liteLLMClient).deleteModel(new DeleteModelRequest("stale-deployment-id"));
+        verify(liteLLMClient).addModel(org.mockito.ArgumentMatchers.any(AddModelRequest.class));
+    }
+
+    @Test
+    void provisionModel_deletesEveryDuplicateDeploymentForTheModelGroup() {
+        ModelProvider provider = new ModelProvider("AWS Bedrock", ProviderType.BEDROCK, "key", null);
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("minimax.minimax-m2", ModelKind.CHAT)));
+        String alias = provisioningService.buildLiteLLMModelName(provider, "minimax.minimax-m2");
+        LiteLLMParams params = new LiteLLMParams("minimax.minimax-m2", "key", "openai", null);
+        when(liteLLMClient.listModelByName(alias))
+                .thenReturn(new ListModelsV2Response(List.of(
+                        new ModelConfig(alias, params, new ModelInfo("id-1", "chat", null, null)),
+                        new ModelConfig(alias, params, new ModelInfo("id-2", "chat", null, null)))))
+                .thenReturn(new ListModelsV2Response(
+                        List.of(new ModelConfig(alias, params, new ModelInfo("id-3", "chat", null, null)))))
+                .thenReturn(new ListModelsV2Response(List.of()));
+
+        provisioningService.provisionModel(provider);
+
+        verify(liteLLMClient).deleteModel(new DeleteModelRequest("id-1"));
+        verify(liteLLMClient).deleteModel(new DeleteModelRequest("id-2"));
+        verify(liteLLMClient).deleteModel(new DeleteModelRequest("id-3"));
+    }
+
+    @Test
+    void provisionModel_ignoresDeploymentsThatDoNotMatchTheModelGroup() {
+        ModelProvider provider = new ModelProvider("Test Provider", ProviderType.OPENAI, "sk-test-key", null);
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("gpt-4", ModelKind.CHAT)));
+        String alias = provisioningService.buildLiteLLMModelName(provider, "gpt-4");
+        ModelConfig other = new ModelConfig(
+                "another-alias",
+                new LiteLLMParams("gpt-4", "sk-test-key", "openai", null),
+                new ModelInfo("other-id", "chat", null, null));
+        when(liteLLMClient.listModelByName(alias)).thenReturn(new ListModelsV2Response(List.of(other)));
+
+        provisioningService.provisionModel(provider);
+
+        verify(liteLLMClient, times(0)).deleteModel(org.mockito.ArgumentMatchers.any(DeleteModelRequest.class));
+        verify(liteLLMClient).addModel(org.mockito.ArgumentMatchers.any(AddModelRequest.class));
+    }
+
+    @Test
+    void removeModel_deletesDeploymentsByModelId() {
+        String alias = provisioningService.buildLiteLLMModelName(testProvider, "gpt-4");
+        ModelConfig config = new ModelConfig(
+                alias,
+                new LiteLLMParams("gpt-4", "sk-test-key", "openai", null),
+                new ModelInfo("deployment-9", "chat", null, null));
+        when(liteLLMClient.listModelByName(alias))
+                .thenReturn(new ListModelsV2Response(List.of(config)))
+                .thenReturn(new ListModelsV2Response(List.of()));
+
+        provisioningService.removeModel(testProvider);
+
+        verify(liteLLMClient).deleteModel(new DeleteModelRequest("deployment-9"));
+    }
+
+    @Test
     void provisionModel_setsModelInfoModeToChat_forChatModels() {
         // Given: A provider with a CHAT model
         ModelProvider chatProvider = new ModelProvider("Chat Provider", ProviderType.OPENAI, "sk-test-key", null);

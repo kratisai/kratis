@@ -7,7 +7,6 @@ import com.kratisai.controlplane.config.SecurityUtil;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.ingestion.IngestionCoordinatorService;
 import com.kratisai.controlplane.model.IngestionBatch;
-import com.kratisai.controlplane.model.IngestionStatus;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
@@ -20,7 +19,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -104,56 +102,6 @@ public class IngestionController {
                 null);
 
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(dto);
-    }
-
-    @GetMapping("/ingestion-status")
-    @Operation(
-            summary = "Get ingestion status",
-            description = "Returns the current ingestion status for the specified repository")
-    @ApiResponses(
-            value = {
-                @ApiResponse(
-                        responseCode = "200",
-                        description = "Ingestion status retrieved",
-                        content = @Content(schema = @Schema(implementation = IngestionStatusDto.class))),
-                @ApiResponse(responseCode = "403", description = "Not a member of this team", content = @Content),
-                @ApiResponse(responseCode = "404", description = "Repository not found", content = @Content)
-            })
-    public ResponseEntity<IngestionStatusDto> getIngestionStatus(@PathVariable UUID teamId, @PathVariable UUID repoId) {
-        UUID userId = SecurityUtil.getCurrentUserId();
-        requireTeamMembership(userId, teamId);
-
-        // Verify repository exists
-        repositoryRepository
-                .findByTeamIdAndId(teamId, repoId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repository not found"));
-
-        Optional<IngestionBatch> latestBatch =
-                ingestionBatchRepository.findFirstByRepositoryIdOrderByStartedAtDesc(repoId);
-
-        if (latestBatch.isEmpty()) {
-            return ResponseEntity.ok(null);
-        }
-
-        IngestionBatch batch = latestBatch.get();
-
-        Integer queuePosition = null;
-        if (batch.getStatus() == IngestionStatus.QUEUED) {
-            int positionBefore = ingestionBatchRepository.countQueuedBatchesBefore(batch.getStartedAt(), batch.getId());
-            queuePosition = positionBefore + 1;
-        }
-
-        IngestionStatusDto dto = new IngestionStatusDto(
-                batch.getId().toString(),
-                batch.getStatus(),
-                batch.getCommitHash(),
-                batch.getCompletedAt(),
-                queuePosition,
-                batch.getStartedAt(),
-                batch.getCompletedAt(),
-                batch.getErrorMessage());
-
-        return ResponseEntity.ok(dto);
     }
 
     @GetMapping("/batches")

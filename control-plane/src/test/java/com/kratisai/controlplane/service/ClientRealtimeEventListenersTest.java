@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
@@ -44,6 +45,7 @@ import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.model.event.UserEntityChangedEvent;
 import com.kratisai.controlplane.model.event.UserEntityType;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -127,10 +129,14 @@ class ClientRealtimeEventListenersTest {
         listeners.onIngestionStatusEvent(new IngestionStatusEvent(batch));
 
         ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
-        verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
-        assertThat(captor.getValue()).isInstanceOf(IngestionResult.class);
-        IngestionResult result = (IngestionResult) captor.getValue();
+        verify(dispatch, times(2)).broadcastNotificationToTeam(eq(teamId), captor.capture());
+        List<ClientPayload> values = captor.getAllValues();
+        assertThat(values.getFirst()).isInstanceOf(IngestionResult.class);
+        IngestionResult result = (IngestionResult) values.getFirst();
         assertThat(result.event()).isInstanceOf(IngestionEvent.StatusUpdate.class);
+        assertThat(values.get(1)).isInstanceOf(TeamEntityChangedResult.class);
+        TeamEntityChangedResult teamResult = (TeamEntityChangedResult) values.get(1);
+        assertThat(teamResult.entity()).isEqualTo(TeamEntityType.REPOSITORIES);
     }
 
     @Test

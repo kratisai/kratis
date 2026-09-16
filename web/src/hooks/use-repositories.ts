@@ -21,7 +21,6 @@ import {
   getBatchHistory,
   getBatchLogs,
   getBatchStats,
-  getIngestionStatus,
   listRepositories,
   triggerIngestion,
   updateRepository,
@@ -140,21 +139,6 @@ export function useDeleteRepository() {
   })
 }
 
-export function useIngestionStatus(repoId: string, enabled = true) {
-  const teamId = useAuthStore().currentTeamId
-
-  return useQuery({
-    enabled: !!teamId && !!repoId && enabled,
-    queryFn: () => getIngestionStatus(teamId!, repoId),
-    queryKey: ['ingestion-status', teamId, repoId],
-    refetchInterval: (query) => {
-      const data = query.state.data
-      const isRunning = data?.status === 'QUEUED' || data?.status === 'PROCESSING'
-      return isRunning ? 2000 : false
-    },
-  })
-}
-
 export function useRepositories() {
   const teamId = useAuthStore().currentTeamId
   return useQuery({
@@ -208,10 +192,6 @@ export function useUpdateRepository() {
 function invalidateRepositoryIngestionQueries(queryClient: QueryClient, repoId: string) {
   const teamId = useAuthStore.getState().currentTeamId
   if (!teamId) return
-  // Invalidate ingestion status so batchId updates to the new batch
-  void queryClient.invalidateQueries({
-    queryKey: ['ingestion-status', teamId, repoId],
-  })
   // Invalidate batch history to show the new ingestion
   void queryClient.invalidateQueries({
     queryKey: ['batch-history', teamId, repoId],

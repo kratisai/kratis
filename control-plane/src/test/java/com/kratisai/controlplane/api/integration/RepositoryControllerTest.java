@@ -106,7 +106,8 @@ class RepositoryControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.name").value("my-project"))
                 .andExpect(jsonPath("$.url").value("https://github.com/user/my-project.git"))
-                .andExpect(jsonPath("$.ingestionStatus").doesNotExist());
+                .andExpect(jsonPath("$.ingestionStatus").doesNotExist())
+                .andExpect(jsonPath("$.latestBatchId").doesNotExist());
     }
 
     @Test
@@ -250,6 +251,7 @@ class RepositoryControllerTest {
                 .andExpect(jsonPath("$.id").value(repoId))
                 .andExpect(jsonPath("$.commitHash").value("abc123def456"))
                 .andExpect(jsonPath("$.ingestionStatus").value("SUCCESS"))
+                .andExpect(jsonPath("$.latestBatchId").value(batch.getId().toString()))
                 .andExpect(jsonPath("$.lastIngestedAt").exists());
     }
 
@@ -285,7 +287,8 @@ class RepositoryControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].name").value("my-project"))
                 .andExpect(jsonPath("$[0].commitHash").value("def789"))
-                .andExpect(jsonPath("$[0].ingestionStatus").value("SUCCESS"));
+                .andExpect(jsonPath("$[0].ingestionStatus").value("SUCCESS"))
+                .andExpect(jsonPath("$[0].latestBatchId").value(batch.getId().toString()));
     }
 
     @Test

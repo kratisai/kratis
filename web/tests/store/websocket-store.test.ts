@@ -192,15 +192,13 @@ describe('handleIngestionResult', () => {
     }
   }
 
-  it('invalidates batch-stats and wiki queries alongside repositories, ingestion-status and batch-history', () => {
+  it('invalidates batch-history, batch-stats and wiki queries', () => {
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined)
 
     handleIngestionResult(ingestionResult())
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['repositories', 'team-1'] })
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ['ingestion-status', 'team-1', 'repo-1'],
-    })
+    // The repository projection is refreshed by the paired team_entity_changed event.
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['repositories', 'team-1'] })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['batch-history', 'team-1', 'repo-1'] })
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['batch-stats', 'team-1', 'repo-1', 'batch-1'],
@@ -224,10 +222,7 @@ describe('handleIngestionResult', () => {
 
     handleIngestionResult(ingestionResult({ repositoryId: '' }))
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['repositories', 'team-1'] })
-    expect(invalidateSpy).not.toHaveBeenCalledWith({
-      queryKey: ['ingestion-status', 'team-1', ''],
-    })
+    expect(invalidateSpy).not.toHaveBeenCalled()
     expect(invalidateSpy).not.toHaveBeenCalledWith({
       queryKey: ['batch-stats', 'team-1', '', 'batch-1'],
     })

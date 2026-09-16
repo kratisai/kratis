@@ -11,11 +11,16 @@ public final class LiteLLMDto {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ModelInfo(
+            @JsonProperty("id") String id,
             @JsonProperty("mode") String mode,
             @JsonProperty("input_cost_per_token") Double inputCostPerToken,
             @JsonProperty("output_cost_per_token") Double outputCostPerToken) {
         public ModelInfo(String mode) {
-            this(mode, null, null);
+            this(null, mode, null, null);
+        }
+
+        public ModelInfo(String mode, Double inputCostPerToken, Double outputCostPerToken) {
+            this(null, mode, inputCostPerToken, outputCostPerToken);
         }
     }
 
@@ -67,7 +72,13 @@ public final class LiteLLMDto {
     public record DeleteModelRequest(String id) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record DeleteModelResponse(boolean deleted) {}
+    public record DeleteModelResponse(
+            @JsonProperty("deleted") Boolean deleted,
+            @JsonProperty("message") String message) {
+        public DeleteModelResponse(boolean deleted) {
+            this(deleted, null);
+        }
+    }
 
     public record ChatCompletionRequest(
             String model,

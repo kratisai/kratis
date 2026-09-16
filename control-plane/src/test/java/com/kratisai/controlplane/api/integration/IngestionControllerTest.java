@@ -122,49 +122,6 @@ class IngestionControllerTest {
     }
 
     @Test
-    void getIngestionStatus_noActiveBatch_shouldReturnNull() throws Exception {
-        mockMvc.perform(get("/api/v1/teams/{teamId}/repositories/{repoId}/ingestion-status", teamId, repoId)
-                        .header("Authorization", "Bearer " + authToken))
-                .andExpect(status().isOk())
-                .andExpect(content().string(""));
-    }
-
-    @Test
-    void getIngestionStatus_activeBatch_shouldReturnStatus() throws Exception {
-        // Create an active batch
-        Repository repo = repositoryRepository.findById(repoId).orElseThrow();
-        IngestionBatch batch = new IngestionBatch(repo);
-        batch.setStatus(IngestionStatus.PROCESSING);
-        batch.setActive(true);
-        ingestionBatchRepository.saveAndFlush(batch);
-
-        mockMvc.perform(get("/api/v1/teams/{teamId}/repositories/{repoId}/ingestion-status", teamId, repoId)
-                        .header("Authorization", "Bearer " + authToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("PROCESSING"))
-                .andExpect(jsonPath("$.batchId").value(batch.getId().toString()));
-    }
-
-    @Test
-    void getIngestionStatus_completedBatch_shouldReturnStatusAndTimestamp() throws Exception {
-        // Create a completed batch
-        Repository repo = repositoryRepository.findById(repoId).orElseThrow();
-        IngestionBatch batch = new IngestionBatch(repo);
-        batch.setStatus(IngestionStatus.SUCCESS);
-        batch.setCommitHash("abc123");
-        batch.setActive(true);
-        batch.setCompletedAt(Instant.now());
-        ingestionBatchRepository.saveAndFlush(batch);
-
-        mockMvc.perform(get("/api/v1/teams/{teamId}/repositories/{repoId}/ingestion-status", teamId, repoId)
-                        .header("Authorization", "Bearer " + authToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("SUCCESS"))
-                .andExpect(jsonPath("$.commitHash").value("abc123"))
-                .andExpect(jsonPath("$.lastIngestedAt").exists());
-    }
-
-    @Test
     void triggerIngestion_shouldCreateBatchInDatabase() throws Exception {
         // Trigger ingestion and capture batch ID
         String response = mockMvc.perform(post("/api/v1/teams/{teamId}/repositories/{repoId}/ingest", teamId, repoId)
@@ -191,22 +148,6 @@ class IngestionControllerTest {
                         .findFirstByRepositoryIdOrderByStartedAtDesc(targetRepoId)
                         .ifPresent(latestBatch -> assertThat(latestBatch.getStatus())
                                 .isIn(IngestionStatus.SUCCESS, IngestionStatus.FAILED)));
-    }
-
-    @Test
-    void getIngestionStatus_queuedBatch_shouldReturnStatusAndQueuePosition() throws Exception {
-        // Create a QUEUED batch
-        Repository repo = repositoryRepository.findById(repoId).orElseThrow();
-        IngestionBatch batch = new IngestionBatch(repo);
-        batch.setStatus(IngestionStatus.QUEUED);
-        ingestionBatchRepository.saveAndFlush(batch);
-
-        mockMvc.perform(get("/api/v1/teams/{teamId}/repositories/{repoId}/ingestion-status", teamId, repoId)
-                        .header("Authorization", "Bearer " + authToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("QUEUED"))
-                .andExpect(jsonPath("$.batchId").value(batch.getId().toString()))
-                .andExpect(jsonPath("$.queuePosition").value(1));
     }
 
     @Test

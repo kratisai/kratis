@@ -48,7 +48,6 @@ vi.mock('@/lib/repo-api', () => ({
   createRepository: vi.fn(),
   deleteRepository: vi.fn(),
   getBatchLogs: vi.fn(),
-  getIngestionStatus: vi.fn(),
   listRepositories: vi.fn(),
   updateRepository: vi.fn(),
 }))

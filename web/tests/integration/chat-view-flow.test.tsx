@@ -7,11 +7,7 @@ import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useWebSocketStore } from '@/store/websocket-store'
 
-import {
-  mockListChats,
-  mockListTeams,
-  setupFetchMock,
-} from '../support/test-fetch-mocks'
+import { mockListChats, mockListTeams, setupFetchMock } from '../support/test-fetch-mocks'
 import {
   renderWithRouter,
   screen,
@@ -19,9 +15,7 @@ import {
   setUnauthenticated,
   waitFor,
 } from '../support/test-render'
-import {
-  setupConnected,
-} from '../support/test-websocket'
+import { setupConnected } from '../support/test-websocket'
 
 describe('Chat View Flow Integration', () => {
   setupFetchMock()
@@ -79,14 +73,16 @@ describe('Chat View Flow Integration', () => {
 
     // Verify the WebSocket send was called with correct payload
     await waitFor(() => {
-      expect(ws.send).toHaveBeenCalledWith(
-        expect.stringContaining('"method":"chat.send"')
-      )
-      const callArg = ws.send.mock.calls[0][0]
-      const parsed = JSON.parse(callArg)
-      expect(parsed.params.message).toBe('Hello Kratis')
-      expect(parsed.params.chatId).toBe('test-session')
-      expect(parsed.params.teamId).toBe('team-1')
+      expect(ws.send).toHaveBeenCalledWith(expect.stringContaining('"method":"chat.send"'))
+      const chatSend = ws.send.mock.calls
+        .map(
+          ([payload]) =>
+            JSON.parse(payload as string) as { method: string; params: Record<string, unknown> },
+        )
+        .find((request) => request.method === 'chat.send')
+      expect(chatSend?.params.message).toBe('Hello Kratis')
+      expect(chatSend?.params.chatId).toBe('test-session')
+      expect(chatSend?.params.teamId).toBe('team-1')
     })
 
     // Verify the user message appears in the UI immediately

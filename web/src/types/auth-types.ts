@@ -150,6 +150,7 @@ export interface RepositoryDto {
   id: string
   ingestionStatus?: IngestionStatus | null
   lastIngestedAt?: null | string
+  latestBatchId?: null | string
   name: string
   queuePosition?: null | number
   repositoryType: string

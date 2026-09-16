@@ -44,6 +44,8 @@ public class ClientRealtimeEventListeners {
                     team.getId());
 
             dispatch.broadcastNotificationToTeam(team.getId(), new IngestionResult(statusEvent));
+            dispatch.broadcastNotificationToTeam(
+                    team.getId(), new TeamEntityChangedResult(team.getId(), TeamEntityType.REPOSITORIES));
         } catch (Exception e) {
             logger.error("Failed to publish ingestion status update for batch {}", batch.getId(), e);
         }
