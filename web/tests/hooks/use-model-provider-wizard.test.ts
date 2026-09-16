@@ -81,6 +81,27 @@ describe('useModelProviderWizard', () => {
     expect(result.current.state.connectionError).toBeNull()
   })
 
+  it('sorts discovered models alphabetically on connect', () => {
+    const { result } = renderHook(() => useModelProviderWizard())
+    act(() => {
+      result.current.actions.setConnected(
+        [
+          { kind: 'CHAT', modelName: 'gpt-4o' },
+          { kind: 'EMBEDDING', modelName: 'text-embedding-ada-002' },
+          { kind: 'CHAT', modelName: 'gpt-4' },
+          { kind: 'CHAT', modelName: 'gpt-3.5-turbo' },
+        ],
+        'fp',
+      )
+    })
+    expect(result.current.state.discoveredModels.map((model) => model.modelName)).toEqual([
+      'gpt-3.5-turbo',
+      'gpt-4',
+      'gpt-4o',
+      'text-embedding-ada-002',
+    ])
+  })
+
   it('toggles individual models', () => {
     const { result } = renderHook(() => useModelProviderWizard())
     act(() => {

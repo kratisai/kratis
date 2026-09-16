@@ -355,7 +355,7 @@ describe('Model Provider Flow', () => {
     expect(teamCalls[0]).toMatchObject({
       embeddingModel: 'text-embedding-ada-002',
       embeddingProvider: 'provider-new',
-      ingestionModel: 'gpt-4',
+      ingestionModel: 'gpt-3.5-turbo',
       ingestionProvider: 'provider-new',
     })
   })
@@ -536,6 +536,29 @@ describe('Model Provider Flow', () => {
       expect(dialog().getByRole('checkbox', { name: 'gpt-4o' })).toBeInTheDocument()
       expect(dialog().queryByRole('checkbox', { name: 'gpt-4' })).not.toBeInTheDocument()
     })
+  })
+
+  it('lists discovered models alphabetically on the models step', async () => {
+    mockListModelProviders([])
+    mockTestConnection({
+      models: ['gpt-4o', 'gpt-4', 'gpt-3.5-turbo', 'text-embedding-ada-002'],
+      success: true,
+    })
+
+    setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
+    const { user } = renderList()
+    await openWizard(user)
+
+    await selectProvider(user, /^OpenAI/)
+    await connectFromConfigure(user, undefined, 'sk-test-key')
+    await waitFor(() => {
+      expect(dialog().getByRole('checkbox', { name: 'gpt-3.5-turbo' })).toBeInTheDocument()
+    })
+
+    const names = dialog()
+      .getAllByRole('checkbox')
+      .map((box) => box.getAttribute('aria-label'))
+    expect(names).toEqual(['gpt-3.5-turbo', 'gpt-4', 'gpt-4o'])
   })
 
   it('connects keyless Ollama with a pre-filled base URL', async () => {

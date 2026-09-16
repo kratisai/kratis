@@ -138,7 +138,9 @@ function wizardReducer(
         connectionError: null,
         connectionFingerprint: action.fingerprint,
         connectionStatus: 'connected',
-        discoveredModels: action.discoveredModels,
+        discoveredModels: [...action.discoveredModels].sort((a, b) =>
+          a.modelName.localeCompare(b.modelName),
+        ),
       }
     case 'SET_CONNECTING':
       return { ...state, connectionError: null, connectionStatus: 'connecting' }
