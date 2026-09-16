@@ -1,9 +1,0 @@
-databaseChangeLog:
-- changeSet:
-    id: 002-widen-model-provider-api-key
-    author: kratis
-    changes:
-    - modifyDataType:
-        columnName: api_key
-        newDataType: VARCHAR(8192)
-        tableName: model_providers
