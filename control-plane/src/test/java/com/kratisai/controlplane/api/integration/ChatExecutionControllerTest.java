@@ -8,8 +8,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.kratisai.controlplane.*;
+import com.kratisai.controlplane.DatabaseCleaner;
 import com.kratisai.controlplane.SpringIntegrationTest;
+import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.api.restdto.CreateSandboxExecutionRequest;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;

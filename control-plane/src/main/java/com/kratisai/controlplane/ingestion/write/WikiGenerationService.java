@@ -153,6 +153,7 @@ public class WikiGenerationService {
                 - Always quote or bracket any subgraph or node title/label that contains spaces, parentheses, colons, braces, brackets, quotes, or hashes, e.g. subgraph "Control Plane Tier (Spring Boot)" or subgraph cpt[Control Plane Tier (Spring Boot)].
                 - A subgraph without a quoted/bracketed title must contain only simple word characters and spaces, e.g. subgraph Client Tier.
                 - Always close every subgraph with "end".
+                - Never use erDiagram relationship markers (||, |o, }o, o{) in flowchart/graph diagrams; those belong to erDiagram only. Use --> or ---, or switch the diagram to erDiagram.
                 - Use the official Mermaid flowchart, sequence, and classDiagram grammars only.
                 - If a diagram would be syntactically fragile, prefer a simpler diagram over an invalid one.
 

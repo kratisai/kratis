@@ -769,4 +769,113 @@ class MermaidDiagramValidatorTest {
         assertThat(issues.get(0)).contains("diagram #1, line 2").contains("step 1 (init)");
         assertThat(issues.get(1)).contains("diagram #1, line 2").contains("step 2 [run]");
     }
+
+    @Test
+    void findIssues_flagsErRelationshipSyntaxInFlowchart() {
+        String content = """
+                ```mermaid
+                flowchart TB
+                    subgraph "Execution Environment Lifecycle"
+                        A[Created] --> B[Provisioned]
+                        B --> C[Connected]
+                        C --> D[Executing]
+                        D --> C
+                        C --> E[Disconnected]
+                        E --> B
+                    end
+
+                    subgraph "Components"
+                        ENV[ExecutionEnvironment Entity]
+                        PROVIDER[EnvironmentProvider]
+                        TEAM[Team]
+                        USER[User]
+                    end
+
+                    ENV }o--o|belongs to| TEAM
+                    ENV }o--o|provisioned by| PROVIDER
+                    ENV }o--o|created by| USER
+                ```
+                """;
+
+        List<String> issues = validator.findIssues(content);
+
+        assertThat(issues).hasSize(3);
+        assertThat(issues.get(0)).contains("diagram #1, line 18").contains("erDiagram");
+        assertThat(issues.get(1)).contains("diagram #1, line 19").contains("erDiagram");
+        assertThat(issues.get(2)).contains("diagram #1, line 20").contains("erDiagram");
+    }
+
+    @Test
+    void findIssues_flagsErRelationshipSyntaxInGraph() {
+        String content = """
+                ```mermaid
+                graph TD
+                    CUSTOMER ||--o{ ORDER : places
+                ```
+                """;
+
+        List<String> issues = validator.findIssues(content);
+
+        assertThat(issues).hasSize(1);
+        assertThat(issues.getFirst()).contains("diagram #1, line 2").contains("erDiagram");
+    }
+
+    @Test
+    void findIssues_acceptsValidFlowchartCircleAndCrossEdges() {
+        String content = """
+                ```mermaid
+                flowchart LR
+                    A o--o B
+                    B --o C
+                    C --x D
+                    D x--x E
+                    E <--> F
+                    G --- H
+                    H -.-> I
+                    I ==> J
+                    J ~~~ K
+                ```
+                """;
+
+        assertThat(validator.findIssues(content)).isEmpty();
+    }
+
+    @Test
+    void findIssues_ignoresErMarkersInsideQuotedNodeLabels() {
+        String content = """
+                ```mermaid
+                flowchart LR
+                    A["}o--o{"] --> B
+                    C["||--||"] --> D
+                ```
+                """;
+
+        assertThat(validator.findIssues(content)).isEmpty();
+    }
+
+    @Test
+    void findIssues_ignoresErMarkersInsideComments() {
+        String content = """
+                ```mermaid
+                flowchart LR
+                    %% ENV }o--o{ TEAM
+                    A --> B
+                ```
+                """;
+
+        assertThat(validator.findIssues(content)).isEmpty();
+    }
+
+    @Test
+    void findIssues_doesNotFlagErDiagramRelationships() {
+        String content = """
+                ```mermaid
+                erDiagram
+                    CUSTOMER ||--o{ ORDER : places
+                    ORDER ||--|{ LINE-ITEM : contains
+                ```
+                """;
+
+        assertThat(validator.findIssues(content)).isEmpty();
+    }
 }

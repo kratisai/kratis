@@ -159,6 +159,7 @@ public class PlanningAgentLoop {
                         - Always quote or bracket any subgraph or node title/label containing spaces, parentheses, colons, braces, brackets, quotes, or hashes, e.g. subgraph "Control Plane Tier (Spring Boot)" or subgraph cpt[Control Plane Tier (Spring Boot)].
                         - A subgraph without a quoted/bracketed title must contain only simple word characters and spaces, e.g. subgraph Client Tier.
                         - Always close every subgraph with "end".
+                        - Never use erDiagram relationship markers (||, |o, }o, o{) in flowchart/graph diagrams; those belong to erDiagram only. Use --> or ---, or switch the diagram to erDiagram.
 
                         Use your scratchpad to track a TODO list, and internal thoughts/lessons.  The scratchpad is not, and should not be presented to the user.  All
                         scratchpad entries will be replayed to you on every turn. Keep them short and remove when they are no-longer relevant.

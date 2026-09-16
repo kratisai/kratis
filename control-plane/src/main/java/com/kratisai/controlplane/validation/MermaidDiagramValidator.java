@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
  *   <li>Unquoted subgraph titles containing special characters (flowchart)
  *   <li>Unquoted node labels containing shape-delimiter characters (flowchart)
  *   <li>Unquoted edge labels containing special characters (flowchart)
+ *   <li>erDiagram relationship syntax used inside flowchart/graph diagrams (flowchart)
  *   <li>Missing {@code end} keywords for subgraphs (flowchart)
  *   <li>Missing {@code end} keywords for sequence diagram blocks (sequenceDiagram)
  *   <li>Unbalanced braces in class/state diagram blocks
@@ -39,6 +40,9 @@ public class MermaidDiagramValidator {
             Pattern.compile("^\\s*(loop|alt|opt|par|rect|critical|break)\\b");
     private static final Pattern END_LINE = Pattern.compile("^\\s*end\\s*$");
     private static final Pattern BRACE_COUNT = Pattern.compile("[{}]");
+    private static final Pattern DOUBLE_QUOTED_SECTION = Pattern.compile("\"[^\"]*\"");
+    private static final Pattern SINGLE_QUOTED_SECTION = Pattern.compile("'[^']*'");
+    private static final Pattern ER_MARKER_IN_FLOWCHART = Pattern.compile("\\|\\||\\|o|o\\||\\}o|o\\{|\\}\\||\\|\\{");
     private static final Pattern NODE_START =
             Pattern.compile("\\b([\\w-]+)\\s*(\\[\\[|\\[\\(|\\(\\[|\\{\\{|\\(\\(|\\[/|\\[\\\\|\\[|\\{|\\()");
     private static final Map<String, String> NODE_SHAPE_CLOSERS = Map.of(
@@ -159,6 +163,7 @@ public class MermaidDiagramValidator {
                 }
             } else {
                 issues.addAll(checkEdgeLabelRules(line, diagramIndex, i + 1));
+                issues.addAll(checkErRelationshipRules(line, diagramIndex, i + 1));
                 String lineWithoutEdgeLabels = EDGE_PIPE_LABEL.matcher(line).replaceAll("");
                 issues.addAll(checkNodeLabelRules(lineWithoutEdgeLabels, diagramIndex, i + 1));
             }
@@ -317,6 +322,52 @@ public class MermaidDiagramValidator {
             return false;
         }
         return UNSAFE_BARE_TITLE_CHARS.matcher(trimmed).find();
+    }
+
+    /**
+     * Flags erDiagram relationship markers ({@code ||}, {@code |o}, {@code }o}, {@code o{}, ...})
+     * in flowchart/graph lines. Those markers belong to {@code erDiagram} only; the flowchart lexer
+     * rejects them with "Unrecognized text" (for example {@code ENV }o--o|belongs to| TEAM}).
+     * Quoted sections and node labels are ignored so {@code A["}o--o{"] --> B} stays valid.
+     */
+    private List<String> checkErRelationshipRules(String line, int diagramIndex, int lineNumber) {
+        String withoutNodes = stripNodeLabels(stripQuotedSections(line));
+        if (ER_MARKER_IN_FLOWCHART.matcher(withoutNodes).find()) {
+            return List.of(
+                    "Mermaid diagram #%d, line %d: erDiagram relationship syntax (such as }o--o{ or ||--||) is only valid in erDiagram diagrams, not in flowchart/graph. Use a flowchart edge such as --> or ---, or switch the diagram to erDiagram."
+                            .formatted(diagramIndex, lineNumber));
+        }
+        return List.of();
+    }
+
+    private String stripQuotedSections(String line) {
+        String unquoted = DOUBLE_QUOTED_SECTION.matcher(line).replaceAll("\"\"");
+        return SINGLE_QUOTED_SECTION.matcher(unquoted).replaceAll("''");
+    }
+
+    /**
+     * Removes {@code [label]}, {@code (label)}, {@code {label}} and similar node-shape sections so
+     * shape delimiters inside node labels are not mistaken for relationship markers. Quoted sections
+     * must already be stripped, so any remaining closer ends the label.
+     */
+    private String stripNodeLabels(String line) {
+        StringBuilder stripped = new StringBuilder();
+        int i = 0;
+        while (i < line.length()) {
+            char c = line.charAt(i);
+            if (c == '[' || c == '(' || c == '{') {
+                char closer = c == '[' ? ']' : c == '(' ? ')' : '}';
+                int end = line.indexOf(closer, i + 1);
+                if (end < 0) {
+                    break;
+                }
+                i = end + 1;
+                continue;
+            }
+            stripped.append(c);
+            i++;
+        }
+        return stripped.toString();
     }
 
     /**
