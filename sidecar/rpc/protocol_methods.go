@@ -50,4 +50,5 @@ var EnvironmentMethods = []MethodDef{
 	{Name: "env.git_file_diff", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GitFileDiffParams{}, Result: &GitFileDiffResult{}},
 	{Name: "env.read_file_slice", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &ReadFileSliceParams{}, Result: &ReadFileSliceResult{}},
 	{Name: "env.git_push", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GitPushParams{}, Result: &GitPushResult{}},
+	{Name: "env.git_set_remote", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GitSetRemoteParams{}, Result: &GitSetRemoteResult{}},
 }

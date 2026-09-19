@@ -40,15 +40,19 @@ export interface DiffSummaryFileDto {
 export type GitDiffStatus = 'ADDED' | 'DELETED' | 'MODIFIED' | 'RENAMED'
 
 export interface PublishCapabilities {
+  canCreateRepository: boolean
   defaultBaseBranch: string
+  newRepo: boolean
   publishedBranch?: string
   publishedPrNumber?: null | number
   publishedPrUrl?: string
   repositoryType: string
   stats: PublishStats
   suggestedBody: string
+  suggestedRepositoryName?: string
   suggestedTitle: string
   supportsPullRequests: boolean
+  visibilityOptions: RepositoryVisibility[]
 }
 
 export interface PublishPrRequest {
@@ -56,8 +60,10 @@ export interface PublishPrRequest {
   body?: string
   branchName: string
   draft?: boolean
+  repositoryName?: string
   squash?: boolean
   title: string
+  visibility?: RepositoryVisibility
 }
 
 export interface PublishStats {
@@ -95,6 +101,8 @@ export interface ReadFileSliceDto {
   path: string
   startLine: number
 }
+
+export type RepositoryVisibility = 'INTERNAL' | 'PRIVATE' | 'PUBLIC'
 
 export interface SteerCommentDto {
   codeSnippet?: string

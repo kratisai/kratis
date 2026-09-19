@@ -13,7 +13,12 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 import type { ExecutionStatus } from '@/lib/execution-api'
-import type { PublishPrRequest, PullRequestResult, PushBranchResponse } from '@/types/diff-types'
+import type {
+  PublishPrRequest,
+  PullRequestResult,
+  PushBranchResponse,
+  RepositoryVisibility,
+} from '@/types/diff-types'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -27,6 +32,13 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { ApiError } from '@/lib/auth-api'
 import { steerExecution } from '@/lib/diff-api'
@@ -62,6 +74,8 @@ export function PublishModal({
   const [body, setBody] = useState('')
   const [isDraft, setIsDraft] = useState(false)
   const [isSquash, setIsSquash] = useState(true)
+  const [repositoryName, setRepositoryName] = useState('')
+  const [visibility, setVisibility] = useState<RepositoryVisibility>('PRIVATE')
   const [prResult, setPrResult] = useState<null | PullRequestResult>(null)
   const [pushResult, setPushResult] = useState<null | PushBranchResponse>(null)
   const [actionError, setActionError] = useState<null | PublishActionError>(null)
@@ -81,6 +95,10 @@ export function PublishModal({
   const baseBranch = capabilities?.defaultBaseBranch || ''
   const hasChanges = stats?.hasChanges ?? true
   const canEscalateToAgent = executionStatus === 'RUNNING' || executionStatus === 'IDLE'
+  const isNewRepo = capabilities?.newRepo ?? false
+  const canCreateRemote = capabilities?.canCreateRepository ?? false
+  const visibilityOptions = capabilities?.visibilityOptions ?? []
+  const patchOnlyNewRepo = isNewRepo && !canCreateRemote
 
   const escalateMutation = useMutation({
     mutationFn: () =>
@@ -112,6 +130,8 @@ export function PublishModal({
     setBranchName(data.publishedBranch || `kratis/feature-${executionId.slice(0, 8)}`)
     setCommitMessage(data.suggestedTitle)
     setBody(data.suggestedBody)
+    setRepositoryName(data.suggestedRepositoryName || '')
+    setVisibility(data.visibilityOptions[0] ?? 'PRIVATE')
     if (data.stats.commitsAhead > 1) {
       setIsSquash(true)
     }
@@ -141,6 +161,10 @@ export function PublishModal({
         branchName: branchName.trim(),
         squash: isSquash,
         title: commitMessage.trim(),
+      }
+      if (isNewRepo) {
+        request.repositoryName = repositoryName.trim()
+        request.visibility = visibility
       }
       if (creatingPr) {
         request.body = body.trim()
@@ -176,12 +200,19 @@ export function PublishModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (patchOnlyNewRepo) {
+      return
+    }
     if (!branchName.trim()) {
       toast.error('Branch name is required')
       return
     }
     if (!commitMessage.trim()) {
       toast.error('Commit message is required')
+      return
+    }
+    if (isNewRepo && canCreateRemote && !repositoryName.trim()) {
+      toast.error('Repository name is required')
       return
     }
     if (supportsPr) {
@@ -254,6 +285,21 @@ export function PublishModal({
                   <span className="font-semibold">There are no changes to publish.</span>
                   <p className="text-muted-foreground mt-0.5">
                     The working tree is clean and no new commits are ahead of the base branch.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {patchOnlyNewRepo && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <span className="font-semibold">
+                    Automatic repository creation is unavailable.
+                  </span>
+                  <p className="text-muted-foreground mt-0.5">
+                    Creating a remote repository requires a personal access token or app credential.
+                    Use Download Patch to apply the agent&apos;s changes to a repository you create.
                   </p>
                 </div>
               </div>
@@ -344,7 +390,7 @@ export function PublishModal({
 
             {!prResult && !pushResult && (
               <>
-                {capabilities && (
+                {capabilities && !patchOnlyNewRepo && (
                   <div
                     className="border-border/60 bg-muted/40 text-foreground flex items-start gap-2 rounded-md border px-3 py-2 text-xs"
                     data-testid="publish-plan"
@@ -357,8 +403,21 @@ export function PublishModal({
                     <span>
                       {creatingPr && (
                         <>
-                          Pushes <code className="font-mono">{branchName}</code> and opens a pull
-                          request against <code className="font-mono">{baseBranch}</code>.
+                          {isNewRepo ? (
+                            <>
+                              Creates repository{' '}
+                              <code className="font-mono">
+                                {repositoryName || 'new repository'}
+                              </code>
+                              , pushes <code className="font-mono">{branchName}</code>, and opens a
+                              pull request against <code className="font-mono">{baseBranch}</code>.
+                            </>
+                          ) : (
+                            <>
+                              Pushes <code className="font-mono">{branchName}</code> and opens a
+                              pull request against <code className="font-mono">{baseBranch}</code>.
+                            </>
+                          )}
                         </>
                       )}
                       {alreadyPublished && (
@@ -418,6 +477,50 @@ export function PublishModal({
                       </p>
                     )}
                   </div>
+
+                  {isNewRepo && canCreateRemote && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs" htmlFor="repository-name">
+                        Repository Name <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        className="font-mono text-xs"
+                        disabled={isPending}
+                        id="repository-name"
+                        onChange={(e) => setRepositoryName(e.target.value)}
+                        placeholder="my-new-repository"
+                        required
+                        value={repositoryName}
+                      />
+                      <p className="text-muted-foreground text-[11px]">
+                        Created in your {capabilities?.repositoryType} account when you publish.
+                      </p>
+                    </div>
+                  )}
+
+                  {isNewRepo && canCreateRemote && visibilityOptions.length > 0 && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs" htmlFor="repository-visibility">
+                        Visibility
+                      </Label>
+                      <Select
+                        disabled={isPending}
+                        onValueChange={(value) => setVisibility(value as RepositoryVisibility)}
+                        value={visibility}
+                      >
+                        <SelectTrigger className="text-xs" id="repository-visibility">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {visibilityOptions.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {option.charAt(0) + option.slice(1).toLowerCase()}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
                   <div className="space-y-1.5">
                     <Label className="text-xs" htmlFor="commit-message">
@@ -490,16 +593,18 @@ export function PublishModal({
                   )}
 
                   <DialogFooter className="border-border/50 bg-card sticky bottom-0 flex flex-col-reverse gap-2 border-t pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-between">
-                    <Button
-                      className="text-muted-foreground hover:text-foreground gap-1.5 text-xs"
-                      disabled={isPending}
-                      onClick={() => void handleExportPatch()}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      Download Patch (.patch)
-                    </Button>
+                    {!patchOnlyNewRepo && (
+                      <Button
+                        className="text-muted-foreground hover:text-foreground gap-1.5 text-xs"
+                        disabled={isPending}
+                        onClick={() => void handleExportPatch()}
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Download Patch (.patch)
+                      </Button>
+                    )}
 
                     <div className="flex items-center justify-end gap-2">
                       <Button
@@ -511,14 +616,32 @@ export function PublishModal({
                         Cancel
                       </Button>
 
-                      <Button className="gap-1.5" disabled={isPending || !hasChanges} type="submit">
-                        {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                        {creatingPr
-                          ? 'Create Pull Request'
-                          : alreadyPublished
-                            ? `Push to PR #${capabilities.publishedPrNumber}`
-                            : 'Push Branch'}
-                      </Button>
+                      {patchOnlyNewRepo ? (
+                        <Button
+                          className="gap-1.5"
+                          disabled={isPending || !hasChanges}
+                          onClick={() => void handleExportPatch()}
+                          type="button"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          Download Patch
+                        </Button>
+                      ) : (
+                        <Button
+                          className="gap-1.5"
+                          disabled={isPending || !hasChanges}
+                          type="submit"
+                        >
+                          {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                          {creatingPr
+                            ? isNewRepo
+                              ? 'Create Repository & Pull Request'
+                              : 'Create Pull Request'
+                            : alreadyPublished
+                              ? `Push to PR #${capabilities.publishedPrNumber}`
+                              : 'Push Branch'}
+                        </Button>
+                      )}
                     </div>
                   </DialogFooter>
                 </form>

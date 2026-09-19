@@ -15,7 +15,9 @@ let queryClient: QueryClient
 
 function makeCapabilities(overrides: Partial<PublishCapabilities> = {}): PublishCapabilities {
   return {
+    canCreateRepository: false,
     defaultBaseBranch: 'main',
+    newRepo: false,
     repositoryType: 'GITHUB',
     stats: {
       additions: 20,
@@ -29,6 +31,7 @@ function makeCapabilities(overrides: Partial<PublishCapabilities> = {}): Publish
     suggestedBody: 'Summary of changes.',
     suggestedTitle: 'feat: new feature',
     supportsPullRequests: true,
+    visibilityOptions: [],
     ...overrides,
   }
 }
@@ -533,5 +536,77 @@ describe('PublishModal', () => {
     const footer = document.querySelector('[data-slot="dialog-footer"]')
     expect(footer).toHaveClass('sticky', 'bottom-0', 'bg-card')
     expect(footer?.className).toContain('pb-[max(0.5rem,env(safe-area-inset-bottom))]')
+  })
+
+  it('creates a repository for a new-repo execution with name and visibility', async () => {
+    vi.spyOn(publishApi, 'fetchPublishCapabilities').mockResolvedValue(
+      makeCapabilities({
+        canCreateRepository: true,
+        newRepo: true,
+        suggestedRepositoryName: 'fresh-repo',
+        visibilityOptions: ['PRIVATE', 'PUBLIC'],
+      }),
+    )
+
+    const publishSpy = vi.spyOn(publishApi, 'publishPullRequest').mockResolvedValue({
+      baseBranch: 'main',
+      headBranch: 'kratis/feature-9b3c2a3f',
+      prNumber: 7,
+      prUrl: 'https://github.com/fake-user/fresh-repo/pull/7',
+    })
+
+    renderModal()
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /create repository & pull request/i }),
+      ).toBeInTheDocument()
+    })
+
+    expect(screen.getByLabelText(/repository name/i)).toHaveValue('fresh-repo')
+    expect(screen.getByTestId('publish-plan')).toHaveTextContent(/creates repository fresh-repo/i)
+
+    fireEvent.click(screen.getByRole('button', { name: /create repository & pull request/i }))
+
+    await waitFor(() => {
+      expect(publishSpy).toHaveBeenCalledWith(
+        'chat-123',
+        '9b3c2a3f-55b7-47a7-83ac-6b9c592f2a07',
+        expect.objectContaining({
+          repositoryName: 'fresh-repo',
+          visibility: 'PRIVATE',
+        }),
+      )
+    })
+  })
+
+  it('offers patch download instead of publishing when a new repo cannot be created', async () => {
+    vi.spyOn(publishApi, 'fetchPublishCapabilities').mockResolvedValue(
+      makeCapabilities({
+        canCreateRepository: false,
+        newRepo: true,
+        repositoryType: 'GENERIC',
+        suggestedRepositoryName: 'fresh-repo',
+        supportsPullRequests: false,
+      }),
+    )
+
+    const downloadSpy = vi.spyOn(publishApi, 'downloadPatchFile').mockResolvedValue()
+
+    renderModal()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^download patch$/i })).toBeInTheDocument()
+    })
+
+    expect(screen.getByText(/automatic repository creation is unavailable/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /push branch/i })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('publish-plan')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /^download patch$/i }))
+
+    await waitFor(() => {
+      expect(downloadSpy).toHaveBeenCalledWith('chat-123', '9b3c2a3f-55b7-47a7-83ac-6b9c592f2a07')
+    })
   })
 })

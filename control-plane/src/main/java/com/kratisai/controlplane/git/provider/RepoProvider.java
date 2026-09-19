@@ -27,4 +27,20 @@ public interface RepoProvider {
     }
 
     PullRequestResultDto createPullRequest(Repository repo, GitAuthMaterial auth, CreatePullRequestCommand command);
+
+    /** Repository creation is a host API operation, so SSH/GENERIC transports cannot support it. */
+    default boolean supportsRepositoryCreation() {
+        return false;
+    }
+
+    /**
+     * Creates a remote repository for a new-repo execution, or reuses an existing empty one.
+     * Implementations must fail when the name already has commits, so a retry cannot push onto
+     * unrelated history.
+     */
+    default RemoteRepositoryDto createRepository(
+            RepoCredential credential, GitAuthMaterial auth, CreateRepositoryCommand command) {
+        throw new UnsupportedOperationException(
+                "Repository creation is not supported for " + supportedType() + " repositories");
+    }
 }

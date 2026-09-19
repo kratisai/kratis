@@ -7,6 +7,7 @@ import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -58,5 +59,33 @@ public class BitbucketRepoProvider implements RepoProvider {
         String workspace = BitbucketApiService.extractWorkspace(repo.getUrl());
         String repoSlug = BitbucketApiService.extractRepoSlug(repo.getUrl());
         return bitbucketApiService.createPullRequest(workspace, repoSlug, command, token);
+    }
+
+    @Override
+    public boolean supportsRepositoryCreation() {
+        return true;
+    }
+
+    @Override
+    public RemoteRepositoryDto createRepository(
+            RepoCredential credential, GitAuthMaterial auth, CreateRepositoryCommand command) {
+        String token = auth.maybeToken()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Bitbucket repository creation requires a token, but no token was resolved"));
+        String workspace = credential
+                .getMetadata()
+                .getBitbucketWorkspace()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Bitbucket repository creation requires a workspace in the credential metadata"));
+
+        Optional<RemoteRepositoryDto> existing = bitbucketApiService.findRepository(workspace, command.name(), token);
+        if (existing.isPresent()) {
+            if (bitbucketApiService.repositoryHasCommits(workspace, command.name(), token)) {
+                throw new RemoteRepositoryExistsException("Bitbucket repository " + workspace + "/" + command.name()
+                        + " already exists and is not empty");
+            }
+            return existing.get();
+        }
+        return bitbucketApiService.createRepository(workspace, command, token);
     }
 }

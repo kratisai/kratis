@@ -167,4 +167,16 @@ public sealed interface EnvironmentConnectorResult {
             Objects.requireNonNull(status, "status is required");
         }
     }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record GitSetRemote(
+            @JsonProperty("status") String status,
+            @JsonProperty("defaultBranch") String defaultBranch,
+            @JsonProperty("seedCommit") String seedCommit)
+            implements EnvironmentConnectorResult {
+        public GitSetRemote {
+            Objects.requireNonNull(status, "status is required");
+            Objects.requireNonNull(defaultBranch, "defaultBranch is required");
+        }
+    }
 }

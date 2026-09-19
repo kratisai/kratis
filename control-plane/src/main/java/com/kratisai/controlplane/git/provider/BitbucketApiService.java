@@ -5,12 +5,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.PullRequestResultDto;
 import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.client.BitbucketApiClient;
+import com.kratisai.controlplane.model.RepositoryVisibility;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -40,14 +43,14 @@ public class BitbucketApiService {
     public List<RemoteRepositoryDto> listRepositories(String workspace, String token) {
         requireToken(token);
         List<RemoteRepositoryDto> repos = new ArrayList<>();
-        String url = workspace != null && !workspace.isBlank()
-                ? "https://api.bitbucket.org/2.0/repositories/" + workspace + "?role=member&pagelen=100"
-                : "https://api.bitbucket.org/2.0/repositories?role=member&pagelen=100";
+        boolean scoped = workspace != null && !workspace.isBlank();
 
         try {
-            while (url != null) {
-                ResponseEntity<String> response =
-                        bitbucketApiClient.getRepositories(java.net.URI.create(url), bearer(token));
+            Integer page = 1;
+            while (page != null) {
+                ResponseEntity<String> response = scoped
+                        ? bitbucketApiClient.getWorkspaceRepositories(workspace, "member", 100, page, bearer(token))
+                        : bitbucketApiClient.getRepositories("member", 100, page, bearer(token));
                 JsonNode root = objectMapper.readTree(response.getBody());
                 JsonNode values = root.get("values");
                 if (values != null && values.isArray()) {
@@ -55,7 +58,9 @@ public class BitbucketApiService {
                         repos.add(toRemoteRepositoryDto(repo));
                     }
                 }
-                url = root.hasNonNull("next") ? root.get("next").asText() : null;
+                page = root.hasNonNull("next")
+                        ? extractPageNumber(root.get("next").asText())
+                        : null;
             }
             return repos;
         } catch (Exception e) {
@@ -158,6 +163,75 @@ public class BitbucketApiService {
         } catch (Exception e) {
             logger.error("Failed to create Bitbucket pull request for {}/{}", workspace, repoSlug, e);
             throw new RuntimeException("Failed to create Bitbucket pull request: " + e.getMessage(), e);
+        }
+    }
+
+    public Optional<RemoteRepositoryDto> findRepository(String workspace, String repoSlug, String token) {
+        requireToken(token);
+        ResponseEntity<String> response = bitbucketApiClient.getRepository(workspace, repoSlug, bearer(token));
+        if (response.getStatusCode().value() == 404) {
+            return Optional.empty();
+        }
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException(
+                    "Bitbucket repository lookup failed with status: " + response.getStatusCode());
+        }
+        return Optional.of(toRemoteRepositoryDto(parse(response)));
+    }
+
+    public boolean repositoryHasCommits(String workspace, String repoSlug, String token) {
+        requireToken(token);
+        ResponseEntity<String> response = bitbucketApiClient.getBranches(workspace, repoSlug, 1, bearer(token));
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException("Bitbucket branch lookup failed with status: " + response.getStatusCode());
+        }
+        JsonNode values = parse(response).path("values");
+        return values.isArray() && !values.isEmpty();
+    }
+
+    public RemoteRepositoryDto createRepository(String workspace, CreateRepositoryCommand command, String token) {
+        requireToken(token);
+        Map<String, Object> body = new HashMap<>();
+        body.put("scm", "git");
+        body.put("name", command.name());
+        body.put("is_private", command.visibility() != RepositoryVisibility.PUBLIC);
+        body.put("mainbranch", Map.of("name", command.defaultBranch()));
+
+        ResponseEntity<String> response =
+                bitbucketApiClient.createRepository(workspace, command.name(), body, bearer(token));
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException(
+                    "Bitbucket repository creation failed with status: " + response.getStatusCode());
+        }
+        return toRemoteRepositoryDto(parse(response));
+    }
+
+    private Integer extractPageNumber(String url) {
+        String query = URI.create(url).getQuery();
+        if (query == null) {
+            return null;
+        }
+        for (String param : query.split("&")) {
+            if (param.startsWith("page=")) {
+                try {
+                    return Integer.valueOf(param.substring("page=".length()));
+                } catch (NumberFormatException e) {
+                    logger.warn("Ignoring unparseable Bitbucket pagination link: {}", url);
+                    return null;
+                }
+            }
+        }
+        return null;
+    }
+
+    private JsonNode parse(ResponseEntity<String> response) {
+        try {
+            if (response.getBody() == null) {
+                throw new IllegalStateException("Empty response from Bitbucket API");
+            }
+            return objectMapper.readTree(response.getBody());
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse Bitbucket API response: " + e.getMessage(), e);
         }
     }
 }

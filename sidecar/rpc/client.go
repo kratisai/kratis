@@ -938,6 +938,19 @@ func (c *Client) handleServerRequest(req JsonRpcRequest) {
 		}
 		go c.ExecuteGitPush(params, req.ID)
 
+	case "env.git_set_remote":
+		var params GitSetRemoteParams
+		rawBytes, err := json.Marshal(req.Params)
+		if err != nil {
+			c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
+			return
+		}
+		if err := json.Unmarshal(rawBytes, &params); err != nil {
+			c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
+			return
+		}
+		go c.ExecuteGitSetRemote(params, req.ID)
+
 	default:
 		c.sendErrorResponse(req.ID, -32601, "Method not found", fmt.Sprintf("Unsupported method: %s", req.Method))
 	}

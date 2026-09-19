@@ -11,8 +11,10 @@ import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
+import com.kratisai.controlplane.model.RepositoryVisibility;
 import com.kratisai.controlplane.model.Team;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -138,5 +140,34 @@ class BitbucketRepoProviderTest {
         assertThatThrownBy(() -> provider.createPullRequest(testRepo, GitAuthMaterial.none(), command))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("token");
+    }
+
+    @Test
+    void createRepository_withWorkspace_delegatesToApiService() {
+        RepoCredential credential = new RepoCredential(new Team("t", "d"), "bb", null, null);
+        credential.setProviderMetadata("{\"provider\":\"bitbucket\",\"bitbucketWorkspace\":\"myteam\"}");
+        CreateRepositoryCommand command =
+                new CreateRepositoryCommand("fresh-repo", RepositoryVisibility.PRIVATE, "main");
+        RemoteRepositoryDto remote =
+                new RemoteRepositoryDto("myteam/fresh-repo", "https://bitbucket.org/myteam/fresh-repo.git", "", "main");
+
+        when(bitbucketApiService.findRepository("myteam", "fresh-repo", "tok")).thenReturn(Optional.empty());
+        when(bitbucketApiService.createRepository("myteam", command, "tok")).thenReturn(remote);
+
+        RemoteRepositoryDto result = provider.createRepository(credential, GitAuthMaterial.ofToken("tok"), command);
+
+        assertThat(result).isEqualTo(remote);
+    }
+
+    @Test
+    void createRepository_withoutWorkspace_throws() {
+        RepoCredential credential = new RepoCredential(new Team("t", "d"), "bb", null, null);
+        credential.setProviderMetadata("{\"provider\":\"bitbucket\"}");
+        CreateRepositoryCommand command =
+                new CreateRepositoryCommand("fresh-repo", RepositoryVisibility.PRIVATE, "main");
+
+        assertThatThrownBy(() -> provider.createRepository(credential, GitAuthMaterial.ofToken("tok"), command))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("workspace");
     }
 }

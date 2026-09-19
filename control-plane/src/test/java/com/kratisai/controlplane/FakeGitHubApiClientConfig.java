@@ -2,7 +2,6 @@ package com.kratisai.controlplane;
 
 import com.kratisai.controlplane.client.GitHubApiClient;
 import com.kratisai.controlplane.client.GitHubContentDto;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -18,12 +17,15 @@ public class FakeGitHubApiClientConfig {
 
         private volatile boolean shouldThrow;
         private final AtomicInteger createPullRequestInvocations = new AtomicInteger();
+        private final AtomicInteger createRepositoryInvocations = new AtomicInteger();
         private String mockInstallationLogin = "fake-org";
         private String mockAccessToken = "ghs_faketoken";
         private String mockRepositoriesJson =
                 "{\"repositories\": [{\"name\": \"repo1\", \"clone_url\": \"https://github.com/fake/repo1.git\", \"default_branch\": \"main\"}]}";
         private String mockUserRepositoriesJson =
                 "[{\"name\": \"user-repo1\", \"clone_url\": \"https://github.com/fake/user-repo1.git\", \"default_branch\": \"main\"}]";
+        private volatile boolean repositoryExists;
+        private volatile boolean repositoryHasCommits;
 
         public void setShouldThrow(boolean throwError) {
             shouldThrow = throwError;
@@ -36,6 +38,9 @@ public class FakeGitHubApiClientConfig {
         public void reset() {
             shouldThrow = false;
             createPullRequestInvocations.set(0);
+            createRepositoryInvocations.set(0);
+            repositoryExists = false;
+            repositoryHasCommits = false;
             mockInstallationLogin = "fake-org";
             mockAccessToken = "ghs_faketoken";
             mockRepositoriesJson =
@@ -49,7 +54,8 @@ public class FakeGitHubApiClientConfig {
             if (shouldThrow) {
                 return ResponseEntity.internalServerError().build();
             }
-            return ResponseEntity.ok("{\"account\": {\"login\": \"" + mockInstallationLogin + "\"}}");
+            return ResponseEntity.ok(
+                    "{\"account\": {\"login\": \"" + mockInstallationLogin + "\", \"type\": \"Organization\"}}");
         }
 
         @Override
@@ -61,14 +67,71 @@ public class FakeGitHubApiClientConfig {
         }
 
         @Override
-        public ResponseEntity<String> getRepositories(URI uri, String authorization) {
+        public ResponseEntity<String> getInstallationRepositories(int perPage, int page, String authorization) {
             if (shouldThrow) {
                 return ResponseEntity.internalServerError().build();
             }
-            if (uri.getPath().startsWith("/installation/repositories")) {
-                return ResponseEntity.ok(mockRepositoriesJson);
+            return ResponseEntity.ok(mockRepositoriesJson);
+        }
+
+        @Override
+        public ResponseEntity<String> getUserRepositories(
+                int perPage, int page, String sort, String affiliation, String authorization) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
             }
             return ResponseEntity.ok(mockUserRepositoriesJson);
+        }
+
+        @Override
+        public ResponseEntity<String> getAuthenticatedUser(String authorization) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
+            }
+            return ResponseEntity.ok("{\"login\": \"fake-user\", \"type\": \"User\"}");
+        }
+
+        @Override
+        public ResponseEntity<String> getRepository(String owner, String repo, String authorization) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
+            }
+            if (!repositoryExists) {
+                return ResponseEntity.status(404).body("{\"message\": \"Not Found\"}");
+            }
+            return ResponseEntity.ok("{\"name\": \"" + repo + "\", \"full_name\": \"" + owner + "/" + repo + "\","
+                    + "\"clone_url\": \"https://github.com/" + owner + "/" + repo
+                    + ".git\", \"default_branch\": \"main\"}");
+        }
+
+        @Override
+        public ResponseEntity<String> getBranches(String owner, String repo, int perPage, String authorization) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
+            }
+            return ResponseEntity.ok(repositoryHasCommits ? "[{\"name\": \"main\"}]" : "[]");
+        }
+
+        @Override
+        public ResponseEntity<String> createUserRepository(java.util.Map<String, Object> body, String authorization) {
+            return createRepositoryResponse("fake-user", body);
+        }
+
+        @Override
+        public ResponseEntity<String> createOrgRepository(
+                String org, java.util.Map<String, Object> body, String authorization) {
+            return createRepositoryResponse(org, body);
+        }
+
+        private ResponseEntity<String> createRepositoryResponse(String owner, java.util.Map<String, Object> body) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
+            }
+            createRepositoryInvocations.incrementAndGet();
+            return ResponseEntity.status(201)
+                    .body("{\"name\": \"" + body.get("name") + "\", \"full_name\": \"" + owner + "/" + body.get("name")
+                            + "\", \"clone_url\": \"https://github.com/" + owner + "/" + body.get("name")
+                            + ".git\", \"default_branch\": \"main\"}");
         }
 
         @Override

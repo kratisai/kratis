@@ -7,6 +7,7 @@ import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -61,5 +62,39 @@ public class AzureRepoProvider implements RepoProvider {
                         "Azure DevOps PR creation requires a token, but no token was resolved"));
         AzureDevOpsApiService.Coordinates coords = AzureDevOpsApiService.parse(repo.getUrl());
         return azureDevOpsApiService.createPullRequest(coords, command, token);
+    }
+
+    @Override
+    public boolean supportsRepositoryCreation() {
+        return true;
+    }
+
+    @Override
+    public RemoteRepositoryDto createRepository(
+            RepoCredential credential, GitAuthMaterial auth, CreateRepositoryCommand command) {
+        String token = auth.maybeToken()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Azure DevOps repository creation requires a token, but no token was resolved"));
+        String apiBaseUrl = credential
+                .getMetadata()
+                .getAzureBaseUrl()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Azure DevOps repository creation requires an organization on the credential metadata"));
+        String project = credential
+                .getMetadata()
+                .getAzureProject()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Azure DevOps repository creation requires a project on the credential metadata"));
+
+        Optional<RemoteRepositoryDto> existing =
+                azureDevOpsApiService.findRepository(apiBaseUrl, project, command.name(), token);
+        if (existing.isPresent()) {
+            if (azureDevOpsApiService.repositoryHasCommits(apiBaseUrl, project, command.name(), token)) {
+                throw new RemoteRepositoryExistsException("Azure DevOps repository " + project + "/" + command.name()
+                        + " already exists and is not empty");
+            }
+            return existing.get();
+        }
+        return azureDevOpsApiService.createRepository(apiBaseUrl, project, command, token);
     }
 }

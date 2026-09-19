@@ -76,6 +76,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
                         case GitFileDiff ignored -> EnvironmentConnectorResult.GitFileDiff.class;
                         case ReadFileSlice ignored -> EnvironmentConnectorResult.ReadFileSlice.class;
                         case GitPush ignored -> EnvironmentConnectorResult.GitPush.class;
+                        case GitSetRemote ignored -> EnvironmentConnectorResult.GitSetRemote.class;
                     };
         }
     }
@@ -527,6 +528,25 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
 
         public GitPush {
             Objects.requireNonNull(branchName, "branchName is required");
+        }
+    }
+
+    /** Attach a newly created remote as origin and seed its default branch. */
+    record GitSetRemote(
+            @JsonProperty("remoteUrl") String remoteUrl,
+            @JsonProperty("defaultBranch") String defaultBranch,
+            @JsonProperty("executionId") String executionId)
+            implements OutboundRequestPayload<EnvironmentConnectorResult.GitSetRemote> {
+        public static final String METHOD = "env.git_set_remote";
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+
+        public GitSetRemote {
+            Objects.requireNonNull(remoteUrl, "remoteUrl is required");
+            Objects.requireNonNull(defaultBranch, "defaultBranch is required");
         }
     }
 }

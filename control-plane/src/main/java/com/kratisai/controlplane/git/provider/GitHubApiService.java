@@ -7,10 +7,12 @@ import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.client.GitHubApiClient;
 import com.kratisai.controlplane.client.GitHubContentDto;
 import com.kratisai.controlplane.config.GitHubAppConfig;
+import com.kratisai.controlplane.model.RepositoryVisibility;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.math.BigInteger;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,6 +27,7 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -279,12 +282,12 @@ public class GitHubApiService {
 
     private List<RemoteRepositoryDto> fetchRepositories(String installationToken) {
         List<RemoteRepositoryDto> allRepos = new ArrayList<>();
-        String url = "https://api.github.com/installation/repositories?per_page=100";
 
         try {
-            while (url != null) {
+            Integer page = 1;
+            while (page != null) {
                 ResponseEntity<String> response =
-                        gitHubApiClient.getRepositories(java.net.URI.create(url), "Bearer " + installationToken);
+                        gitHubApiClient.getInstallationRepositories(100, page, "Bearer " + installationToken);
                 JsonNode root = objectMapper.readTree(response.getBody());
 
                 JsonNode reposNode = root.get("repositories");
@@ -294,7 +297,7 @@ public class GitHubApiService {
                     }
                 }
 
-                url = getNextPageUrl(response);
+                page = getNextPage(response);
             }
             return allRepos;
         } catch (Exception e) {
@@ -304,13 +307,12 @@ public class GitHubApiService {
 
     private List<RemoteRepositoryDto> fetchUserRepositories(String token) {
         List<RemoteRepositoryDto> allRepos = new ArrayList<>();
-        String url =
-                "https://api.github.com/user/repos?per_page=100&sort=full_name&affiliation=owner,collaborator,organization_member";
 
         try {
-            while (url != null) {
-                ResponseEntity<String> response =
-                        gitHubApiClient.getRepositories(java.net.URI.create(url), "Bearer " + token);
+            Integer page = 1;
+            while (page != null) {
+                ResponseEntity<String> response = gitHubApiClient.getUserRepositories(
+                        100, page, "full_name", "owner,collaborator,organization_member", "Bearer " + token);
                 JsonNode root = objectMapper.readTree(response.getBody());
 
                 if (root.isArray()) {
@@ -319,7 +321,7 @@ public class GitHubApiService {
                     }
                 }
 
-                url = getNextPageUrl(response);
+                page = getNextPage(response);
             }
             return allRepos;
         } catch (Exception e) {
@@ -340,21 +342,37 @@ public class GitHubApiService {
         return new RemoteRepositoryDto(name, cloneUrl, sshUrl, branch);
     }
 
-    private String getNextPageUrl(ResponseEntity<String> response) {
+    private Integer getNextPage(ResponseEntity<String> response) {
         String linkHeader = response.getHeaders().getFirst("Link");
         if (linkHeader == null) {
             return null;
         }
 
-        // Parse Link header for "rel=next" URL
         // Format: <https://api.github.com/...?page=2>; rel="next", <...>; rel="last"
-        String[] links = linkHeader.split(",");
-        for (String link : links) {
+        for (String link : linkHeader.split(",")) {
             if (link.contains("rel=\"next\"")) {
-                int start = link.indexOf("<");
-                int end = link.indexOf(">");
+                int start = link.indexOf('<');
+                int end = link.indexOf('>');
                 if (start >= 0 && end > start) {
-                    return link.substring(start + 1, end);
+                    return extractPageNumber(link.substring(start + 1, end));
+                }
+            }
+        }
+        return null;
+    }
+
+    private Integer extractPageNumber(String url) {
+        String query = URI.create(url).getQuery();
+        if (query == null) {
+            return null;
+        }
+        for (String param : query.split("&")) {
+            if (param.startsWith("page=")) {
+                try {
+                    return Integer.valueOf(param.substring("page=".length()));
+                } catch (NumberFormatException e) {
+                    logger.warn("Ignoring unparseable GitHub pagination link: {}", url);
+                    return null;
                 }
             }
         }
@@ -420,6 +438,85 @@ public class GitHubApiService {
         } catch (Exception e) {
             logger.error("Failed to create GitHub pull request for {}/{}", owner, repo, e);
             throw new RuntimeException("Failed to create GitHub pull request: " + e.getMessage(), e);
+        }
+    }
+
+    /** The account a credential creates repositories under. */
+    public record GitHubAccount(String login, boolean organization) {}
+
+    /** Resolves the account that installed the GitHub App, used as the repository owner. */
+    public GitHubAccount getInstallationAccount(String installationId) {
+        try {
+            String jwt = generateInstallationJwt(installationId);
+            ResponseEntity<String> response = gitHubApiClient.getInstallation(installationId, "Bearer " + jwt);
+            JsonNode account = parse(response).path("account");
+            String login = account.path("login").asText("");
+            if (login.isEmpty()) {
+                throw new IllegalStateException("GitHub installation response did not include an account login");
+            }
+            return new GitHubAccount(
+                    login, "Organization".equals(account.path("type").asText("")));
+        } catch (Exception e) {
+            logger.error("Failed to fetch GitHub App installation account", e);
+            throw new RuntimeException("Failed to fetch GitHub App installation account: " + e.getMessage(), e);
+        }
+    }
+
+    /** Resolves the authenticated PAT user, used as the repository owner. */
+    public GitHubAccount getAuthenticatedAccount(String token) {
+        ResponseEntity<String> response = gitHubApiClient.getAuthenticatedUser("Bearer " + token);
+        String login = parse(response).path("login").asText("");
+        if (login.isEmpty()) {
+            throw new IllegalStateException("GitHub user response did not include a login");
+        }
+        return new GitHubAccount(login, false);
+    }
+
+    public Optional<RemoteRepositoryDto> findRepository(String owner, String repo, String token) {
+        ResponseEntity<String> response = gitHubApiClient.getRepository(owner, repo, "Bearer " + token);
+        if (response.getStatusCode().value() == 404) {
+            return Optional.empty();
+        }
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException("GitHub repository lookup failed with status: " + response.getStatusCode());
+        }
+        return Optional.of(toRemoteRepositoryDto(parse(response)));
+    }
+
+    public boolean repositoryHasCommits(String owner, String repo, String token) {
+        ResponseEntity<String> response = gitHubApiClient.getBranches(owner, repo, 1, "Bearer " + token);
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException("GitHub branch lookup failed with status: " + response.getStatusCode());
+        }
+        JsonNode branches = parse(response);
+        return branches.isArray() && !branches.isEmpty();
+    }
+
+    public RemoteRepositoryDto createRepository(
+            String owner, boolean organization, CreateRepositoryCommand command, String token) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("name", command.name());
+        body.put("private", command.visibility() != RepositoryVisibility.PUBLIC);
+        body.put("auto_init", false);
+
+        ResponseEntity<String> response = organization
+                ? gitHubApiClient.createOrgRepository(owner, body, "Bearer " + token)
+                : gitHubApiClient.createUserRepository(body, "Bearer " + token);
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException(
+                    "GitHub repository creation failed with status: " + response.getStatusCode());
+        }
+        return toRemoteRepositoryDto(parse(response));
+    }
+
+    private JsonNode parse(ResponseEntity<String> response) {
+        try {
+            if (response.getBody() == null) {
+                throw new IllegalStateException("Empty response from GitHub API");
+            }
+            return objectMapper.readTree(response.getBody());
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse GitHub API response: " + e.getMessage(), e);
         }
     }
 }

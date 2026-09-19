@@ -408,6 +408,47 @@ func mergeBaseWithHead(workspace string, ref string) (string, error) {
 	return sha, nil
 }
 
+// resolveDiffBase resolves the commit diff RPCs compare the workspace against.
+// A provisioned new repository has no origin remote and therefore no target
+// branch; its stable base is the root commit, which keeps agent commits in the
+// diff. Cloned repositories diff against the merge-base of the target branch
+// and HEAD.
+func resolveDiffBase(workspace, baseBranch string) (string, error) {
+	if !hasOriginRemote(workspace) {
+		return rootCommit(workspace)
+	}
+	baseRef, err := resolveBaseRef(workspace, baseBranch)
+	if err != nil {
+		return "", err
+	}
+	return mergeBaseWithHead(workspace, baseRef)
+}
+
+func hasOriginRemote(workspace string) bool {
+	cmd := exec.Command("git", "remote", "get-url", "origin") //nolint:gosec
+	cmd.Dir = workspace
+	return cmd.Run() == nil
+}
+
+// rootCommit returns the provisioning base of a new repository: the empty
+// "Initial commit".
+func rootCommit(workspace string) (string, error) {
+	cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD") //nolint:gosec
+	cmd.Dir = workspace
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("unable to resolve the repository root commit: %w", err)
+	}
+	sha := strings.TrimSpace(string(out))
+	if idx := strings.IndexByte(sha, '\n'); idx != -1 {
+		sha = strings.TrimSpace(sha[:idx])
+	}
+	if sha == "" {
+		return "", fmt.Errorf("repository has no root commit")
+	}
+	return sha, nil
+}
+
 func isGeneratedOrLarge(path string, additions, deletions int) bool {
 	if additions+deletions > 1000 {
 		return true
@@ -451,16 +492,7 @@ func (c *Client) ExecuteGitDiffSummary(params GitDiffSummaryParams, reqID interf
 	headBytes, _ := headCmd.Output()
 	headCommit := strings.TrimSpace(string(headBytes))
 
-	baseRef, err := resolveBaseRef(workspace, params.BaseBranch)
-	if err != nil {
-		if reqID != nil {
-			c.sendErrorResponse(reqID, -32000, "Unable to resolve base branch", err.Error())
-		}
-		return
-	}
-	// Diff against the merge-base so changes merged into the target branch after
-	// this branch diverged never appear (or get reversed) in the branch diff.
-	baseCommit, err := mergeBaseWithHead(workspace, baseRef)
+	baseCommit, err := resolveDiffBase(workspace, params.BaseBranch)
 	if err != nil {
 		if reqID != nil {
 			c.sendErrorResponse(reqID, -32000, "Unable to resolve diff base", err.Error())
@@ -572,7 +604,7 @@ func (c *Client) ExecuteGitDiffSummary(params GitDiffSummaryParams, reqID interf
 	// not from the base branch tip).
 	commitsAhead := 0
 	var commitMessages []GitCommitMessage
-	revRange := fmt.Sprintf("%s..HEAD", baseRef)
+	revRange := fmt.Sprintf("%s..HEAD", baseCommit)
 	countCmd := exec.Command("git", "rev-list", "--count", revRange) //nolint:gosec
 	countCmd.Dir = workspace
 	if cOut, err := countCmd.Output(); err == nil {
@@ -663,14 +695,7 @@ func (c *Client) ExecuteGitFileDiff(params GitFileDiffParams, reqID interface{})
 		return
 	}
 
-	baseRef, err := resolveBaseRef(workspace, params.BaseBranch)
-	if err != nil {
-		if reqID != nil {
-			c.sendErrorResponse(reqID, -32000, "Unable to resolve base branch", err.Error())
-		}
-		return
-	}
-	baseCommit, err := mergeBaseWithHead(workspace, baseRef)
+	baseCommit, err := resolveDiffBase(workspace, params.BaseBranch)
 	if err != nil {
 		if reqID != nil {
 			c.sendErrorResponse(reqID, -32000, "Unable to resolve diff base", err.Error())
@@ -951,6 +976,96 @@ func (c *Client) ExecuteGitPush(params GitPushParams, reqID interface{}) {
 			BranchName: branchName,
 			RemoteRef:  remoteRef,
 			Status:     "success",
+		})
+	}
+}
+
+// ExecuteGitSetRemote attaches a newly created remote repository as origin and
+// seeds its default branch from the repository root commit.
+//
+// Provisioning initialises a new repository with an empty "Initial commit", so
+// that commit is the only local content before the agent starts. Pushing it to
+// the remote default branch gives git_push a resolvable origin/<defaultBranch>
+// base without importing any agent work into the default branch.
+func (c *Client) ExecuteGitSetRemote(params GitSetRemoteParams, reqID interface{}) {
+	remoteURL := strings.TrimSpace(params.RemoteURL)
+	if remoteURL == "" {
+		if reqID != nil {
+			c.sendErrorResponse(reqID, -32602, "Invalid parameters", "remoteUrl is required")
+		}
+		return
+	}
+
+	defaultBranch := strings.TrimSpace(params.DefaultBranch)
+	if defaultBranch == "" {
+		if reqID != nil {
+			c.sendErrorResponse(reqID, -32602, "Invalid parameters", "defaultBranch is required")
+		}
+		return
+	}
+
+	cmdEnv := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	workspace := c.resolveWorkspace()
+
+	c.reassertGitIdentity()
+
+	// Replace any stale origin left by a previous attempt so the push below
+	// cannot target the wrong host.
+	removeCmd := exec.Command("git", "remote", "remove", "origin") //nolint:gosec
+	removeCmd.Dir = workspace
+	removeCmd.Env = cmdEnv
+	_ = removeCmd.Run()
+
+	addCmd := exec.Command("git", "remote", "add", "origin", remoteURL) //nolint:gosec
+	addCmd.Dir = workspace
+	addCmd.Env = cmdEnv
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		log.Printf("git remote add origin failed: %v, output: %s", err, string(out))
+		if reqID != nil {
+			c.sendErrorResponse(reqID, -32000, "Failed to configure remote origin", string(out))
+		}
+		return
+	}
+
+	rootCmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD") //nolint:gosec
+	rootCmd.Dir = workspace
+	rootCmd.Env = cmdEnv
+	rootOut, rootErr := rootCmd.Output()
+	if rootErr != nil {
+		if reqID != nil {
+			c.sendErrorResponse(reqID, -32000, "Unable to resolve the repository root commit", rootErr.Error())
+		}
+		return
+	}
+	seedCommit := strings.TrimSpace(string(rootOut))
+	if idx := strings.IndexByte(seedCommit, '\n'); idx != -1 {
+		seedCommit = strings.TrimSpace(seedCommit[:idx])
+	}
+
+	// The remote was created empty, so seeding the default branch needs no force.
+	pushCmd := exec.Command("git", "push", "origin", seedCommit+":refs/heads/"+defaultBranch) //nolint:gosec
+	pushCmd.Dir = workspace
+	pushCmd.Env = cmdEnv
+	if out, err := pushCmd.CombinedOutput(); err != nil {
+		log.Printf("git push seed to %s failed: %v, output: %s", defaultBranch, err, string(out))
+		if reqID != nil {
+			c.sendErrorResponse(reqID, -32000, "Failed to seed the remote default branch", string(out))
+		}
+		return
+	}
+
+	fetchCmd := exec.Command("git", "fetch", "origin") //nolint:gosec
+	fetchCmd.Dir = workspace
+	fetchCmd.Env = cmdEnv
+	if out, err := fetchCmd.CombinedOutput(); err != nil {
+		log.Printf("git fetch origin after set_remote failed (continuing): %v, output: %s", err, string(out))
+	}
+
+	if reqID != nil {
+		c.sendSuccessResponse(reqID, GitSetRemoteResult{
+			Status:        "success",
+			DefaultBranch: defaultBranch,
+			SeedCommit:    seedCommit,
 		})
 	}
 }

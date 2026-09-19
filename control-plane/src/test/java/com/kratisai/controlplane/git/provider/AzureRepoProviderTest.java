@@ -13,8 +13,10 @@ import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
+import com.kratisai.controlplane.model.RepositoryVisibility;
 import com.kratisai.controlplane.model.Team;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -135,5 +137,37 @@ class AzureRepoProviderTest {
         assertThatThrownBy(() -> provider.createPullRequest(testRepo, GitAuthMaterial.none(), command))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("token");
+    }
+
+    @Test
+    void createRepository_withOrgAndProject_delegatesToApiService() {
+        RepoCredential credential = new RepoCredential(new Team("t", "d"), "az", null, null);
+        credential.setProviderMetadata(
+                "{\"provider\":\"azure\",\"azureBaseUrl\":\"https://dev.azure.com/myorg\",\"azureProject\":\"myproject\"}");
+        CreateRepositoryCommand command =
+                new CreateRepositoryCommand("fresh-repo", RepositoryVisibility.PRIVATE, "main");
+        RemoteRepositoryDto remote = new RemoteRepositoryDto(
+                "myproject/fresh-repo", "https://dev.azure.com/myorg/myproject/_git/fresh-repo", "", "main");
+
+        when(azureDevOpsApiService.findRepository("https://dev.azure.com/myorg", "myproject", "fresh-repo", "tok"))
+                .thenReturn(Optional.empty());
+        when(azureDevOpsApiService.createRepository("https://dev.azure.com/myorg", "myproject", command, "tok"))
+                .thenReturn(remote);
+
+        RemoteRepositoryDto result = provider.createRepository(credential, GitAuthMaterial.ofToken("tok"), command);
+
+        assertThat(result).isEqualTo(remote);
+    }
+
+    @Test
+    void createRepository_withoutProject_throws() {
+        RepoCredential credential = new RepoCredential(new Team("t", "d"), "az", null, null);
+        credential.setProviderMetadata("{\"provider\":\"azure\",\"azureBaseUrl\":\"https://dev.azure.com/myorg\"}");
+        CreateRepositoryCommand command =
+                new CreateRepositoryCommand("fresh-repo", RepositoryVisibility.PRIVATE, "main");
+
+        assertThatThrownBy(() -> provider.createRepository(credential, GitAuthMaterial.ofToken("tok"), command))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("project");
     }
 }

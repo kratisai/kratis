@@ -374,6 +374,27 @@
           "$ref": "./schemas/results/git_push.schema.json"
         }
       }
+    },
+    {
+      "name": "env.git_set_remote",
+      "summary": "Configure origin and seed the default branch of a newly created remote repository",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/git_set_remote.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/git_set_remote.schema.json"
+        }
+      }
     }
   ]
 }

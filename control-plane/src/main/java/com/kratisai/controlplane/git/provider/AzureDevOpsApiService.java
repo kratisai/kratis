@@ -5,8 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.PullRequestResultDto;
 import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.client.AzureDevOpsApiClient;
-import java.net.URI;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -14,12 +12,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.util.DefaultUriBuilderFactory;
+import org.springframework.web.util.UriBuilderFactory;
 
 @Service
 public class AzureDevOpsApiService {
@@ -56,13 +57,12 @@ public class AzureDevOpsApiService {
      */
     public List<RemoteRepositoryDto> listRepositories(String apiBaseUrl, String project, String token) {
         requireToken(token);
-        String base = stripTrailingSlash(apiBaseUrl);
-        String scope =
-                project != null && !project.isBlank() ? "/" + URLEncoder.encode(project, StandardCharsets.UTF_8) : "";
-        String url = base + scope + "/_apis/git/repositories?api-version=" + API_VERSION;
+        UriBuilderFactory base = baseUriFactory(apiBaseUrl);
 
         try {
-            ResponseEntity<String> response = azureDevOpsApiClient.getRepositories(URI.create(url), basic(token));
+            ResponseEntity<String> response = project != null && !project.isBlank()
+                    ? azureDevOpsApiClient.getProjectRepositories(base, project, API_VERSION, basic(token))
+                    : azureDevOpsApiClient.getOrganizationRepositories(base, API_VERSION, basic(token));
             JsonNode root = objectMapper.readTree(response.getBody());
             List<RemoteRepositoryDto> repos = new ArrayList<>();
             JsonNode values = root.get("value");
@@ -81,14 +81,16 @@ public class AzureDevOpsApiService {
     public String readFile(Coordinates coords, String path, String branch, String token) {
         requireToken(token);
         String ref = branch != null && !branch.isBlank() ? branch : "main";
-        String url = coords.apiBaseUrl() + "/"
-                + URLEncoder.encode(coords.project(), StandardCharsets.UTF_8) + "/_apis/git/repositories/"
-                + URLEncoder.encode(coords.repository(), StandardCharsets.UTF_8) + "/items"
-                + "?path=" + URLEncoder.encode(path, StandardCharsets.UTF_8)
-                + "&versionDescriptor.version=" + URLEncoder.encode(ref, StandardCharsets.UTF_8)
-                + "&includeContent=true&api-version=" + API_VERSION;
 
-        ResponseEntity<String> response = azureDevOpsApiClient.getItem(URI.create(url), basic(token));
+        ResponseEntity<String> response = azureDevOpsApiClient.getItem(
+                baseUriFactory(coords.apiBaseUrl()),
+                coords.project(),
+                coords.repository(),
+                path,
+                ref,
+                true,
+                API_VERSION,
+                basic(token));
         String body = response.getBody();
         if (body == null) {
             throw new IllegalStateException("Empty response from Azure DevOps Items API for " + path);
@@ -103,11 +105,6 @@ public class AzureDevOpsApiService {
     public PullRequestResultDto createPullRequest(Coordinates coords, CreatePullRequestCommand command, String token) {
         requireToken(token);
         try {
-            String url = coords.apiBaseUrl() + "/"
-                    + URLEncoder.encode(coords.project(), StandardCharsets.UTF_8) + "/_apis/git/repositories/"
-                    + URLEncoder.encode(coords.repository(), StandardCharsets.UTF_8)
-                    + "/pullrequests?api-version=" + API_VERSION;
-
             String headRef = command.headBranch().startsWith("refs/heads/")
                     ? command.headBranch()
                     : "refs/heads/" + command.headBranch();
@@ -124,8 +121,13 @@ public class AzureDevOpsApiService {
                 body.put("isDraft", true);
             }
 
-            ResponseEntity<String> response =
-                    azureDevOpsApiClient.createPullRequest(URI.create(url), body, basic(token));
+            ResponseEntity<String> response = azureDevOpsApiClient.createPullRequest(
+                    baseUriFactory(coords.apiBaseUrl()),
+                    coords.project(),
+                    coords.repository(),
+                    API_VERSION,
+                    body,
+                    basic(token));
 
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
                 throw new IllegalStateException(
@@ -152,6 +154,62 @@ public class AzureDevOpsApiService {
             logger.error(
                     "Failed to create Azure DevOps pull request for {}/{}", coords.project(), coords.repository(), e);
             throw new RuntimeException("Failed to create Azure DevOps pull request: " + e.getMessage(), e);
+        }
+    }
+
+    public Optional<RemoteRepositoryDto> findRepository(String apiBaseUrl, String project, String name, String token) {
+        requireToken(token);
+        ResponseEntity<String> response = azureDevOpsApiClient.getRepository(
+                baseUriFactory(apiBaseUrl), project, name, API_VERSION, basic(token));
+        if (response.getStatusCode().value() == 404) {
+            return Optional.empty();
+        }
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException(
+                    "Azure DevOps repository lookup failed with status: " + response.getStatusCode());
+        }
+        return Optional.of(toRemoteRepositoryDto(parseBody(response)));
+    }
+
+    public boolean repositoryHasCommits(String apiBaseUrl, String project, String name, String token) {
+        requireToken(token);
+        ResponseEntity<String> response = azureDevOpsApiClient.getCommits(
+                baseUriFactory(apiBaseUrl), project, name, 1, API_VERSION, basic(token));
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException(
+                    "Azure DevOps commit lookup failed with status: " + response.getStatusCode());
+        }
+        return parseBody(response).path("count").asInt(0) > 0;
+    }
+
+    public RemoteRepositoryDto createRepository(
+            String apiBaseUrl, String project, CreateRepositoryCommand command, String token) {
+        requireToken(token);
+        Map<String, Object> body = new HashMap<>();
+        body.put("name", command.name());
+        body.put("project", Map.of("name", project));
+
+        ResponseEntity<String> response = azureDevOpsApiClient.createRepository(
+                baseUriFactory(apiBaseUrl), project, API_VERSION, body, basic(token));
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new IllegalStateException(
+                    "Azure DevOps repository creation failed with status: " + response.getStatusCode());
+        }
+        return toRemoteRepositoryDto(parseBody(response));
+    }
+
+    private static UriBuilderFactory baseUriFactory(String apiBaseUrl) {
+        return new DefaultUriBuilderFactory(stripTrailingSlash(apiBaseUrl));
+    }
+
+    private JsonNode parseBody(ResponseEntity<String> response) {
+        try {
+            if (response.getBody() == null) {
+                throw new IllegalStateException("Empty response from Azure DevOps API");
+            }
+            return objectMapper.readTree(response.getBody());
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse Azure DevOps API response: " + e.getMessage(), e);
         }
     }
 

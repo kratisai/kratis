@@ -44,6 +44,11 @@ public record ProviderMetadata(String rawJson) {
         return textValue("gitlabUrl");
     }
 
+    /** Retrieves the GitLab group namespace to create repositories under, if configured. */
+    public Optional<String> getGitLabGroup() {
+        return textValue("gitlabGroup");
+    }
+
     /** Retrieves the Bitbucket workspace if configured. */
     public Optional<String> getBitbucketWorkspace() {
         return textValue("bitbucketWorkspace");

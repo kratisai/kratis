@@ -464,6 +464,20 @@ type GitPushResult struct {
 	Status     string `json:"status"`
 }
 
+// GitSetRemoteParams is the parameters payload for env.git_set_remote.
+type GitSetRemoteParams struct {
+	RemoteURL     string `json:"remoteUrl"`
+	DefaultBranch string `json:"defaultBranch"`
+	ExecutionID   string `json:"executionId,omitempty"`
+}
+
+// GitSetRemoteResult is the success response payload for env.git_set_remote.
+type GitSetRemoteResult struct {
+	Status        string `json:"status"`
+	DefaultBranch string `json:"defaultBranch"`
+	SeedCommit    string `json:"seedCommit,omitempty"`
+}
+
 // AcpInitializedParams is sent by the sidecar when ACP handshake completes.
 type AcpInitializedParams struct {
 	SessionID    string `json:"sessionId"`

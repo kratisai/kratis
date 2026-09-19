@@ -799,6 +799,7 @@ class ProtocolConformanceTest {
             case "env.git_file_diff" -> EnvironmentConnectorResult.GitFileDiff.class;
             case "env.read_file_slice" -> EnvironmentConnectorResult.ReadFileSlice.class;
             case "env.git_push" -> EnvironmentConnectorResult.GitPush.class;
+            case "env.git_set_remote" -> EnvironmentConnectorResult.GitSetRemote.class;
             default -> null;
         };
     }
@@ -818,6 +819,7 @@ class ProtocolConformanceTest {
             case "git_file_diff" -> EnvironmentConnectorResult.GitFileDiff.class;
             case "read_file_slice" -> EnvironmentConnectorResult.ReadFileSlice.class;
             case "git_push" -> EnvironmentConnectorResult.GitPush.class;
+            case "git_set_remote" -> EnvironmentConnectorResult.GitSetRemote.class;
             default -> throw new AssertionError("Unexpected environment result fixture: " + name);
         };
     }

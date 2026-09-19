@@ -11,8 +11,10 @@ import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
+import com.kratisai.controlplane.model.RepositoryVisibility;
 import com.kratisai.controlplane.model.Team;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -141,5 +143,68 @@ class GitLabRepoProviderTest {
         assertThatThrownBy(() -> provider.createPullRequest(testRepo, GitAuthMaterial.none(), command))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("token");
+    }
+
+    @Test
+    void createRepository_personalNamespace_createsUnderUsername() {
+        RepoCredential credential = new RepoCredential(new Team("t", "d"), "pat", null, null);
+        credential.setProviderMetadata("{\"provider\":\"gitlab\"}");
+        CreateRepositoryCommand command =
+                new CreateRepositoryCommand("fresh-repo", RepositoryVisibility.INTERNAL, "main");
+        RemoteRepositoryDto remote = new RemoteRepositoryDto(
+                "fake-user/fresh-repo", "https://gitlab.com/fake-user/fresh-repo.git", "", "main");
+
+        when(gitLabApiService.getAuthenticatedUsername("tok", "https://gitlab.com"))
+                .thenReturn("fake-user");
+        when(gitLabApiService.findProject("fake-user/fresh-repo", "tok", "https://gitlab.com"))
+                .thenReturn(Optional.empty());
+        when(gitLabApiService.createRepository(null, command, "tok", "https://gitlab.com"))
+                .thenReturn(remote);
+
+        RemoteRepositoryDto result = provider.createRepository(credential, GitAuthMaterial.ofToken("tok"), command);
+
+        assertThat(result).isEqualTo(remote);
+    }
+
+    @Test
+    void createRepository_configuredGroup_createsUnderGroupNamespace() {
+        RepoCredential credential = new RepoCredential(new Team("t", "d"), "pat", null, null);
+        credential.setProviderMetadata("{\"provider\":\"gitlab\",\"gitlabGroup\":\"my-group\"}");
+        CreateRepositoryCommand command =
+                new CreateRepositoryCommand("fresh-repo", RepositoryVisibility.PRIVATE, "main");
+        RemoteRepositoryDto remote = new RemoteRepositoryDto(
+                "my-group/fresh-repo", "https://gitlab.com/my-group/fresh-repo.git", "", "main");
+
+        when(gitLabApiService.getGroupId("my-group", "tok", "https://gitlab.com"))
+                .thenReturn(77L);
+        when(gitLabApiService.findProject("my-group/fresh-repo", "tok", "https://gitlab.com"))
+                .thenReturn(Optional.empty());
+        when(gitLabApiService.createRepository(77L, command, "tok", "https://gitlab.com"))
+                .thenReturn(remote);
+
+        RemoteRepositoryDto result = provider.createRepository(credential, GitAuthMaterial.ofToken("tok"), command);
+
+        assertThat(result).isEqualTo(remote);
+    }
+
+    @Test
+    void createRepository_existingNonEmpty_throws() {
+        RepoCredential credential = new RepoCredential(new Team("t", "d"), "pat", null, null);
+        credential.setProviderMetadata("{\"provider\":\"gitlab\"}");
+        CreateRepositoryCommand command =
+                new CreateRepositoryCommand("fresh-repo", RepositoryVisibility.PRIVATE, "main");
+        RemoteRepositoryDto remote = new RemoteRepositoryDto(
+                "fake-user/fresh-repo", "https://gitlab.com/fake-user/fresh-repo.git", "", "main");
+
+        when(gitLabApiService.getAuthenticatedUsername("tok", "https://gitlab.com"))
+                .thenReturn("fake-user");
+        when(gitLabApiService.findProject("fake-user/fresh-repo", "tok", "https://gitlab.com"))
+                .thenReturn(Optional.of(remote));
+        when(gitLabApiService.projectHasCommits("fake-user/fresh-repo", "tok", "https://gitlab.com"))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> provider.createRepository(credential, GitAuthMaterial.ofToken("tok"), command))
+                .isInstanceOf(RemoteRepositoryExistsException.class)
+                .hasMessageContaining("already exists and is not empty");
     }
 }

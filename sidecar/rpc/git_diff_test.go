@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -201,6 +202,84 @@ func TestExecuteGitDiffSummaryAndFileDiff(t *testing.T) {
 	}
 	if newFileDiff.TotalLines != 2 {
 		t.Errorf("Expected totalLines 2 for new_file.txt, got %d", newFileDiff.TotalLines)
+	}
+}
+
+// setupTestNewRepo mirrors provisioning: an empty "Initial commit", an agent
+// commit, and an uncommitted change. Returns the workspace and root commit.
+func setupTestNewRepo(t *testing.T) (string, string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "kratis-git-new-repo-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	runGitCmd(t, dir, "init")
+	runGitCmd(t, dir, "config", "user.name", "Test")
+	runGitCmd(t, dir, "config", "user.email", "test@kratis.ai")
+	runGitCmd(t, dir, "commit", "--allow-empty", "-m", "Initial commit")
+	rootSHA := gitOutput(t, dir, "rev-parse", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0600); err != nil {
+		t.Fatalf("Failed to write main.go: %v", err)
+	}
+	runGitCmd(t, dir, "add", "main.go")
+	runGitCmd(t, dir, "commit", "-m", "feat: add main")
+
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# New repo\n"), 0600); err != nil {
+		t.Fatalf("Failed to write README.md: %v", err)
+	}
+	return dir, rootSHA
+}
+
+func TestExecuteGitDiffSummary_NewRepoDiffsAgainstRootCommit(t *testing.T) {
+	dir, rootSHA := setupTestNewRepo(t)
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	client, received := connectedGitClient(t, dir)
+	client.ExecuteGitDiffSummary(
+		GitDiffSummaryParams{BaseBranch: "main", ExecutionID: "exec-new"}, "req-new")
+
+	var envelope struct {
+		Result GitDiffSummaryResult `json:"result"`
+	}
+	if err := json.Unmarshal(captureNextResponse(t, received), &envelope); err != nil {
+		t.Fatalf("Failed to unmarshal diff summary: %v", err)
+	}
+	result := envelope.Result
+
+	if result.BaseCommit != rootSHA {
+		t.Errorf("Expected baseCommit to be the root commit %s, got %s", rootSHA, result.BaseCommit)
+	}
+	paths := map[string]bool{}
+	for _, f := range result.Files {
+		paths[f.Path] = true
+	}
+	if !paths["main.go"] {
+		t.Errorf("Expected committed agent file main.go in diff, got %v", paths)
+	}
+	if !paths["README.md"] {
+		t.Errorf("Expected uncommitted README.md in diff, got %v", paths)
+	}
+}
+
+func TestExecuteGitFileDiff_NewRepoDiffsAgainstRootCommit(t *testing.T) {
+	dir, _ := setupTestNewRepo(t)
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	client, received := connectedGitClient(t, dir)
+	client.ExecuteGitFileDiff(GitFileDiffParams{Path: "main.go", BaseBranch: "main"}, "req-new-file")
+
+	var envelope struct {
+		Result GitFileDiffResult `json:"result"`
+	}
+	if err := json.Unmarshal(captureNextResponse(t, received), &envelope); err != nil {
+		t.Fatalf("Failed to unmarshal file diff: %v", err)
+	}
+	if !strings.Contains(envelope.Result.Patch, "@@") {
+		t.Errorf("Expected a unified patch for committed agent file, got %q", envelope.Result.Patch)
+	}
+	if envelope.Result.Additions <= 0 {
+		t.Errorf("Expected additions > 0 for committed agent file, got %d", envelope.Result.Additions)
 	}
 }
 

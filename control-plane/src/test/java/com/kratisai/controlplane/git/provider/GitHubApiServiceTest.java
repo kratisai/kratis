@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.client.GitHubApiClient;
 import com.kratisai.controlplane.config.GitHubAppConfig;
-import java.net.URI;
+import com.kratisai.controlplane.model.RepositoryVisibility;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
@@ -70,9 +70,7 @@ class GitHubApiServiceTest {
         org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
         headers.add("Link", "<https://api.github.com/installation/repositories?per_page=100&page=2>; rel=\"next\"");
 
-        Mockito.when(gitHubApiClient.getRepositories(
-                        Mockito.eq(URI.create("https://api.github.com/installation/repositories?per_page=100")),
-                        Mockito.anyString()))
+        Mockito.when(gitHubApiClient.getInstallationRepositories(Mockito.eq(100), Mockito.eq(1), Mockito.anyString()))
                 .thenReturn(ResponseEntity.ok().headers(headers).body(reposResponsePage1));
 
         String reposResponsePage2 = """
@@ -88,9 +86,7 @@ class GitHubApiServiceTest {
                           ]
                         }""";
 
-        Mockito.when(gitHubApiClient.getRepositories(
-                        Mockito.eq(URI.create("https://api.github.com/installation/repositories?per_page=100&page=2")),
-                        Mockito.anyString()))
+        Mockito.when(gitHubApiClient.getInstallationRepositories(Mockito.eq(100), Mockito.eq(2), Mockito.anyString()))
                 .thenReturn(ResponseEntity.ok(reposResponsePage2));
 
         List<RemoteRepositoryDto> repos = gitHubApiService.listAvailableRepositories("inst-123");
@@ -126,10 +122,11 @@ class GitHubApiServiceTest {
                             "default_branch": "main"
                           }
                         ]""";
-        Mockito.when(gitHubApiClient.getRepositories(
-                        Mockito.eq(
-                                URI.create(
-                                        "https://api.github.com/user/repos?per_page=100&sort=full_name&affiliation=owner,collaborator,organization_member")),
+        Mockito.when(gitHubApiClient.getUserRepositories(
+                        Mockito.eq(100),
+                        Mockito.eq(1),
+                        Mockito.eq("full_name"),
+                        Mockito.eq("owner,collaborator,organization_member"),
                         Mockito.anyString()))
                 .thenReturn(ResponseEntity.ok(reposResponse));
 
@@ -139,5 +136,90 @@ class GitHubApiServiceTest {
         assertThat(repos.getFirst().name()).isEqualTo("kratis-user/user-repo-1");
         assertThat(repos.getFirst().cloneUrl()).isEqualTo("https://github.com/kratis-user/user-repo-1.git");
         assertThat(repos.getFirst().sshUrl()).isEqualTo("git@github.com:kratis-user/user-repo-1.git");
+    }
+
+    @Test
+    void getInstallationAccount_returnsLoginAndOrganizationKind() {
+        Mockito.when(gitHubApiClient.getInstallation(Mockito.eq("inst-123"), Mockito.anyString()))
+                .thenReturn(
+                        ResponseEntity.ok("{\"account\": {\"login\": \"kratis-org\", \"type\": \"Organization\"}}"));
+
+        GitHubApiService.GitHubAccount account = gitHubApiService.getInstallationAccount("inst-123");
+
+        assertThat(account.login()).isEqualTo("kratis-org");
+        assertThat(account.organization()).isTrue();
+    }
+
+    @Test
+    void getAuthenticatedAccount_returnsUserLogin() {
+        Mockito.when(gitHubApiClient.getAuthenticatedUser(Mockito.eq("Bearer tok")))
+                .thenReturn(ResponseEntity.ok("{\"login\": \"fake-user\", \"type\": \"User\"}"));
+
+        GitHubApiService.GitHubAccount account = gitHubApiService.getAuthenticatedAccount("tok");
+
+        assertThat(account.login()).isEqualTo("fake-user");
+        assertThat(account.organization()).isFalse();
+    }
+
+    @Test
+    void findRepository_returnsEmptyOn404() {
+        Mockito.when(gitHubApiClient.getRepository(
+                        Mockito.eq("fake-user"), Mockito.eq("repo"), Mockito.eq("Bearer tok")))
+                .thenReturn(ResponseEntity.status(404).body("{}"));
+
+        assertThat(gitHubApiService.findRepository("fake-user", "repo", "tok")).isEmpty();
+    }
+
+    @Test
+    void findRepository_returnsRepository() {
+        Mockito.when(gitHubApiClient.getRepository(
+                        Mockito.eq("fake-user"), Mockito.eq("repo"), Mockito.eq("Bearer tok")))
+                .thenReturn(ResponseEntity.ok("{\"name\": \"repo\", \"full_name\": \"fake-user/repo\","
+                        + "\"clone_url\": \"https://github.com/fake-user/repo.git\", \"default_branch\": \"main\"}"));
+
+        RemoteRepositoryDto result =
+                gitHubApiService.findRepository("fake-user", "repo", "tok").orElseThrow();
+
+        assertThat(result.cloneUrl()).isEqualTo("https://github.com/fake-user/repo.git");
+    }
+
+    @Test
+    void repositoryHasCommits_reflectsBranchList() {
+        Mockito.when(gitHubApiClient.getBranches(
+                        Mockito.eq("fake-user"), Mockito.eq("repo"), Mockito.eq(1), Mockito.eq("Bearer tok")))
+                .thenReturn(ResponseEntity.ok("[{\"name\": \"main\"}]"))
+                .thenReturn(ResponseEntity.ok("[]"));
+
+        assertThat(gitHubApiService.repositoryHasCommits("fake-user", "repo", "tok"))
+                .isTrue();
+        assertThat(gitHubApiService.repositoryHasCommits("fake-user", "repo", "tok"))
+                .isFalse();
+    }
+
+    @Test
+    void createRepository_postsAndParsesResult() {
+        Mockito.when(gitHubApiClient.createUserRepository(Mockito.any(), Mockito.eq("Bearer tok")))
+                .thenReturn(
+                        ResponseEntity.status(201)
+                                .body(
+                                        "{\"name\": \"repo\", \"full_name\": \"fake-user/repo\","
+                                                + "\"clone_url\": \"https://github.com/fake-user/repo.git\", \"default_branch\": \"main\"}"));
+
+        RemoteRepositoryDto result = gitHubApiService.createRepository(
+                "fake-user", false, new CreateRepositoryCommand("repo", RepositoryVisibility.PRIVATE, "main"), "tok");
+
+        assertThat(result.cloneUrl()).isEqualTo("https://github.com/fake-user/repo.git");
+    }
+
+    @Test
+    void createRepository_errorStatus_throws() {
+        Mockito.when(gitHubApiClient.createUserRepository(Mockito.any(), Mockito.eq("Bearer tok")))
+                .thenReturn(ResponseEntity.status(422).body("{}"));
+
+        CreateRepositoryCommand command = new CreateRepositoryCommand("repo", RepositoryVisibility.PRIVATE, "main");
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(
+                        () -> gitHubApiService.createRepository("fake-user", false, command, "tok")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("creation failed");
     }
 }

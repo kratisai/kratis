@@ -8,6 +8,7 @@ import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
@@ -70,6 +71,40 @@ public class GitHubRepoProvider implements RepoProvider {
                         new IllegalStateException("GitHub PR creation requires a token, but no token was resolved"));
 
         return gitHubApiService.createPullRequest(owner, repoSlug, command, token);
+    }
+
+    @Override
+    public boolean supportsRepositoryCreation() {
+        return true;
+    }
+
+    @Override
+    public RemoteRepositoryDto createRepository(
+            RepoCredential credential, GitAuthMaterial auth, CreateRepositoryCommand command) {
+        String token = auth.maybeToken()
+                .orElseThrow(() -> new IllegalStateException(
+                        "GitHub repository creation requires a token, but no token was resolved"));
+
+        String installationId = credential.getMetadata().getInstallationId().orElse(null);
+        boolean appInstallation = installationId != null && !installationId.isBlank();
+        GitHubApiService.GitHubAccount account = appInstallation
+                ? gitHubApiService.getInstallationAccount(installationId)
+                : gitHubApiService.getAuthenticatedAccount(token);
+        if (appInstallation && !account.organization()) {
+            throw new IllegalStateException("GitHub App installations on personal accounts cannot create repositories; "
+                    + "use a PAT or install the app on an organization");
+        }
+
+        Optional<RemoteRepositoryDto> existing =
+                gitHubApiService.findRepository(account.login(), command.name(), token);
+        if (existing.isPresent()) {
+            if (gitHubApiService.repositoryHasCommits(account.login(), command.name(), token)) {
+                throw new RemoteRepositoryExistsException(
+                        "Repository " + account.login() + "/" + command.name() + " already exists and is not empty");
+            }
+            return existing.get();
+        }
+        return gitHubApiService.createRepository(account.login(), account.organization(), command, token);
     }
 
     private String extractOwner(String repoUrl) {

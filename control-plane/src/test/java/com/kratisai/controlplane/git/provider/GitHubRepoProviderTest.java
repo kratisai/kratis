@@ -11,8 +11,10 @@ import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
+import com.kratisai.controlplane.model.RepositoryVisibility;
 import com.kratisai.controlplane.model.Team;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -185,5 +187,65 @@ class GitHubRepoProviderTest {
         assertThatThrownBy(() -> provider.createPullRequest(testRepo, GitAuthMaterial.none(), command))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("requires a token");
+    }
+
+    @Test
+    void supportsRepositoryCreation_returnsTrue() {
+        assertThat(provider.supportsRepositoryCreation()).isTrue();
+    }
+
+    @Test
+    void createRepository_pat_createsUnderAuthenticatedUser() {
+        RepoCredential credential = new RepoCredential(new Team("t", "d"), "pat", null, null);
+        credential.setProviderMetadata("{\"provider\":\"github\"}");
+        CreateRepositoryCommand command =
+                new CreateRepositoryCommand("fresh-repo", RepositoryVisibility.PRIVATE, "main");
+        RemoteRepositoryDto remote = new RemoteRepositoryDto(
+                "fake-user/fresh-repo", "https://github.com/fake-user/fresh-repo.git", "", "main");
+
+        when(gitHubApiService.getAuthenticatedAccount("tok"))
+                .thenReturn(new GitHubApiService.GitHubAccount("fake-user", false));
+        when(gitHubApiService.findRepository("fake-user", "fresh-repo", "tok")).thenReturn(Optional.empty());
+        when(gitHubApiService.createRepository("fake-user", false, command, "tok"))
+                .thenReturn(remote);
+
+        RemoteRepositoryDto result = provider.createRepository(credential, GitAuthMaterial.ofToken("tok"), command);
+
+        assertThat(result).isEqualTo(remote);
+    }
+
+    @Test
+    void createRepository_existingNonEmpty_throws() {
+        RepoCredential credential = new RepoCredential(new Team("t", "d"), "pat", null, null);
+        credential.setProviderMetadata("{\"provider\":\"github\"}");
+        CreateRepositoryCommand command =
+                new CreateRepositoryCommand("fresh-repo", RepositoryVisibility.PRIVATE, "main");
+        RemoteRepositoryDto remote = new RemoteRepositoryDto(
+                "fake-user/fresh-repo", "https://github.com/fake-user/fresh-repo.git", "", "main");
+
+        when(gitHubApiService.getAuthenticatedAccount("tok"))
+                .thenReturn(new GitHubApiService.GitHubAccount("fake-user", false));
+        when(gitHubApiService.findRepository("fake-user", "fresh-repo", "tok")).thenReturn(Optional.of(remote));
+        when(gitHubApiService.repositoryHasCommits("fake-user", "fresh-repo", "tok"))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> provider.createRepository(credential, GitAuthMaterial.ofToken("tok"), command))
+                .isInstanceOf(RemoteRepositoryExistsException.class)
+                .hasMessageContaining("already exists and is not empty");
+    }
+
+    @Test
+    void createRepository_appOnPersonalAccount_throws() {
+        RepoCredential credential = new RepoCredential(new Team("t", "d"), "app", null, null);
+        credential.setProviderMetadata("{\"installationId\":\"123\",\"provider\":\"github\"}");
+        CreateRepositoryCommand command =
+                new CreateRepositoryCommand("fresh-repo", RepositoryVisibility.PRIVATE, "main");
+
+        when(gitHubApiService.getInstallationAccount("123"))
+                .thenReturn(new GitHubApiService.GitHubAccount("personal", false));
+
+        assertThatThrownBy(() -> provider.createRepository(credential, GitAuthMaterial.ofToken("tok"), command))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("personal accounts");
     }
 }

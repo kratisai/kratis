@@ -3,12 +3,13 @@ package com.kratisai.controlplane.git.provider;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.client.BitbucketApiClient;
-import java.net.URI;
+import com.kratisai.controlplane.model.RepositoryVisibility;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,7 +37,7 @@ class BitbucketApiServiceTest {
                 + "{\"name\": \"https\", \"href\": \"https://bitbucket.org/team/repo.git\"},"
                 + "{\"name\": \"ssh\", \"href\": \"git@bitbucket.org:team/repo.git\"}]},"
                 + "\"mainbranch\": {\"name\": \"master\"}}]}";
-        when(bitbucketApiClient.getRepositories(any(URI.class), eq("Bearer tok")))
+        when(bitbucketApiClient.getRepositories(any(), anyInt(), anyInt(), eq("Bearer tok")))
                 .thenReturn(ResponseEntity.ok(json));
 
         List<RemoteRepositoryDto> result = service.listRepositories(null, "tok");
@@ -53,7 +54,7 @@ class BitbucketApiServiceTest {
         String page1 =
                 "{\"values\": [{\"full_name\": \"team/one\"}], \"next\": \"https://api.bitbucket.org/2.0/repositories?page=2\"}";
         String page2 = "{\"values\": [{\"full_name\": \"team/two\"}]}";
-        when(bitbucketApiClient.getRepositories(any(URI.class), eq("Bearer tok")))
+        when(bitbucketApiClient.getRepositories(any(), anyInt(), anyInt(), eq("Bearer tok")))
                 .thenReturn(ResponseEntity.ok(page1))
                 .thenReturn(ResponseEntity.ok(page2));
 
@@ -66,14 +67,13 @@ class BitbucketApiServiceTest {
     @Test
     void listRepositories_withWorkspace_scopesRequestToWorkspace() {
         String json = "{\"values\": [{\"full_name\": \"myteam/repo\"}]}";
-        when(bitbucketApiClient.getRepositories(any(URI.class), eq("Bearer tok")))
+        when(bitbucketApiClient.getWorkspaceRepositories(eq("myteam"), eq("member"), eq(100), eq(1), eq("Bearer tok")))
                 .thenReturn(ResponseEntity.ok(json));
 
         service.listRepositories("myteam", "tok");
 
-        org.mockito.ArgumentCaptor<URI> captor = org.mockito.ArgumentCaptor.forClass(URI.class);
-        org.mockito.Mockito.verify(bitbucketApiClient).getRepositories(captor.capture(), eq("Bearer tok"));
-        assertThat(captor.getValue().toString()).contains("/repositories/myteam");
+        org.mockito.Mockito.verify(bitbucketApiClient)
+                .getWorkspaceRepositories(eq("myteam"), eq("member"), eq(100), eq(1), eq("Bearer tok"));
     }
 
     @Test
@@ -88,7 +88,7 @@ class BitbucketApiServiceTest {
 
     @Test
     void listRepositories_apiError_throws() {
-        when(bitbucketApiClient.getRepositories(any(URI.class), eq("Bearer tok")))
+        when(bitbucketApiClient.getRepositories(any(), anyInt(), anyInt(), eq("Bearer tok")))
                 .thenReturn(ResponseEntity.internalServerError().build());
 
         assertThatThrownBy(() -> service.listRepositories(null, "tok"))
@@ -157,5 +157,62 @@ class BitbucketApiServiceTest {
         assertThatThrownBy(() -> BitbucketApiService.extractRepoSlug("not-a-url"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unable to extract");
+    }
+
+    @Test
+    void findRepository_returnsEmptyOn404() {
+        when(bitbucketApiClient.getRepository(eq("myteam"), eq("repo"), eq("Bearer tok")))
+                .thenReturn(ResponseEntity.status(404).body("{}"));
+
+        assertThat(service.findRepository("myteam", "repo", "tok")).isEmpty();
+    }
+
+    @Test
+    void findRepository_returnsRepository() {
+        when(bitbucketApiClient.getRepository(eq("myteam"), eq("repo"), eq("Bearer tok")))
+                .thenReturn(ResponseEntity.ok("{\"full_name\": \"myteam/repo\", \"links\": {\"clone\": ["
+                        + "{\"name\": \"https\", \"href\": \"https://bitbucket.org/myteam/repo.git\"}]},"
+                        + "\"mainbranch\": {\"name\": \"main\"}}"));
+
+        RemoteRepositoryDto result =
+                service.findRepository("myteam", "repo", "tok").orElseThrow();
+
+        assertThat(result.name()).isEqualTo("myteam/repo");
+        assertThat(result.cloneUrl()).isEqualTo("https://bitbucket.org/myteam/repo.git");
+    }
+
+    @Test
+    void repositoryHasCommits_reflectsBranchList() {
+        when(bitbucketApiClient.getBranches(eq("myteam"), eq("repo"), eq(1), eq("Bearer tok")))
+                .thenReturn(ResponseEntity.ok("{\"values\": [{\"name\": \"main\"}]}"))
+                .thenReturn(ResponseEntity.ok("{\"values\": []}"));
+
+        assertThat(service.repositoryHasCommits("myteam", "repo", "tok")).isTrue();
+        assertThat(service.repositoryHasCommits("myteam", "repo", "tok")).isFalse();
+    }
+
+    @Test
+    void createRepository_postsAndParsesResult() {
+        when(bitbucketApiClient.createRepository(eq("myteam"), eq("repo"), any(), eq("Bearer tok")))
+                .thenReturn(ResponseEntity.status(201)
+                        .body("{\"full_name\": \"myteam/repo\", \"links\": {\"clone\": ["
+                                + "{\"name\": \"https\", \"href\": \"https://bitbucket.org/myteam/repo.git\"}]},"
+                                + "\"mainbranch\": {\"name\": \"main\"}}"));
+
+        RemoteRepositoryDto result = service.createRepository(
+                "myteam", new CreateRepositoryCommand("repo", RepositoryVisibility.PRIVATE, "main"), "tok");
+
+        assertThat(result.cloneUrl()).isEqualTo("https://bitbucket.org/myteam/repo.git");
+    }
+
+    @Test
+    void createRepository_errorStatus_throws() {
+        when(bitbucketApiClient.createRepository(eq("myteam"), eq("repo"), any(), eq("Bearer tok")))
+                .thenReturn(ResponseEntity.status(400).body("{}"));
+
+        CreateRepositoryCommand command = new CreateRepositoryCommand("repo", RepositoryVisibility.PRIVATE, "main");
+        assertThatThrownBy(() -> service.createRepository("myteam", command, "tok"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("creation failed");
     }
 }

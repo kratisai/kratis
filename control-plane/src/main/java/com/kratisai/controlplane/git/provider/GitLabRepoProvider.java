@@ -7,6 +7,7 @@ import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -66,5 +67,39 @@ public class GitLabRepoProvider implements RepoProvider {
 
     private String resolveBaseUrl(RepoCredential credential) {
         return credential.getMetadata().getGitLabUrl().orElse("https://gitlab.com");
+    }
+
+    @Override
+    public boolean supportsRepositoryCreation() {
+        return true;
+    }
+
+    @Override
+    public RemoteRepositoryDto createRepository(
+            RepoCredential credential, GitAuthMaterial auth, CreateRepositoryCommand command) {
+        String token = auth.maybeToken()
+                .orElseThrow(() -> new IllegalStateException(
+                        "GitLab repository creation requires a token, but no token was resolved"));
+        String baseUrl = resolveBaseUrl(credential);
+
+        Optional<String> group = credential.getMetadata().getGitLabGroup();
+        Long namespaceId = null;
+        String namespacePath;
+        if (group.isPresent()) {
+            namespaceId = gitLabApiService.getGroupId(group.get(), token, baseUrl);
+            namespacePath = group.get() + "/" + command.name();
+        } else {
+            namespacePath = gitLabApiService.getAuthenticatedUsername(token, baseUrl) + "/" + command.name();
+        }
+
+        Optional<RemoteRepositoryDto> existing = gitLabApiService.findProject(namespacePath, token, baseUrl);
+        if (existing.isPresent()) {
+            if (gitLabApiService.projectHasCommits(namespacePath, token, baseUrl)) {
+                throw new RemoteRepositoryExistsException(
+                        "GitLab project " + namespacePath + " already exists and is not empty");
+            }
+            return existing.get();
+        }
+        return gitLabApiService.createRepository(namespaceId, command, token, baseUrl);
     }
 }

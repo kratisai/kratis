@@ -8,7 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.client.AzureDevOpsApiClient;
-import java.net.URI;
+import com.kratisai.controlplane.model.RepositoryVisibility;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
@@ -18,6 +18,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.util.UriBuilderFactory;
 
 @ExtendWith(MockitoExtension.class)
 class AzureDevOpsApiServiceTest {
@@ -43,7 +44,8 @@ class AzureDevOpsApiServiceTest {
                 + "\"sshUrl\": \"git@ssh.dev.azure.com:v3/myorg/proj/azure-core\","
                 + "\"defaultBranch\": \"refs/heads/main\","
                 + "\"project\": {\"name\": \"proj\"}}]}";
-        when(azureDevOpsApiClient.getRepositories(any(URI.class), eq(basicAuthHeader())))
+        when(azureDevOpsApiClient.getProjectRepositories(
+                        any(UriBuilderFactory.class), eq("proj"), eq("7.1"), eq(basicAuthHeader())))
                 .thenReturn(ResponseEntity.ok(json));
 
         List<RemoteRepositoryDto> result = service.listRepositories("https://dev.azure.com/myorg", "proj", "tok");
@@ -58,18 +60,16 @@ class AzureDevOpsApiServiceTest {
     @Test
     void listRepositories_withoutProject_listsWholeOrg() {
         String json = "{\"value\": [{\"name\": \"core\"}]}";
-        when(azureDevOpsApiClient.getRepositories(any(URI.class), eq(basicAuthHeader())))
+        when(azureDevOpsApiClient.getOrganizationRepositories(
+                        any(UriBuilderFactory.class), eq("7.1"), eq(basicAuthHeader())))
                 .thenReturn(ResponseEntity.ok(json));
 
         service.listRepositories("https://dev.azure.com/myorg", null, "tok");
 
-        org.mockito.ArgumentCaptor<URI> captor = org.mockito.ArgumentCaptor.forClass(URI.class);
-        verifyGetRepositories(captor);
-        assertThat(captor.getValue().toString()).doesNotContain("/proj/_apis");
-    }
-
-    private void verifyGetRepositories(org.mockito.ArgumentCaptor<URI> captor) {
-        org.mockito.Mockito.verify(azureDevOpsApiClient).getRepositories(captor.capture(), eq(basicAuthHeader()));
+        org.mockito.Mockito.verify(azureDevOpsApiClient)
+                .getOrganizationRepositories(any(UriBuilderFactory.class), eq("7.1"), eq(basicAuthHeader()));
+        org.mockito.Mockito.verify(azureDevOpsApiClient, org.mockito.Mockito.never())
+                .getProjectRepositories(any(UriBuilderFactory.class), any(), any(), any());
     }
 
     @Test
@@ -88,7 +88,8 @@ class AzureDevOpsApiServiceTest {
 
     @Test
     void listRepositories_apiError_throws() {
-        when(azureDevOpsApiClient.getRepositories(any(URI.class), eq(basicAuthHeader())))
+        when(azureDevOpsApiClient.getOrganizationRepositories(
+                        any(UriBuilderFactory.class), eq("7.1"), eq(basicAuthHeader())))
                 .thenReturn(ResponseEntity.internalServerError().build());
 
         assertThatThrownBy(() -> service.listRepositories("https://dev.azure.com/myorg", null, "tok"))
@@ -98,7 +99,15 @@ class AzureDevOpsApiServiceTest {
 
     @Test
     void readFile_returnsRawBody() {
-        when(azureDevOpsApiClient.getItem(any(URI.class), eq(basicAuthHeader())))
+        when(azureDevOpsApiClient.getItem(
+                        any(UriBuilderFactory.class),
+                        eq("proj"),
+                        eq("repo"),
+                        eq("src/a.txt"),
+                        eq("main"),
+                        eq(true),
+                        eq("7.1"),
+                        eq(basicAuthHeader())))
                 .thenReturn(ResponseEntity.ok("raw content"));
 
         AzureDevOpsApiService.Coordinates coords =
@@ -121,7 +130,8 @@ class AzureDevOpsApiServiceTest {
 
     @Test
     void readFile_emptyResponse_throws() {
-        when(azureDevOpsApiClient.getItem(any(URI.class), eq(basicAuthHeader())))
+        when(azureDevOpsApiClient.getItem(
+                        any(UriBuilderFactory.class), any(), any(), any(), any(), eq(true), any(), any()))
                 .thenReturn(ResponseEntity.ok(null));
 
         AzureDevOpsApiService.Coordinates coords =
@@ -191,5 +201,72 @@ class AzureDevOpsApiServiceTest {
         assertThatThrownBy(() -> AzureDevOpsApiService.parse("not-a-url"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unable to parse");
+    }
+
+    @Test
+    void findRepository_returnsEmptyOn404() {
+        when(azureDevOpsApiClient.getRepository(
+                        any(UriBuilderFactory.class), eq("proj"), eq("repo"), eq("7.1"), eq(basicAuthHeader())))
+                .thenReturn(ResponseEntity.status(404).body("{}"));
+
+        assertThat(service.findRepository("https://dev.azure.com/myorg", "proj", "repo", "tok"))
+                .isEmpty();
+    }
+
+    @Test
+    void findRepository_returnsRepository() {
+        when(azureDevOpsApiClient.getRepository(
+                        any(UriBuilderFactory.class), eq("proj"), eq("repo"), eq("7.1"), eq(basicAuthHeader())))
+                .thenReturn(ResponseEntity.ok(
+                        "{\"name\": \"repo\", \"remoteUrl\": \"https://dev.azure.com/myorg/proj/_git/repo\","
+                                + "\"defaultBranch\": \"refs/heads/main\", \"project\": {\"name\": \"proj\"}}"));
+
+        RemoteRepositoryDto result = service.findRepository("https://dev.azure.com/myorg", "proj", "repo", "tok")
+                .orElseThrow();
+
+        assertThat(result.name()).isEqualTo("proj/repo");
+        assertThat(result.defaultBranch()).isEqualTo("main");
+    }
+
+    @Test
+    void repositoryHasCommits_reflectsCount() {
+        when(azureDevOpsApiClient.getCommits(
+                        any(UriBuilderFactory.class), eq("proj"), eq("repo"), eq(1), eq("7.1"), eq(basicAuthHeader())))
+                .thenReturn(ResponseEntity.ok("{\"count\": 1, \"value\": []}"))
+                .thenReturn(ResponseEntity.ok("{\"count\": 0, \"value\": []}"));
+
+        assertThat(service.repositoryHasCommits("https://dev.azure.com/myorg", "proj", "repo", "tok"))
+                .isTrue();
+        assertThat(service.repositoryHasCommits("https://dev.azure.com/myorg", "proj", "repo", "tok"))
+                .isFalse();
+    }
+
+    @Test
+    void createRepository_postsAndParsesResult() {
+        when(azureDevOpsApiClient.createRepository(
+                        any(UriBuilderFactory.class), eq("proj"), eq("7.1"), any(), eq(basicAuthHeader())))
+                .thenReturn(ResponseEntity.status(201)
+                        .body("{\"name\": \"repo\", \"remoteUrl\": \"https://dev.azure.com/myorg/proj/_git/repo\","
+                                + "\"defaultBranch\": \"refs/heads/main\", \"project\": {\"name\": \"proj\"}}"));
+
+        RemoteRepositoryDto result = service.createRepository(
+                "https://dev.azure.com/myorg",
+                "proj",
+                new CreateRepositoryCommand("repo", RepositoryVisibility.PRIVATE, "main"),
+                "tok");
+
+        assertThat(result.cloneUrl()).isEqualTo("https://dev.azure.com/myorg/proj/_git/repo");
+    }
+
+    @Test
+    void createRepository_errorStatus_throws() {
+        when(azureDevOpsApiClient.createRepository(
+                        any(UriBuilderFactory.class), eq("proj"), eq("7.1"), any(), eq(basicAuthHeader())))
+                .thenReturn(ResponseEntity.status(400).body("{}"));
+
+        CreateRepositoryCommand command = new CreateRepositoryCommand("repo", RepositoryVisibility.PRIVATE, "main");
+        assertThatThrownBy(() -> service.createRepository("https://dev.azure.com/myorg", "proj", command, "tok"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("creation failed");
     }
 }
