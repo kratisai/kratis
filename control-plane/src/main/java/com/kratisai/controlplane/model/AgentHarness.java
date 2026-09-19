@@ -120,6 +120,9 @@ public enum AgentHarness {
             "OpenCode",
             List.of(
                     "export PATH=$HOME/.opencode/bin:$PATH",
+                    // OpenCode's shell tool defaults to a short timeout and clamps agent-chosen
+                    // values, which kills long build and test commands in the sandbox.
+                    "export OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS=3600000",
                     // Install OpenCode first
                     "curl --retry 5 --retry-delay 2 -fsSL -o /tmp/install.sh https://opencode.ai/install && bash /tmp/install.sh",
                     // Create OpenCode config
