@@ -3,10 +3,15 @@ package com.kratisai.controlplane;
 import static java.net.URI.create;
 
 import com.github.dockerjava.api.command.RestartContainerCmd;
+import com.github.dockerjava.api.model.ContainerNetwork;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
@@ -28,9 +33,9 @@ import org.testcontainers.utility.MountableFile;
 
 /**
  * Singleton Testcontainers initializer. Starts PostgreSQL, LiteLLM, and Mock LLM containers once
- * per JVM run. All containers use reuse-enabled configuration — with TESTCONTAINERS_REUSE_ENABLE=true
- * and ~/.testcontainers.properties containing testcontainers.reuse.enable=true, containers persist
- * between test runs for near-instant startup.
+ * per JVM run. All containers use reuse-enabled configuration. Kratis sandboxes set
+ * TESTCONTAINERS_REUSE_ENABLE=true on the runner; elsewhere it needs
+ * testcontainers.reuse.enable=true in ~/.testcontainers.properties.
  *
  * <p>Schema isolation: each call to {@link #initialize} (one per Spring context) allocates a
  * fresh, randomly-named Postgres schema (e.g. {@code test_a1b2c3d4e5f6}). The schema properties
@@ -90,22 +95,19 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
             throw new RuntimeException("Failed to install pgvector in public schema", e);
         }
 
-        // Detect the Docker bridge gateway IP — reachable from both the host and all containers
-        // on the default bridge network. This eliminates the need for separate "docker-accessible"
-        // URLs since a single baseUrl works for all consumers (control plane, LiteLLM, agents).
-        String dockerGatewayIp = POSTGRES_CONTAINER
+        // Peer IP, not the bridge gateway's published port: that listener lives only in the DinD
+        // sibling's parent namespace, so LiteLLM cannot reach it from inside.
+        ContainerNetwork postgresNetwork = POSTGRES_CONTAINER
                 .getContainerInfo()
                 .getNetworkSettings()
                 .getNetworks()
                 .values()
                 .iterator()
-                .next()
-                .getGateway();
-        logger.info("Detected Docker bridge gateway IP: {}", dockerGatewayIp);
+                .next();
+        String postgresIp = postgresNetwork.getIpAddress();
+        logger.info("Detected Postgres container IP: {}", postgresIp);
 
-        // Use the gateway IP so LiteLLM can reach Postgres without a shared network
-        String databaseUrl =
-                "postgresql://test:test@" + dockerGatewayIp + ":" + POSTGRES_CONTAINER.getMappedPort(5432) + "/litellm";
+        String databaseUrl = "postgresql://test:test@" + postgresIp + ":5432/litellm";
 
         // Start LiteLLM from pre-built cached image (reused across test runs)
         // TestLiteLLMClient tracks models registered per test, and expunges them after each test.
@@ -134,21 +136,33 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
         logger.info("Starting LiteLLM proxy...");
         LITELLM_CONTAINER.start();
 
-        // Use the Docker gateway IP so both the control plane (host) and sandbox containers
-        // can reach LiteLLM via the same URL — no separate "docker-accessible" URL needed
-        String litellmGatewayUrl = "http://" + dockerGatewayIp + ":" + LITELLM_CONTAINER.getMappedPort(4000);
-        System.setProperty("kratis.litellm.base-url", litellmGatewayUrl);
+        String litellmMappedPort = String.valueOf(LITELLM_CONTAINER.getMappedPort(4000));
+        String litellmBaseUrl = "http://" + LITELLM_CONTAINER.getHost() + ":" + litellmMappedPort;
+        System.setProperty("kratis.litellm.base-url", litellmBaseUrl);
         System.setProperty("kratis.litellm.master-key", "sk-test-master");
-        logger.info("LiteLLM operational at {}", litellmGatewayUrl);
+
+        // Set explicitly rather than left to fall back to base-url, which is only reachable from
+        // this JVM. A spawned sandbox reaches LiteLLM through the dind's own bridge.
+        boolean insideSandbox = Files.exists(Paths.get("/.dockerenv"));
+        String agentHost = insideSandbox ? litellmContainerIp() : postgresNetwork.getGateway();
+        String agentPort = insideSandbox ? "4000" : litellmMappedPort;
+        System.setProperty("kratis.litellm.sandbox-base-url", "http://" + agentHost + ":" + agentPort);
+
+        String containerHost = resolveContainerReachableHost(postgresNetwork.getGateway());
+        System.setProperty("kratis.litellm.container-host", containerHost);
+        logger.info(
+                "LiteLLM operational at {} (agents {}, mock upstream host {})",
+                litellmBaseUrl,
+                System.getProperty("kratis.litellm.sandbox-base-url"),
+                containerHost);
 
         verifyLiteLLMLoggingPatch();
-        checkLiteLLMModelCountOrFail(litellmGatewayUrl);
+        checkLiteLLMModelCountOrFail(litellmBaseUrl);
 
         // Register shutdown hook to check model count and conditionally remove container
         // This prevents unbounded growth across test runs
         Runtime.getRuntime()
-                .addShutdownHook(
-                        new Thread(() -> executeLiteLLMShutdownHook(dockerGatewayIp), "litellm-cleanup-check"));
+                .addShutdownHook(new Thread(() -> executeLiteLLMShutdownHook(litellmBaseUrl), "litellm-cleanup-check"));
     }
 
     static final long LITELLM_MODEL_COUNT_FAIL_THRESHOLD = 100;
@@ -170,6 +184,33 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                 throw illegalStateException;
             }
             throw new IllegalStateException("Unable to verify the LiteLLM logging patch", e);
+        }
+    }
+
+    private static String litellmContainerIp() {
+        return LITELLM_CONTAINER
+                .getContainerInfo()
+                .getNetworkSettings()
+                .getNetworks()
+                .values()
+                .iterator()
+                .next()
+                .getIpAddress();
+    }
+
+    /**
+     * Host that containers started by this JVM use to reach this JVM. The bridge gateway does that
+     * on a developer host; inside a sandbox it leads to the DinD sibling instead, so use our own.
+     */
+    static String resolveContainerReachableHost(String dockerGatewayIp) {
+        if (!Files.exists(Paths.get("/.dockerenv"))) {
+            return dockerGatewayIp;
+        }
+        try {
+            return InetAddress.getLocalHost().getHostAddress();
+        } catch (UnknownHostException e) {
+            logger.warn("Could not resolve own address, falling back to docker gateway {}", dockerGatewayIp, e);
+            return dockerGatewayIp;
         }
     }
 
@@ -231,9 +272,9 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
         }
     }
 
-    public static void executeLiteLLMShutdownHook(String dockerGatewayIp) {
+    public static void executeLiteLLMShutdownHook(String litellmBaseUrl) {
         try {
-            String url = "http://" + dockerGatewayIp + ":" + LITELLM_CONTAINER.getMappedPort(4000);
+            String url = litellmBaseUrl;
             HttpClient client = HttpClient.newHttpClient();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(create(url + "/model/info"))

@@ -231,6 +231,8 @@ class ChatExecutionControllerTest {
                         "--network",
                         "--security-opt",
                         "seccomp=unconfined",
+                        "--security-opt",
+                        "systempaths=unconfined",
                         "--device",
                         "/dev/net/tun",
                         "--add-host",
@@ -273,7 +275,10 @@ class ChatExecutionControllerTest {
                         "--user=1000",
                         "kratis-runner-base:latest",
                         "sleep",
-                        "infinity");
+                        "infinity")
+                .anyMatch(arg -> arg.startsWith("TESTCONTAINERS_HOST_OVERRIDE=kratis-dind-"))
+                .contains("TESTCONTAINERS_RYUK_DISABLED=true")
+                .contains("TESTCONTAINERS_REUSE_ENABLE=true");
 
         // 4. Verify that the execution environment and container ID are persisted
         List<ExecutionEnvironment> envs =

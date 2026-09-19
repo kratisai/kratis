@@ -138,6 +138,11 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 networkName,
                 "--security-opt",
                 "seccomp=unconfined",
+                // Docker's masked paths leave non-empty child mounts under /proc, which the kernel
+                // rejects a nested procfs mount over (fs_fully_visible), so no inner container
+                // could start. Removing the masks grants no capability, device, or socket.
+                "--security-opt",
+                "systempaths=unconfined",
                 //  /dev/net/tun needed for rootlesskit's slirp4netns network driver
                 "--device",
                 "/dev/net/tun"));
@@ -201,6 +206,10 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 "TESTCONTAINERS_HOST_OVERRIDE=" + dindName,
                 "-e",
                 "TESTCONTAINERS_RYUK_DISABLED=true",
+                // Ryuk cannot reach the sibling daemon, so nothing reaps testcontainers. Reuse
+                // keeps each `mvnw test` from leaving another Postgres + LiteLLM pair behind.
+                "-e",
+                "TESTCONTAINERS_REUSE_ENABLE=true",
                 "--label",
                 "kratis.instance.id=" + instanceId,
                 "--label",
@@ -393,10 +402,12 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
     }
 
     private void terminateSandboxResources(String sandboxId, String runnerContainerId) {
+        // -v matters: docker:dind-rootless declares two VOLUMEs holding its image store, so each
+        // sibling leaks gigabytes without it.
         // 1. Remove runner container
         if (runnerContainerId != null && !runnerContainerId.isBlank()) {
             try {
-                processExecutor.execute(List.of("docker", "rm", "-f", runnerContainerId), null, null);
+                processExecutor.execute(List.of("docker", "rm", "-f", "-v", runnerContainerId), null, null);
             } catch (IOException | InterruptedException e) {
                 logger.error("Failed to terminate runner container: {}", runnerContainerId, e);
             }
@@ -406,7 +417,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         String runnerName = "kratis-sandbox-" + sandboxId;
         if (!runnerName.equals(runnerContainerId)) {
             try {
-                processExecutor.execute(List.of("docker", "rm", "-f", runnerName), null, null);
+                processExecutor.execute(List.of("docker", "rm", "-f", "-v", runnerName), null, null);
             } catch (Exception e) {
                 logger.debug("Runner container {} already removed or not found", runnerName);
             }
@@ -415,7 +426,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         // 2. Remove DinD sibling container
         String dindName = "kratis-dind-" + sandboxId;
         try {
-            processExecutor.execute(List.of("docker", "rm", "-f", dindName), null, null);
+            processExecutor.execute(List.of("docker", "rm", "-f", "-v", dindName), null, null);
         } catch (IOException | InterruptedException e) {
             logger.error("Failed to terminate dind container: {}", dindName, e);
         }

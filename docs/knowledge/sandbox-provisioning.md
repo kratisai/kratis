@@ -80,7 +80,8 @@ sandbox it creates three labelled resources:
 
 1. A Docker network (`kratis-net-<envId>`).
 2. A rootless Docker-in-Docker sibling (`kratis-dind-<envId>`, `docker:dind-rootless`,
-   `seccomp=unconfined`) with`/dev/net/tun` and unprivileged user namespaces.
+   `seccomp=unconfined`, `systempaths=unconfined`) with `/dev/net/tun` and unprivileged
+   user namespaces.
 3. The runner container (`kratis-sandbox-<envId>`) with
    `DOCKER_HOST=tcp://<dind>:2375` so the agent can run Docker/Testcontainers against the
    rootless daemon, isolated from the host.
@@ -88,13 +89,71 @@ sandbox it creates three labelled resources:
 Every resource carries `kratis.instance.id` and `kratis.sandbox.id` labels for
 instance-scoped cleanup (`ZombieContainerCollector`).
 
+**DinD security flags:** the sibling needs `systempaths=unconfined`. Docker's default
+masked paths leave non-empty, writable child mounts under `/proc`; the kernel then refuses
+a nested procfs mount over them (`fs_fully_visible`), runc inside rootlesskit fails with
+`error mounting "proc" to rootfs at "/proc": operation not permitted`, and no inner
+container can start. Removing the masks is the only relaxation: the sibling still runs as
+uid 1000 with `CapEff: 0` in the host user namespace, sees no host devices, and holds no
+host socket. It is never `--privileged` — privilege would expose host block devices to the
+agent through the sibling's unauthenticated Docker API. Capabilities are also never
+dropped, because rootlesskit's setuid `newuidmap` needs `SETUID`/`SETGID` left in the
+bounding set. On kernels where AppArmor gates unprivileged user namespaces
+(`kernel.apparmor_restrict_unprivileged_userns=1`) the sibling additionally gets
+`apparmor=rootlesskit`.
+
 **Image resolution:** `kratis-runner-base:latest` by default, or the team provider's
 `dockerImage` (e.g. a DevContainer image) when set.
 
 **Runner security flags:** `--cap-drop=ALL` re-grants only
 `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `FSETID`, `KILL`, `SETGID`, `SETUID`, `AUDIT_WRITE`
 (the package-management minimum) and runs as the non-root user (`--user=1000`). The host
-Docker socket is never mounted.
+Docker socket is never mounted. Testcontainers needs no capability in the runner: it is a
+plain API client of the sibling daemon, so `CAP_SYS_ADMIN` there would buy nothing and
+weaken the boundary.
+
+**Testcontainers reachability:** inner containers live in rootlesskit's private network
+namespace, so their own IPs are not routable from the runner. Published ports are:
+rootlesskit's port driver forwards them into the sibling's namespace, which is why the
+runner gets `TESTCONTAINERS_HOST_OVERRIDE=<dind>` and connects to `<dind>:<mappedPort>`.
+The same applies to a URL the control plane builds from `getContainerInfo()`: the inner
+bridge gateway (e.g. `172.17.0.1`) is not routable from the runner, so anything the control
+plane itself must call (e.g. `kratis.litellm.base-url` in `PostgresTestInitializer`) has to
+be derived from Testcontainers' `getHost()`, which honours `TESTCONTAINERS_HOST_OVERRIDE`.
+
+**Container-to-container addressing:** three consumers, three different addresses, published by
+`PostgresTestInitializer` for the test suite.
+
+- *Inner container → inner container* (LiteLLM reaching Postgres) must use the **peer's own
+  IP and internal port**. The bridge gateway plus published port (`172.17.0.1:<mapped>`)
+  works on a developer host but that listener only exists in the sibling's parent namespace,
+  so from inside LiteLLM it refuses the connection and Prisma dies with
+  `httpx.ConnectError`. This is what makes `Container startup failed for image
+  ghcr.io/berriai/litellm:main-stable` appear, which then surfaces as a class-initialization
+  error in `PostgresTestInitializer` and cascading Spring context failures.
+- *Test JVM → LiteLLM* (`kratis.litellm.base-url`) must be reachable from the JVM's own
+  namespace: `getHost()`, which honours `TESTCONTAINERS_HOST_OVERRIDE` (the sibling name in a
+  sandbox, localhost on a developer host).
+- *Container → the test JVM* (LiteLLM reaching a `WireMockLlmServer` in the runner) must use
+  the **runner's own address**, not the inner gateway and not `host.docker.internal`.
+  `kratis.litellm.container-host` carries it: the bridge gateway on a developer host, the
+  JVM's own address when it runs inside a container. `WireMockLlmServer.getBaseUrl(...)` reads it.
+- *Spawned sandbox agent → LiteLLM* (`kratis.litellm.sandbox-base-url`) must be reachable from
+  inside a sandbox. Set explicitly — never left to fall back to `base-url`, whose host is only
+  valid for the JVM itself. On a developer host it is the gateway plus the published port;
+  inside a sandbox it is LiteLLM's own container IP on the dind bridge with port 4000.
+
+**Testcontainer lifecycle:** `TESTCONTAINERS_RYUK_DISABLED=true` because Ryuk cannot reach
+the sibling daemon. With no reaper, every test JVM would leave its Postgres and LiteLLM
+containers behind inside the dind, so the runner also gets
+`TESTCONTAINERS_REUSE_ENABLE=true`. That satisfies the `testcontainers.reuse.enable` gate
+that `PostgresTestInitializer`'s `withReuse(true)` call requires — without it, reuse is
+silently disabled (a log warning, not an error) and the containers accumulate.
+
+**Volume cleanup:** `docker:dind-rootless` declares `VOLUME /home/rootless/.local/share/docker`
+and `VOLUME /var/lib/docker`, so Docker creates two anonymous volumes per sibling holding
+the dind image store (hundreds of MB to GB). Teardown must use `docker rm -f -v`; without
+`-v` every provisioned sandbox leaks those volumes permanently.
 
 **Image contract:** `/kratis/workspace` and `/kratis/logs` must exist and be writable by
 the sandbox's non-root user at image build time; ownership is never fixed up at runtime

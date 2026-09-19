@@ -77,6 +77,7 @@ class LocalDockerSandboxProviderTest {
                                 && cmd.contains("kratis.role=dind")
                                 && cmd.contains("--security-opt")
                                 && cmd.contains("seccomp=unconfined")
+                                && cmd.contains("systempaths=unconfined")
                                 && cmd.contains("--device")
                                 && cmd.contains("/dev/net/tun")
                                 && cmd.contains("dockerd-entrypoint.sh")),
@@ -94,6 +95,7 @@ class LocalDockerSandboxProviderTest {
                                 && cmd.stream()
                                         .anyMatch(arg -> arg.startsWith("TESTCONTAINERS_HOST_OVERRIDE=kratis-dind-"))
                                 && cmd.contains("TESTCONTAINERS_RYUK_DISABLED=true")
+                                && cmd.contains("TESTCONTAINERS_REUSE_ENABLE=true")
                                 && cmd.stream().noneMatch(arg -> arg.equals("kratis.managed=true"))),
                         any(),
                         any());
@@ -250,6 +252,30 @@ class LocalDockerSandboxProviderTest {
     }
 
     @Test
+    void testSpawnDindSiblingUnmasksProcWithoutPrivilegeOrExtraCapabilities() throws Exception {
+        ExecutionEnvironment env = new ExecutionEnvironment();
+        env.setId(java.util.UUID.randomUUID());
+
+        when(mockProcessExecutor.execute(any(), any(), any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
+
+        provider.spawnSandbox(env, "test-token");
+
+        // systempaths=unconfined must stay the only relaxation. --cap-drop=ALL is asserted absent
+        // because rootlesskit's setuid newuidmap needs SETUID/SETGID left in the bounding set.
+        verify(mockProcessExecutor)
+                .execute(
+                        argThat(cmd -> cmd.contains("docker:dind-rootless")
+                                && cmd.contains("systempaths=unconfined")
+                                && cmd.stream().noneMatch(arg -> arg.equals("--privileged"))
+                                && cmd.stream().noneMatch(arg -> arg.startsWith("--cap-add="))
+                                && cmd.stream().noneMatch(arg -> arg.equals("--cap-drop=ALL"))
+                                && cmd.stream().noneMatch(arg -> arg.contains("docker.sock"))),
+                        any(),
+                        any());
+    }
+
+    @Test
     void testInitializeWorkspaceNeverExecutesAsRoot() throws Exception {
         ExecutionEnvironment env = new ExecutionEnvironment();
         env.setProvider(null);
@@ -400,11 +426,11 @@ class LocalDockerSandboxProviderTest {
                         any(),
                         any());
         inOrder.verify(mockProcessExecutor)
-                .execute(eq(List.of("docker", "rm", "-f", "test-container-id")), any(), any());
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "test-container-id")), any(), any());
         inOrder.verify(mockProcessExecutor)
-                .execute(eq(List.of("docker", "rm", "-f", "kratis-sandbox-test-container-id")), any(), any());
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-sandbox-test-container-id")), any(), any());
         inOrder.verify(mockProcessExecutor)
-                .execute(eq(List.of("docker", "rm", "-f", "kratis-dind-test-container-id")), any(), any());
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-dind-test-container-id")), any(), any());
         inOrder.verify(mockProcessExecutor)
                 .execute(eq(List.of("docker", "network", "rm", "kratis-net-test-container-id")), any(), any());
     }
@@ -429,7 +455,7 @@ class LocalDockerSandboxProviderTest {
                         any(),
                         any());
         verify(mockProcessExecutor, times(1))
-                .execute(eq(List.of("docker", "rm", "-f", "test-container-id")), any(), any());
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "test-container-id")), any(), any());
     }
 
     @Test
@@ -445,7 +471,7 @@ class LocalDockerSandboxProviderTest {
         provider.terminateSandbox("test-container-id");
 
         verify(mockProcessExecutor, times(1))
-                .execute(eq(List.of("docker", "rm", "-f", "test-container-id")), any(), any());
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "test-container-id")), any(), any());
     }
 
     @Test
@@ -461,7 +487,7 @@ class LocalDockerSandboxProviderTest {
         provider.terminateSandbox("test-container-id");
 
         verify(mockProcessExecutor, times(1))
-                .execute(eq(List.of("docker", "rm", "-f", "test-container-id")), any(), any());
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "test-container-id")), any(), any());
     }
 
     @Test
@@ -478,7 +504,7 @@ class LocalDockerSandboxProviderTest {
         provider.terminateSandbox("test-container-id");
 
         verify(mockProcessExecutor, times(1))
-                .execute(eq(List.of("docker", "rm", "-f", "test-container-id")), any(), any());
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "test-container-id")), any(), any());
     }
 
     @Test
@@ -502,7 +528,7 @@ class LocalDockerSandboxProviderTest {
                         any(),
                         any());
         verify(mockProcessExecutor, times(1))
-                .execute(eq(List.of("docker", "rm", "-f", "test-container-id")), any(), any());
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "test-container-id")), any(), any());
     }
 
     @Test
@@ -676,7 +702,7 @@ class LocalDockerSandboxProviderTest {
         provider.terminateSandbox("test-container-id");
 
         verify(mockProcessExecutor)
-                .execute(eq(List.of("docker", "rm", "-f", "kratis-dind-custom-sandbox-uuid")), any(), any());
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-dind-custom-sandbox-uuid")), any(), any());
         verify(mockProcessExecutor)
                 .execute(eq(List.of("docker", "network", "rm", "kratis-net-custom-sandbox-uuid")), any(), any());
     }

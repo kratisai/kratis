@@ -96,6 +96,9 @@ class CanvasToExecutionIntegrationTest {
         assertThat(execution.taskPrompt()).contains("Step one");
         assertThat(execution.taskPrompt()).contains("</plan_context>");
         assertThat(execution.taskPrompt()).contains("Execute the plan");
+
+        // Assert the Docker sandbox facts that the agent cannot infer
+        assertThat(execution.taskPrompt()).contains("### Docker").contains("$TESTCONTAINERS_HOST_OVERRIDE");
     }
 
     @Test

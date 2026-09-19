@@ -4,10 +4,12 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.kratisai.controlplane.config.LiteLLMProperties;
+import java.net.URI;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.util.StringUtils;
 
 /**
  * WireMock-based LLM API mock server for E2E tests. All POST traffic is routed through a single
@@ -102,10 +104,14 @@ public final class WireMockLlmServer {
     }
 
     /**
-     * Returns a Docker-accessible base URL using the WireMock port. This URL is
-     * reachable from the control-plane and from inside sandbox containers.
+     * Base URL for LiteLLM to reach this mock. A container cannot use the host this JVM uses, so
+     * {@code PostgresTestInitializer} publishes a container-reachable one.
      */
     public String getBaseUrl(LiteLLMProperties liteLLMProperties) {
-        return "http://" + java.net.URI.create(liteLLMProperties.getBaseUrl()).getHost() + ":" + wireMockServer.port();
+        String containerHost = System.getProperty("kratis.litellm.container-host");
+        if (!StringUtils.hasText(containerHost)) {
+            containerHost = URI.create(liteLLMProperties.getBaseUrl()).getHost();
+        }
+        return "http://" + containerHost + ":" + wireMockServer.port();
     }
 }

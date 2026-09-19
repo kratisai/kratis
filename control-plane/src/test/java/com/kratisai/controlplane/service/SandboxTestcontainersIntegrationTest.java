@@ -126,6 +126,7 @@ class SandboxTestcontainersIntegrationTest {
                                 && cmd.contains("--network")
                                 && cmd.contains(expectedNet)
                                 && cmd.contains("seccomp=unconfined")
+                                && cmd.contains("systempaths=unconfined")
                                 && cmd.contains("--device")
                                 && cmd.contains("/dev/net/tun")
                                 && cmd.contains("DOCKER_TLS_CERTDIR=")
@@ -145,6 +146,7 @@ class SandboxTestcontainersIntegrationTest {
                                 && cmd.contains("DOCKER_HOST=tcp://" + expectedDind + ":2375")
                                 && cmd.contains("TESTCONTAINERS_HOST_OVERRIDE=" + expectedDind)
                                 && cmd.contains("TESTCONTAINERS_RYUK_DISABLED=true")
+                                && cmd.contains("TESTCONTAINERS_REUSE_ENABLE=true")
                                 && cmd.contains("kratis.role=runner")),
                         any(),
                         any());
@@ -165,8 +167,11 @@ class SandboxTestcontainersIntegrationTest {
         // 4. Teardown sandbox: deterministic removal of runner, DinD sibling, and network
         provider.terminateSandbox(spawnedContainerId);
 
-        verify(mockExecutor, atLeastOnce()).execute(eq(List.of("docker", "rm", "-f", expectedRunner)), any(), any());
-        verify(mockExecutor, atLeastOnce()).execute(eq(List.of("docker", "rm", "-f", expectedDind)), any(), any());
+        // -v matters: the sibling declares two VOLUMEs, so omitting it leaks its image store.
+        verify(mockExecutor, atLeastOnce())
+                .execute(eq(List.of("docker", "rm", "-f", "-v", expectedRunner)), any(), any());
+        verify(mockExecutor, atLeastOnce())
+                .execute(eq(List.of("docker", "rm", "-f", "-v", expectedDind)), any(), any());
         verify(mockExecutor, atLeastOnce()).execute(eq(List.of("docker", "network", "rm", expectedNet)), any(), any());
     }
 }

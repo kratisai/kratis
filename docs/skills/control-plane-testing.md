@@ -276,6 +276,13 @@ class SandboxExecutionWebSocketIntegrationTest {
 
 Tests use **reusable Testcontainers** (PostgreSQL, LiteLLM) to speed up development and CI. Containers are identified by a hash label and reused across test runs when possible.
 
+Reuse only takes effect when Testcontainers' global `testcontainers.reuse.enable` gate is on; `withReuse(true)` alone is a no-op (it logs a warning). On a plain developer host or CI runner:
+
+```bash
+echo "testcontainers.reuse.enable=true" >> ~/.testcontainers.properties
+# or: export TESTCONTAINERS_REUSE_ENABLE=true
+```
+
 > [!WARNING]
 > **If you encounter application startup failures** (e.g., `FlywayMigrationException`, `DataIntegrityViolation`, or schema mismatch errors), the reusable testcontainer may have **dirty state** from a previous run. Restart the containers:
 >

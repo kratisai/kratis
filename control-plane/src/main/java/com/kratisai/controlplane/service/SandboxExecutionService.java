@@ -50,6 +50,17 @@ public class SandboxExecutionService {
 
     private static final long TERMINATE_TIMEOUT_SECONDS = 30;
 
+    private static final String DOCKER_GUIDANCE = """
+            Docker talks to a rootless Docker-in-Docker sibling over TCP (`DOCKER_HOST`; there is no \
+            socket) and Testcontainers is preconfigured.
+
+            - Reach inner containers by their published port on `$TESTCONTAINERS_HOST_OVERRIDE`, \
+            never by container IP: container IPs are not routable from here.
+            - `--privileged` inner containers fail to start; do not reach for it.
+            - Ryuk is disabled and container reuse is enabled, so containers persist across runs. \
+            Remove the reusable container if state goes stale.
+            """;
+
     private final SandboxExecutionRepository sandboxExecutionRepository;
     private final ChatRepository chatRepository;
     private final ExecutionEnvironmentRepository executionEnvironmentRepository;
@@ -255,10 +266,11 @@ public class SandboxExecutionService {
             RepoCredential newRepoCredential,
             ModelProvider modelProvider,
             CreateSandboxExecutionRequest request) {
-        // Build task prompt: wrap canvas content in plan_context tags
         String taskPrompt = "<plan_context>\n" + canvas.getContent() + "\n</plan_context>\n\nExecute the plan.  "
                 + "You are running as a non-root user inside a sandbox. To install system packages, prefix the "
-                + "command with sudo (e.g. `sudo apt-get update && sudo apt-get install -y <package>`).";
+                + "command with sudo (e.g. `sudo apt-get update && sudo apt-get install -y <package>`).\n\n"
+                + "### Docker\n\n"
+                + DOCKER_GUIDANCE;
 
         SandboxExecution execution = new SandboxExecution();
         execution.setEnvironment(environment);

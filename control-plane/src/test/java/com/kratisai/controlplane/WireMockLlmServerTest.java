@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.config.LiteLLMProperties;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -37,7 +38,6 @@ class WireMockLlmServerTest {
     @Test
     void constructor_shouldStartServerAndReturnBaseUrl() {
         String url = wireMockLlmServer.getBaseUrl();
-
         assertThat(url).isNotNull();
         assertThat(url).startsWith("http://localhost:");
         assertThat(URI.create(url).getPort()).isPositive();
@@ -49,6 +49,44 @@ class WireMockLlmServerTest {
         String secondCall = wireMockLlmServer.getBaseUrl();
 
         assertThat(firstCall).isSameAs(secondCall);
+    }
+
+    @Test
+    void getBaseUrlWithProperties_usesPublishedContainerHostWhenSet() {
+        String previous = System.getProperty("kratis.litellm.container-host");
+        try {
+            System.setProperty("kratis.litellm.container-host", "172.17.0.1");
+            LiteLLMProperties properties = new LiteLLMProperties();
+            properties.setBaseUrl("http://localhost:4000");
+
+            assertThat(wireMockLlmServer.getBaseUrl(properties))
+                    .isEqualTo("http://172.17.0.1:" + wireMockLlmServer.getPort());
+        } finally {
+            restore("kratis.litellm.container-host", previous);
+        }
+    }
+
+    @Test
+    void getBaseUrlWithProperties_fallsBackToBaseUrlHostWhenContainerHostUnset() {
+        String previous = System.getProperty("kratis.litellm.container-host");
+        try {
+            System.clearProperty("kratis.litellm.container-host");
+            LiteLLMProperties properties = new LiteLLMProperties();
+            properties.setBaseUrl("http://localhost:4000");
+
+            assertThat(wireMockLlmServer.getBaseUrl(properties))
+                    .isEqualTo("http://localhost:" + wireMockLlmServer.getPort());
+        } finally {
+            restore("kratis.litellm.container-host", previous);
+        }
+    }
+
+    private static void restore(String key, String value) {
+        if (value == null) {
+            System.clearProperty(key);
+        } else {
+            System.setProperty(key, value);
+        }
     }
 
     @Test
