@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
@@ -56,8 +57,13 @@ public class GitFixtureContainer extends GenericContainer<GitFixtureContainer> {
             prepareFixtureFiles();
             super.start();
             injectFixtureFiles();
-            gitHttpUrl = "http://host.docker.internal:" + getMappedPort(80) + "/git/repo.git";
-            gitSshUrl = "ssh://" + SSH_USER + "@host.docker.internal:" + getMappedPort(2222) + "/srv/git/repo.git";
+            // Consumed by sandbox containers. They reach this fixture through the docker host its
+            // published ports live on: TESTCONTAINERS_HOST_OVERRIDE when this JVM runs inside a
+            // sandbox (the sibling sharing their network), otherwise host.docker.internal.
+            String fixtureHost = Optional.ofNullable(System.getenv("TESTCONTAINERS_HOST_OVERRIDE"))
+                    .orElse("host.docker.internal");
+            gitHttpUrl = "http://" + fixtureHost + ":" + getMappedPort(80) + "/git/repo.git";
+            gitSshUrl = "ssh://" + SSH_USER + "@" + fixtureHost + ":" + getMappedPort(2222) + "/srv/git/repo.git";
             logger.info("[git-fixture] serving {} and {}", gitHttpUrl, gitSshUrl);
         } catch (IOException | InterruptedException | NoSuchAlgorithmException e) {
             throw new IllegalStateException("Failed to start git fixture container", e);

@@ -3,10 +3,10 @@ package com.kratisai.controlplane;
 import static java.net.URI.create;
 
 import com.github.dockerjava.api.command.RestartContainerCmd;
+import com.github.dockerjava.api.exception.ConflictException;
 import com.github.dockerjava.api.model.ContainerNetwork;
+import com.kratisai.controlplane.service.LocalDockerSandboxProvider;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -24,6 +24,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContextInitializer;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.env.MapPropertySource;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -43,12 +44,18 @@ import org.testcontainers.utility.MountableFile;
  * so concurrent contexts never bleed data into each other. The schema is dropped automatically
  * when the JVM shuts down.
  *
- * <p>No shared Docker network is used — containers connect via host:port to avoid creating
- * orphaned networks on every test run.
+ * <p>Postgres and LiteLLM share a fixed-name user network and resolve each other by alias, so
+ * inter-container addressing is the same on a developer host and inside a DinD sandbox.
  */
 public class PostgresTestInitializer implements ApplicationContextInitializer<ConfigurableApplicationContext> {
 
     private static final Logger logger = LoggerFactory.getLogger(PostgresTestInitializer.class);
+
+    /** Peers resolve each other by alias here, so inter-container addressing needs no IP math. */
+    private static final String TEST_NETWORK_NAME = "kratis-test-net";
+
+    private static final String POSTGRES_ALIAS = "postgres";
+    private static final String LITELLM_ALIAS = "litellm";
 
     @SuppressWarnings("resource")
     private static final PostgreSQLContainer<?> POSTGRES_CONTAINER = new PostgreSQLContainer<>(
@@ -66,12 +73,16 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                     "synchronous_commit=off",
                     "-c",
                     "full_page_writes=off")
+            .withNetworkMode(TEST_NETWORK_NAME)
+            .withCreateContainerCmdModifier(cmd -> cmd.withAliases(POSTGRES_ALIAS))
             .withLabel("workspace.id", System.getProperty("user.dir"))
             .withReuse(true);
 
     static final GenericContainer<?> LITELLM_CONTAINER;
 
     static {
+        ensureTestNetwork();
+
         // 1. Start PostgreSQL (reused across test runs when reuse is enabled)
         POSTGRES_CONTAINER.start();
 
@@ -95,7 +106,7 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
             throw new RuntimeException("Failed to install pgvector in public schema", e);
         }
 
-        // Peer IP, not the bridge gateway's published port: that listener lives only in the DinD
+        // Peer alias, not the bridge gateway's published port: that listener lives only in the DinD
         // sibling's parent namespace, so LiteLLM cannot reach it from inside.
         ContainerNetwork postgresNetwork = POSTGRES_CONTAINER
                 .getContainerInfo()
@@ -104,15 +115,16 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                 .values()
                 .iterator()
                 .next();
-        String postgresIp = postgresNetwork.getIpAddress();
-        logger.info("Detected Postgres container IP: {}", postgresIp);
+        logger.info("Detected Postgres network: {}", postgresNetwork.getNetworkID());
 
-        String databaseUrl = "postgresql://test:test@" + postgresIp + ":5432/litellm";
+        String databaseUrl = "postgresql://test:test@" + POSTGRES_ALIAS + ":5432/litellm";
 
         // Start LiteLLM from pre-built cached image (reused across test runs)
         // TestLiteLLMClient tracks models registered per test, and expunges them after each test.
         LITELLM_CONTAINER = new GenericContainer<>(DockerImageName.parse("ghcr.io/berriai/litellm:main-stable"))
                 .withExposedPorts(4000)
+                .withNetworkMode(TEST_NETWORK_NAME)
+                .withCreateContainerCmdModifier(cmd -> cmd.withAliases(LITELLM_ALIAS))
                 .withExtraHost("host.docker.internal", "host-gateway")
                 .withLabel("workspace.id", System.getProperty("user.dir"))
                 .withEnv("LITELLM_MASTER_KEY", "sk-test-master")
@@ -142,13 +154,13 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
         System.setProperty("kratis.litellm.master-key", "sk-test-master");
 
         // Set explicitly rather than left to fall back to base-url, which is only reachable from
-        // this JVM. A spawned sandbox reaches LiteLLM through the dind's own bridge.
+        // this JVM. A spawned sandbox shares a network with the dind sibling, so it reaches
+        // LiteLLM through the published port there.
         boolean insideSandbox = Files.exists(Paths.get("/.dockerenv"));
-        String agentHost = insideSandbox ? litellmContainerIp() : postgresNetwork.getGateway();
-        String agentPort = insideSandbox ? "4000" : litellmMappedPort;
-        System.setProperty("kratis.litellm.sandbox-base-url", "http://" + agentHost + ":" + agentPort);
+        String agentHost = insideSandbox ? LITELLM_CONTAINER.getHost() : postgresNetwork.getGateway();
+        System.setProperty("kratis.litellm.sandbox-base-url", "http://" + agentHost + ":" + litellmMappedPort);
 
-        String containerHost = resolveContainerReachableHost(postgresNetwork.getGateway());
+        String containerHost = LocalDockerSandboxProvider.resolveContainerReachableHost(postgresNetwork.getGateway());
         System.setProperty("kratis.litellm.container-host", containerHost);
         logger.info(
                 "LiteLLM operational at {} (agents {}, mock upstream host {})",
@@ -187,30 +199,17 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
         }
     }
 
-    private static String litellmContainerIp() {
-        return LITELLM_CONTAINER
-                .getContainerInfo()
-                .getNetworkSettings()
-                .getNetworks()
-                .values()
-                .iterator()
-                .next()
-                .getIpAddress();
-    }
-
-    /**
-     * Host that containers started by this JVM use to reach this JVM. The bridge gateway does that
-     * on a developer host; inside a sandbox it leads to the DinD sibling instead, so use our own.
-     */
-    static String resolveContainerReachableHost(String dockerGatewayIp) {
-        if (!Files.exists(Paths.get("/.dockerenv"))) {
-            return dockerGatewayIp;
-        }
+    /** Creates the peer network once; a fixed name keeps the container reuse hash stable. */
+    private static void ensureTestNetwork() {
         try {
-            return InetAddress.getLocalHost().getHostAddress();
-        } catch (UnknownHostException e) {
-            logger.warn("Could not resolve own address, falling back to docker gateway {}", dockerGatewayIp, e);
-            return dockerGatewayIp;
+            DockerClientFactory.instance()
+                    .client()
+                    .createNetworkCmd()
+                    .withName(TEST_NETWORK_NAME)
+                    .withDriver("bridge")
+                    .exec();
+        } catch (ConflictException alreadyExists) {
+            logger.debug("Reusing test network {}", TEST_NETWORK_NAME);
         }
     }
 
@@ -274,10 +273,9 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
 
     public static void executeLiteLLMShutdownHook(String litellmBaseUrl) {
         try {
-            String url = litellmBaseUrl;
             HttpClient client = HttpClient.newHttpClient();
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(create(url + "/model/info"))
+                    .uri(create(litellmBaseUrl + "/model/info"))
                     .header("Authorization", "Bearer sk-test-master")
                     .GET()
                     .build();

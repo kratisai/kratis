@@ -12,6 +12,7 @@ import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionProviderType;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import java.io.IOException;
+import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -267,12 +268,46 @@ class LocalDockerSandboxProviderTest {
                 .execute(
                         argThat(cmd -> cmd.contains("docker:dind-rootless")
                                 && cmd.contains("systempaths=unconfined")
+                                && cmd.stream().anyMatch(arg -> arg.startsWith("--host-gateway-ip="))
                                 && cmd.stream().noneMatch(arg -> arg.equals("--privileged"))
                                 && cmd.stream().noneMatch(arg -> arg.startsWith("--cap-add="))
                                 && cmd.stream().noneMatch(arg -> arg.equals("--cap-drop=ALL"))
                                 && cmd.stream().noneMatch(arg -> arg.contains("docker.sock"))),
                         any(),
                         any());
+    }
+
+    @Test
+    void testSpawnDindSiblingSkipsHostGatewayIpWhenNetworkGatewayIsUnknown() throws Exception {
+        ExecutionEnvironment env = new ExecutionEnvironment();
+        env.setId(java.util.UUID.randomUUID());
+
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("network") && cmd.contains("inspect")) {
+                // An unreadable gateway must not fail provisioning
+                return new ProcessExecutor.ProcessResult(1, new byte[0]);
+            }
+            return new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes());
+        });
+
+        provider.spawnSandbox(env, "test-token");
+
+        verify(mockProcessExecutor)
+                .execute(
+                        argThat(cmd -> cmd.contains("docker:dind-rootless")
+                                && cmd.stream().noneMatch(arg -> arg.startsWith("--host-gateway-ip="))),
+                        any(),
+                        any());
+    }
+
+    @Test
+    void isReachable_reflectsTcpConnectivity() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            assertThat(LocalDockerSandboxProvider.isReachable("127.0.0.1", server.getLocalPort()))
+                    .isTrue();
+        }
+        assertThat(LocalDockerSandboxProvider.isReachable("127.0.0.1", 1)).isFalse();
     }
 
     @Test

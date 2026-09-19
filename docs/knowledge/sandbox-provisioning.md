@@ -116,21 +116,24 @@ weaken the boundary.
 namespace, so their own IPs are not routable from the runner. Published ports are:
 rootlesskit's port driver forwards them into the sibling's namespace, which is why the
 runner gets `TESTCONTAINERS_HOST_OVERRIDE=<dind>` and connects to `<dind>:<mappedPort>`.
-The same applies to a URL the control plane builds from `getContainerInfo()`: the inner
-bridge gateway (e.g. `172.17.0.1`) is not routable from the runner, so anything the control
-plane itself must call (e.g. `kratis.litellm.base-url` in `PostgresTestInitializer`) has to
-be derived from Testcontainers' `getHost()`, which honours `TESTCONTAINERS_HOST_OVERRIDE`.
+The sibling's dockerd is also started with
+`--host-gateway-ip=<gateway of the sandbox network>`, so `host.docker.internal` inside the
+sibling's containers — including nested sandboxes — resolves to the machine running the
+control plane, which is what the connector's `--server-url` depends on. The docker default
+(gateway of the sibling's own bridge) points at the sibling's daemon instead, which nothing
+outside the sibling listens on.
 
 **Container-to-container addressing:** three consumers, three different addresses, published by
 `PostgresTestInitializer` for the test suite.
 
-- *Inner container → inner container* (LiteLLM reaching Postgres) must use the **peer's own
-  IP and internal port**. The bridge gateway plus published port (`172.17.0.1:<mapped>`)
-  works on a developer host but that listener only exists in the sibling's parent namespace,
-  so from inside LiteLLM it refuses the connection and Prisma dies with
-  `httpx.ConnectError`. This is what makes `Container startup failed for image
-  ghcr.io/berriai/litellm:main-stable` appear, which then surfaces as a class-initialization
-  error in `PostgresTestInitializer` and cascading Spring context failures.
+- *Inner container → inner container* (LiteLLM reaching Postgres) resolves peers by alias on a
+  fixed-name user network (`kratis-test-net`): `postgresql://test:test@postgres:5432/litellm`.
+  Do not replace this with the bridge gateway plus published port (`172.17.0.1:<mapped>`): that
+  listener exists only in the sibling's parent namespace, so from inside LiteLLM it refuses the
+  connection and Prisma dies with `httpx.ConnectError`, which surfaces as
+  `Container startup failed for image ghcr.io/berriai/litellm:main-stable`, then a
+  class-initialization error in `PostgresTestInitializer`, then cascading Spring context
+  failures. The network name is fixed so the container reuse hash stays stable across runs.
 - *Test JVM → LiteLLM* (`kratis.litellm.base-url`) must be reachable from the JVM's own
   namespace: `getHost()`, which honours `TESTCONTAINERS_HOST_OVERRIDE` (the sibling name in a
   sandbox, localhost on a developer host).
@@ -139,9 +142,11 @@ be derived from Testcontainers' `getHost()`, which honours `TESTCONTAINERS_HOST_
   `kratis.litellm.container-host` carries it: the bridge gateway on a developer host, the
   JVM's own address when it runs inside a container. `WireMockLlmServer.getBaseUrl(...)` reads it.
 - *Spawned sandbox agent → LiteLLM* (`kratis.litellm.sandbox-base-url`) must be reachable from
-  inside a sandbox. Set explicitly — never left to fall back to `base-url`, whose host is only
-  valid for the JVM itself. On a developer host it is the gateway plus the published port;
-  inside a sandbox it is LiteLLM's own container IP on the dind bridge with port 4000.
+  inside a sandbox. Spawned sandboxes sit on the same network as the sibling, so they address
+  LiteLLM through its published port on the sibling — the same value as `getHost()` when the
+  control plane itself runs in a sandbox, and the gateway plus published port on a developer
+  host. Do not use a container IP: Docker isolates traffic between different bridge networks,
+  so a peer IP is unreachable from a container on another network.
 
 **Testcontainer lifecycle:** `TESTCONTAINERS_RYUK_DISABLED=true` because Ryuk cannot reach
 the sibling daemon. With no reaper, every test JVM would leave its Postgres and LiteLLM
@@ -149,6 +154,12 @@ containers behind inside the dind, so the runner also gets
 `TESTCONTAINERS_REUSE_ENABLE=true`. That satisfies the `testcontainers.reuse.enable` gate
 that `PostgresTestInitializer`'s `withReuse(true)` call requires — without it, reuse is
 silently disabled (a log warning, not an error) and the containers accumulate.
+
+**Registry cache:** the sibling is started with `--registry-mirror` from
+`kratis.sandbox.registry-mirror`. The dev compose stack publishes its cache on 5002 and deploy
+on 5001, so each profile must point at the port its stack actually publishes — the provider
+warns at spawn time when the mirror refuses connections, and dockerd otherwise silently falls
+back to docker.io, so a stale port looks like slow pulls rather than an error.
 
 **Volume cleanup:** `docker:dind-rootless` declares `VOLUME /home/rootless/.local/share/docker`
 and `VOLUME /var/lib/docker`, so Docker creates two anonymous volumes per sibling holding

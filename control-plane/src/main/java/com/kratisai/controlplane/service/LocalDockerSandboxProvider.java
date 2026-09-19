@@ -6,6 +6,11 @@ import com.kratisai.controlplane.model.ExecutionProviderType;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import java.io.File;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.URI;
+import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -163,10 +168,87 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 "kratis.role=dind",
                 "docker:dind-rootless",
                 "dockerd-entrypoint.sh"));
+        // dockerd maps `host-gateway` to its own bridge by default, which is this sibling's daemon
+        // rather than the machine running the control plane. Point it at this process instead so
+        // every container inside the sibling reaches the control plane via host.docker.internal.
+        String gateway = dockerNetworkGateway(networkName);
+        if (gateway != null) {
+            command.add("--host-gateway-ip=" + resolveContainerReachableHost(gateway));
+        } else {
+            logger.warn(
+                    "Could not resolve the gateway of {} (kratis.sandbox.*); containers inside the sibling"
+                            + " will not be able to reach this control plane via host.docker.internal",
+                    networkName);
+        }
         if (registryMirror != null && !registryMirror.isBlank()) {
+            warnIfRegistryMirrorUnreachable(registryMirror);
             command.add("--registry-mirror=" + registryMirror);
         }
         executeCommand("Spawning dind container", command);
+    }
+
+    /**
+     * Address that containers reach this control plane on. The docker bridge gateway does that
+     * when this JVM runs on the host; inside a container the gateway leads to the docker host
+     * instead, so use our own address.
+     */
+    public static String resolveContainerReachableHost(String dockerGatewayIp) {
+        if (!Files.exists(Path.of("/.dockerenv"))) {
+            return dockerGatewayIp;
+        }
+        try {
+            return InetAddress.getLocalHost().getHostAddress();
+        } catch (UnknownHostException e) {
+            return dockerGatewayIp;
+        }
+    }
+
+    private String dockerNetworkGateway(String networkName) {
+        try {
+            ProcessExecutor.ProcessResult result = processExecutor.execute(
+                    List.of(
+                            "docker",
+                            "network",
+                            "inspect",
+                            "--format",
+                            "{{(index .IPAM.Config 0).Gateway}}",
+                            networkName),
+                    null,
+                    null);
+            if (result.exitCode() != 0) {
+                logger.warn("Could not read the gateway of docker network {}", networkName);
+                return null;
+            }
+            String output = new String(result.output()).trim();
+            return output.isBlank() ? null : output;
+        } catch (IOException | InterruptedException | RuntimeException e) {
+            logger.warn("Failed to read the gateway of docker network {}", networkName, e);
+            return null;
+        }
+    }
+
+    private void warnIfRegistryMirrorUnreachable(String registryMirror) {
+        try {
+            URI uri = URI.create(registryMirror);
+            int port = uri.getPort() > 0 ? uri.getPort() : 443;
+            if (!isReachable(uri.getHost(), port)) {
+                logger.warn(
+                        "Registry mirror {} is unreachable; image pulls will bypass the cache"
+                                + " (check kratis.sandbox.registry-mirror)",
+                        registryMirror);
+            }
+        } catch (RuntimeException e) {
+            logger.debug("Could not probe registry mirror {}", registryMirror, e);
+        }
+    }
+
+    static boolean isReachable(String host, int port) {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(host, port), 2_000);
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     // Check whether userns is allowed for unprivileged users
