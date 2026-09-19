@@ -7,7 +7,7 @@ import {
   Terminal,
   XCircle,
 } from 'lucide-react'
-import { memo, type ReactNode, useEffect, useRef } from 'react'
+import { memo, type ReactNode, useEffect, useMemo, useRef } from 'react'
 
 import type {
   Activity,
@@ -26,6 +26,8 @@ import { activityTitle, useActivityStore } from '@/store/activity-store'
 
 const EMPTY_ACTIVITIES: Activity[] = []
 
+const NEAR_BOTTOM_THRESHOLD_PX = 120
+
 interface ActivityItemProps {
   activity: Activity
   executionId: string
@@ -33,7 +35,6 @@ interface ActivityItemProps {
 
 interface ActivityItemShellProps {
   activity: Activity
-  alwaysToggleable?: boolean
   content: ReactNode
   executionId: string
   icon: ReactNode
@@ -49,14 +50,48 @@ export function ExecutionActivityLog({ executionId }: ExecutionActivityLogProps)
   const activities = useActivityStore(
     (state) => state.activitiesByExecution[executionId] ?? EMPTY_ACTIVITIES,
   )
+  const logRef = useRef<HTMLDivElement>(null)
   const logEndRef = useRef<HTMLDivElement>(null)
+  const isNearBottomRef = useRef(true)
+  const hasActivities = activities.length > 0
+
+  const hitlActivityId = useMemo(
+    () =>
+      activities.findLast(
+        (activity) =>
+          activity.state === 'pending_approval' ||
+          (activity.type === 'elicitation' && activity.state === 'active'),
+      )?.id,
+    [activities],
+  )
 
   useEffect(() => {
-    // Instant (not smooth) scrolling: during streaming this fires many times per second as
-    // activities append, and repeatedly restarting a smooth-scroll animation against a moving
-    // target makes the list visibly jump instead of settling at the bottom.
+    const scroller =
+      getScrollParent(logRef.current) ?? document.scrollingElement ?? document.documentElement
+
+    const updateNearBottom = () => {
+      const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+      isNearBottomRef.current = distanceFromBottom < NEAR_BOTTOM_THRESHOLD_PX
+    }
+    updateNearBottom()
+    scroller.addEventListener('scroll', updateNearBottom, { passive: true })
+    return () => scroller.removeEventListener('scroll', updateNearBottom)
+  }, [hasActivities])
+
+  useEffect(() => {
+    // Instant (not smooth) scrolling: smooth animations restart on every stream event and jump
+    // against a moving target. Suppressed while a HITL prompt is open so it stays in view.
+    if (!isNearBottomRef.current || hitlActivityId !== undefined) return
     logEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
-  }, [activities.length])
+  }, [activities, hitlActivityId])
+
+  useEffect(() => {
+    // Approval requests often merge into an already-rendered activity, so no length change
+    // would scroll the prompt into view.
+    if (hitlActivityId === undefined || !logRef.current) return
+    const prompt = logRef.current.querySelector(`[data-activity-id="${hitlActivityId}"]`)
+    prompt?.scrollIntoView({ behavior: 'auto', block: 'center' })
+  }, [hitlActivityId])
 
   if (activities.length === 0) {
     return (
@@ -70,13 +105,27 @@ export function ExecutionActivityLog({ executionId }: ExecutionActivityLogProps)
     <div
       className="activity-log mx-auto w-full max-w-4xl min-w-0 space-y-1 p-2 sm:p-4"
       data-testid="execution-activity-log"
+      ref={logRef}
     >
       {activities.map((activity) => (
-        <ActivityItem activity={activity} executionId={executionId} key={activity.id} />
+        <div data-activity-id={activity.id} key={activity.id}>
+          <ActivityItem activity={activity} executionId={executionId} />
+        </div>
       ))}
       <div ref={logEndRef} />
     </div>
   )
+}
+
+/** Desktop scrolls the log pane; mobile scrolls the document. */
+function getScrollParent(element: HTMLElement | null): HTMLElement | null {
+  let node = element?.parentElement ?? null
+  while (node) {
+    const overflowY = window.getComputedStyle(node).overflowY
+    if (overflowY === 'auto' || overflowY === 'scroll') return node
+    node = node.parentElement
+  }
+  return null
 }
 
 const ActivityItem = memo(function ActivityItem({ activity, executionId }: ActivityItemProps) {
@@ -98,7 +147,6 @@ const ActivityItem = memo(function ActivityItem({ activity, executionId }: Activ
 
 function ActivityItemShell({
   activity,
-  alwaysToggleable = false,
   content,
   executionId,
   icon,
@@ -106,7 +154,6 @@ function ActivityItemShell({
   trailing,
 }: ActivityItemShellProps) {
   const toggleCollapsed = useActivityStore((s) => s.toggleCollapsed)
-  const canToggle = alwaysToggleable || isTerminal(activity)
   const collapsed = activity.collapsed
 
   const chevron = collapsed ? (
@@ -116,20 +163,6 @@ function ActivityItemShell({
   )
 
   const toggle = () => toggleCollapsed(executionId, activity.id)
-
-  if (!canToggle) {
-    return (
-      <div className="border-border/50 min-w-0 rounded border p-2">
-        <div className="flex w-full min-w-0 items-center gap-2 text-left text-sm">
-          {chevron}
-          {icon}
-          <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
-          {trailing}
-        </div>
-        {content}
-      </div>
-    )
-  }
 
   if (collapsed) {
     return (
@@ -226,10 +259,6 @@ function ElicitationActivityItem({
   return <ActivityElicitation activity={activity} executionId={executionId} />
 }
 
-function isTerminal(activity: Activity): boolean {
-  return activity.state === 'completed' || activity.state === 'error'
-}
-
 function MessageActivityItem({
   activity,
   executionId,
@@ -240,7 +269,6 @@ function MessageActivityItem({
   return (
     <ActivityItemShell
       activity={activity}
-      alwaysToggleable
       content={
         <div className="mt-1 pl-5">
           <p className="text-muted-foreground text-xs break-words whitespace-pre-wrap">
@@ -265,7 +293,6 @@ function PlanActivityItem({
   return (
     <ActivityItemShell
       activity={activity}
-      alwaysToggleable
       content={
         <div className="mt-1 pl-5">
           <PlanEntriesList entries={activity.plan} />
@@ -305,7 +332,6 @@ function ThinkingActivityItem({
   return (
     <ActivityItemShell
       activity={activity}
-      alwaysToggleable
       content={
         <div className="mt-1 pl-5">
           <p className="text-muted-foreground text-xs break-words whitespace-pre-wrap">

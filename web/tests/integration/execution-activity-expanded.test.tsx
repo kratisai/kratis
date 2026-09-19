@@ -277,7 +277,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     expect(screen.getByText('Analyzing dependencies')).toBeInTheDocument()
   })
 
-  it('keeps active commands expanded (not closable) and toggles completed ones manually', async () => {
+  it('collapses the active (current) command via its header and re-expands it', async () => {
     const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
 
     seedActivities([
@@ -314,6 +314,9 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
 
     const activeHeader = screen.getByText('echo hello').closest('button')!
     await user.click(activeHeader)
+    expect(screen.queryByText('hello')).not.toBeInTheDocument()
+
+    await user.click(screen.getByText('echo hello').closest('button')!)
     expect(screen.getByText('hello')).toBeInTheDocument()
 
     const doneHeader = screen.getByText('echo done').closest('button')!
@@ -322,6 +325,53 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
 
     await user.click(screen.getByText('echo done').closest('button')!)
     expect(screen.getByText('done')).toBeInTheDocument()
+  })
+
+  it('keeps a manually collapsed active command collapsed while its stream continues', async () => {
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'cmd-stream-1',
+      activityType: 'COMMAND',
+      description: 'npm test',
+      executionId: EXECUTION_ID,
+      status: 'in_progress',
+      type: 'execution_activity',
+    })
+    await waitFor(() => {
+      expect(screen.getByText('npm test')).toBeInTheDocument()
+    })
+
+    useActivityStore.getState().handleExecutionOutput({
+      executionId: EXECUTION_ID,
+      line: 'PASS src/a.test.ts',
+      stream: 'stdout',
+      type: 'execution_output',
+    })
+    await waitFor(() => {
+      expect(screen.getByText('PASS src/a.test.ts')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByText('npm test').closest('button')!)
+    expect(screen.queryByText('PASS src/a.test.ts')).not.toBeInTheDocument()
+
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'cmd-stream-1',
+      activityType: 'COMMAND',
+      description: 'npm test',
+      executionId: EXECUTION_ID,
+      status: 'in_progress',
+      type: 'execution_activity',
+    })
+    useActivityStore.getState().handleExecutionOutput({
+      executionId: EXECUTION_ID,
+      line: 'PASS src/b.test.ts',
+      stream: 'stdout',
+      type: 'execution_output',
+    })
+
+    expect(screen.queryByText('PASS src/a.test.ts')).not.toBeInTheDocument()
+    expect(screen.queryByText('PASS src/b.test.ts')).not.toBeInTheDocument()
   })
 
   it('shows exit code for completed command execution', async () => {

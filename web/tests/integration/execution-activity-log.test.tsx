@@ -15,6 +15,39 @@ import {
 
 const EXECUTION_ID = 'exec-1'
 
+interface ScrollCall {
+  el: Element
+  options?: boolean | ScrollIntoViewOptions
+}
+
+function captureScrollCalls() {
+  const calls: ScrollCall[] = []
+  const spy = vi
+    .spyOn(Element.prototype, 'scrollIntoView')
+    .mockImplementation(function (this: Element, options?: boolean | ScrollIntoViewOptions) {
+      calls.push({ el: this, options })
+    })
+  return {
+    calls,
+    restore: () => {
+      spy.mockRestore()
+    },
+  }
+}
+
+/** jsdom has no layout, so metrics must be shadowed to simulate a scrolled-up document. */
+function stubDocumentScrollMetrics(metrics: { clientHeight: number; scrollHeight: number; scrollTop: number }) {
+  const el = document.documentElement as unknown as Record<string, number>
+  for (const prop of ['clientHeight', 'scrollHeight', 'scrollTop'] as const) {
+    Object.defineProperty(el, prop, { configurable: true, value: metrics[prop] })
+  }
+  return () => {
+    for (const prop of ['clientHeight', 'scrollHeight', 'scrollTop'] as const) {
+      delete el[prop]
+    }
+  }
+}
+
 describe('Execution Activity Log', () => {
   setupFetchMock()
 
@@ -137,6 +170,131 @@ describe('Execution Activity Log', () => {
       )
     })
     scrollSpy.mockRestore()
+  })
+
+  it('does not yank the view back to the bottom after the user scrolls up', async () => {
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+    const { calls, restore } = captureScrollCalls()
+    const restoreMetrics = stubDocumentScrollMetrics({
+      clientHeight: 200,
+      scrollHeight: 5000,
+      scrollTop: 0,
+    })
+    // Recompute the near-bottom state against the stubbed metrics.
+    document.documentElement.dispatchEvent(new Event('scroll'))
+
+    try {
+      useActivityStore.getState().handleActivityEvent({
+        actionId: 'a-scrolled-up',
+        activityType: 'RESEARCH',
+        description: 'read pom.xml',
+        executionId: EXECUTION_ID,
+        status: 'in_progress',
+        type: 'execution_activity',
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText('read pom.xml')).toBeInTheDocument()
+      })
+      expect(calls).toHaveLength(0)
+    } finally {
+      restore()
+      restoreMetrics()
+    }
+  })
+
+  it('scrolls an approval prompt into view when it merges into the current activity', async () => {
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+    const { calls, restore } = captureScrollCalls()
+
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'tc-approve-scroll',
+      activityType: 'COMMAND',
+      description: 'systemctl restart app',
+      executionId: EXECUTION_ID,
+      status: 'in_progress',
+      type: 'execution_activity',
+    })
+    await waitFor(() => {
+      expect(screen.getByText('systemctl restart app')).toBeInTheDocument()
+    })
+
+    // Merges into the existing activity in place — no length change, so only
+    // the prompt scroll can bring the card into view.
+    useActivityStore.getState().handleHitlRequired({
+      command: 'systemctl restart app',
+      executionId: EXECUTION_ID,
+      hitlId: 'tc-approve-scroll',
+      kind: 'approval',
+      message: 'Allow systemctl restart app?',
+      type: 'execution_hitl_required',
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+    })
+
+    const prompt = screen.getByText('Permission Required').closest('[data-activity-id]')
+    expect(prompt).not.toBeNull()
+    const promptCall = calls.find((call) => call.el === prompt)
+    expect(promptCall?.options).toEqual({ behavior: 'auto', block: 'center' })
+    restore()
+  })
+
+  it('scrolls a question prompt into view when a HITL question arrives', async () => {
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+    const { calls, restore } = captureScrollCalls()
+
+    useActivityStore.getState().handleHitlRequired({
+      executionId: EXECUTION_ID,
+      form: { properties: { target: { type: 'string' } }, type: 'object' },
+      hitlId: 'el-scroll',
+      kind: 'question',
+      message: 'Choose a deployment target',
+      type: 'execution_hitl_required',
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent Question')).toBeInTheDocument()
+    })
+
+    const prompt = screen.getByText('Agent Question').closest('[data-activity-id]')
+    expect(prompt).not.toBeNull()
+    const promptCall = calls.find((call) => call.el === prompt)
+    expect(promptCall?.options).toEqual({ behavior: 'auto', block: 'center' })
+    restore()
+  })
+
+  it('does not chase the list bottom while a HITL prompt is pending', async () => {
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+    const { calls, restore } = captureScrollCalls()
+
+    useActivityStore.getState().handleHitlRequired({
+      executionId: EXECUTION_ID,
+      form: { properties: { target: { type: 'string' } }, type: 'object' },
+      hitlId: 'el-follow',
+      kind: 'question',
+      message: 'Choose a deployment target',
+      type: 'execution_hitl_required',
+    })
+    await waitFor(() => {
+      expect(screen.getByText('Agent Question')).toBeInTheDocument()
+    })
+    calls.length = 0
+
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'a-follow',
+      activityType: 'RESEARCH',
+      description: 'read pom.xml',
+      executionId: EXECUTION_ID,
+      status: 'in_progress',
+      type: 'execution_activity',
+    })
+    await waitFor(() => {
+      expect(screen.getByText('read pom.xml')).toBeInTheDocument()
+    })
+    expect(calls).toHaveLength(0)
+    restore()
   })
 
   it('renders command execution output when active', async () => {

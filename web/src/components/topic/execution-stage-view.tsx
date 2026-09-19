@@ -201,7 +201,7 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
       <div className="relative flex min-h-0 flex-1 overflow-visible md:overflow-hidden">
         {activeSubTab === 'activity' ? (
           <div
-            className="min-w-0 flex-1 overflow-visible pb-20 md:overflow-auto"
+            className="min-w-0 flex-1 [scroll-padding-bottom:5rem] overflow-visible pb-20 md:overflow-auto"
             onScroll={handleScroll}
           >
             <div className="mx-auto w-full max-w-4xl min-w-0 px-2 sm:px-4">
@@ -214,7 +214,7 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
             {/* If Unified diff mode on widescreen, show 50% Activity Log on the left */}
             {diffViewMode === 'unified' && (
               <div
-                className="border-border/60 hidden min-w-0 flex-1 flex-col overflow-auto border-r pb-20 xl:flex xl:max-w-[50%]"
+                className="border-border/60 hidden min-w-0 flex-1 [scroll-padding-bottom:5rem] flex-col overflow-auto border-r pb-20 xl:flex xl:max-w-[50%]"
                 onScroll={handleScroll}
               >
                 <div className="w-full px-2 sm:px-4">
