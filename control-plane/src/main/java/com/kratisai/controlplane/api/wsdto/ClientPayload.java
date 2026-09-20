@@ -195,6 +195,7 @@ public sealed interface ClientPayload {
             HitlKind kind,
             String message,
             String command,
+            List<CommandSegment> commandSegments,
             String title,
             String toolKind,
             List<PermissionOption> options,
@@ -215,6 +216,7 @@ public sealed interface ClientPayload {
                 HitlKind kind,
                 String message,
                 String command,
+                List<CommandSegment> commandSegments,
                 String title,
                 String toolKind,
                 List<PermissionOption> options,
@@ -227,6 +229,7 @@ public sealed interface ClientPayload {
                     kind,
                     message,
                     command,
+                    commandSegments,
                     title,
                     toolKind,
                     options,
@@ -234,8 +237,22 @@ public sealed interface ClientPayload {
                     form);
         }
 
+        public ExecutionHitlRequiredResult(
+                UUID executionId,
+                String hitlId,
+                HitlKind kind,
+                String message,
+                String command,
+                String title,
+                String toolKind,
+                List<PermissionOption> options,
+                ActivityDiff diff,
+                Map<String, Object> form) {
+            this(executionId, hitlId, kind, message, command, null, title, toolKind, options, diff, form);
+        }
+
         public ExecutionHitlRequiredResult(UUID executionId, String hitlId, HitlKind kind, String message) {
-            this(executionId, hitlId, kind, message, null, null, null, null, null, null);
+            this(executionId, hitlId, kind, message, null, null, null, null, null, null, null);
         }
     }
 

@@ -21,6 +21,14 @@ const permissionOption = z
   .object({ kind: approvalOptionKind, name: z.string(), optionId: z.string() })
   .strict()
 
+const commandSegment = z
+  .object({
+    ruleType: z.enum(['EXACT', 'PREFIX_WILD', 'TOOL_KIND']).optional(),
+    suggestedRoot: z.string(),
+    text: z.string(),
+  })
+  .strict()
+
 const permissionDiffSchema = z
   .object({
     newText: z.string().optional(),
@@ -46,9 +54,8 @@ const planEntrySchema = z
 
 const hitlSchema = z
   .object({
-    approved: z.boolean().optional(),
-    cancelled: z.boolean().optional(),
     command: z.string().optional(),
+    commandSegments: z.array(commandSegment).optional(),
     content: z.record(z.string(), z.unknown()).optional(),
     diff: permissionDiffSchema,
     form: z.record(z.string(), z.unknown()).optional(),
@@ -195,6 +202,7 @@ export const CLIENT_RESULTS = {
   execution_hitl_required: z
     .object({
       command: z.string().optional(),
+      commandSegments: z.array(commandSegment).optional(),
       diff: permissionDiffSchema,
       executionId: uuid,
       form: z.record(z.string(), z.unknown()).optional(),
@@ -307,5 +315,3 @@ export const CLIENT_RESULTS = {
     })
     .strict(),
 } as const
-
-export type ClientResultType = keyof typeof CLIENT_RESULTS

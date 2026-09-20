@@ -52,18 +52,6 @@ public class SandboxExecutionActivity {
     @Column(columnDefinition = "jsonb")
     private String detail;
 
-    @Column
-    private Boolean approved;
-
-    @Column(name = "selected_option_id", length = 255)
-    private String selectedOptionId;
-
-    @Column(name = "resolved_by")
-    private UUID resolvedByUserId;
-
-    @Column(name = "resolved_at")
-    private Instant resolvedAt;
-
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -164,38 +152,6 @@ public class SandboxExecutionActivity {
 
     public void setDetail(String detail) {
         this.detail = detail;
-    }
-
-    public Boolean getApproved() {
-        return approved;
-    }
-
-    public void setApproved(Boolean approved) {
-        this.approved = approved;
-    }
-
-    public String getSelectedOptionId() {
-        return selectedOptionId;
-    }
-
-    public void setSelectedOptionId(String selectedOptionId) {
-        this.selectedOptionId = selectedOptionId;
-    }
-
-    public UUID getResolvedByUserId() {
-        return resolvedByUserId;
-    }
-
-    public void setResolvedByUserId(UUID resolvedByUserId) {
-        this.resolvedByUserId = resolvedByUserId;
-    }
-
-    public Instant getResolvedAt() {
-        return resolvedAt;
-    }
-
-    public void setResolvedAt(Instant resolvedAt) {
-        this.resolvedAt = resolvedAt;
     }
 
     public Instant getCreatedAt() {

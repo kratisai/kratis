@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
@@ -46,7 +47,12 @@ class PendingHitlTimeoutServiceTest {
 
     private PendingHitlRegistry.PendingHitl pending(UUID teamId, HitlKind kind, String hitlId, String command) {
         return new PendingHitlRegistry.PendingHitl(
-                kind, session, 7, hitlId, "message", command, null, null, null, null, null, Instant.now(), teamId);
+                new ExecutionHitlRequiredResult(
+                        UUID.randomUUID(), hitlId, kind, "message", command, null, null, null, null, null, null),
+                session,
+                7,
+                Instant.now(),
+                teamId);
     }
 
     @Test
@@ -63,11 +69,11 @@ class PendingHitlTimeoutServiceTest {
             ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
             verify(eventPublisher).publishEvent(eventCaptor.capture());
             SandboxExecutionHitlResolvedEvent event = (SandboxExecutionHitlResolvedEvent) eventCaptor.getValue();
-            Assertions.assertThat(event.executionId()).isEqualTo(executionId);
-            Assertions.assertThat(event.hitlId()).isEqualTo("tool-call-42");
-            Assertions.assertThat(event.kind()).isEqualTo(HitlKind.APPROVAL);
-            Assertions.assertThat(event.response()).isEqualTo(HitlResponse.CANCELLED);
-            Assertions.assertThat(event.resolvedByDisplayName()).isEqualTo("System (timeout)");
+            Assertions.assertThat(event.result().executionId()).isEqualTo(executionId);
+            Assertions.assertThat(event.result().hitlId()).isEqualTo("tool-call-42");
+            Assertions.assertThat(event.result().kind()).isEqualTo(HitlKind.APPROVAL);
+            Assertions.assertThat(event.result().response()).isEqualTo(HitlResponse.CANCELLED);
+            Assertions.assertThat(event.result().resolvedByDisplayName()).isEqualTo("System (timeout)");
 
             for (TransactionSynchronization sync : TransactionSynchronizationManager.getSynchronizations()) {
                 sync.afterCommit();
@@ -93,11 +99,11 @@ class PendingHitlTimeoutServiceTest {
             ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
             verify(eventPublisher).publishEvent(eventCaptor.capture());
             SandboxExecutionHitlResolvedEvent event = (SandboxExecutionHitlResolvedEvent) eventCaptor.getValue();
-            Assertions.assertThat(event.executionId()).isEqualTo(executionId);
-            Assertions.assertThat(event.hitlId()).isEqualTo("el-1");
-            Assertions.assertThat(event.kind()).isEqualTo(HitlKind.QUESTION);
-            Assertions.assertThat(event.response()).isEqualTo(HitlResponse.CANCELLED);
-            Assertions.assertThat(event.resolvedByDisplayName()).isEqualTo("System (timeout)");
+            Assertions.assertThat(event.result().executionId()).isEqualTo(executionId);
+            Assertions.assertThat(event.result().hitlId()).isEqualTo("el-1");
+            Assertions.assertThat(event.result().kind()).isEqualTo(HitlKind.QUESTION);
+            Assertions.assertThat(event.result().response()).isEqualTo(HitlResponse.CANCELLED);
+            Assertions.assertThat(event.result().resolvedByDisplayName()).isEqualTo("System (timeout)");
 
             for (TransactionSynchronization sync : TransactionSynchronizationManager.getSynchronizations()) {
                 sync.afterCommit();

@@ -48,6 +48,10 @@
             "kind": { "type": "string", "enum": ["approval", "question"] },
             "message": { "type": "string" },
             "command": { "type": "string" },
+            "commandSegments": {
+              "type": "array",
+              "items": { "type": "object", "required": ["text", "suggestedRoot"], "properties": { "text": { "type": "string" }, "suggestedRoot": { "type": "string" }, "ruleType": { "type": "string", "enum": ["EXACT", "PREFIX_WILD", "TOOL_KIND"] } } }
+            },
             "title": { "type": "string" },
             "toolKind": { "type": "string" },
             "options": {
@@ -58,9 +62,7 @@
             "form": { "type": "object" },
             "response": { "type": "string", "enum": ["approved", "answered", "declined", "cancelled"] },
             "optionId": { "type": "string" },
-            "content": { "type": "object" },
-            "approved": { "type": "boolean" },
-            "cancelled": { "type": "boolean" }
+            "content": { "type": "object" }
           },
           "additionalProperties": true
         }

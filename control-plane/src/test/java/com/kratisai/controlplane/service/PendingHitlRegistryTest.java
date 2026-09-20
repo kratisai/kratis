@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import java.time.Instant;
 import java.util.Map;
@@ -34,22 +35,25 @@ class PendingHitlRegistryTest {
         return session;
     }
 
-    private PendingHitlRegistry.PendingHitl registerSample(String sessionId, String hitlId, HitlKind kind) {
-        WebSocketSession session = session(sessionId);
-        PendingHitlRegistry.PendingHitl hitl = new PendingHitlRegistry.PendingHitl(
-                kind,
-                session,
-                42,
+    private ExecutionHitlRequiredResult sampleRequest(UUID forExecutionId, String hitlId, HitlKind kind) {
+        return new ExecutionHitlRequiredResult(
+                forExecutionId,
                 hitlId,
-                "message",
+                kind,
+                kind == HitlKind.QUESTION ? "Pick a target" : "message",
                 kind == HitlKind.APPROVAL ? "echo hello" : null,
                 null,
                 null,
                 null,
                 null,
-                kind == HitlKind.QUESTION ? Map.of("type", "object") : null,
-                Instant.now(),
-                teamId);
+                null,
+                kind == HitlKind.QUESTION ? Map.of("type", "object") : null);
+    }
+
+    private PendingHitlRegistry.PendingHitl registerSample(String sessionId, String hitlId, HitlKind kind) {
+        WebSocketSession session = session(sessionId);
+        PendingHitlRegistry.PendingHitl hitl = new PendingHitlRegistry.PendingHitl(
+                sampleRequest(executionId, hitlId, kind), session, 42, Instant.now(), teamId);
         registry.register(executionId, hitl);
         return hitl;
     }
@@ -79,24 +83,18 @@ class PendingHitlRegistryTest {
         registerSample("ws-1", "hitl-1", HitlKind.APPROVAL);
         UUID questionExecution = UUID.randomUUID();
         PendingHitlRegistry.PendingHitl question = new PendingHitlRegistry.PendingHitl(
-                HitlKind.QUESTION,
+                sampleRequest(questionExecution, "hitl-2", HitlKind.QUESTION),
                 session("ws-1"),
                 43,
-                "hitl-2",
-                "Pick a target",
-                null,
-                null,
-                null,
-                null,
-                null,
-                Map.of("type", "object"),
                 Instant.now(),
                 teamId);
         registry.register(questionExecution, question);
 
-        assertThat(registry.getPending().get(executionId).kind()).isEqualTo(HitlKind.APPROVAL);
-        assertThat(registry.getPending().get(questionExecution).kind()).isEqualTo(HitlKind.QUESTION);
-        assertThat(registry.getPending().get(questionExecution).form()).containsEntry("type", "object");
+        assertThat(registry.getPending().get(executionId).request().kind()).isEqualTo(HitlKind.APPROVAL);
+        assertThat(registry.getPending().get(questionExecution).request().kind())
+                .isEqualTo(HitlKind.QUESTION);
+        assertThat(registry.getPending().get(questionExecution).request().form())
+                .containsEntry("type", "object");
     }
 
     @Test
@@ -106,17 +104,9 @@ class PendingHitlRegistryTest {
                 .put(
                         executionId,
                         new PendingHitlRegistry.PendingHitl(
-                                HitlKind.APPROVAL,
+                                fresh.request(),
                                 fresh.session(),
                                 fresh.requestId(),
-                                fresh.hitlId(),
-                                fresh.message(),
-                                fresh.command(),
-                                fresh.title(),
-                                fresh.toolKind(),
-                                fresh.options(),
-                                fresh.diff(),
-                                fresh.form(),
                                 Instant.now().minusSeconds(600),
                                 teamId));
 
@@ -127,17 +117,9 @@ class PendingHitlRegistryTest {
         registry.register(
                 freshExecution,
                 new PendingHitlRegistry.PendingHitl(
-                        HitlKind.QUESTION,
+                        sampleRequest(freshExecution, "hitl-2", HitlKind.QUESTION),
                         fresh.session(),
                         44,
-                        "hitl-2",
-                        "q",
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
                         Instant.now(),
                         teamId));
         assertThat(registry.getExpired()).doesNotContainKey(freshExecution);
@@ -150,34 +132,18 @@ class PendingHitlRegistryTest {
                 .put(
                         executionId,
                         new PendingHitlRegistry.PendingHitl(
-                                HitlKind.APPROVAL,
+                                fresh.request(),
                                 fresh.session(),
                                 fresh.requestId(),
-                                fresh.hitlId(),
-                                fresh.message(),
-                                fresh.command(),
-                                fresh.title(),
-                                fresh.toolKind(),
-                                fresh.options(),
-                                fresh.diff(),
-                                fresh.form(),
                                 Instant.now().minusSeconds(600),
                                 teamId));
         UUID freshExecution = UUID.randomUUID();
         registry.register(
                 freshExecution,
                 new PendingHitlRegistry.PendingHitl(
-                        HitlKind.QUESTION,
+                        sampleRequest(freshExecution, "hitl-2", HitlKind.QUESTION),
                         fresh.session(),
                         44,
-                        "hitl-2",
-                        "q",
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
                         Instant.now(),
                         teamId));
 
@@ -195,17 +161,9 @@ class PendingHitlRegistryTest {
         registry.register(
                 otherExecution,
                 new PendingHitlRegistry.PendingHitl(
-                        HitlKind.QUESTION,
+                        sampleRequest(otherExecution, "hitl-2", HitlKind.QUESTION),
                         session("ws-2"),
                         44,
-                        "hitl-2",
-                        "q",
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
                         Instant.now(),
                         teamId));
 
@@ -241,41 +199,15 @@ class PendingHitlRegistryTest {
         WebSocketSession session = session("ws-3");
         when(sessionRegistry.getSession("ws-3")).thenReturn(session);
         registry.register(
-                executionId,
-                HitlKind.QUESTION,
-                session.getId(),
-                42,
-                "hitl-1",
-                "Pick a target",
-                null,
-                null,
-                null,
-                null,
-                null,
-                Map.of("type", "object"),
-                Instant.now(),
-                teamId);
+                executionId, sampleRequest(executionId, "hitl-1", HitlKind.QUESTION), session.getId(), 42, teamId);
         assertThat(registry.getPending().get(executionId).session()).isSameAs(session);
-        assertThat(registry.getPending().get(executionId).kind()).isEqualTo(HitlKind.QUESTION);
+        assertThat(registry.getPending().get(executionId).request().kind()).isEqualTo(HitlKind.QUESTION);
     }
 
     @Test
     void registerBySessionId_unknownSession_throws() {
         assertThatThrownBy(() -> registry.register(
-                        executionId,
-                        HitlKind.QUESTION,
-                        "missing",
-                        42,
-                        "hitl-1",
-                        "Pick a target",
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        Map.of("type", "object"),
-                        Instant.now(),
-                        teamId))
+                        executionId, sampleRequest(executionId, "hitl-1", HitlKind.QUESTION), "missing", 42, teamId))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("missing");
     }

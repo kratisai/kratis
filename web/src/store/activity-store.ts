@@ -12,6 +12,7 @@ import type {
   ThinkingActivity,
   ToolExecutionActivity,
 } from '@/types/execution-activity-types'
+import type { CreateHitlRuleRequest } from '@/types/hitl-rule-types'
 import type {
   ExecutionActivityResult,
   ExecutionCompleteResult,
@@ -44,6 +45,7 @@ interface ExecutionActivityState {
     response: HitlResponse,
     optionId?: string,
     content?: Record<string, unknown>,
+    rules?: CreateHitlRuleRequest[],
   ) => Promise<void>
   toggleCollapsed: (executionId: string, activityId: string) => void
 }
@@ -696,6 +698,7 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
         permissionDiff: result.diff,
         permissionKind: result.toolKind,
         permissionOptions: result.options,
+        permissionSegments: result.commandSegments,
         permissionTitle: result.title,
       }
       const findIdx = (type: 'command_execution' | 'tool_execution') => {
@@ -840,10 +843,12 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
     response: HitlResponse,
     optionId?: string,
     content?: Record<string, unknown>,
+    rules?: CreateHitlRuleRequest[],
   ) => {
     const body: Record<string, unknown> = { executionId, hitlId, response }
     if (optionId !== undefined) body.optionId = optionId
     if (content !== undefined) body.content = content
+    if (rules !== undefined && rules.length > 0) body.rules = rules
     const httpResponse = await fetchWithAuth('/api/v1/hitl/resolve', {
       body: JSON.stringify(body),
       method: 'POST',

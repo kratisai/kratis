@@ -199,10 +199,17 @@ sequenceDiagram
     "hitlId": "tool-call-42",
     "kind": "approval",
     "message": "Allow docker run --rm -v /workspace:/app golangci-lint run?",
-    "command": "docker run --rm -v /workspace:/app golangci-lint run"
+    "command": "docker run --rm -v /workspace:/app golangci-lint run",
+    "commandSegments": [
+      { "text": "docker run --rm -v /workspace:/app golangci-lint run", "suggestedRoot": "docker run" }
+    ]
   }
 }
 ```
+
+`commandSegments` lists the root commands of a composite command. The control plane splits at
+`&&`, `||`, `;`, `|`, and newlines. Each segment carries a derived rule candidate. The UI uses
+the segments in its "Remember choices" panel.
 
 #### Sandbox Execution Log Line (`type: "execution_output"`)
 ```json

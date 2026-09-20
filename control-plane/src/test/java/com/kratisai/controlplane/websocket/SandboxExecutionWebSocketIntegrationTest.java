@@ -11,6 +11,7 @@ import com.kratisai.controlplane.DatabaseCleaner;
 import com.kratisai.controlplane.SandboxExecutionScenarioFactory;
 import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.TestDataFactory;
+import com.kratisai.controlplane.api.restdto.CreateHitlRuleRequest;
 import com.kratisai.controlplane.api.restdto.ResolveHitlRequest;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
@@ -18,6 +19,7 @@ import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
 import com.kratisai.controlplane.api.wsdto.OutputStream;
 import com.kratisai.controlplane.model.ChatEntity;
+import com.kratisai.controlplane.model.HitlRuleAction;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
@@ -145,7 +147,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                                 "execution_hitl_resolved", (session, payload) -> resolvedNotificationLatch.countDown()),
                 sidecar -> sidecar.withAcpCommand("rm -rf /")
                         .expectTrigger("env.acp_prompt", 1)
-                        .expectTrigger("\"optionId\":\"allow-always\"", 1)
+                        .expectTrigger("\"optionId\":\"allow\"", 1)
                         .expectTrigger("\"id\":101", 1))) {
             assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 5, TimeUnit.SECONDS))
                     .isTrue();
@@ -162,17 +164,22 @@ class SandboxExecutionWebSocketIntegrationTest {
             MockMvc mockMvc = MockMvcBuilders.webAppContextSetup(wac)
                     .apply(springSecurity())
                     .build();
-            ResolveHitlRequest approveRequest =
-                    new ResolveHitlRequest(executionId, "tool-call-100", HitlResponse.APPROVED, "allow-always", null);
+            ResolveHitlRequest approveRequest = new ResolveHitlRequest(
+                    executionId,
+                    "tool-call-100",
+                    HitlResponse.APPROVED,
+                    "allow",
+                    null,
+                    List.of(new CreateHitlRuleRequest("rm -rf", null, HitlRuleAction.ALLOW)));
             mockMvc.perform(post("/api/v1/hitl/resolve")
                             .header("Authorization", "Bearer " + auth.accessToken())
                             .contentType("application/json")
                             .content(objectMapper.writeValueAsString(approveRequest)))
                     .andExpect(status().isNoContent());
 
-            assertThat(pair.sidecar().awaitTrigger("\"optionId\":\"allow-always\"", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("\"optionId\":\"allow\"", 5, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.sidecar().hasReceivedMessageContaining("100", "\"optionId\":\"allow-always\""))
+            assertThat(pair.sidecar().hasReceivedMessageContaining("100", "\"optionId\":\"allow\""))
                     .isTrue();
 
             assertThat(resolvedNotificationLatch.await(5, TimeUnit.SECONDS)).isTrue();
@@ -195,7 +202,7 @@ class SandboxExecutionWebSocketIntegrationTest {
 
             assertThat(pair.sidecar().awaitTrigger("\"id\":101", 5, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.sidecar().hasReceivedMessageContaining("\"id\":101", "\"optionId\":\"allow-always\""))
+            assertThat(pair.sidecar().hasReceivedMessageContaining("\"id\":101", "\"optionId\":\"allow\""))
                     .isTrue();
         }
     }

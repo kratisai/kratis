@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.service;
 
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import java.util.Map;
@@ -43,20 +44,21 @@ public class PendingHitlTimeoutService {
             logger.info(
                     "Timing out pending HITL request for execution {} (hitlId='{}', kind={}, team={})",
                     executionId,
-                    request.hitlId(),
-                    request.kind(),
+                    request.request().hitlId(),
+                    request.request().kind(),
                     request.teamId());
 
             eventPublisher.publishEvent(new SandboxExecutionHitlResolvedEvent(
                     request.teamId(),
-                    executionId,
-                    request.hitlId(),
-                    request.kind(),
-                    HitlResponse.CANCELLED,
-                    null,
-                    null,
-                    null,
-                    "System (timeout)"));
+                    new ExecutionHitlResolvedResult(
+                            executionId,
+                            request.request().hitlId(),
+                            request.request().kind(),
+                            HitlResponse.CANCELLED,
+                            null,
+                            null,
+                            null,
+                            "System (timeout)")));
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {

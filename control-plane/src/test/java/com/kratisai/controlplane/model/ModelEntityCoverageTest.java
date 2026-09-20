@@ -629,14 +629,14 @@ class ModelEntityCoverageTest {
     }
 
     @Test
-    void sandboxPermissionRuleCoverage() {
-        SandboxPermissionRule rule = new SandboxPermissionRule();
+    void hitlRuleCoverage() {
+        HitlRule rule = new HitlRule();
         rule.setId(UUID.randomUUID());
         Team team = new Team();
         rule.setTeam(team);
         rule.setCommandRoot("npm test");
-        rule.setRuleType(SandboxPermissionRuleType.EXACT);
-        rule.setAction(SandboxPermissionAction.ALLOW);
+        rule.setRuleType(HitlRuleType.EXACT);
+        rule.setAction(HitlRuleAction.ALLOW);
         User user = new User();
         rule.setCreatedBy(user);
         rule.setCreatedAt(Instant.EPOCH);
@@ -644,27 +644,26 @@ class ModelEntityCoverageTest {
         assertThat(rule.getId()).isNotNull();
         assertThat(rule.getTeam()).isEqualTo(team);
         assertThat(rule.getCommandRoot()).isEqualTo("npm test");
-        assertThat(rule.getRuleType()).isEqualTo(SandboxPermissionRuleType.EXACT);
-        assertThat(rule.getAction()).isEqualTo(SandboxPermissionAction.ALLOW);
+        assertThat(rule.getRuleType()).isEqualTo(HitlRuleType.EXACT);
+        assertThat(rule.getAction()).isEqualTo(HitlRuleAction.ALLOW);
         assertThat(rule.getCreatedBy()).isEqualTo(user);
         assertThat(rule.getCreatedAt()).isEqualTo(Instant.EPOCH);
         assertThat(rule.matches("npm test")).isTrue();
         assertThat(rule.matches("npm run test")).isFalse();
         assertThat(rule.matches(null)).isFalse();
 
-        rule.setRuleType(SandboxPermissionRuleType.PREFIX_WILD);
+        rule.setRuleType(HitlRuleType.PREFIX_WILD);
         rule.setCommandRoot("npm *");
-        rule.setAction(SandboxPermissionAction.DENY);
-        assertThat(rule.getAction()).isEqualTo(SandboxPermissionAction.DENY);
+        rule.setAction(HitlRuleAction.DENY);
+        assertThat(rule.getAction()).isEqualTo(HitlRuleAction.DENY);
         assertThat(rule.matches("npm install")).isTrue();
         assertThat(rule.matches("npx test")).isFalse();
 
         rule.onCreate();
         assertThat(rule.getCreatedAt()).isNotNull();
 
-        assertThat(SandboxPermissionAction.values())
-                .containsExactly(SandboxPermissionAction.ALLOW, SandboxPermissionAction.DENY);
-        assertThat(SandboxPermissionAction.valueOf("ALLOW")).isEqualTo(SandboxPermissionAction.ALLOW);
+        assertThat(HitlRuleAction.values()).containsExactly(HitlRuleAction.ALLOW, HitlRuleAction.DENY);
+        assertThat(HitlRuleAction.valueOf("ALLOW")).isEqualTo(HitlRuleAction.ALLOW);
     }
 
     @Test

@@ -8,6 +8,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
@@ -45,34 +47,40 @@ class EnvironmentRealtimeEventListenersTest {
 
     private PendingHitlRegistry.PendingHitl pendingApproval(Object requestId) {
         return new PendingHitlRegistry.PendingHitl(
-                HitlKind.APPROVAL,
+                new ExecutionHitlRequiredResult(
+                        UUID.randomUUID(),
+                        "tool-call-1",
+                        HitlKind.APPROVAL,
+                        "Approve ls",
+                        "ls",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
                 session,
                 requestId,
-                "tool-call-1",
-                "Approve ls",
-                "ls",
-                null,
-                null,
-                null,
-                null,
-                null,
                 Instant.now(),
                 UUID.randomUUID());
     }
 
     private PendingHitlRegistry.PendingHitl pendingQuestion(Object requestId) {
         return new PendingHitlRegistry.PendingHitl(
-                HitlKind.QUESTION,
+                new ExecutionHitlRequiredResult(
+                        UUID.randomUUID(),
+                        "el-1",
+                        HitlKind.QUESTION,
+                        "Pick a target",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Map.of("type", "object")),
                 session,
                 requestId,
-                "el-1",
-                "Pick a target",
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
                 Instant.now(),
                 UUID.randomUUID());
     }
@@ -87,14 +95,15 @@ class EnvironmentRealtimeEventListenersTest {
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 teamId,
-                executionId,
-                "tool-call-1",
-                HitlKind.APPROVAL,
-                HitlResponse.APPROVED,
-                "allow-once",
-                null,
-                UUID.randomUUID(),
-                "Bob"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "tool-call-1",
+                        HitlKind.APPROVAL,
+                        HitlResponse.APPROVED,
+                        "allow-once",
+                        null,
+                        UUID.randomUUID(),
+                        "Bob")));
 
         ArgumentCaptor<HitlResult> captor = ArgumentCaptor.forClass(HitlResult.class);
         verify(environmentRpcClient).reply(any(String.class), eq(42), captor.capture());
@@ -112,14 +121,15 @@ class EnvironmentRealtimeEventListenersTest {
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 teamId,
-                executionId,
-                "tool-call-1",
-                HitlKind.APPROVAL,
-                HitlResponse.CANCELLED,
-                null,
-                null,
-                null,
-                "System (timeout)"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "tool-call-1",
+                        HitlKind.APPROVAL,
+                        HitlResponse.CANCELLED,
+                        null,
+                        null,
+                        null,
+                        "System (timeout)")));
 
         ArgumentCaptor<HitlResult> captor = ArgumentCaptor.forClass(HitlResult.class);
         verify(environmentRpcClient).reply(any(String.class), eq(42), captor.capture());
@@ -133,14 +143,15 @@ class EnvironmentRealtimeEventListenersTest {
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                executionId,
-                "tool-call-1",
-                HitlKind.APPROVAL,
-                HitlResponse.CANCELLED,
-                null,
-                null,
-                null,
-                "System (timeout)"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "tool-call-1",
+                        HitlKind.APPROVAL,
+                        HitlResponse.CANCELLED,
+                        null,
+                        null,
+                        null,
+                        "System (timeout)")));
 
         verify(environmentRpcClient, never()).reply(any(), any(), any());
     }
@@ -166,14 +177,15 @@ class EnvironmentRealtimeEventListenersTest {
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 teamId,
-                executionId,
-                "el-1",
-                HitlKind.QUESTION,
-                HitlResponse.ANSWERED,
-                null,
-                Map.of("target", "staging"),
-                UUID.randomUUID(),
-                "Alice"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "el-1",
+                        HitlKind.QUESTION,
+                        HitlResponse.ANSWERED,
+                        null,
+                        Map.of("target", "staging"),
+                        UUID.randomUUID(),
+                        "Alice")));
 
         ArgumentCaptor<HitlResult> captor = ArgumentCaptor.forClass(HitlResult.class);
         verify(environmentRpcClient).reply(any(String.class), eq(7), captor.capture());
@@ -191,14 +203,15 @@ class EnvironmentRealtimeEventListenersTest {
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 teamId,
-                executionId,
-                "el-1",
-                HitlKind.QUESTION,
-                HitlResponse.DECLINED,
-                null,
-                null,
-                null,
-                "System (timeout)"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "el-1",
+                        HitlKind.QUESTION,
+                        HitlResponse.DECLINED,
+                        null,
+                        null,
+                        null,
+                        "System (timeout)")));
 
         ArgumentCaptor<HitlResult> captor = ArgumentCaptor.forClass(HitlResult.class);
         verify(environmentRpcClient).reply(any(String.class), eq(7), captor.capture());
@@ -212,14 +225,15 @@ class EnvironmentRealtimeEventListenersTest {
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                executionId,
-                "el-1",
-                HitlKind.QUESTION,
-                HitlResponse.CANCELLED,
-                null,
-                null,
-                null,
-                "System (timeout)"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "el-1",
+                        HitlKind.QUESTION,
+                        HitlResponse.CANCELLED,
+                        null,
+                        null,
+                        null,
+                        "System (timeout)")));
 
         verify(environmentRpcClient, never()).reply(any(), any(), any());
     }

@@ -5,6 +5,7 @@ import type {
   ActivityKind,
   ActivityLocation,
   ApprovalOptionKind,
+  CommandSegment,
   HitlKind,
   HitlResponse,
   PermissionOption,
@@ -18,6 +19,7 @@ export type {
   ActivityKind,
   ActivityLocation,
   ApprovalOptionKind,
+  CommandSegment,
   HitlKind,
   HitlResponse,
   PermissionOption,
@@ -53,6 +55,7 @@ export interface BaseActivity {
   permissionDiff?: ActivityDiff
   permissionKind?: string
   permissionOptions?: PermissionOption[]
+  permissionSegments?: CommandSegment[]
   permissionTitle?: string
   startedAt: string
   state: ActivityState

@@ -151,17 +151,7 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
                 PendingHitlRegistry.PendingHitl pending =
                         pendingHitlRegistry.getPending().get(executionId);
                 if (pending != null) {
-                    return Flux.just(new ClientPayload.ExecutionHitlRequiredResult(
-                            executionId,
-                            pending.hitlId(),
-                            pending.kind(),
-                            pending.message(),
-                            pending.command(),
-                            pending.title(),
-                            pending.toolKind(),
-                            pending.options(),
-                            pending.diff(),
-                            pending.form()));
+                    return Flux.just(pending.request());
                 }
                 return Flux.empty();
             });

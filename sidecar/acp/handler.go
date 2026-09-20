@@ -799,6 +799,7 @@ func (h *Handler) HandleTerminalKill(transport *AcpTransport, params map[string]
 	_ = transport.WriteResponse(response)
 }
 
+// HandleFsWriteTextFile gates file writes through HITL approval, aliased to the generic "write" tool kind.
 func (h *Handler) HandleFsWriteTextFile(transport *AcpTransport, params map[string]interface{}, id interface{}) {
 	path, _ := params["path"].(string)
 	if path == "" {
@@ -811,7 +812,35 @@ func (h *Handler) HandleFsWriteTextFile(transport *AcpTransport, params map[stri
 		return
 	}
 
-	h.debugf("[ACP][FS] Writing file: %s (%d bytes)", path, len(content))
+	h.debugf("[ACP][FS] Requesting HITL permission for write: %s (%d bytes)", path, len(content))
+
+	diff := &ActivityDiff{Path: path, NewText: content}
+	if old, err := os.ReadFile(path); err == nil { //nolint:gosec // G304: diff preview reads the agent-requested path by design; the write itself is HITL-gated below
+		diff.OldText = string(old)
+	}
+
+	// No toolCallId and no agent option set; synthesise the default pair for a uniform shape.
+	req := PermissionRequest{
+		Command: path,
+		Title:   path,
+		Kind:    "write",
+		Options: []PermissionOption{
+			{OptionID: "allow", Name: "Allow", Kind: string(ApprovalAllowOnce)},
+			{OptionID: "reject", Name: "Reject", Kind: string(ApprovalRejectOnce)},
+		},
+		Diff: diff,
+	}
+	selectedOptionID, err := h.sink.RequestPermission(req)
+	h.debugf("[ACP][FS] HITL permission result: selectedOptionID=%q, err=%v", selectedOptionID, err)
+
+	if err != nil && strings.Contains(err.Error(), "cancelled") {
+		h.sendErrorResponse(transport, id, -32800, "Cancelled", "Write cancelled before a decision")
+		return
+	}
+	if selectedOptionID == "" || err != nil {
+		h.sendErrorResponse(transport, id, -32000, "Write denied", "The user denied permission to write "+path)
+		return
+	}
 
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		h.debugf("[ACP][FS] ERROR: failed to write file: %v", err)

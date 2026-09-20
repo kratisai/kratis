@@ -1,14 +1,17 @@
-import { CheckCircle2, ShieldCheck, ShieldX, XCircle } from 'lucide-react'
-import { useState } from 'react'
+import { Check, CheckCircle2, ChevronDown, ShieldCheck, ShieldX, X, XCircle } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import type {
   CommandExecutionActivity,
   PermissionOption,
   ToolExecutionActivity,
 } from '@/types/execution-activity-types'
+import type { CreateHitlRuleRequest } from '@/types/hitl-rule-types'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 import { activityCommand, useActivityStore } from '@/store/activity-store'
 
 interface ActivityApprovalProps {
@@ -17,24 +20,62 @@ interface ActivityApprovalProps {
 }
 
 type ApprovalActivity = CommandExecutionActivity | ToolExecutionActivity
+type SegmentMark = 'allow' | 'deny'
 
 export function ActivityApproval({ activity, executionId }: ActivityApprovalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [rememberOpen, setRememberOpen] = useState(false)
+  const cardRef = useRef<HTMLDivElement>(null)
+
+  // Expanding the remember panel grows the card; keep its action buttons in view.
+  useEffect(() => {
+    if (rememberOpen) {
+      cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
+  }, [rememberOpen])
+  const [marks, setMarks] = useState<Record<number, SegmentMark>>({})
+  const [roots, setRoots] = useState<Record<number, string | undefined>>({})
   const resolveHitl = useActivityStore((s) => s.resolveHitl)
   const command = activityCommand(activity)
-  const options = activity.permissionOptions ?? []
+  const hitlDetail = activity.detail?.hitl
+  const options = activity.permissionOptions ?? hitlDetail?.options ?? []
+  const segments = activity.permissionSegments ?? hitlDetail?.commandSegments ?? []
   const diff = activity.permissionDiff ?? activity.detail?.diff
   const hitlId = activity.actionId ?? command
+
+  const allowOption =
+    options.find((o) => o.kind === 'allow_once') ?? options.find((o) => o.kind.startsWith('allow'))
+  const rejectOption =
+    options.find((o) => o.kind === 'reject_once') ??
+    options.find((o) => o.kind.startsWith('reject'))
+
+  const markedEntries = Object.entries(marks)
+  const hasAllowMark = markedEntries.some(([, mark]) => mark === 'allow')
+  const hasDenyMark = markedEntries.some(([, mark]) => mark === 'deny')
+  const rememberedRules: CreateHitlRuleRequest[] = markedEntries.flatMap(([index, mark]) => {
+    const i = Number(index)
+    const commandRoot = (roots[i] ?? segments[i].suggestedRoot).trim()
+    if (commandRoot === '') return []
+    return [
+      {
+        action: mark === 'allow' ? ('ALLOW' as const) : ('DENY' as const),
+        commandRoot,
+        ruleType: segments[i].ruleType,
+      },
+    ]
+  })
 
   const isResolved =
     activity.state === 'active' || activity.state === 'error' || activity.state === 'completed'
 
-  const handleOption = async (optionId: string) => {
+  const submit = async (
+    response: 'approved' | 'cancelled' | 'declined',
+    optionId?: string,
+    rules?: CreateHitlRuleRequest[],
+  ) => {
     setIsSubmitting(true)
     try {
-      const isAllow = options.find((o) => o.optionId === optionId)?.kind.startsWith('allow')
-      const response = isAllow ? 'approved' : 'declined'
-      await resolveHitl(executionId, hitlId, response, optionId)
+      await resolveHitl(executionId, hitlId, response, optionId, undefined, rules)
     } catch {
       // handled via websocket resolution
     } finally {
@@ -42,15 +83,32 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
     }
   }
 
-  const handleCancel = async () => {
-    setIsSubmitting(true)
-    try {
-      await resolveHitl(executionId, hitlId, 'cancelled')
-    } catch {
-      // handled via websocket resolution
-    } finally {
-      setIsSubmitting(false)
-    }
+  const handleAllow = () =>
+    submit(
+      'approved',
+      allowOption?.optionId,
+      hasAllowMark && !hasDenyMark && rememberedRules.length > 0 ? rememberedRules : undefined,
+    )
+
+  const handleReject = () =>
+    submit(
+      'declined',
+      rejectOption?.optionId,
+      rememberedRules.length > 0 ? rememberedRules : undefined,
+    )
+
+  const handleCancel = () => submit('cancelled')
+
+  const toggleMark = (index: number, mark: SegmentMark) => {
+    setMarks((prev) => {
+      const next = { ...prev }
+      if (next[index] === mark) {
+        delete next[index]
+      } else {
+        next[index] = mark
+      }
+      return next
+    })
   }
 
   if (isResolved) {
@@ -72,8 +130,10 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
     )
   }
 
+  const anyMark = hasAllowMark || hasDenyMark
+
   return (
-    <Card className="min-w-0 border-amber-500/50 bg-amber-50 dark:bg-amber-950/20">
+    <Card className="min-w-0 border-amber-500/50 bg-amber-50 dark:bg-amber-950/20" ref={cardRef}>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium text-amber-800 dark:text-amber-200">
           Permission Required
@@ -97,17 +157,110 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
           </div>
         )}
 
+        {segments.length > 0 && (
+          <div className="space-y-2">
+            <Button
+              aria-expanded={rememberOpen}
+              className="w-full justify-between"
+              onClick={() => setRememberOpen((open) => !open)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              <span>Remember choices</span>
+              <ChevronDown
+                className={cn('h-4 w-4 transition-transform', rememberOpen && 'rotate-180')}
+              />
+            </Button>
+            {rememberOpen && (
+              <div className="bg-background/60 space-y-3 rounded-md border p-2">
+                <p className="text-muted-foreground text-xs">
+                  Tick to always allow a command root for this team, cross to always block it. A
+                  root matches commands starting with the same whole words, e.g.{' '}
+                  <code className="font-mono">npm run test</code> also covers{' '}
+                  <code className="font-mono">npm run test file.spec.ts</code>.
+                </p>
+                {segments.map((segment, index) => (
+                  <div className="min-w-0 space-y-1" key={`${hitlId}-segment-${index}`}>
+                    <code className="text-muted-foreground block truncate font-mono text-xs">
+                      {segment.text}
+                    </code>
+                    <div className="flex items-center gap-1">
+                      <Input
+                        aria-label={`Command root for ${segment.text}`}
+                        className="h-7 min-w-0 flex-1 font-mono text-xs"
+                        onChange={(event) =>
+                          setRoots((prev) => ({ ...prev, [index]: event.target.value }))
+                        }
+                        value={roots[index] ?? segment.suggestedRoot}
+                      />
+                      <Button
+                        aria-label={`Always allow ${segment.text}`}
+                        aria-pressed={marks[index] === 'allow'}
+                        className={cn(
+                          'h-7 w-7 shrink-0 p-0',
+                          marks[index] === 'allow' && 'bg-green-600 text-white hover:bg-green-700',
+                        )}
+                        disabled={isSubmitting}
+                        onClick={() => toggleMark(index, 'allow')}
+                        size="sm"
+                        type="button"
+                        variant={marks[index] === 'allow' ? 'default' : 'outline'}
+                      >
+                        <Check className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        aria-label={`Always block ${segment.text}`}
+                        aria-pressed={marks[index] === 'deny'}
+                        className={cn(
+                          'h-7 w-7 shrink-0 p-0',
+                          marks[index] === 'deny' && 'bg-red-600 text-white hover:bg-red-700',
+                        )}
+                        disabled={isSubmitting}
+                        onClick={() => toggleMark(index, 'deny')}
+                        size="sm"
+                        type="button"
+                        variant={marks[index] === 'deny' ? 'destructive' : 'outline'}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2">
-          {options.map((option) => (
-            <OptionButton
-              disabled={isSubmitting}
-              key={option.optionId}
+          {allowOption && (
+            <Button
+              className="flex-1"
+              disabled={isSubmitting || hasDenyMark || !allowOption}
               onClick={() => {
-                void handleOption(option.optionId)
+                void handleAllow()
               }}
-              option={option}
-            />
-          ))}
+              size="sm"
+              variant="default"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              {hasAllowMark && !hasDenyMark ? 'Allow and remember' : optionLabel(allowOption)}
+            </Button>
+          )}
+          {rejectOption && (
+            <Button
+              className="flex-1"
+              disabled={isSubmitting || !rejectOption}
+              onClick={() => {
+                void handleReject()
+              }}
+              size="sm"
+              variant="destructive"
+            >
+              <ShieldX className="h-4 w-4" />
+              {anyMark ? 'Reject and remember' : optionLabel(rejectOption)}
+            </Button>
+          )}
         </div>
 
         <Button
@@ -126,27 +279,9 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
   )
 }
 
-function OptionButton({
-  disabled,
-  onClick,
-  option,
-}: {
-  disabled: boolean
-  onClick: () => void
-  option: PermissionOption
-}) {
-  const isAllow = option.kind === 'allow_once' || option.kind === 'allow_always'
-  const Icon = isAllow ? ShieldCheck : ShieldX
-  return (
-    <Button
-      className="flex-1"
-      disabled={disabled}
-      onClick={onClick}
-      size="sm"
-      variant={isAllow ? 'default' : 'destructive'}
-    >
-      <Icon className="h-4 w-4" />
-      {option.name}
-    </Button>
-  )
+/** Always-variants are relabeled: persistent memory belongs to team rules, not the agent. */
+function optionLabel(option: PermissionOption): string {
+  if (option.kind === 'allow_always') return 'Allow once'
+  if (option.kind === 'reject_always') return 'Reject'
+  return option.name
 }

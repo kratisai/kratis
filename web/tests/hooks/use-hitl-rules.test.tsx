@@ -2,20 +2,20 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { SandboxPermissionRuleDto } from '@/types/permission-types'
+import type { HitlRuleDto } from '@/types/hitl-rule-types'
 
 import {
-  useCreatePermissionRule,
-  useDeletePermissionRule,
-  usePermissionRules,
-} from '@/hooks/use-permissions'
-import * as permissionApi from '@/lib/permission-api'
+  useCreateHitlRule,
+  useDeleteHitlRule,
+  useHitlRules,
+} from '@/hooks/use-hitl-rules'
+import * as hitlRuleApi from '@/lib/hitl-rule-api'
 import { useAuthStore } from '@/store/auth-store'
 
-vi.mock('@/lib/permission-api', () => ({
-  createPermissionRule: vi.fn(),
-  deletePermissionRule: vi.fn(),
-  listPermissionRules: vi.fn(),
+vi.mock('@/lib/hitl-rule-api', () => ({
+  createHitlRule: vi.fn(),
+  deleteHitlRule: vi.fn(),
+  listHitlRules: vi.fn(),
 }))
 
 const createWrapper = () => {
@@ -29,7 +29,7 @@ const createWrapper = () => {
   )
 }
 
-const mockRules: SandboxPermissionRuleDto[] = [
+const mockRules: HitlRuleDto[] = [
   {
     action: 'ALLOW',
     commandRoot: 'npm test',
@@ -42,7 +42,7 @@ const mockRules: SandboxPermissionRuleDto[] = [
   },
 ]
 
-describe('use-permissions hooks', () => {
+describe('use-hitl-rules hooks', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useAuthStore.setState({
@@ -56,10 +56,10 @@ describe('use-permissions hooks', () => {
     })
   })
 
-  it('usePermissionRules fetches rules for current team', async () => {
-    vi.mocked(permissionApi.listPermissionRules).mockResolvedValue(mockRules)
+  it('useHitlRules fetches rules for current team', async () => {
+    vi.mocked(hitlRuleApi.listHitlRules).mockResolvedValue(mockRules)
 
-    const { result } = renderHook(() => usePermissionRules(), {
+    const { result } = renderHook(() => useHitlRules(), {
       wrapper: createWrapper(),
     })
 
@@ -68,11 +68,11 @@ describe('use-permissions hooks', () => {
     })
 
     expect(result.current.data).toEqual(mockRules)
-    expect(permissionApi.listPermissionRules).toHaveBeenCalledWith('team-1')
+    expect(hitlRuleApi.listHitlRules).toHaveBeenCalledWith('team-1')
   })
 
-  it('useCreatePermissionRule creates rule and invalidates query', async () => {
-    const newRule: SandboxPermissionRuleDto = {
+  it('useCreateHitlRule creates rule and invalidates query', async () => {
+    const newRule: HitlRuleDto = {
       action: 'DENY',
       commandRoot: 'rm -rf',
       createdAt: '2026-09-06T12:00:00Z',
@@ -82,9 +82,9 @@ describe('use-permissions hooks', () => {
       ruleType: 'PREFIX_WILD',
       teamId: 'team-1',
     }
-    vi.mocked(permissionApi.createPermissionRule).mockResolvedValue(newRule)
+    vi.mocked(hitlRuleApi.createHitlRule).mockResolvedValue(newRule)
 
-    const { result } = renderHook(() => useCreatePermissionRule(), {
+    const { result } = renderHook(() => useCreateHitlRule(), {
       wrapper: createWrapper(),
     })
 
@@ -96,17 +96,17 @@ describe('use-permissions hooks', () => {
       })
     })
 
-    expect(permissionApi.createPermissionRule).toHaveBeenCalledWith('team-1', {
+    expect(hitlRuleApi.createHitlRule).toHaveBeenCalledWith('team-1', {
       action: 'DENY',
       commandRoot: 'rm -rf',
       ruleType: 'PREFIX_WILD',
     })
   })
 
-  it('useDeletePermissionRule deletes rule and invalidates query', async () => {
-    vi.mocked(permissionApi.deletePermissionRule).mockResolvedValue(undefined)
+  it('useDeleteHitlRule deletes rule and invalidates query', async () => {
+    vi.mocked(hitlRuleApi.deleteHitlRule).mockResolvedValue(undefined)
 
-    const { result } = renderHook(() => useDeletePermissionRule(), {
+    const { result } = renderHook(() => useDeleteHitlRule(), {
       wrapper: createWrapper(),
     })
 
@@ -114,6 +114,6 @@ describe('use-permissions hooks', () => {
       await result.current.mutateAsync('rule-1')
     })
 
-    expect(permissionApi.deletePermissionRule).toHaveBeenCalledWith('team-1', 'rule-1')
+    expect(hitlRuleApi.deleteHitlRule).toHaveBeenCalledWith('team-1', 'rule-1')
   })
 })

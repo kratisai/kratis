@@ -1,9 +1,9 @@
 package com.kratisai.controlplane.api.rest;
 
-import com.kratisai.controlplane.api.restdto.CreateSandboxPermissionRuleRequest;
-import com.kratisai.controlplane.api.restdto.SandboxPermissionRuleDto;
+import com.kratisai.controlplane.api.restdto.CreateHitlRuleRequest;
+import com.kratisai.controlplane.api.restdto.HitlRuleDto;
 import com.kratisai.controlplane.config.SecurityUtil;
-import com.kratisai.controlplane.service.SandboxPermissionService;
+import com.kratisai.controlplane.service.HitlRuleService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -25,56 +25,52 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/v1/teams/{teamId}/permissions")
-@Tag(name = "Sandbox Permissions", description = "Sandbox execution permission rule management scoped to teams")
+@RequestMapping("/api/v1/teams/{teamId}/hitl-rules")
+@Tag(name = "HITL Rules", description = "Team HITL rules: always allow or always block command roots")
 @SecurityRequirement(name = "bearerAuth")
-public class SandboxPermissionController {
+public class HitlRuleController {
 
-    private final SandboxPermissionService sandboxPermissionService;
+    private final HitlRuleService hitlRuleService;
 
-    public SandboxPermissionController(SandboxPermissionService sandboxPermissionService) {
-        this.sandboxPermissionService = sandboxPermissionService;
+    public HitlRuleController(HitlRuleService hitlRuleService) {
+        this.hitlRuleService = hitlRuleService;
     }
 
     @GetMapping
-    @Operation(
-            summary = "List team permission rules",
-            description = "Lists all active sandbox permission rules for a team")
+    @Operation(summary = "List team HITL rules", description = "Lists all HITL rules for a team")
     @ApiResponses({
         @ApiResponse(
                 responseCode = "200",
-                description = "List of permission rules",
-                content = @Content(schema = @Schema(implementation = SandboxPermissionRuleDto.class))),
+                description = "List of HITL rules",
+                content = @Content(schema = @Schema(implementation = HitlRuleDto.class))),
         @ApiResponse(responseCode = "403", description = "Forbidden membership check failure", content = @Content)
     })
-    public ResponseEntity<List<SandboxPermissionRuleDto>> listRules(@PathVariable UUID teamId) {
+    public ResponseEntity<List<HitlRuleDto>> listRules(@PathVariable UUID teamId) {
         UUID userId = SecurityUtil.getCurrentUserId();
-        List<SandboxPermissionRuleDto> rules = sandboxPermissionService.listRules(userId, teamId);
+        List<HitlRuleDto> rules = hitlRuleService.listRules(userId, teamId);
         return ResponseEntity.ok(rules);
     }
 
     @PostMapping
-    @Operation(
-            summary = "Create a sandbox permission rule",
-            description = "Creates a new ALLOW or DENY permission rule for a team")
+    @Operation(summary = "Create a HITL rule", description = "Creates a new ALLOW or DENY HITL rule for a team")
     @ApiResponses({
         @ApiResponse(
                 responseCode = "201",
                 description = "Rule created",
-                content = @Content(schema = @Schema(implementation = SandboxPermissionRuleDto.class))),
+                content = @Content(schema = @Schema(implementation = HitlRuleDto.class))),
         @ApiResponse(responseCode = "400", description = "Invalid request payload", content = @Content),
         @ApiResponse(responseCode = "403", description = "Forbidden membership check failure", content = @Content),
         @ApiResponse(responseCode = "409", description = "Rule already exists", content = @Content)
     })
-    public ResponseEntity<SandboxPermissionRuleDto> createRule(
-            @PathVariable UUID teamId, @Valid @RequestBody CreateSandboxPermissionRuleRequest request) {
+    public ResponseEntity<HitlRuleDto> createRule(
+            @PathVariable UUID teamId, @Valid @RequestBody CreateHitlRuleRequest request) {
         UUID userId = SecurityUtil.getCurrentUserId();
-        SandboxPermissionRuleDto created = sandboxPermissionService.createRule(userId, teamId, request);
+        HitlRuleDto created = hitlRuleService.createRule(userId, teamId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @DeleteMapping("/{ruleId}")
-    @Operation(summary = "Delete a permission rule", description = "Deletes an existing sandbox permission rule")
+    @Operation(summary = "Delete a HITL rule", description = "Deletes an existing HITL rule")
     @ApiResponses({
         @ApiResponse(responseCode = "204", description = "Rule deleted"),
         @ApiResponse(responseCode = "403", description = "Forbidden membership check failure", content = @Content),
@@ -82,7 +78,7 @@ public class SandboxPermissionController {
     })
     public ResponseEntity<Void> deleteRule(@PathVariable UUID teamId, @PathVariable UUID ruleId) {
         UUID userId = SecurityUtil.getCurrentUserId();
-        sandboxPermissionService.deleteRule(userId, teamId, ruleId);
+        hitlRuleService.deleteRule(userId, teamId, ruleId);
         return ResponseEntity.noContent().build();
     }
 }

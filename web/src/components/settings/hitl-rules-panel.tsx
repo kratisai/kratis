@@ -2,11 +2,11 @@ import { Loader2, Plus, Search, Shield, Trash2, TriangleAlert } from 'lucide-rea
 import { useMemo, useState } from 'react'
 
 import type {
-  CreateSandboxPermissionRuleRequest,
-  SandboxPermissionAction,
-  SandboxPermissionRuleDto,
-  SandboxPermissionRuleType,
-} from '@/types/permission-types'
+  CreateHitlRuleRequest,
+  HitlRuleAction,
+  HitlRuleDto,
+  HitlRuleType,
+} from '@/types/hitl-rule-types'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -28,26 +28,22 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  useCreatePermissionRule,
-  useDeletePermissionRule,
-  usePermissionRules,
-} from '@/hooks/use-permissions'
+import { useCreateHitlRule, useDeleteHitlRule, useHitlRules } from '@/hooks/use-hitl-rules'
 import { formatRelativeTime } from '@/lib/format'
 
-import { CreatePermissionRuleDialog } from './create-permission-rule-dialog'
+import { CreateHitlRuleDialog } from './create-hitl-rule-dialog'
 
-type ActionFilter = 'ALL' | SandboxPermissionAction
+type ActionFilter = 'ALL' | HitlRuleAction
 
-export function PermissionsPanel() {
-  const { data: rules, isLoading } = usePermissionRules()
-  const createRule = useCreatePermissionRule()
-  const deleteRule = useDeletePermissionRule()
+export function HitlRulesPanel() {
+  const { data: rules, isLoading } = useHitlRules()
+  const createRule = useCreateHitlRule()
+  const deleteRule = useDeleteHitlRule()
 
   const [search, setSearch] = useState('')
   const [actionFilter, setActionFilter] = useState<ActionFilter>('ALL')
   const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const [ruleToDelete, setRuleToDelete] = useState<null | SandboxPermissionRuleDto>(null)
+  const [ruleToDelete, setRuleToDelete] = useState<HitlRuleDto | null>(null)
 
   const filteredRules = useMemo(() => {
     if (!rules) return []
@@ -59,7 +55,7 @@ export function PermissionsPanel() {
     })
   }, [rules, search, actionFilter])
 
-  const handleCreateSubmit = (data: CreateSandboxPermissionRuleRequest) => {
+  const handleCreateSubmit = (data: CreateHitlRuleRequest) => {
     createRule.mutate(data, {
       onSuccess: () => {
         setIsCreateOpen(false)
@@ -85,11 +81,11 @@ export function PermissionsPanel() {
             <div>
               <div className="flex items-center gap-2">
                 <Shield className="h-5 w-5" />
-                <CardTitle>Permission Registry</CardTitle>
+                <CardTitle>HITL Rules</CardTitle>
               </div>
               <CardDescription className="mt-1">
-                Manage tool execution permissions for your team. ALLOW rules bypass confirmation
-                unless blocked by a matching DENY rule.
+                Manage always-allowed and always-blocked command roots for your team. ALLOW rules
+                bypass confirmation unless blocked by a matching DENY rule.
               </CardDescription>
             </div>
             <Button onClick={() => setIsCreateOpen(true)} size="sm">
@@ -130,7 +126,7 @@ export function PermissionsPanel() {
           ) : !rules || rules.length === 0 ? (
             <div className="rounded-lg border border-dashed p-8 text-center">
               <Shield className="text-muted-foreground mx-auto mb-2 h-8 w-8 opacity-50" />
-              <p className="text-sm font-medium">No permission rules configured</p>
+              <p className="text-sm font-medium">No HITL rules configured</p>
               <p className="text-muted-foreground mt-1 text-xs">
                 Rules created manually or via &quot;Allow Always&quot; prompts will appear here.
               </p>
@@ -192,7 +188,7 @@ export function PermissionsPanel() {
                 </Table>
               </div>
 
-              <div className="space-y-2 md:hidden" data-testid="permission-cards">
+              <div className="space-y-2 md:hidden" data-testid="hitl-rule-cards">
                 {filteredRules.map((rule) => (
                   <div className="rounded-lg border p-3" key={rule.id}>
                     <div className="flex items-start justify-between gap-2">
@@ -225,7 +221,7 @@ export function PermissionsPanel() {
         </CardContent>
       </Card>
 
-      <CreatePermissionRuleDialog
+      <CreateHitlRuleDialog
         isLoading={createRule.isPending}
         onOpenChange={setIsCreateOpen}
         onSubmit={handleCreateSubmit}
@@ -233,14 +229,14 @@ export function PermissionsPanel() {
       />
 
       <Dialog onOpenChange={(open) => !open && setRuleToDelete(null)} open={!!ruleToDelete}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-106.25">
           <DialogHeader>
             <div className="flex items-center gap-2">
               <TriangleAlert className="text-destructive h-5 w-5" />
-              <DialogTitle>Delete Permission Rule</DialogTitle>
+              <DialogTitle>Delete HITL Rule</DialogTitle>
             </div>
             <DialogDescription>
-              Are you sure you want to delete the permission rule for{' '}
+              Are you sure you want to delete the HITL rule for{' '}
               <span className="text-foreground font-mono font-medium">
                 {ruleToDelete?.commandRoot}
               </span>
@@ -266,7 +262,7 @@ export function PermissionsPanel() {
   )
 }
 
-function ActionBadge({ action }: { action: SandboxPermissionAction }) {
+function ActionBadge({ action }: { action: HitlRuleAction }) {
   return action === 'ALLOW' ? (
     <Badge className="border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
       ALLOW
@@ -276,6 +272,8 @@ function ActionBadge({ action }: { action: SandboxPermissionAction }) {
   )
 }
 
-function RuleTypeBadge({ ruleType }: { ruleType: SandboxPermissionRuleType }) {
-  return <Badge variant="outline">{ruleType === 'EXACT' ? 'Exact' : 'Prefix Wildcard'}</Badge>
+function RuleTypeBadge({ ruleType }: { ruleType: HitlRuleType }) {
+  const label =
+    ruleType === 'EXACT' ? 'Exact' : ruleType === 'TOOL_KIND' ? 'Tool Kind' : 'Prefix Wildcard'
+  return <Badge variant="outline">{label}</Badge>
 }

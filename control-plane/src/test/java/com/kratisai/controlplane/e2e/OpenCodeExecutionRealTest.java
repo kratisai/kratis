@@ -118,7 +118,9 @@ class OpenCodeExecutionRealTest extends AbstractAgentExecutionRealTest {
 
     @Override
     protected int getExpectedHitlRequestCount() {
-        return 2;
+        // Gated fs/write_text_file for the task script (tool kind "write") plus
+        // the agent's own permission requests.
+        return 3;
     }
 
     @Override

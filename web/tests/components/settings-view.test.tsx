@@ -54,10 +54,10 @@ vi.mock('@/lib/model-provider-api', () => ({
   updateModelProvider: vi.fn(),
 }))
 
-vi.mock('@/lib/permission-api', () => ({
-  createPermissionRule: vi.fn(),
-  deletePermissionRule: vi.fn(),
-  listPermissionRules: vi.fn().mockResolvedValue([]),
+vi.mock('@/lib/hitl-rule-api', () => ({
+  createHitlRule: vi.fn(),
+  deleteHitlRule: vi.fn(),
+  listHitlRules: vi.fn().mockResolvedValue([]),
 }))
 
 function createTestQueryClient() {
@@ -271,7 +271,7 @@ describe('SettingsView', () => {
     })
   })
 
-  it('switches to permissions tab when clicked', async () => {
+  it('switches to HITL rules tab when clicked', async () => {
     vi.mocked(teamApi.listTeams).mockResolvedValue(mockTeams)
     vi.mocked(teamApi.getTeam).mockResolvedValue(mockTeamDetail)
 
@@ -279,13 +279,13 @@ describe('SettingsView', () => {
     renderWithProviders(<SettingsView />)
 
     await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /permissions/i })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: /hitl rules/i })).toBeInTheDocument()
     })
 
-    await user.click(screen.getByRole('tab', { name: /permissions/i }))
+    await user.click(screen.getByRole('tab', { name: /hitl rules/i }))
 
     await waitFor(() => {
-      expect(screen.getByText('Permission Registry')).toBeInTheDocument()
+      expect(screen.getByText('HITL Rules')).toBeInTheDocument()
     })
   })
 
@@ -337,7 +337,7 @@ describe('SettingsView', () => {
     await user.click(screen.getByRole('tab', { name: /team/i }))
     expect(screen.getByTestId('enquiries-banner')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: /permissions/i }))
+    await user.click(screen.getByRole('tab', { name: /hitl rules/i }))
     expect(screen.getByTestId('enquiries-banner')).toBeInTheDocument()
   })
 })

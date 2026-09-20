@@ -1,11 +1,7 @@
 import { AlertCircle } from 'lucide-react'
 import { useState } from 'react'
 
-import type {
-  CreateSandboxPermissionRuleRequest,
-  SandboxPermissionAction,
-  SandboxPermissionRuleType,
-} from '@/types/permission-types'
+import type { CreateHitlRuleRequest, HitlRuleAction, HitlRuleType } from '@/types/hitl-rule-types'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -25,30 +21,31 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { TOOL_KIND_VALUES } from '@/types/hitl-rule-types'
 
-interface CreatePermissionRuleDialogProps {
+interface CreateHitlRuleDialogProps {
   isLoading?: boolean
   onOpenChange: (open: boolean) => void
-  onSubmit: (data: CreateSandboxPermissionRuleRequest) => void
+  onSubmit: (data: CreateHitlRuleRequest) => void
   open: boolean
 }
 
-export function CreatePermissionRuleDialog({
+export function CreateHitlRuleDialog({
   isLoading = false,
   onOpenChange,
   onSubmit,
   open,
-}: CreatePermissionRuleDialogProps) {
+}: CreateHitlRuleDialogProps) {
   const [commandRoot, setCommandRoot] = useState('')
-  const [ruleType, setRuleType] = useState<SandboxPermissionRuleType>('EXACT')
-  const [action, setAction] = useState<SandboxPermissionAction>('ALLOW')
+  const [ruleType, setRuleType] = useState<HitlRuleType>('EXACT')
+  const [action, setAction] = useState<HitlRuleAction>('ALLOW')
   const [error, setError] = useState<null | string>(null)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     const trimmed = commandRoot.trim()
     if (!trimmed) {
-      setError('Command pattern is required')
+      setError(ruleType === 'TOOL_KIND' ? 'Tool kind is required' : 'Command pattern is required')
       return
     }
     setError(null)
@@ -74,9 +71,9 @@ export function CreatePermissionRuleDialog({
     <Dialog onOpenChange={handleOpenChange} open={open}>
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
-          <DialogTitle>Add Permission Rule</DialogTitle>
+          <DialogTitle>Add HITL Rule</DialogTitle>
           <DialogDescription>
-            Configure pre-approved or blocked tool execution commands for your team.
+            Configure pre-approved or blocked commands and tool kinds for your team.
           </DialogDescription>
         </DialogHeader>
 
@@ -84,10 +81,7 @@ export function CreatePermissionRuleDialog({
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="action">Action</Label>
-              <Select
-                onValueChange={(val) => setAction(val as SandboxPermissionAction)}
-                value={action}
-              >
+              <Select onValueChange={(val) => setAction(val as HitlRuleAction)} value={action}>
                 <SelectTrigger id="action">
                   <SelectValue placeholder="Select action" />
                 </SelectTrigger>
@@ -101,7 +95,11 @@ export function CreatePermissionRuleDialog({
             <div className="space-y-2">
               <Label htmlFor="rule-type">Match Type</Label>
               <Select
-                onValueChange={(val) => setRuleType(val as SandboxPermissionRuleType)}
+                onValueChange={(val) => {
+                  setRuleType(val as HitlRuleType)
+                  setCommandRoot('')
+                  if (error) setError(null)
+                }}
                 value={ruleType}
               >
                 <SelectTrigger id="rule-type">
@@ -110,23 +108,50 @@ export function CreatePermissionRuleDialog({
                 <SelectContent>
                   <SelectItem value="EXACT">Exact Match</SelectItem>
                   <SelectItem value="PREFIX_WILD">Prefix Wildcard</SelectItem>
+                  <SelectItem value="TOOL_KIND">Tool Kind</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="command-root">Command Pattern</Label>
-              <Input
-                id="command-root"
-                onChange={(e) => {
-                  setCommandRoot(e.target.value)
-                  if (error) setError(null)
-                }}
-                placeholder={
-                  ruleType === 'PREFIX_WILD' ? 'git * or npm run' : 'git status or npm test'
-                }
-                value={commandRoot}
-              />
+              {ruleType === 'TOOL_KIND' ? (
+                <>
+                  <Label htmlFor="tool-kind">Tool Kind</Label>
+                  <Select
+                    onValueChange={(val) => {
+                      setCommandRoot(val)
+                      if (error) setError(null)
+                    }}
+                    value={commandRoot}
+                  >
+                    <SelectTrigger id="tool-kind">
+                      <SelectValue placeholder="Select tool kind" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TOOL_KIND_VALUES.map((kind) => (
+                        <SelectItem key={kind} value={kind}>
+                          {kind}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              ) : (
+                <>
+                  <Label htmlFor="command-root">Command Pattern</Label>
+                  <Input
+                    id="command-root"
+                    onChange={(e) => {
+                      setCommandRoot(e.target.value)
+                      if (error) setError(null)
+                    }}
+                    placeholder={
+                      ruleType === 'PREFIX_WILD' ? 'git * or npm run' : 'git status or npm test'
+                    }
+                    value={commandRoot}
+                  />
+                </>
+              )}
               {error && <p className="text-destructive text-xs">{error}</p>}
             </div>
 

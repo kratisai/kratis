@@ -5,6 +5,9 @@
   "kind": "approval",
   "message": "Allow command 'rm -rf /tmp/x'?",
   "command": "rm -rf /tmp/x",
+  "commandSegments": [
+    { "text": "rm -rf /tmp/x", "suggestedRoot": "rm", "ruleType": "PREFIX_WILD" }
+  ],
   "title": "Remove temp directory",
   "toolKind": "execute",
   "options": [

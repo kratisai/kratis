@@ -7,6 +7,7 @@ import com.kratisai.controlplane.api.restdto.CreateSandboxExecutionRequest;
 import com.kratisai.controlplane.api.restdto.SandboxExecutionDto;
 import com.kratisai.controlplane.api.restdto.SteerCommentDto;
 import com.kratisai.controlplane.api.restdto.SteerExecutionRequest;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
@@ -628,20 +629,21 @@ public class SandboxExecutionService {
         logger.info(
                 "Removed pending HITL request for execution {} (kind={}): {}",
                 execution.getId(),
-                pendingHitl.kind(),
+                pendingHitl.request().kind(),
                 reason);
         UUID teamId = pendingHitl.teamId();
         transactionTemplate.executeWithoutResult(
                 status -> eventPublisher.publishEvent(new SandboxExecutionHitlResolvedEvent(
                         teamId,
-                        execution.getId(),
-                        pendingHitl.hitlId(),
-                        pendingHitl.kind(),
-                        HitlResponse.CANCELLED,
-                        null,
-                        null,
-                        null,
-                        null)));
+                        new ExecutionHitlResolvedResult(
+                                execution.getId(),
+                                pendingHitl.request().hitlId(),
+                                pendingHitl.request().kind(),
+                                HitlResponse.CANCELLED,
+                                null,
+                                null,
+                                null,
+                                null))));
         try {
             environmentRpcClient.replyError(
                     execution.getEnvironment().getId(),

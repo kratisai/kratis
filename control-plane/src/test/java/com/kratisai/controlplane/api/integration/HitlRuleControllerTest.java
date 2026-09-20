@@ -11,13 +11,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.DatabaseCleaner;
 import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.TestDataFactory;
-import com.kratisai.controlplane.api.restdto.CreateSandboxPermissionRuleRequest;
-import com.kratisai.controlplane.model.SandboxPermissionAction;
-import com.kratisai.controlplane.model.SandboxPermissionRule;
-import com.kratisai.controlplane.model.SandboxPermissionRuleType;
+import com.kratisai.controlplane.api.restdto.CreateHitlRuleRequest;
+import com.kratisai.controlplane.model.HitlRule;
+import com.kratisai.controlplane.model.HitlRuleAction;
+import com.kratisai.controlplane.model.HitlRuleType;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
-import com.kratisai.controlplane.repository.SandboxPermissionRuleRepository;
+import com.kratisai.controlplane.repository.HitlRuleRepository;
 import com.kratisai.controlplane.service.JwtService;
 import java.time.Instant;
 import java.util.List;
@@ -32,7 +32,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 @SpringIntegrationTest
-class SandboxPermissionControllerTest {
+class HitlRuleControllerTest {
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -47,7 +47,7 @@ class SandboxPermissionControllerTest {
     private TestDataFactory testDataFactory;
 
     @Autowired
-    private SandboxPermissionRuleRepository ruleRepository;
+    private HitlRuleRepository ruleRepository;
 
     @Autowired
     private JwtService jwtService;
@@ -56,7 +56,6 @@ class SandboxPermissionControllerTest {
     private String nonMemberToken;
     private Team team;
     private User memberUser;
-    private User nonMemberUser;
 
     @BeforeEach
     void setUp() {
@@ -72,38 +71,38 @@ class SandboxPermissionControllerTest {
         memberToken = jwtService.generateAccessToken(memberUser.getId(), memberUser.getEmail());
 
         TestDataFactory.TestContext nonMemberCtx = testDataFactory.createUserAndTeam();
-        nonMemberUser = nonMemberCtx.user();
+        User nonMemberUser = nonMemberCtx.user();
         nonMemberToken = jwtService.generateAccessToken(nonMemberUser.getId(), nonMemberUser.getEmail());
     }
 
     @Test
     void listRules_nonMember_returns403() throws Exception {
-        mockMvc.perform(get("/api/v1/teams/{teamId}/permissions", team.getId())
+        mockMvc.perform(get("/api/v1/teams/{teamId}/hitl-rules", team.getId())
                         .header("Authorization", "Bearer " + nonMemberToken))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     void listRules_member_returnsRulesOrderedByCreatedAtDesc() throws Exception {
-        SandboxPermissionRule rule1 = new SandboxPermissionRule();
+        HitlRule rule1 = new HitlRule();
         rule1.setTeam(team);
         rule1.setCommandRoot("echo");
-        rule1.setRuleType(SandboxPermissionRuleType.PREFIX_WILD);
-        rule1.setAction(SandboxPermissionAction.ALLOW);
+        rule1.setRuleType(HitlRuleType.PREFIX_WILD);
+        rule1.setAction(HitlRuleAction.ALLOW);
         rule1.setCreatedBy(memberUser);
         rule1.setCreatedAt(Instant.now().minusSeconds(100));
         ruleRepository.save(rule1);
 
-        SandboxPermissionRule rule2 = new SandboxPermissionRule();
+        HitlRule rule2 = new HitlRule();
         rule2.setTeam(team);
         rule2.setCommandRoot("rm -rf");
-        rule2.setRuleType(SandboxPermissionRuleType.PREFIX_WILD);
-        rule2.setAction(SandboxPermissionAction.DENY);
+        rule2.setRuleType(HitlRuleType.PREFIX_WILD);
+        rule2.setAction(HitlRuleAction.DENY);
         rule2.setCreatedBy(memberUser);
         rule2.setCreatedAt(Instant.now());
         ruleRepository.save(rule2);
 
-        mockMvc.perform(get("/api/v1/teams/{teamId}/permissions", team.getId())
+        mockMvc.perform(get("/api/v1/teams/{teamId}/hitl-rules", team.getId())
                         .header("Authorization", "Bearer " + memberToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2))
@@ -118,10 +117,9 @@ class SandboxPermissionControllerTest {
 
     @Test
     void createRule_nonMember_returns403() throws Exception {
-        CreateSandboxPermissionRuleRequest request = new CreateSandboxPermissionRuleRequest(
-                "npm test", SandboxPermissionRuleType.EXACT, SandboxPermissionAction.ALLOW);
+        CreateHitlRuleRequest request = new CreateHitlRuleRequest("npm test", HitlRuleType.EXACT, HitlRuleAction.ALLOW);
 
-        mockMvc.perform(post("/api/v1/teams/{teamId}/permissions", team.getId())
+        mockMvc.perform(post("/api/v1/teams/{teamId}/hitl-rules", team.getId())
                         .header("Authorization", "Bearer " + nonMemberToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -130,10 +128,9 @@ class SandboxPermissionControllerTest {
 
     @Test
     void createRule_member_success() throws Exception {
-        CreateSandboxPermissionRuleRequest request = new CreateSandboxPermissionRuleRequest(
-                "npm test", SandboxPermissionRuleType.EXACT, SandboxPermissionAction.ALLOW);
+        CreateHitlRuleRequest request = new CreateHitlRuleRequest("npm test", HitlRuleType.EXACT, HitlRuleAction.ALLOW);
 
-        mockMvc.perform(post("/api/v1/teams/{teamId}/permissions", team.getId())
+        mockMvc.perform(post("/api/v1/teams/{teamId}/hitl-rules", team.getId())
                         .header("Authorization", "Bearer " + memberToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -145,25 +142,25 @@ class SandboxPermissionControllerTest {
                         jsonPath("$.createdByUserId").value(memberUser.getId().toString()))
                 .andExpect(jsonPath("$.createdByName").value(memberUser.getDisplayName()));
 
-        List<SandboxPermissionRule> saved = ruleRepository.findByTeamId(team.getId());
+        List<HitlRule> saved = ruleRepository.findByTeamId(team.getId());
         assertThat(saved).hasSize(1);
         assertThat(saved.getFirst().getCommandRoot()).isEqualTo("npm test");
-        assertThat(saved.getFirst().getAction()).isEqualTo(SandboxPermissionAction.ALLOW);
+        assertThat(saved.getFirst().getAction()).isEqualTo(HitlRuleAction.ALLOW);
         assertThat(saved.getFirst().getCreatedBy().getId()).isEqualTo(memberUser.getId());
     }
 
     @Test
     void createRule_duplicate_returns409() throws Exception {
-        CreateSandboxPermissionRuleRequest request = new CreateSandboxPermissionRuleRequest(
-                "git status", SandboxPermissionRuleType.EXACT, SandboxPermissionAction.ALLOW);
+        CreateHitlRuleRequest request =
+                new CreateHitlRuleRequest("git status", HitlRuleType.EXACT, HitlRuleAction.ALLOW);
 
-        mockMvc.perform(post("/api/v1/teams/{teamId}/permissions", team.getId())
+        mockMvc.perform(post("/api/v1/teams/{teamId}/hitl-rules", team.getId())
                         .header("Authorization", "Bearer " + memberToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated());
 
-        mockMvc.perform(post("/api/v1/teams/{teamId}/permissions", team.getId())
+        mockMvc.perform(post("/api/v1/teams/{teamId}/hitl-rules", team.getId())
                         .header("Authorization", "Bearer " + memberToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -172,32 +169,32 @@ class SandboxPermissionControllerTest {
 
     @Test
     void deleteRule_nonMember_returns403() throws Exception {
-        SandboxPermissionRule rule = new SandboxPermissionRule();
+        HitlRule rule = new HitlRule();
         rule.setTeam(team);
         rule.setCommandRoot("echo");
-        rule.setRuleType(SandboxPermissionRuleType.PREFIX_WILD);
-        rule.setAction(SandboxPermissionAction.ALLOW);
+        rule.setRuleType(HitlRuleType.PREFIX_WILD);
+        rule.setAction(HitlRuleAction.ALLOW);
         rule.setCreatedBy(memberUser);
         rule.setCreatedAt(Instant.now());
         rule = ruleRepository.save(rule);
 
-        mockMvc.perform(delete("/api/v1/teams/{teamId}/permissions/{ruleId}", team.getId(), rule.getId())
+        mockMvc.perform(delete("/api/v1/teams/{teamId}/hitl-rules/{ruleId}", team.getId(), rule.getId())
                         .header("Authorization", "Bearer " + nonMemberToken))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     void deleteRule_member_success() throws Exception {
-        SandboxPermissionRule rule = new SandboxPermissionRule();
+        HitlRule rule = new HitlRule();
         rule.setTeam(team);
         rule.setCommandRoot("echo");
-        rule.setRuleType(SandboxPermissionRuleType.PREFIX_WILD);
-        rule.setAction(SandboxPermissionAction.ALLOW);
+        rule.setRuleType(HitlRuleType.PREFIX_WILD);
+        rule.setAction(HitlRuleAction.ALLOW);
         rule.setCreatedBy(memberUser);
         rule.setCreatedAt(Instant.now());
         rule = ruleRepository.save(rule);
 
-        mockMvc.perform(delete("/api/v1/teams/{teamId}/permissions/{ruleId}", team.getId(), rule.getId())
+        mockMvc.perform(delete("/api/v1/teams/{teamId}/hitl-rules/{ruleId}", team.getId(), rule.getId())
                         .header("Authorization", "Bearer " + memberToken))
                 .andExpect(status().isNoContent());
 
@@ -208,7 +205,7 @@ class SandboxPermissionControllerTest {
     void deleteRule_notFound_returns404() throws Exception {
         UUID nonExistentRuleId = UUID.randomUUID();
 
-        mockMvc.perform(delete("/api/v1/teams/{teamId}/permissions/{ruleId}", team.getId(), nonExistentRuleId)
+        mockMvc.perform(delete("/api/v1/teams/{teamId}/hitl-rules/{ruleId}", team.getId(), nonExistentRuleId)
                         .header("Authorization", "Bearer " + memberToken))
                 .andExpect(status().isNotFound());
     }
@@ -216,16 +213,16 @@ class SandboxPermissionControllerTest {
     @Test
     void deleteRule_otherTeamRule_returns404() throws Exception {
         TestDataFactory.TestContext otherCtx = testDataFactory.createUserAndTeam();
-        SandboxPermissionRule rule = new SandboxPermissionRule();
+        HitlRule rule = new HitlRule();
         rule.setTeam(otherCtx.team());
         rule.setCommandRoot("echo");
-        rule.setRuleType(SandboxPermissionRuleType.PREFIX_WILD);
-        rule.setAction(SandboxPermissionAction.ALLOW);
+        rule.setRuleType(HitlRuleType.PREFIX_WILD);
+        rule.setAction(HitlRuleAction.ALLOW);
         rule.setCreatedBy(otherCtx.user());
         rule.setCreatedAt(Instant.now());
         rule = ruleRepository.save(rule);
 
-        mockMvc.perform(delete("/api/v1/teams/{teamId}/permissions/{ruleId}", team.getId(), rule.getId())
+        mockMvc.perform(delete("/api/v1/teams/{teamId}/hitl-rules/{ruleId}", team.getId(), rule.getId())
                         .header("Authorization", "Bearer " + memberToken))
                 .andExpect(status().isNotFound());
     }

@@ -6,9 +6,9 @@ import { CredentialsPanel } from '@/components/settings/credentials-panel'
 import { EnquiriesBanner } from '@/components/settings/enquiries-banner'
 import { EnquiriesDialog } from '@/components/settings/enquiries-dialog'
 import { EnvironmentList } from '@/components/settings/environment-list'
+import { HitlRulesPanel } from '@/components/settings/hitl-rules-panel'
 import { ModelDefaultsSettings } from '@/components/settings/model-defaults-settings'
 import { ModelProviderList } from '@/components/settings/model-provider-list'
-import { PermissionsPanel } from '@/components/settings/permissions-panel'
 import { ProviderList } from '@/components/settings/provider-list'
 import { TavilySettings } from '@/components/settings/tavily-settings'
 import { TeamGeneralSettings } from '@/components/settings/team-general-settings'
@@ -74,9 +74,9 @@ export function SettingsView() {
                   <Server className="h-4 w-4" />
                   Runtime
                 </TabsTrigger>
-                <TabsTrigger value="permissions">
+                <TabsTrigger value="hitl-rules">
                   <Shield className="h-4 w-4" />
-                  Permissions
+                  HITL rules
                 </TabsTrigger>
               </TabsList>
 
@@ -114,8 +114,8 @@ export function SettingsView() {
                 <EnvironmentList isOwner={isOwner} />
               </TabsContent>
 
-              <TabsContent className="mt-6 space-y-6" value="permissions">
-                <PermissionsPanel />
+              <TabsContent className="mt-6 space-y-6" value="hitl-rules">
+                <HitlRulesPanel />
               </TabsContent>
             </Tabs>
           )}

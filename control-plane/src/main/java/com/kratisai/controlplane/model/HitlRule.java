@@ -5,15 +5,15 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "sandbox_permission_rules")
-public class SandboxPermissionRule {
+@Table(name = "hitl_rules")
+public class HitlRule {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "team_id", nullable = false, foreignKey = @ForeignKey(name = "fk_sandbox_permission_rules_team"))
+    @JoinColumn(name = "team_id", nullable = false, foreignKey = @ForeignKey(name = "fk_hitl_rules_team"))
     private Team team;
 
     @Column(name = "command_root", nullable = false, columnDefinition = "TEXT")
@@ -21,14 +21,14 @@ public class SandboxPermissionRule {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "rule_type", nullable = false, length = 50)
-    private SandboxPermissionRuleType ruleType;
+    private HitlRuleType ruleType;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "action", nullable = false, length = 16)
-    private SandboxPermissionAction action = SandboxPermissionAction.ALLOW;
+    private HitlRuleAction action = HitlRuleAction.ALLOW;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "created_by_user_id", foreignKey = @ForeignKey(name = "fk_sandbox_permission_rules_user"))
+    @JoinColumn(name = "created_by_user_id", foreignKey = @ForeignKey(name = "fk_hitl_rules_user"))
     private User createdBy;
 
     @Column(name = "created_at", nullable = false)
@@ -41,7 +41,7 @@ public class SandboxPermissionRule {
         }
     }
 
-    public SandboxPermissionRule() {}
+    public HitlRule() {}
 
     public UUID getId() {
         return id;
@@ -67,19 +67,19 @@ public class SandboxPermissionRule {
         this.commandRoot = commandRoot;
     }
 
-    public SandboxPermissionRuleType getRuleType() {
+    public HitlRuleType getRuleType() {
         return ruleType;
     }
 
-    public void setRuleType(SandboxPermissionRuleType ruleType) {
+    public void setRuleType(HitlRuleType ruleType) {
         this.ruleType = ruleType;
     }
 
-    public SandboxPermissionAction getAction() {
+    public HitlRuleAction getAction() {
         return action;
     }
 
-    public void setAction(SandboxPermissionAction action) {
+    public void setAction(HitlRuleAction action) {
         this.action = action;
     }
 
@@ -103,14 +103,21 @@ public class SandboxPermissionRule {
         if (command == null) {
             return false;
         }
-        if (ruleType == SandboxPermissionRuleType.EXACT) {
+        if (ruleType == HitlRuleType.EXACT) {
             return command.trim().equals(commandRoot.trim());
-        } else if (ruleType == SandboxPermissionRuleType.PREFIX_WILD) {
+        } else if (ruleType == HitlRuleType.PREFIX_WILD) {
             String prefix = commandRoot.trim();
             if (prefix.endsWith("*")) {
                 prefix = prefix.substring(0, prefix.length() - 1).trim();
             }
-            return command.trim().startsWith(prefix);
+            String trimmed = command.trim();
+            if (trimmed.equals(prefix)) {
+                return true;
+            }
+            // Require a token boundary so a root like "npm run test" cannot match
+            // "npm run tests-backdoor".
+            return trimmed.startsWith(prefix)
+                    && (prefix.isEmpty() || Character.isWhitespace(trimmed.charAt(prefix.length())));
         }
         return false;
     }

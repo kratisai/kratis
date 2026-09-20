@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  createPermissionRule,
-  deletePermissionRule,
-  listPermissionRules,
-} from '@/lib/permission-api'
+  createHitlRule,
+  deleteHitlRule,
+  listHitlRules,
+} from '@/lib/hitl-rule-api'
 import { useAuthStore } from '@/store/auth-store'
 
 vi.mock('@/store/auth-store', () => ({
@@ -13,7 +13,7 @@ vi.mock('@/store/auth-store', () => ({
   },
 }))
 
-describe('permission-api', () => {
+describe('hitl-rule-api', () => {
   const mockFetch = vi.fn()
   const originalFetch = globalThis.fetch
 
@@ -29,8 +29,8 @@ describe('permission-api', () => {
     vi.resetAllMocks()
   })
 
-  describe('listPermissionRules', () => {
-    it('should list permission rules successfully', async () => {
+  describe('listHitlRules', () => {
+    it('should list HITL rules successfully', async () => {
       const mockRules = [
         {
           action: 'ALLOW',
@@ -48,10 +48,10 @@ describe('permission-api', () => {
         ok: true,
       })
 
-      const result = await listPermissionRules('team-1')
+      const result = await listHitlRules('team-1')
       expect(result).toEqual(mockRules)
       expect(mockFetch).toHaveBeenCalledWith(
-        '/api/v1/teams/team-1/permissions',
+        '/api/v1/teams/team-1/hitl-rules',
         expect.objectContaining({
           headers: expect.objectContaining({
             Authorization: 'Bearer mock-token',
@@ -67,12 +67,12 @@ describe('permission-api', () => {
         status: 403,
       })
 
-      await expect(listPermissionRules('team-1')).rejects.toThrow('Forbidden')
+      await expect(listHitlRules('team-1')).rejects.toThrow('Forbidden')
     })
   })
 
-  describe('createPermissionRule', () => {
-    it('should create a permission rule successfully', async () => {
+  describe('createHitlRule', () => {
+    it('should create a HITL rule successfully', async () => {
       const mockRule = {
         action: 'DENY',
         commandRoot: 'rm -rf',
@@ -88,14 +88,14 @@ describe('permission-api', () => {
         ok: true,
       })
 
-      const result = await createPermissionRule('team-1', {
+      const result = await createHitlRule('team-1', {
         action: 'DENY',
         commandRoot: 'rm -rf',
         ruleType: 'PREFIX_WILD',
       })
       expect(result).toEqual(mockRule)
       expect(mockFetch).toHaveBeenCalledWith(
-        '/api/v1/teams/team-1/permissions',
+        '/api/v1/teams/team-1/hitl-rules',
         expect.objectContaining({
           body: JSON.stringify({
             action: 'DENY',
@@ -119,7 +119,7 @@ describe('permission-api', () => {
       })
 
       await expect(
-        createPermissionRule('team-1', {
+        createHitlRule('team-1', {
           action: 'ALLOW',
           commandRoot: 'git status',
           ruleType: 'EXACT',
@@ -128,15 +128,15 @@ describe('permission-api', () => {
     })
   })
 
-  describe('deletePermissionRule', () => {
-    it('should delete a permission rule successfully', async () => {
+  describe('deleteHitlRule', () => {
+    it('should delete a HITL rule successfully', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
       })
 
-      await deletePermissionRule('team-1', 'rule-1')
+      await deleteHitlRule('team-1', 'rule-1')
       expect(mockFetch).toHaveBeenCalledWith(
-        '/api/v1/teams/team-1/permissions/rule-1',
+        '/api/v1/teams/team-1/hitl-rules/rule-1',
         expect.objectContaining({
           headers: expect.objectContaining({
             Authorization: 'Bearer mock-token',
@@ -148,13 +148,13 @@ describe('permission-api', () => {
 
     it('should throw ApiError on not found', async () => {
       mockFetch.mockResolvedValueOnce({
-        json: async () => ({ message: 'Permission rule not found' }),
+        json: async () => ({ message: 'HITL rule not found' }),
         ok: false,
         status: 404,
       })
 
-      await expect(deletePermissionRule('team-1', 'rule-999')).rejects.toThrow(
-        'Permission rule not found',
+      await expect(deleteHitlRule('team-1', 'rule-999')).rejects.toThrow(
+        'HITL rule not found',
       )
     })
   })

@@ -1,0 +1,18 @@
+databaseChangeLog:
+- changeSet:
+    id: 003-rename-sandbox-permission-rules-to-hitl-rules
+    author: kratis
+    dbms: postgresql
+    changes:
+    - renameTable:
+        newTableName: hitl_rules
+        oldTableName: sandbox_permission_rules
+    - sql:
+        dbms: postgresql
+        splitStatements: true
+        stripComments: true
+        sql: >-
+          ALTER TABLE hitl_rules RENAME CONSTRAINT sandbox_permission_rules_pkey TO hitl_rules_pkey;
+          ALTER TABLE hitl_rules RENAME CONSTRAINT uq_sandbox_permission_rules_team_cmd_type_action TO uq_hitl_rules_team_cmd_type_action;
+          ALTER TABLE hitl_rules RENAME CONSTRAINT fk_sandbox_permission_rules_team TO fk_hitl_rules_team;
+          ALTER TABLE hitl_rules RENAME CONSTRAINT fk_sandbox_permission_rules_user TO fk_hitl_rules_user;

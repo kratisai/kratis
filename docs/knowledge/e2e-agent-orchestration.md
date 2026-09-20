@@ -127,8 +127,30 @@ ACP Agent          Connector           Control Plane          UI Client
 The execution remains `RUNNING` while the request is unresolved. The control plane returns the
 `optionId` the user selected (allow or reject kind); the connector translates it into
 `outcome.selected{optionId}` per ACP. A real cancel (dismissal/timeout/termination) is the only
-path that returns `outcome.cancelled` — rejection is no longer collapsed into cancellation. Auto-approve
-rules pick the best allow option (`allow_always` preferred) so a rule match still yields a real selection.
+path that returns `outcome.cancelled` — rejection is no longer collapsed into cancellation.
+
+The control plane owns permission policy:
+
+- `ShellCommandSplitter` splits composite commands into root commands at `&&`, `||`, `;`, `|`,
+  and newlines. `HitlRuleService.autoResolve` evaluates team rules per segment. Any denied
+  segment denies the whole command. Auto-approve requires a fully trusted parse in which every
+  segment is covered by an allow rule. Otherwise the request goes to HITL.
+- The splitter marks hidden-command constructs as untrusted (`$(...)`, backticks, heredocs,
+  subshells). It also marks segments with env-assignment prefixes, expansions, or redirections.
+  Untrusted segments never auto-approve.
+- Rules carry a match type. `EXACT` and `PREFIX_WILD` match command text. `TOOL_KIND` matches
+  the ACP tool kind of the request (`read`, `edit`, `write`, `delete`, `move`, `search`,
+  `execute`, `think`, `fetch`, `switch_mode`, `other`). Non-command kinds (e.g. an agent edit
+  tool) are governed exclusively by `TOOL_KIND` rules, because their command text is only a
+  synthesized description. A `TOOL_KIND` rule on `execute` resolves every command request.
+- The control plane strips agent-offered `allow_always` and `reject_always` options when a
+  once-variant exists. Persistent memory is exclusively team HITL rules. Auto-approve picks
+  `allow_once` first, so a rule match never seeds agent-side session memory.
+- The `execution_hitl_required` payload carries `commandSegments` (`text`, `suggestedRoot`,
+  `ruleType`). Command requests get one segment per root command with `ruleType=PREFIX_WILD`.
+  Non-command requests get a single segment naming the tool kind with `ruleType=TOOL_KIND`.
+  The UI uses them in the "Remember choices" panel. Resolving with `rules` persists the ticked
+  or crossed roots as ALLOW or DENY rules of the segment's type.
 
 ### Phase 6: Verification and Cleanup
 

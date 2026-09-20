@@ -1,21 +1,20 @@
 package com.kratisai.controlplane.api.rest;
 
+import com.kratisai.controlplane.api.restdto.CreateHitlRuleRequest;
 import com.kratisai.controlplane.api.restdto.ResolveHitlRequest;
-import com.kratisai.controlplane.api.wsdto.ApprovalOptionKind;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.config.SecurityUtil;
+import com.kratisai.controlplane.model.HitlRule;
 import com.kratisai.controlplane.model.SandboxExecution;
-import com.kratisai.controlplane.model.SandboxPermissionAction;
-import com.kratisai.controlplane.model.SandboxPermissionRule;
-import com.kratisai.controlplane.model.SandboxPermissionRuleType;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityType;
+import com.kratisai.controlplane.repository.HitlRuleRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
-import com.kratisai.controlplane.repository.SandboxPermissionRuleRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.repository.UserRepository;
 import com.kratisai.controlplane.service.PendingHitlRegistry;
@@ -47,7 +46,7 @@ public class SandboxHitlController {
     private static final Logger logger = LoggerFactory.getLogger(SandboxHitlController.class);
 
     private final SandboxExecutionRepository sandboxExecutionRepository;
-    private final SandboxPermissionRuleRepository sandboxPermissionRuleRepository;
+    private final HitlRuleRepository hitlRuleRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final UserRepository userRepository;
     private final PendingHitlRegistry pendingHitlRegistry;
@@ -55,13 +54,13 @@ public class SandboxHitlController {
 
     public SandboxHitlController(
             SandboxExecutionRepository sandboxExecutionRepository,
-            SandboxPermissionRuleRepository sandboxPermissionRuleRepository,
+            HitlRuleRepository hitlRuleRepository,
             TeamMemberRepository teamMemberRepository,
             UserRepository userRepository,
             PendingHitlRegistry pendingHitlRegistry,
             ApplicationEventPublisher eventPublisher) {
         this.sandboxExecutionRepository = sandboxExecutionRepository;
-        this.sandboxPermissionRuleRepository = sandboxPermissionRuleRepository;
+        this.hitlRuleRepository = hitlRuleRepository;
         this.teamMemberRepository = teamMemberRepository;
         this.userRepository = userRepository;
         this.pendingHitlRegistry = pendingHitlRegistry;
@@ -84,7 +83,7 @@ public class SandboxHitlController {
         if (pending == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No pending HITL request for this execution");
         }
-        if (!pending.hitlId().equals(request.hitlId())) {
+        if (!pending.request().hitlId().equals(request.hitlId())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "hitlId does not match pending request");
         }
 
@@ -93,51 +92,82 @@ public class SandboxHitlController {
                 .findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
-        if (pending.kind() == HitlKind.APPROVAL) {
+        HitlKind kind = pending.request().kind();
+        if (kind == HitlKind.APPROVAL) {
             validateApprovalResponse(response, request.optionId());
-            if (response == HitlResponse.APPROVED) {
-                ApprovalOptionKind kind = resolveOptionKind(pending, request.optionId());
-                if (kind == ApprovalOptionKind.ALLOW_ALWAYS) {
-                    String command = pending.command() != null ? pending.command() : "";
-                    boolean exists = sandboxPermissionRuleRepository.existsByTeamIdAndCommandRootAndRuleTypeAndAction(
-                            teamId, command, SandboxPermissionRuleType.EXACT, SandboxPermissionAction.ALLOW);
-                    if (!exists) {
-                        SandboxPermissionRule rule = new SandboxPermissionRule();
-                        rule.setTeam(execution.getEnvironment().getTeam());
-                        rule.setRuleType(SandboxPermissionRuleType.EXACT);
-                        rule.setAction(SandboxPermissionAction.ALLOW);
-                        rule.setCommandRoot(command);
-                        rule.setCreatedBy(resolvingUser);
-                        rule.setCreatedAt(Instant.now());
-                        sandboxPermissionRuleRepository.save(rule);
-                        eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.PERMISSIONS));
-                        logger.info("Saved persistent allow rule for command '{}' (team {})", command, teamId);
-                    }
-                }
-            }
+            validateKnownOption(pending, request.optionId());
+            persistRememberedRules(request, response, execution, teamId, resolvingUser);
         } else {
             validateQuestionResponse(response);
+            if (request.rules() != null && !request.rules().isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "rules are only valid for approvals");
+            }
         }
 
         eventPublisher.publishEvent(new SandboxExecutionHitlResolvedEvent(
                 teamId,
-                request.executionId(),
-                request.hitlId(),
-                pending.kind(),
-                response,
-                request.optionId(),
-                request.content(),
-                userId,
-                resolvingUser.getDisplayName()));
+                new ExecutionHitlResolvedResult(
+                        request.executionId(),
+                        request.hitlId(),
+                        kind,
+                        response,
+                        request.optionId(),
+                        request.content(),
+                        userId,
+                        resolvingUser.getDisplayName())));
 
         logger.info(
                 "Resolved HITL '{}' (kind={}, response={}) for execution {} by user {}",
                 request.hitlId(),
-                pending.kind(),
+                kind,
                 response,
                 request.executionId(),
                 userId);
         return ResponseEntity.noContent().build();
+    }
+
+    private void persistRememberedRules(
+            ResolveHitlRequest request,
+            HitlResponse response,
+            SandboxExecution execution,
+            UUID teamId,
+            User resolvingUser) {
+        List<CreateHitlRuleRequest> choices = request.rules();
+        if (choices == null || choices.isEmpty()) {
+            return;
+        }
+        if (response != HitlResponse.APPROVED && response != HitlResponse.DECLINED) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "rules can only be remembered when approving or declining");
+        }
+        boolean created = false;
+        for (CreateHitlRuleRequest choice : choices) {
+            if (choice == null) {
+                continue;
+            }
+            boolean exists = hitlRuleRepository.existsByTeamIdAndCommandRootAndRuleTypeAndAction(
+                    teamId, choice.commandRoot(), choice.ruleType(), choice.action());
+            if (exists) {
+                continue;
+            }
+            HitlRule rule = new HitlRule();
+            rule.setTeam(execution.getEnvironment().getTeam());
+            rule.setRuleType(choice.ruleType());
+            rule.setAction(choice.action());
+            rule.setCommandRoot(choice.commandRoot());
+            rule.setCreatedBy(resolvingUser);
+            rule.setCreatedAt(Instant.now());
+            hitlRuleRepository.save(rule);
+            created = true;
+            logger.info(
+                    "Saved remembered {} rule for command root '{}' (team {})",
+                    choice.action(),
+                    choice.commandRoot(),
+                    teamId);
+        }
+        if (created) {
+            eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.PERMISSIONS));
+        }
     }
 
     private static void validateApprovalResponse(HitlResponse response, String optionId) {
@@ -155,17 +185,18 @@ public class SandboxHitlController {
         }
     }
 
-    private ApprovalOptionKind resolveOptionKind(PendingHitlRegistry.PendingHitl pending, String optionId) {
-        List<PermissionOption> options = pending.options();
+    private void validateKnownOption(PendingHitlRegistry.PendingHitl pending, String optionId) {
+        if (optionId == null || optionId.isBlank()) {
+            return;
+        }
+        List<PermissionOption> options = pending.request().options();
         if (options == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "HITL request carried no options");
         }
-        for (PermissionOption option : options) {
-            if (option != null && optionId.equals(option.optionId())) {
-                return option.kind();
-            }
+        boolean known = options.stream().anyMatch(option -> option != null && optionId.equals(option.optionId()));
+        if (!known) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown optionId: " + optionId);
         }
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown optionId: " + optionId);
     }
 
     private SandboxExecution findAndVerifyMembership(UUID executionId, UUID userId) {

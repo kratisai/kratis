@@ -257,17 +257,20 @@ class ClientChatSubscribeRpcHandlerTest {
         pendingHitlRegistry.register(
                 executionId,
                 new PendingHitlRegistry.PendingHitl(
-                        HitlKind.APPROVAL,
+                        new ExecutionHitlRequiredResult(
+                                executionId,
+                                "tool-call-42",
+                                HitlKind.APPROVAL,
+                                "Approve rm -rf /",
+                                "rm -rf /",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null),
                         envSession,
                         "req-1",
-                        "tool-call-42",
-                        "Approve rm -rf /",
-                        "rm -rf /",
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
                         Instant.now(),
                         teamId));
 
@@ -290,17 +293,20 @@ class ClientChatSubscribeRpcHandlerTest {
         pendingHitlRegistry.register(
                 executionId,
                 new PendingHitlRegistry.PendingHitl(
-                        HitlKind.APPROVAL,
+                        new ExecutionHitlRequiredResult(
+                                executionId,
+                                "tool-call-42",
+                                HitlKind.APPROVAL,
+                                "Approve rm -rf /",
+                                "rm -rf /",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null),
                         envSession,
                         "req-1",
-                        "tool-call-42",
-                        "Approve rm -rf /",
-                        "rm -rf /",
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
                         Instant.now(),
                         teamId));
 

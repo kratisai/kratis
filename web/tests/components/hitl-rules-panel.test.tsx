@@ -3,19 +3,19 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { SandboxPermissionRuleDto } from '@/types/permission-types'
+import type { HitlRuleDto } from '@/types/hitl-rule-types'
 
-import { PermissionsPanel } from '@/components/settings/permissions-panel'
-import * as permissionApi from '@/lib/permission-api'
+import { HitlRulesPanel } from '@/components/settings/hitl-rules-panel'
+import * as hitlRuleApi from '@/lib/hitl-rule-api'
 import { useAuthStore } from '@/store/auth-store'
 
-vi.mock('@/lib/permission-api', () => ({
-  createPermissionRule: vi.fn(),
-  deletePermissionRule: vi.fn(),
-  listPermissionRules: vi.fn(),
+vi.mock('@/lib/hitl-rule-api', () => ({
+  createHitlRule: vi.fn(),
+  deleteHitlRule: vi.fn(),
+  listHitlRules: vi.fn(),
 }))
 
-const mockRules: SandboxPermissionRuleDto[] = [
+const mockRules: HitlRuleDto[] = [
   {
     action: 'ALLOW',
     commandRoot: 'npm test',
@@ -49,7 +49,7 @@ function renderWithProviders(ui: React.ReactElement) {
   )
 }
 
-describe('PermissionsPanel', () => {
+describe('HitlRulesPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useAuthStore.setState({
@@ -63,13 +63,13 @@ describe('PermissionsPanel', () => {
     })
   })
 
-  it('renders permission rules list', async () => {
-    vi.mocked(permissionApi.listPermissionRules).mockResolvedValue(mockRules)
+  it('renders HITL rules list', async () => {
+    vi.mocked(hitlRuleApi.listHitlRules).mockResolvedValue(mockRules)
 
-    renderWithProviders(<PermissionsPanel />)
+    renderWithProviders(<HitlRulesPanel />)
 
     await waitFor(() => {
-      expect(screen.getByText('Permission Registry')).toBeInTheDocument()
+      expect(screen.getByText('HITL Rules')).toBeInTheDocument()
       const table = screen.getByRole('table')
       expect(within(table).getByText('npm test')).toBeInTheDocument()
       expect(within(table).getByText('rm -rf')).toBeInTheDocument()
@@ -83,15 +83,15 @@ describe('PermissionsPanel', () => {
   })
 
   it('renders a mobile card layout alongside the table', async () => {
-    vi.mocked(permissionApi.listPermissionRules).mockResolvedValue(mockRules)
+    vi.mocked(hitlRuleApi.listHitlRules).mockResolvedValue(mockRules)
 
-    renderWithProviders(<PermissionsPanel />)
+    renderWithProviders(<HitlRulesPanel />)
 
     await waitFor(() => {
       expect(screen.getByRole('table')).toBeInTheDocument()
     })
 
-    const cards = screen.getByTestId('permission-cards')
+    const cards = screen.getByTestId('hitl-rule-cards')
     expect(within(cards).getByText('npm test')).toBeInTheDocument()
     expect(within(cards).getByText('ALLOW')).toBeInTheDocument()
     expect(within(cards).getByText('Exact')).toBeInTheDocument()
@@ -101,10 +101,10 @@ describe('PermissionsPanel', () => {
   })
 
   it('filters rules by search input', async () => {
-    vi.mocked(permissionApi.listPermissionRules).mockResolvedValue(mockRules)
+    vi.mocked(hitlRuleApi.listHitlRules).mockResolvedValue(mockRules)
     const user = userEvent.setup()
 
-    renderWithProviders(<PermissionsPanel />)
+    renderWithProviders(<HitlRulesPanel />)
 
     await waitFor(() => {
       expect(screen.getAllByText('npm test').length).toBeGreaterThan(0)
@@ -118,10 +118,10 @@ describe('PermissionsPanel', () => {
   })
 
   it('filters rules by action filter', async () => {
-    vi.mocked(permissionApi.listPermissionRules).mockResolvedValue(mockRules)
+    vi.mocked(hitlRuleApi.listHitlRules).mockResolvedValue(mockRules)
     const user = userEvent.setup()
 
-    renderWithProviders(<PermissionsPanel />)
+    renderWithProviders(<HitlRulesPanel />)
 
     await waitFor(() => {
       expect(screen.getAllByText('npm test').length).toBeGreaterThan(0)
@@ -138,11 +138,11 @@ describe('PermissionsPanel', () => {
   })
 
   it('opens delete confirmation modal and calls delete API', async () => {
-    vi.mocked(permissionApi.listPermissionRules).mockResolvedValue(mockRules)
-    vi.mocked(permissionApi.deletePermissionRule).mockResolvedValue(undefined)
+    vi.mocked(hitlRuleApi.listHitlRules).mockResolvedValue(mockRules)
+    vi.mocked(hitlRuleApi.deleteHitlRule).mockResolvedValue(undefined)
     const user = userEvent.setup()
 
-    renderWithProviders(<PermissionsPanel />)
+    renderWithProviders(<HitlRulesPanel />)
 
     await waitFor(() => {
       expect(screen.getAllByText('npm test').length).toBeGreaterThan(0)
@@ -154,20 +154,20 @@ describe('PermissionsPanel', () => {
     await user.click(deleteBtn)
 
     await waitFor(() => {
-      expect(screen.getByText('Delete Permission Rule')).toBeInTheDocument()
-      expect(screen.getByText(/Are you sure you want to delete the permission rule for/)).toBeInTheDocument()
+      expect(screen.getByText('Delete HITL Rule')).toBeInTheDocument()
+      expect(screen.getByText(/Are you sure you want to delete the HITL rule for/)).toBeInTheDocument()
     })
 
     const confirmBtn = screen.getByRole('button', { name: 'Delete Rule' })
     await user.click(confirmBtn)
 
     await waitFor(() => {
-      expect(permissionApi.deletePermissionRule).toHaveBeenCalledWith('team-1', 'rule-1')
+      expect(hitlRuleApi.deleteHitlRule).toHaveBeenCalledWith('team-1', 'rule-1')
     })
   })
 
   it('wraps long command patterns instead of overflowing the table', async () => {
-    const longCommandRule: SandboxPermissionRuleDto = {
+    const longHitlRule: HitlRuleDto = {
       action: 'ALLOW',
       commandRoot:
         '/usr/local/bin/a-very-long-command-with-no-spaces-that-would-overflow-the-table',
@@ -178,22 +178,22 @@ describe('PermissionsPanel', () => {
       ruleType: 'PREFIX_WILD',
       teamId: 'team-1',
     }
-    vi.mocked(permissionApi.listPermissionRules).mockResolvedValue([longCommandRule])
+    vi.mocked(hitlRuleApi.listHitlRules).mockResolvedValue([longHitlRule])
 
-    renderWithProviders(<PermissionsPanel />)
+    renderWithProviders(<HitlRulesPanel />)
 
-    const commandCells = await screen.findAllByText(longCommandRule.commandRoot)
+    const commandCells = await screen.findAllByText(longHitlRule.commandRoot)
     expect(commandCells.length).toBeGreaterThan(0)
     commandCells.forEach((cell) => expect(cell).toHaveClass('break-all'))
   })
 
   it('displays empty state when no rules exist', async () => {
-    vi.mocked(permissionApi.listPermissionRules).mockResolvedValue([])
+    vi.mocked(hitlRuleApi.listHitlRules).mockResolvedValue([])
 
-    renderWithProviders(<PermissionsPanel />)
+    renderWithProviders(<HitlRulesPanel />)
 
     await waitFor(() => {
-      expect(screen.getByText('No permission rules configured')).toBeInTheDocument()
+      expect(screen.getByText('No HITL rules configured')).toBeInTheDocument()
     })
   })
 })

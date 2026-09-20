@@ -47,7 +47,7 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
  * <li>Connect sidecar and simulate agent requesting permission for a
  * destructive command
  * <li>Assert BOTH UI clients receive execution_hitl_required
- * <li>Client 1 calls POST /api/v1/permissions/resolve
+ * <li>Client 1 calls POST /api/v1/hitl/resolve
  * <li>Assert BOTH UI clients receive execution_hitl_resolved
  * <li>Assert sidecar receives the JSON-RPC approval response
  * <li>Verify the pending HITL request is cleared from PendingHitlRegistry

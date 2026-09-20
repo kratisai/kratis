@@ -2,6 +2,7 @@
 
 import type { IngestionStatus } from './auth-types'
 import type { CanvasEvent } from './canvas-types'
+import type { HitlRuleType } from './hitl-rule-types'
 
 export interface ActivityDetail {
   diff?: ActivityDiff
@@ -27,9 +28,8 @@ export interface ActivityDiff {
 }
 
 export interface ActivityHitl {
-  approved?: boolean
-  cancelled?: boolean
   command?: string
+  commandSegments?: CommandSegment[]
   content?: Record<string, unknown>
   diff?: ActivityDiff
   form?: Record<string, unknown>
@@ -118,6 +118,12 @@ export interface ClientRpcMethods {
   unsubscribe: SubscribeParams
 }
 
+export interface CommandSegment {
+  ruleType?: HitlRuleType
+  suggestedRoot: string
+  text: string
+}
+
 export interface CompleteResult {
   chatId?: string
   messageCount?: number
@@ -144,6 +150,7 @@ export interface ExecutionCompleteResult {
 
 export interface ExecutionHitlRequiredResult {
   command?: string
+  commandSegments?: CommandSegment[]
   content?: Record<string, unknown>
   diff?: ActivityDiff
   executionId: string

@@ -12,6 +12,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.wsdto.ActivityDetail;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.PlanEntry;
@@ -534,19 +536,17 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                executionId,
-                "tool-call-42",
-                HitlKind.APPROVAL,
-                HitlResponse.APPROVED,
-                "allow-once",
-                null,
-                resolvedBy,
-                "Alice"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        HitlResponse.APPROVED,
+                        "allow-once",
+                        null,
+                        resolvedBy,
+                        "Alice")));
 
-        assertThat(row.getApproved()).isTrue();
         assertThat(row.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
-        assertThat(row.getResolvedByUserId()).isEqualTo(resolvedBy);
-        assertThat(row.getResolvedAt()).isNotNull();
         verify(repository).save(row);
     }
 
@@ -560,18 +560,17 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                executionId,
-                "tool-call-42",
-                HitlKind.APPROVAL,
-                HitlResponse.DECLINED,
-                "reject-once",
-                null,
-                null,
-                "Bob"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        HitlResponse.DECLINED,
+                        "reject-once",
+                        null,
+                        null,
+                        "Bob")));
 
-        assertThat(row.getApproved()).isFalse();
         assertThat(row.getStatus()).isEqualTo(ActivityStatus.FAILED);
-        assertThat(row.getResolvedByUserId()).isNull();
     }
 
     @Test
@@ -586,16 +585,16 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                executionId,
-                "tool-call-42",
-                HitlKind.APPROVAL,
-                HitlResponse.APPROVED,
-                "allow-once",
-                null,
-                null,
-                "Alice"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        HitlResponse.APPROVED,
+                        "allow-once",
+                        null,
+                        null,
+                        "Alice")));
 
-        assertThat(pending.getApproved()).isTrue();
         assertThat(pending.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
     }
 
@@ -609,14 +608,15 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                executionId,
-                "tool-call-42",
-                HitlKind.APPROVAL,
-                HitlResponse.APPROVED,
-                "allow-once",
-                null,
-                null,
-                "Alice"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        HitlResponse.APPROVED,
+                        "allow-once",
+                        null,
+                        null,
+                        "Alice")));
 
         verify(repository, never()).save(any());
     }
@@ -632,16 +632,18 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
                 UUID.randomUUID(),
-                executionId,
-                "tool-call-42",
-                "Approve Write file",
-                HitlKind.APPROVAL,
-                "Write file",
-                "Write",
-                "edit",
-                null,
-                null,
-                null));
+                new ExecutionHitlRequiredResult(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        "Approve Write file",
+                        "Write file",
+                        null,
+                        "Write",
+                        "edit",
+                        null,
+                        null,
+                        null)));
 
         assertThat(existing.getStatus()).isEqualTo(ActivityStatus.PENDING);
         assertThat(existing.getDetail()).contains("tool-call-42").contains("approval");
@@ -659,16 +661,18 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
                 UUID.randomUUID(),
-                executionId,
-                "tool-call-42",
-                "Approve rm -rf /",
-                HitlKind.APPROVAL,
-                "rm -rf /",
-                "Remove",
-                "execute",
-                null,
-                null,
-                null));
+                new ExecutionHitlRequiredResult(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        "Approve rm -rf /",
+                        "rm -rf /",
+                        null,
+                        "Remove",
+                        "execute",
+                        null,
+                        null,
+                        null)));
 
         SandboxExecutionActivity saved = capturedSave();
         assertInsertedRow(
@@ -692,16 +696,18 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
                 UUID.randomUUID(),
-                executionId,
-                "tool-call-42",
-                "Approve Write file",
-                HitlKind.APPROVAL,
-                "Write file",
-                "Write",
-                "edit",
-                null,
-                null,
-                null));
+                new ExecutionHitlRequiredResult(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        "Approve Write file",
+                        "Write file",
+                        null,
+                        "Write",
+                        "edit",
+                        null,
+                        null,
+                        null)));
 
         SandboxExecutionActivity saved = capturedSave();
         assertInsertedRow(
@@ -722,16 +728,18 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
                 UUID.randomUUID(),
-                executionId,
-                "el-1",
-                "Pick a target",
-                HitlKind.QUESTION,
-                null,
-                null,
-                null,
-                null,
-                null,
-                Map.of("type", "object")));
+                new ExecutionHitlRequiredResult(
+                        executionId,
+                        "el-1",
+                        HitlKind.QUESTION,
+                        "Pick a target",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Map.of("type", "object"))));
 
         SandboxExecutionActivity saved = capturedSave();
         assertInsertedRow(
@@ -750,14 +758,15 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                executionId,
-                "el-1",
-                HitlKind.QUESTION,
-                HitlResponse.ANSWERED,
-                null,
-                Map.of("target", "staging"),
-                null,
-                "Alice"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "el-1",
+                        HitlKind.QUESTION,
+                        HitlResponse.ANSWERED,
+                        null,
+                        Map.of("target", "staging"),
+                        null,
+                        "Alice")));
 
         assertThat(pending.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
         assertThat(pending.getDetail()).contains("staging").contains("answered");
@@ -773,14 +782,8 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                executionId,
-                "el-1",
-                HitlKind.QUESTION,
-                HitlResponse.DECLINED,
-                null,
-                null,
-                null,
-                "Alice"));
+                new ExecutionHitlResolvedResult(
+                        executionId, "el-1", HitlKind.QUESTION, HitlResponse.DECLINED, null, null, null, "Alice")));
 
         assertThat(pending.getStatus()).isEqualTo(ActivityStatus.FAILED);
         assertThat(pending.getDetail()).contains("declined");
@@ -794,14 +797,8 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                executionId,
-                "el-1",
-                HitlKind.QUESTION,
-                HitlResponse.ANSWERED,
-                null,
-                null,
-                null,
-                "Alice"));
+                new ExecutionHitlResolvedResult(
+                        executionId, "el-1", HitlKind.QUESTION, HitlResponse.ANSWERED, null, null, null, "Alice")));
 
         verify(repository, never()).save(any());
     }

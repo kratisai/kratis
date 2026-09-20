@@ -1,25 +1,30 @@
 package com.kratisai.controlplane.websocket.environment;
 
 import com.kratisai.controlplane.api.wsdto.ApprovalOptionKind;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
+import com.kratisai.controlplane.api.wsdto.CommandSegment;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
+import com.kratisai.controlplane.api.wsdto.ToolKind;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
+import com.kratisai.controlplane.model.HitlRule;
+import com.kratisai.controlplane.model.HitlRuleType;
 import com.kratisai.controlplane.model.SandboxExecution;
-import com.kratisai.controlplane.model.SandboxPermissionRule;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlRequiredEvent;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
+import com.kratisai.controlplane.repository.HitlRuleRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
-import com.kratisai.controlplane.repository.SandboxPermissionRuleRepository;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
+import com.kratisai.controlplane.service.HitlRuleService;
 import com.kratisai.controlplane.service.PendingHitlRegistry;
-import com.kratisai.controlplane.service.SandboxPermissionService;
-import com.kratisai.controlplane.service.SandboxPermissionService.RuleDecision;
-import java.time.Instant;
+import com.kratisai.controlplane.service.command.ShellCommandSplitter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,7 +41,7 @@ public class EnvironmentHitlRequestRpcHandler
     private static final Logger logger = LoggerFactory.getLogger(EnvironmentHitlRequestRpcHandler.class);
 
     private final EnvironmentSessionRegistry sessionRegistry;
-    private final SandboxPermissionRuleRepository ruleRepository;
+    private final HitlRuleRepository ruleRepository;
     private final ExecutionEnvironmentRepository environmentRepository;
     private final SandboxExecutionRepository executionRepository;
     private final EnvironmentExecutionGuard executionGuard;
@@ -45,7 +50,7 @@ public class EnvironmentHitlRequestRpcHandler
 
     public EnvironmentHitlRequestRpcHandler(
             EnvironmentSessionRegistry sessionRegistry,
-            SandboxPermissionRuleRepository ruleRepository,
+            HitlRuleRepository ruleRepository,
             ExecutionEnvironmentRepository environmentRepository,
             SandboxExecutionRepository executionRepository,
             EnvironmentExecutionGuard executionGuard,
@@ -105,18 +110,18 @@ public class EnvironmentHitlRequestRpcHandler
         }
 
         String command = params.command();
+        String toolKind = params.toolKind();
 
-        logger.debug("Checking permission rules for team {} and command '{}'", teamId, command);
+        logger.debug("Checking HITL rules for team {} and command '{}'", teamId, command);
 
-        List<SandboxPermissionRule> rules = ruleRepository.findByTeamId(teamId);
-        RuleDecision decision = SandboxPermissionService.evaluate(rules, command);
+        List<HitlRule> rules = ruleRepository.findByTeamId(teamId);
+        Optional<HitlResponse> autoResolution = HitlRuleService.autoResolve(rules, command, toolKind);
 
-        if (decision == RuleDecision.DENY) {
-            logger.info("Command '{}' rejected by DENY permission rule for team {}", command, teamId);
-            return Flux.just(HitlResult.declined());
-        }
-
-        if (decision == RuleDecision.ALLOW) {
+        if (autoResolution.isPresent()) {
+            if (autoResolution.get() == HitlResponse.DECLINED) {
+                logger.info("Command '{}' rejected by DENY HITL rule for team {}", command, teamId);
+                return Flux.just(HitlResult.declined());
+            }
             String optionId = selectAllowOptionId(params.options());
             if (optionId == null) {
                 logger.warn(
@@ -140,34 +145,21 @@ public class EnvironmentHitlRequestRpcHandler
         }
         executionGuard.verifyExecutionInEnvironment(execution, envId);
 
-        pendingHitlRegistry.register(
+        ExecutionHitlRequiredResult payload = new ExecutionHitlRequiredResult(
                 execution.getId(),
-                HitlKind.APPROVAL,
-                sessionId,
-                requestId,
                 params.hitlId(),
+                HitlKind.APPROVAL,
                 params.message(),
                 command,
+                approvalSegments(command, toolKind),
                 params.title(),
-                params.toolKind(),
-                params.options(),
+                toolKind,
+                sanitizeOptions(params.options()),
                 params.diff(),
-                null,
-                Instant.now(),
-                teamId);
+                null);
 
-        eventPublisher.publishEvent(new SandboxExecutionHitlRequiredEvent(
-                teamId,
-                execution.getId(),
-                params.hitlId(),
-                params.message(),
-                HitlKind.APPROVAL,
-                command,
-                params.title(),
-                params.toolKind(),
-                params.options(),
-                params.diff(),
-                null));
+        pendingHitlRegistry.register(execution.getId(), payload, sessionId, requestId, teamId);
+        eventPublisher.publishEvent(new SandboxExecutionHitlRequiredEvent(teamId, payload));
         logger.info(
                 "Deferred command '{}' to HITL for execution {} and team {} — response sent when user resolves",
                 command,
@@ -190,34 +182,21 @@ public class EnvironmentHitlRequestRpcHandler
         }
         executionGuard.verifyExecutionInEnvironment(execution, envId);
 
-        pendingHitlRegistry.register(
+        ExecutionHitlRequiredResult payload = new ExecutionHitlRequiredResult(
                 execution.getId(),
-                HitlKind.QUESTION,
-                sessionId,
-                requestId,
                 params.hitlId(),
+                HitlKind.QUESTION,
                 params.message(),
                 null,
                 null,
                 null,
                 null,
                 null,
-                params.form(),
-                Instant.now(),
-                teamId);
+                null,
+                params.form());
 
-        eventPublisher.publishEvent(new SandboxExecutionHitlRequiredEvent(
-                teamId,
-                execution.getId(),
-                params.hitlId(),
-                params.message(),
-                HitlKind.QUESTION,
-                null,
-                null,
-                null,
-                null,
-                null,
-                params.form()));
+        pendingHitlRegistry.register(execution.getId(), payload, sessionId, requestId, teamId);
+        eventPublisher.publishEvent(new SandboxExecutionHitlRequiredEvent(teamId, payload));
         logger.info(
                 "Deferred question '{}' to HITL for execution {} and team {} — response sent when user answers",
                 params.hitlId(),
@@ -226,10 +205,46 @@ public class EnvironmentHitlRequestRpcHandler
         return Flux.empty();
     }
 
-    /**
-     * Picks the best allow option for an auto-approval: prefer {@code allow_always} (a rule match is
-     * a persistent allow), then {@code allow_once}, then any option.
-     */
+    /** Unknown tool kinds get no segments, so nothing unrememberable can be persisted. */
+    private static List<CommandSegment> approvalSegments(String command, String toolKind) {
+        if (ToolKind.isCommandLike(toolKind)) {
+            return ShellCommandSplitter.parse(command).toWireSegments();
+        }
+        String kind = ToolKind.effectiveWireValue(toolKind);
+        if (ToolKind.fromWireValue(kind).isEmpty()) {
+            return List.of();
+        }
+        return List.of(new CommandSegment(kind, kind, HitlRuleType.TOOL_KIND));
+    }
+
+    /** Strips "always" variants when a "once" variant exists, so persistent memory stays exclusively team rules. */
+    static List<PermissionOption> sanitizeOptions(List<PermissionOption> options) {
+        if (options == null || options.isEmpty()) {
+            return options;
+        }
+        boolean hasAllowOnce = hasKind(options, ApprovalOptionKind.ALLOW_ONCE);
+        boolean hasRejectOnce = hasKind(options, ApprovalOptionKind.REJECT_ONCE);
+        List<PermissionOption> sanitized = new ArrayList<>(options.size());
+        for (PermissionOption option : options) {
+            if (option == null) {
+                continue;
+            }
+            if (option.kind() == ApprovalOptionKind.ALLOW_ALWAYS && hasAllowOnce) {
+                continue;
+            }
+            if (option.kind() == ApprovalOptionKind.REJECT_ALWAYS && hasRejectOnce) {
+                continue;
+            }
+            sanitized.add(option);
+        }
+        return sanitized;
+    }
+
+    private static boolean hasKind(List<PermissionOption> options, ApprovalOptionKind kind) {
+        return options.stream().anyMatch(option -> option != null && option.kind() == kind);
+    }
+
+    /** Prefers {@code allow_once} so an auto-approval never seeds agent-side session memory. */
     private static String selectAllowOptionId(List<PermissionOption> options) {
         if (options == null || options.isEmpty()) {
             return null;
@@ -244,17 +259,17 @@ public class EnvironmentHitlRequestRpcHandler
             if (first == null) {
                 first = option.optionId();
             }
-            if (option.kind() == ApprovalOptionKind.ALLOW_ALWAYS && firstAllowAlways == null) {
-                firstAllowAlways = option.optionId();
-            } else if (option.kind() == ApprovalOptionKind.ALLOW_ONCE && firstAllowOnce == null) {
+            if (option.kind() == ApprovalOptionKind.ALLOW_ONCE && firstAllowOnce == null) {
                 firstAllowOnce = option.optionId();
+            } else if (option.kind() == ApprovalOptionKind.ALLOW_ALWAYS && firstAllowAlways == null) {
+                firstAllowAlways = option.optionId();
             }
-        }
-        if (firstAllowAlways != null) {
-            return firstAllowAlways;
         }
         if (firstAllowOnce != null) {
             return firstAllowOnce;
+        }
+        if (firstAllowAlways != null) {
+            return firstAllowAlways;
         }
         return first;
     }

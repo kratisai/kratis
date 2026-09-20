@@ -15,9 +15,9 @@ import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
 import com.kratisai.controlplane.model.ChatEntity;
-import com.kratisai.controlplane.model.SandboxPermissionRule;
-import com.kratisai.controlplane.model.SandboxPermissionRuleType;
-import com.kratisai.controlplane.repository.SandboxPermissionRuleRepository;
+import com.kratisai.controlplane.model.HitlRule;
+import com.kratisai.controlplane.model.HitlRuleType;
+import com.kratisai.controlplane.repository.HitlRuleRepository;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -48,7 +48,7 @@ class ActivityAndPermissionIntegrationTest {
     private SandboxExecutionScenarioFactory scenarioFactory;
 
     @Autowired
-    private SandboxPermissionRuleRepository permissionRuleRepository;
+    private HitlRuleRepository permissionRuleRepository;
 
     @Autowired
     private DatabaseCleaner databaseCleaner;
@@ -64,10 +64,10 @@ class ActivityAndPermissionIntegrationTest {
         auth = testDataFactory.createProvisionedContext();
         chat = testDataFactory.createChat(auth.team(), auth.user(), "WebSocket Test Session");
 
-        SandboxPermissionRule echoRule = new SandboxPermissionRule();
+        HitlRule echoRule = new HitlRule();
         echoRule.setTeam(auth.team());
         echoRule.setCommandRoot("echo*");
-        echoRule.setRuleType(SandboxPermissionRuleType.PREFIX_WILD);
+        echoRule.setRuleType(HitlRuleType.PREFIX_WILD);
         permissionRuleRepository.save(echoRule);
     }
 
@@ -134,7 +134,9 @@ class ActivityAndPermissionIntegrationTest {
 
             assertThat(pair.sidecar().awaitTrigger("\"id\":99", 5, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.sidecar().hasReceivedMessageContaining("\"id\":99", "\"optionId\":\"allow-always\""))
+            // Auto-approve answers with the allow_once option so a rule match never
+            // seeds agent-side session memory.
+            assertThat(pair.sidecar().hasReceivedMessageContaining("\"id\":99", "\"optionId\":\"allow\""))
                     .isTrue();
 
             assertThat(permissionLatch.await(5, TimeUnit.SECONDS)).isTrue();

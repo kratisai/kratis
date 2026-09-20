@@ -13,6 +13,7 @@ import com.kratisai.controlplane.ResourcelessTransactionManager;
 import com.kratisai.controlplane.api.restdto.CreateSandboxExecutionRequest;
 import com.kratisai.controlplane.api.restdto.SandboxExecutionDto;
 import com.kratisai.controlplane.api.restdto.SteerExecutionRequest;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.ExecStatus;
@@ -34,6 +35,7 @@ import com.kratisai.controlplane.repository.*;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -1083,17 +1085,20 @@ class SandboxExecutionServiceTest {
         when(webSocketSession.isOpen()).thenReturn(true);
 
         PendingHitlRegistry.PendingHitl pendingHitl = new PendingHitlRegistry.PendingHitl(
-                HitlKind.APPROVAL,
+                new ExecutionHitlRequiredResult(
+                        execution.getId(),
+                        "tool-call-1",
+                        HitlKind.APPROVAL,
+                        "Approve rm -rf /",
+                        "rm -rf /",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
                 webSocketSession,
                 "req-123",
-                null,
-                null,
-                "rm -rf /",
-                null,
-                null,
-                null,
-                null,
-                null,
                 Instant.now(),
                 UUID.randomUUID());
         when(pendingHitlRegistry.remove(execution.getId())).thenReturn(pendingHitl);
@@ -1106,9 +1111,9 @@ class SandboxExecutionServiceTest {
         ArgumentCaptor<SandboxExecutionHitlResolvedEvent> hitlCaptor =
                 ArgumentCaptor.forClass(SandboxExecutionHitlResolvedEvent.class);
         verify(eventPublisher).publishEvent(hitlCaptor.capture());
-        assertThat(hitlCaptor.getValue().executionId()).isEqualTo(execution.getId());
-        assertThat(hitlCaptor.getValue().response()).isEqualTo(HitlResponse.CANCELLED);
-        assertThat(hitlCaptor.getValue().kind()).isEqualTo(HitlKind.APPROVAL);
+        assertThat(hitlCaptor.getValue().result().executionId()).isEqualTo(execution.getId());
+        assertThat(hitlCaptor.getValue().result().response()).isEqualTo(HitlResponse.CANCELLED);
+        assertThat(hitlCaptor.getValue().result().kind()).isEqualTo(HitlKind.APPROVAL);
 
         verify(environmentRpcClient)
                 .request(
@@ -1139,17 +1144,20 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
         PendingHitlRegistry.PendingHitl pendingHitl = new PendingHitlRegistry.PendingHitl(
-                HitlKind.QUESTION,
+                new ExecutionHitlRequiredResult(
+                        execution.getId(),
+                        "hitl-789",
+                        HitlKind.QUESTION,
+                        "Pick a target",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Map.of("type", "object")),
                 webSocketSession,
                 "req-456",
-                "hitl-789",
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
                 Instant.now(),
                 TEAM_ID);
         when(pendingHitlRegistry.remove(execution.getId())).thenReturn(pendingHitl);
@@ -1162,10 +1170,10 @@ class SandboxExecutionServiceTest {
         ArgumentCaptor<SandboxExecutionHitlResolvedEvent> hitlCaptor =
                 ArgumentCaptor.forClass(SandboxExecutionHitlResolvedEvent.class);
         verify(eventPublisher).publishEvent(hitlCaptor.capture());
-        assertThat(hitlCaptor.getValue().executionId()).isEqualTo(execution.getId());
-        assertThat(hitlCaptor.getValue().hitlId()).isEqualTo("hitl-789");
-        assertThat(hitlCaptor.getValue().kind()).isEqualTo(HitlKind.QUESTION);
-        assertThat(hitlCaptor.getValue().response()).isEqualTo(HitlResponse.CANCELLED);
+        assertThat(hitlCaptor.getValue().result().executionId()).isEqualTo(execution.getId());
+        assertThat(hitlCaptor.getValue().result().hitlId()).isEqualTo("hitl-789");
+        assertThat(hitlCaptor.getValue().result().kind()).isEqualTo(HitlKind.QUESTION);
+        assertThat(hitlCaptor.getValue().result().response()).isEqualTo(HitlResponse.CANCELLED);
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
     }
 

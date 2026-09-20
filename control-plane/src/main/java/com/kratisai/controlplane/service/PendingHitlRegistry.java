@@ -1,11 +1,8 @@
 package com.kratisai.controlplane.service;
 
-import com.kratisai.controlplane.api.wsdto.ActivityDiff;
-import com.kratisai.controlplane.api.wsdto.HitlKind;
-import com.kratisai.controlplane.api.wsdto.PermissionOption;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -24,17 +21,9 @@ public class PendingHitlRegistry {
     private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(5);
 
     public record PendingHitl(
-            HitlKind kind,
+            ExecutionHitlRequiredResult request,
             WebSocketSession session,
             Object requestId,
-            String hitlId,
-            String message,
-            String command,
-            String title,
-            String toolKind,
-            List<PermissionOption> options,
-            ActivityDiff diff,
-            Map<String, Object> form,
             Instant createdAt,
             UUID teamId) {}
 
@@ -50,36 +39,19 @@ public class PendingHitlRegistry {
         logger.info(
                 "Registered pending HITL request for execution {} (hitlId='{}', kind={}, team={}, request id={})",
                 executionId,
-                pendingHitl.hitlId(),
-                pendingHitl.kind(),
+                pendingHitl.request().hitlId(),
+                pendingHitl.request().kind(),
                 pendingHitl.teamId(),
                 pendingHitl.requestId());
     }
 
     public void register(
-            UUID executionId,
-            HitlKind kind,
-            String sessionId,
-            Object requestId,
-            String hitlId,
-            String message,
-            String command,
-            String title,
-            String toolKind,
-            List<PermissionOption> options,
-            ActivityDiff diff,
-            Map<String, Object> form,
-            Instant createdAt,
-            UUID teamId) {
+            UUID executionId, ExecutionHitlRequiredResult request, String sessionId, Object requestId, UUID teamId) {
         WebSocketSession session = sessionRegistry.getSession(sessionId);
         if (session == null) {
             throw new IllegalStateException("Unknown environment session " + sessionId);
         }
-        register(
-                executionId,
-                new PendingHitl(
-                        kind, session, requestId, hitlId, message, command, title, toolKind, options, diff, form,
-                        createdAt, teamId));
+        register(executionId, new PendingHitl(request, session, requestId, Instant.now(), teamId));
     }
 
     public PendingHitl remove(UUID executionId) {
@@ -88,8 +60,8 @@ public class PendingHitlRegistry {
             logger.info(
                     "Removed pending HITL request for execution {} (hitlId='{}', kind={})",
                     executionId,
-                    removed.hitlId(),
-                    removed.kind());
+                    removed.request().hitlId(),
+                    removed.request().kind());
         } else {
             logger.debug("No pending HITL request found for execution {}", executionId);
         }
@@ -139,7 +111,7 @@ public class PendingHitlRegistry {
                     logger.info(
                             "Removed pending HITL request for execution {} (hitlId='{}') due to session disconnect",
                             executionId,
-                            removedRequest.hitlId());
+                            removedRequest.request().hitlId());
                 }
             }
         });
@@ -151,21 +123,14 @@ public class PendingHitlRegistry {
         for (Map.Entry<UUID, PendingHitl> entry : pending.entrySet()) {
             PendingHitl request = entry.getValue();
             if (request.session().getId().equals(oldSessionId)) {
-                PendingHitl updated = new PendingHitl(
-                        request.kind(),
-                        newSession,
-                        request.requestId(),
-                        request.hitlId(),
-                        request.message(),
-                        request.command(),
-                        request.title(),
-                        request.toolKind(),
-                        request.options(),
-                        request.diff(),
-                        request.form(),
-                        request.createdAt(),
-                        request.teamId());
-                pending.put(entry.getKey(), updated);
+                pending.put(
+                        entry.getKey(),
+                        new PendingHitl(
+                                request.request(),
+                                newSession,
+                                request.requestId(),
+                                request.createdAt(),
+                                request.teamId()));
                 count++;
             }
         }

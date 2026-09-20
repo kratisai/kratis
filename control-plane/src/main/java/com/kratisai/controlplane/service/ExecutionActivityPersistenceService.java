@@ -7,6 +7,8 @@ import com.kratisai.controlplane.api.wsdto.ActivityHitl;
 import com.kratisai.controlplane.api.wsdto.ActivityKind;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
@@ -14,7 +16,6 @@ import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlRequiredEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
-import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -98,7 +99,7 @@ public class ExecutionActivityPersistenceService {
 
     @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
     public void onHitlRequired(SandboxExecutionHitlRequiredEvent event) {
-        if (event.kind() == HitlKind.APPROVAL) {
+        if (event.result().kind() == HitlKind.APPROVAL) {
             onApprovalRequired(event);
         } else {
             onQuestionRequired(event);
@@ -106,29 +107,16 @@ public class ExecutionActivityPersistenceService {
     }
 
     private void onApprovalRequired(SandboxExecutionHitlRequiredEvent event) {
-        ActivityHitl hitl = new ActivityHitl(
-                event.hitlId(),
-                event.kind(),
-                event.message(),
-                event.command(),
-                event.title(),
-                event.toolKind(),
-                event.options(),
-                event.diff(),
-                event.form(),
-                null,
-                null,
-                null,
-                null,
-                null);
+        ExecutionHitlRequiredResult request = event.result();
+        ActivityHitl hitl = ActivityHitl.from(request);
         // The tool activity the agent emits for the approved call is typed by
         // its tool kind; the approval row must share that type so both merge
         // into one activity instead of duplicating the actionId.
-        ActivityType type = activityTypeForToolKind(event.toolKind());
+        ActivityType type = activityTypeForToolKind(request.toolKind());
 
         repository
                 .findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        event.executionId(), event.hitlId(), type)
+                        request.executionId(), request.hitlId(), type)
                 .ifPresentOrElse(
                         existing -> {
                             ActivityDetail detail = detailOf(existing);
@@ -140,10 +128,10 @@ public class ExecutionActivityPersistenceService {
                             repository.save(existing);
                         },
                         () -> recordActivity(
-                                event.executionId(),
+                                request.executionId(),
                                 type,
-                                event.message() != null ? event.message() : event.command(),
-                                event.hitlId(),
+                                request.message() != null ? request.message() : request.command(),
+                                request.hitlId(),
                                 ActivityStatus.PENDING,
                                 new ActivityDetail(
                                         null, null, null, null, null, null, null, null, null, null, null, null, null,
@@ -151,35 +139,34 @@ public class ExecutionActivityPersistenceService {
     }
 
     private void onQuestionRequired(SandboxExecutionHitlRequiredEvent event) {
-        ActivityHitl hitl = new ActivityHitl(
-                event.hitlId(),
-                event.kind(),
-                event.message(),
+        ExecutionHitlRequiredResult request = event.result();
+        ActivityDetail detail = new ActivityDetail(
                 null,
                 null,
                 null,
                 null,
                 null,
-                event.form(),
                 null,
                 null,
                 null,
                 null,
-                null);
-        ActivityDetail detail =
-                new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null, null, null, hitl);
+                null,
+                null,
+                null,
+                null,
+                ActivityHitl.from(request));
         recordActivity(
-                event.executionId(),
+                request.executionId(),
                 ActivityType.ELICITATION,
-                event.message(),
-                event.hitlId(),
+                request.message(),
+                request.hitlId(),
                 ActivityStatus.PENDING,
                 detail);
     }
 
     @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
     public void onHitlResolved(SandboxExecutionHitlResolvedEvent event) {
-        if (event.kind() == HitlKind.APPROVAL) {
+        if (event.result().kind() == HitlKind.APPROVAL) {
             onApprovalResolved(event);
         } else {
             onQuestionResolved(event);
@@ -187,86 +174,40 @@ public class ExecutionActivityPersistenceService {
     }
 
     private void onApprovalResolved(SandboxExecutionHitlResolvedEvent event) {
-        Optional<SandboxExecutionActivity> row =
-                repository.findFirstByExecutionIdAndActionIdOrderBySequenceDesc(event.executionId(), event.hitlId());
+        ExecutionHitlResolvedResult resolution = event.result();
+        Optional<SandboxExecutionActivity> row = repository.findFirstByExecutionIdAndActionIdOrderBySequenceDesc(
+                resolution.executionId(), resolution.hitlId());
         if (row.isEmpty()) {
             row = repository.findFirstByExecutionIdAndStatusOrderBySequenceDesc(
-                    event.executionId(), ActivityStatus.PENDING);
+                    resolution.executionId(), ActivityStatus.PENDING);
         }
         row.ifPresent(activity -> {
-            boolean approved = event.response() == HitlResponse.APPROVED;
-            activity.setApproved(approved);
-            activity.setSelectedOptionId(event.optionId());
-            activity.setResolvedByUserId(event.resolvedByUserId());
-            activity.setResolvedAt(Instant.now());
+            boolean approved = resolution.response() == HitlResponse.APPROVED;
             activity.setStatus(approved ? ActivityStatus.IN_PROGRESS : ActivityStatus.FAILED);
             ActivityDetail detail = detailOf(activity);
             if (detail != null && detail.hitl() != null) {
-                ActivityHitl prev = detail.hitl();
-                ActivityHitl resolved = new ActivityHitl(
-                        prev.hitlId(),
-                        prev.kind(),
-                        prev.message(),
-                        prev.command(),
-                        prev.title(),
-                        prev.toolKind(),
-                        prev.options(),
-                        prev.diff(),
-                        prev.form(),
-                        event.response(),
-                        event.optionId(),
-                        event.content(),
-                        approved,
-                        event.response() == HitlResponse.CANCELLED);
-                activity.setDetail(toJson(detail.withHitl(resolved)));
+                activity.setDetail(toJson(detail.withHitl(detail.hitl().withResolution(resolution))));
             }
             repository.save(activity);
         });
     }
 
     private void onQuestionResolved(SandboxExecutionHitlResolvedEvent event) {
+        ExecutionHitlResolvedResult resolution = event.result();
         repository
-                .findFirstByExecutionIdAndActionIdOrderBySequenceDesc(event.executionId(), event.hitlId())
+                .findFirstByExecutionIdAndActionIdOrderBySequenceDesc(resolution.executionId(), resolution.hitlId())
                 .ifPresent(activity -> {
                     ActivityDetail detail = detailOf(activity);
-                    ActivityHitl pending = detail != null && detail.hitl() != null
-                            ? detail.hitl()
-                            : new ActivityHitl(
-                                    event.hitlId(),
-                                    event.kind(),
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    null);
-                    ActivityHitl answered = new ActivityHitl(
-                            pending.hitlId(),
-                            pending.kind() != null ? pending.kind() : event.kind(),
-                            pending.message() != null ? pending.message() : event.hitlId(),
-                            pending.command(),
-                            pending.title(),
-                            pending.toolKind(),
-                            pending.options(),
-                            pending.diff(),
-                            pending.form(),
-                            event.response(),
-                            event.optionId(),
-                            event.content(),
-                            event.response() == HitlResponse.APPROVED || event.response() == HitlResponse.ANSWERED,
-                            event.response() == HitlResponse.CANCELLED);
+                    ActivityHitl answered = detail != null && detail.hitl() != null
+                            ? detail.hitl().withResolution(resolution)
+                            : ActivityHitl.from(resolution);
                     ActivityDetail resolved = detail != null
                             ? detail.withHitl(answered)
                             : emptyDetail().withHitl(answered);
                     activity.setDetail(toJson(resolved));
                     activity.setStatus(
-                            event.response() == HitlResponse.ANSWERED || event.response() == HitlResponse.APPROVED
+                            resolution.response() == HitlResponse.ANSWERED
+                                            || resolution.response() == HitlResponse.APPROVED
                                     ? ActivityStatus.COMPLETED
                                     : ActivityStatus.FAILED);
                     repository.save(activity);

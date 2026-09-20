@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.service;
 
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlResult;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
@@ -27,13 +28,14 @@ public class EnvironmentRealtimeEventListeners {
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onSandboxExecutionHitlResolvedEvent(SandboxExecutionHitlResolvedEvent event) {
-        PendingHitlRegistry.PendingHitl pending = pendingHitlRegistry.remove(event.executionId());
+        ExecutionHitlResolvedResult result = event.result();
+        PendingHitlRegistry.PendingHitl pending = pendingHitlRegistry.remove(result.executionId());
         if (pending != null) {
-            replyToSidecar(pending, event.executionId(), event.response(), event.optionId(), event.content());
+            replyToSidecar(pending, result.executionId(), result.response(), result.optionId(), result.content());
         } else {
             logger.debug(
                     "No pending HITL request in registry for execution {} (already claimed or timed out)",
-                    event.executionId());
+                    result.executionId());
         }
     }
 

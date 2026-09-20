@@ -1,7 +1,4 @@
-import type {
-  CreateSandboxPermissionRuleRequest,
-  SandboxPermissionRuleDto,
-} from '@/types/permission-types'
+import type { CreateHitlRuleRequest, HitlRuleDto } from '@/types/hitl-rule-types'
 
 import { useAuthStore } from '@/store/auth-store'
 
@@ -9,25 +6,25 @@ import { ApiError } from './auth-api'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
-export async function createPermissionRule(
+export async function createHitlRule(
   teamId: string,
-  data: CreateSandboxPermissionRuleRequest,
-): Promise<SandboxPermissionRuleDto> {
-  const response = await fetchWithAuth(`/api/v1/teams/${teamId}/permissions`, {
+  data: CreateHitlRuleRequest,
+): Promise<HitlRuleDto> {
+  const response = await fetchWithAuth(`/api/v1/teams/${teamId}/hitl-rules`, {
     body: JSON.stringify(data),
     method: 'POST',
   })
   return response.json()
 }
 
-export async function deletePermissionRule(teamId: string, ruleId: string): Promise<void> {
-  await fetchWithAuth(`/api/v1/teams/${teamId}/permissions/${ruleId}`, {
+export async function deleteHitlRule(teamId: string, ruleId: string): Promise<void> {
+  await fetchWithAuth(`/api/v1/teams/${teamId}/hitl-rules/${ruleId}`, {
     method: 'DELETE',
   })
 }
 
-export async function listPermissionRules(teamId: string): Promise<SandboxPermissionRuleDto[]> {
-  const response = await fetchWithAuth(`/api/v1/teams/${teamId}/permissions`)
+export async function listHitlRules(teamId: string): Promise<HitlRuleDto[]> {
+  const response = await fetchWithAuth(`/api/v1/teams/${teamId}/hitl-rules`)
   return response.json()
 }
 

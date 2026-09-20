@@ -2,7 +2,6 @@ package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.api.wsdto.CanvasEvent;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.*;
-import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.IngestionEvent;
 import com.kratisai.controlplane.api.wsdto.IngestionStatusEvent;
 import com.kratisai.controlplane.model.IngestionBatch;
@@ -101,25 +100,13 @@ public class ClientRealtimeEventListeners {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onSandboxExecutionHitlRequiredEvent(SandboxExecutionHitlRequiredEvent event) {
         try {
-            dispatch.broadcastNotificationToTeam(
-                    event.teamId(),
-                    new ExecutionHitlRequiredResult(
-                            event.executionId(),
-                            event.hitlId(),
-                            event.kind(),
-                            event.message(),
-                            event.command(),
-                            event.title(),
-                            event.toolKind(),
-                            event.options(),
-                            event.diff(),
-                            event.form()));
+            dispatch.broadcastNotificationToTeam(event.teamId(), event.result());
         } catch (Exception e) {
             logger.error(
                     "Failed to publish HITL required event for execution {} (hitlId='{}', kind={})",
-                    event.executionId(),
-                    event.hitlId(),
-                    event.kind(),
+                    event.result().executionId(),
+                    event.result().hitlId(),
+                    event.result().kind(),
                     e);
         }
     }
@@ -127,22 +114,12 @@ public class ClientRealtimeEventListeners {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onSandboxExecutionHitlResolvedEvent(SandboxExecutionHitlResolvedEvent event) {
         try {
-            dispatch.broadcastNotificationToTeam(
-                    event.teamId(),
-                    new ExecutionHitlResolvedResult(
-                            event.executionId(),
-                            event.hitlId(),
-                            event.kind() != null ? event.kind() : HitlKind.APPROVAL,
-                            event.response(),
-                            event.optionId(),
-                            event.content(),
-                            event.resolvedByUserId(),
-                            event.resolvedByDisplayName()));
+            dispatch.broadcastNotificationToTeam(event.teamId(), event.result());
         } catch (Exception e) {
             logger.error(
                     "Failed to publish HITL resolved event for execution {} (hitlId='{}')",
-                    event.executionId(),
-                    event.hitlId(),
+                    event.result().executionId(),
+                    event.result().hitlId(),
                     e);
         }
     }

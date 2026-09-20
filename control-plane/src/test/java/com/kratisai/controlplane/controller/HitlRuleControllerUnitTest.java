@@ -14,12 +14,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.rest.GlobalExceptionHandler;
-import com.kratisai.controlplane.api.rest.SandboxPermissionController;
-import com.kratisai.controlplane.api.restdto.CreateSandboxPermissionRuleRequest;
-import com.kratisai.controlplane.api.restdto.SandboxPermissionRuleDto;
-import com.kratisai.controlplane.model.SandboxPermissionAction;
-import com.kratisai.controlplane.model.SandboxPermissionRuleType;
-import com.kratisai.controlplane.service.SandboxPermissionService;
+import com.kratisai.controlplane.api.rest.HitlRuleController;
+import com.kratisai.controlplane.api.restdto.CreateHitlRuleRequest;
+import com.kratisai.controlplane.api.restdto.HitlRuleDto;
+import com.kratisai.controlplane.model.HitlRuleAction;
+import com.kratisai.controlplane.model.HitlRuleType;
+import com.kratisai.controlplane.service.HitlRuleService;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -38,20 +38,20 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
-class SandboxPermissionControllerUnitTest {
+class HitlRuleControllerUnitTest {
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Mock
-    private SandboxPermissionService permissionService;
+    private HitlRuleService permissionService;
 
     private final UUID userId = UUID.randomUUID();
     private final UUID teamId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
-        SandboxPermissionController controller = new SandboxPermissionController(permissionService);
+        HitlRuleController controller = new HitlRuleController(permissionService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -71,25 +71,18 @@ class SandboxPermissionControllerUnitTest {
         when(permissionService.listRules(userId, teamId))
                 .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this team"));
 
-        mockMvc.perform(get("/api/v1/teams/{teamId}/permissions", teamId)).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/teams/{teamId}/hitl-rules", teamId)).andExpect(status().isForbidden());
     }
 
     @Test
     void listRules_member_returnsRules() throws Exception {
         UUID ruleId = UUID.randomUUID();
-        SandboxPermissionRuleDto dto = new SandboxPermissionRuleDto(
-                ruleId,
-                teamId,
-                "npm test",
-                SandboxPermissionRuleType.EXACT,
-                SandboxPermissionAction.ALLOW,
-                userId,
-                "Alice",
-                Instant.now());
+        HitlRuleDto dto = new HitlRuleDto(
+                ruleId, teamId, "npm test", HitlRuleType.EXACT, HitlRuleAction.ALLOW, userId, "Alice", Instant.now());
 
         when(permissionService.listRules(userId, teamId)).thenReturn(List.of(dto));
 
-        mockMvc.perform(get("/api/v1/teams/{teamId}/permissions", teamId))
+        mockMvc.perform(get("/api/v1/teams/{teamId}/hitl-rules", teamId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].id").value(ruleId.toString()))
@@ -101,13 +94,12 @@ class SandboxPermissionControllerUnitTest {
 
     @Test
     void createRule_nonMember_returns403() throws Exception {
-        CreateSandboxPermissionRuleRequest request = new CreateSandboxPermissionRuleRequest(
-                "npm test", SandboxPermissionRuleType.EXACT, SandboxPermissionAction.ALLOW);
+        CreateHitlRuleRequest request = new CreateHitlRuleRequest("npm test", HitlRuleType.EXACT, HitlRuleAction.ALLOW);
 
         when(permissionService.createRule(eq(userId), eq(teamId), any()))
                 .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this team"));
 
-        mockMvc.perform(post("/api/v1/teams/{teamId}/permissions", teamId)
+        mockMvc.perform(post("/api/v1/teams/{teamId}/hitl-rules", teamId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isForbidden());
@@ -115,13 +107,12 @@ class SandboxPermissionControllerUnitTest {
 
     @Test
     void createRule_duplicate_returns409() throws Exception {
-        CreateSandboxPermissionRuleRequest request = new CreateSandboxPermissionRuleRequest(
-                "npm test", SandboxPermissionRuleType.EXACT, SandboxPermissionAction.ALLOW);
+        CreateHitlRuleRequest request = new CreateHitlRuleRequest("npm test", HitlRuleType.EXACT, HitlRuleAction.ALLOW);
 
         when(permissionService.createRule(eq(userId), eq(teamId), any()))
                 .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "Rule already exists"));
 
-        mockMvc.perform(post("/api/v1/teams/{teamId}/permissions", teamId)
+        mockMvc.perform(post("/api/v1/teams/{teamId}/hitl-rules", teamId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isConflict());
@@ -129,23 +120,23 @@ class SandboxPermissionControllerUnitTest {
 
     @Test
     void createRule_success_returns201() throws Exception {
-        CreateSandboxPermissionRuleRequest request = new CreateSandboxPermissionRuleRequest(
-                "cargo build", SandboxPermissionRuleType.PREFIX_WILD, SandboxPermissionAction.DENY);
+        CreateHitlRuleRequest request =
+                new CreateHitlRuleRequest("cargo build", HitlRuleType.PREFIX_WILD, HitlRuleAction.DENY);
 
         UUID ruleId = UUID.randomUUID();
-        SandboxPermissionRuleDto responseDto = new SandboxPermissionRuleDto(
+        HitlRuleDto responseDto = new HitlRuleDto(
                 ruleId,
                 teamId,
                 "cargo build",
-                SandboxPermissionRuleType.PREFIX_WILD,
-                SandboxPermissionAction.DENY,
+                HitlRuleType.PREFIX_WILD,
+                HitlRuleAction.DENY,
                 userId,
                 "Bob",
                 Instant.now());
 
         when(permissionService.createRule(eq(userId), eq(teamId), any())).thenReturn(responseDto);
 
-        mockMvc.perform(post("/api/v1/teams/{teamId}/permissions", teamId)
+        mockMvc.perform(post("/api/v1/teams/{teamId}/hitl-rules", teamId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
@@ -163,18 +154,18 @@ class SandboxPermissionControllerUnitTest {
                 .when(permissionService)
                 .deleteRule(userId, teamId, ruleId);
 
-        mockMvc.perform(delete("/api/v1/teams/{teamId}/permissions/{ruleId}", teamId, ruleId))
+        mockMvc.perform(delete("/api/v1/teams/{teamId}/hitl-rules/{ruleId}", teamId, ruleId))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     void deleteRule_notFound_returns404() throws Exception {
         UUID ruleId = UUID.randomUUID();
-        doThrow(new ResponseStatusException(HttpStatus.NOT_FOUND, "Permission rule not found"))
+        doThrow(new ResponseStatusException(HttpStatus.NOT_FOUND, "HITL rule not found"))
                 .when(permissionService)
                 .deleteRule(userId, teamId, ruleId);
 
-        mockMvc.perform(delete("/api/v1/teams/{teamId}/permissions/{ruleId}", teamId, ruleId))
+        mockMvc.perform(delete("/api/v1/teams/{teamId}/hitl-rules/{ruleId}", teamId, ruleId))
                 .andExpect(status().isNotFound());
     }
 
@@ -183,7 +174,7 @@ class SandboxPermissionControllerUnitTest {
         UUID ruleId = UUID.randomUUID();
         doNothing().when(permissionService).deleteRule(userId, teamId, ruleId);
 
-        mockMvc.perform(delete("/api/v1/teams/{teamId}/permissions/{ruleId}", teamId, ruleId))
+        mockMvc.perform(delete("/api/v1/teams/{teamId}/hitl-rules/{ruleId}", teamId, ruleId))
                 .andExpect(status().isNoContent());
 
         verify(permissionService).deleteRule(userId, teamId, ruleId);

@@ -1,0 +1,21 @@
+databaseChangeLog:
+- changeSet:
+    id: 002-drop-writeonly-activity-columns
+    author: kratis
+    dbms: postgresql
+    changes:
+    - dropForeignKeyConstraint:
+        baseTableName: sandbox_execution_activities
+        constraintName: fk_sandbox_execution_activities_resolved_by
+    - dropColumn:
+        columnName: approved
+        tableName: sandbox_execution_activities
+    - dropColumn:
+        columnName: selected_option_id
+        tableName: sandbox_execution_activities
+    - dropColumn:
+        columnName: resolved_by
+        tableName: sandbox_execution_activities
+    - dropColumn:
+        columnName: resolved_at
+        tableName: sandbox_execution_activities

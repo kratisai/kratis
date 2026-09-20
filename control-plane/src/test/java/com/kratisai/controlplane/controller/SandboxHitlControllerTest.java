@@ -12,6 +12,7 @@ import com.kratisai.controlplane.api.restdto.*;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.ApprovalOptionKind;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
@@ -56,7 +57,7 @@ class SandboxHitlControllerTest {
     private ChatRepository chatRepository;
 
     @Autowired
-    private SandboxPermissionRuleRepository sandboxPermissionRuleRepository;
+    private HitlRuleRepository hitlRuleRepository;
 
     @Autowired
     private ExecutionEnvironmentService executionEnvironmentService;
@@ -148,17 +149,20 @@ class SandboxHitlControllerTest {
         pendingHitlRegistry.register(
                 executionId,
                 new PendingHitlRegistry.PendingHitl(
-                        HitlKind.APPROVAL,
+                        new ExecutionHitlRequiredResult(
+                                executionId,
+                                "tool-call-42",
+                                HitlKind.APPROVAL,
+                                "Remove",
+                                "rm -rf /",
+                                null,
+                                "Remove",
+                                "execute",
+                                OPTIONS,
+                                null,
+                                null),
                         Mockito.mock(WebSocketSession.class),
                         "req-1",
-                        "tool-call-42",
-                        "Remove",
-                        "rm -rf /",
-                        "Remove",
-                        "execute",
-                        OPTIONS,
-                        null,
-                        null,
                         Instant.now(),
                         teamId));
     }
@@ -167,17 +171,20 @@ class SandboxHitlControllerTest {
         pendingHitlRegistry.register(
                 executionId,
                 new PendingHitlRegistry.PendingHitl(
-                        HitlKind.QUESTION,
+                        new ExecutionHitlRequiredResult(
+                                executionId,
+                                "el-1",
+                                HitlKind.QUESTION,
+                                "Choose a deployment target",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                Map.of("type", "object")),
                         Mockito.mock(WebSocketSession.class),
                         "req-1",
-                        "el-1",
-                        "Choose a deployment target",
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        Map.of("type", "object"),
                         Instant.now(),
                         teamId));
     }
@@ -212,11 +219,7 @@ class SandboxHitlControllerTest {
         SandboxExecutionActivity row = activityRepository
                 .findFirstByExecutionIdAndActionIdOrderBySequenceDesc(executionId, "tool-call-42")
                 .orElseThrow();
-        assertThat(row.getApproved()).isTrue();
-        assertThat(row.getSelectedOptionId()).isEqualTo("allow-once");
         assertThat(row.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
-        assertThat(row.getResolvedByUserId()).isNotNull();
-        assertThat(row.getResolvedAt()).isNotNull();
     }
 
     @Test
@@ -236,16 +239,19 @@ class SandboxHitlControllerTest {
         SandboxExecutionActivity row = activityRepository
                 .findFirstByExecutionIdAndActionIdOrderBySequenceDesc(executionId, "tool-call-42")
                 .orElseThrow();
-        assertThat(row.getApproved()).isFalse();
-        assertThat(row.getSelectedOptionId()).isEqualTo("reject-once");
         assertThat(row.getStatus()).isEqualTo(ActivityStatus.FAILED);
     }
 
     @Test
-    void resolveApproval_withAllowAlways_createsRuleAndReturns204() throws Exception {
+    void resolveApproval_withRememberedRules_createsPrefixWildRulesAndReturns204() throws Exception {
         registerPendingApproval();
-        ResolveHitlRequest request =
-                new ResolveHitlRequest(executionId, "tool-call-42", HitlResponse.APPROVED, "allow-always", null);
+        ResolveHitlRequest request = new ResolveHitlRequest(
+                executionId,
+                "tool-call-42",
+                HitlResponse.APPROVED,
+                "allow-once",
+                null,
+                List.of(new CreateHitlRuleRequest("rm -rf", null, HitlRuleAction.ALLOW)));
 
         mockMvc.perform(post("/api/v1/hitl/resolve")
                         .header("Authorization", "Bearer " + userAuthToken)
@@ -253,14 +259,15 @@ class SandboxHitlControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isNoContent());
 
-        long ruleCount = sandboxPermissionRuleRepository.count();
+        long ruleCount = hitlRuleRepository.count();
         assertThat(ruleCount).isEqualTo(1);
-        SandboxPermissionRule saved = sandboxPermissionRuleRepository.findAll().getFirst();
-        assertThat(saved.getAction()).isEqualTo(SandboxPermissionAction.ALLOW);
+        HitlRule saved = hitlRuleRepository.findAll().getFirst();
+        assertThat(saved.getAction()).isEqualTo(HitlRuleAction.ALLOW);
+        assertThat(saved.getRuleType()).isEqualTo(HitlRuleType.PREFIX_WILD);
+        assertThat(saved.getCommandRoot()).isEqualTo("rm -rf");
         assertThat(saved.getCreatedBy()).isNotNull();
         assertThat(saved.getCreatedBy().getId()).isEqualTo(user.getId());
 
-        // Test idempotency: re-resolving with allow-always does not create duplicate
         registerPendingApproval();
         mockMvc.perform(post("/api/v1/hitl/resolve")
                         .header("Authorization", "Bearer " + userAuthToken)
@@ -268,31 +275,19 @@ class SandboxHitlControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isNoContent());
 
-        assertThat(sandboxPermissionRuleRepository.count()).isEqualTo(1);
+        assertThat(hitlRuleRepository.count()).isEqualTo(1);
     }
 
     @Test
-    void resolveApproval_allowAlways_withLongCommand_persistsRule() throws Exception {
-        String longCommand = "echo " + "a".repeat(400);
-        pendingHitlRegistry.register(
+    void resolveApproval_declinedWithDenyRule_persistsDenyRule() throws Exception {
+        registerPendingApproval();
+        ResolveHitlRequest request = new ResolveHitlRequest(
                 executionId,
-                new PendingHitlRegistry.PendingHitl(
-                        HitlKind.APPROVAL,
-                        Mockito.mock(WebSocketSession.class),
-                        "req-long",
-                        "tool-call-long",
-                        "Run long command",
-                        longCommand,
-                        "Run long command",
-                        "execute",
-                        OPTIONS,
-                        null,
-                        null,
-                        Instant.now(),
-                        teamId));
-
-        ResolveHitlRequest request =
-                new ResolveHitlRequest(executionId, "tool-call-long", HitlResponse.APPROVED, "allow-always", null);
+                "tool-call-42",
+                HitlResponse.DECLINED,
+                "reject-once",
+                null,
+                List.of(new CreateHitlRuleRequest("rm -rf", null, HitlRuleAction.DENY)));
 
         mockMvc.perform(post("/api/v1/hitl/resolve")
                         .header("Authorization", "Bearer " + userAuthToken)
@@ -300,9 +295,48 @@ class SandboxHitlControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isNoContent());
 
-        List<SandboxPermissionRule> rules = sandboxPermissionRuleRepository.findByTeamId(teamId);
+        List<HitlRule> rules = hitlRuleRepository.findByTeamId(teamId);
         assertThat(rules).hasSize(1);
-        assertThat(rules.getFirst().getCommandRoot()).isEqualTo(longCommand);
+        assertThat(rules.getFirst().getAction()).isEqualTo(HitlRuleAction.DENY);
+        assertThat(rules.getFirst().getRuleType()).isEqualTo(HitlRuleType.PREFIX_WILD);
+        assertThat(rules.getFirst().getCommandRoot()).isEqualTo("rm -rf");
+    }
+
+    @Test
+    void resolveApproval_rememberedRule_normalizesWhitespaceAndRejectsCancelled() throws Exception {
+        registerPendingApproval();
+        ResolveHitlRequest request = new ResolveHitlRequest(
+                executionId,
+                "tool-call-42",
+                HitlResponse.APPROVED,
+                "allow-once",
+                null,
+                List.of(new CreateHitlRuleRequest("  npm   run\ttest  ", null, null)));
+
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        List<HitlRule> rules = hitlRuleRepository.findByTeamId(teamId);
+        assertThat(rules).hasSize(1);
+        assertThat(rules.getFirst().getCommandRoot()).isEqualTo("npm run test");
+        assertThat(rules.getFirst().getAction()).isEqualTo(HitlRuleAction.ALLOW);
+
+        registerPendingApproval();
+        ResolveHitlRequest cancelled = new ResolveHitlRequest(
+                executionId,
+                "tool-call-42",
+                HitlResponse.CANCELLED,
+                null,
+                null,
+                List.of(new CreateHitlRuleRequest("git push", null, HitlRuleAction.ALLOW)));
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(cancelled)))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -403,8 +437,6 @@ class SandboxHitlControllerTest {
         SandboxExecutionActivity row = activityRepository
                 .findFirstByExecutionIdAndActionIdOrderBySequenceDesc(executionId, "tool-call-42")
                 .orElseThrow();
-        assertThat(row.getApproved()).isFalse();
-        assertThat(row.getSelectedOptionId()).isNull();
         assertThat(row.getStatus()).isEqualTo(ActivityStatus.FAILED);
     }
 

@@ -14,6 +14,20 @@
     "kind": { "type": "string", "enum": ["approval", "question"] },
     "message": { "type": "string", "description": "The question or instruction shown to the user." },
     "command": { "type": "string", "description": "The command to authorize (kind=approval)." },
+    "commandSegments": {
+      "type": "array",
+      "description": "Approvable units of the request: root commands of a composite command, or the tool kind for non-command requests (kind=approval).",
+      "items": {
+        "type": "object",
+        "required": ["text", "suggestedRoot"],
+        "properties": {
+          "text": { "type": "string", "description": "The segment text as written." },
+          "suggestedRoot": { "type": "string", "description": "Derived rule candidate for a remembered rule; empty when not derivable." },
+          "ruleType": { "type": "string", "enum": ["EXACT", "PREFIX_WILD", "TOOL_KIND"], "description": "Rule type a remembered choice for this segment persists as; absent on segments stored before rule types were carried." }
+        },
+        "additionalProperties": false
+      }
+    },
     "title": { "type": "string" },
     "toolKind": { "type": "string", "description": "Tool kind of the requesting action (kind=approval)." },
     "options": {

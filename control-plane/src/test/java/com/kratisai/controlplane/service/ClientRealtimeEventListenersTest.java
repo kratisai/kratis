@@ -175,16 +175,18 @@ class ClientRealtimeEventListenersTest {
         UUID executionId = UUID.randomUUID();
         listeners.onSandboxExecutionHitlRequiredEvent(new SandboxExecutionHitlRequiredEvent(
                 teamId,
-                executionId,
-                "tool-call-42",
-                "Remove",
-                HitlKind.APPROVAL,
-                "rm -rf /",
-                "Remove",
-                "execute",
-                null,
-                null,
-                null));
+                new ExecutionHitlRequiredResult(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        "Remove",
+                        "rm -rf /",
+                        null,
+                        "Remove",
+                        "execute",
+                        null,
+                        null,
+                        null)));
 
         ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
         verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
@@ -201,14 +203,15 @@ class ClientRealtimeEventListenersTest {
         UUID userId = UUID.randomUUID();
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 teamId,
-                executionId,
-                "tool-call-42",
-                HitlKind.APPROVAL,
-                HitlResponse.APPROVED,
-                "allow-once",
-                null,
-                userId,
-                "Alice"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        HitlResponse.APPROVED,
+                        "allow-once",
+                        null,
+                        userId,
+                        "Alice")));
 
         ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
         verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
@@ -224,16 +227,18 @@ class ClientRealtimeEventListenersTest {
         UUID executionId = UUID.randomUUID();
         listeners.onSandboxExecutionHitlRequiredEvent(new SandboxExecutionHitlRequiredEvent(
                 teamId,
-                executionId,
-                "el-1",
-                "Choose a target",
-                HitlKind.QUESTION,
-                null,
-                null,
-                null,
-                null,
-                null,
-                java.util.Map.of("type", "object")));
+                new ExecutionHitlRequiredResult(
+                        executionId,
+                        "el-1",
+                        HitlKind.QUESTION,
+                        "Choose a target",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        java.util.Map.of("type", "object"))));
 
         ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
         verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
@@ -251,14 +256,15 @@ class ClientRealtimeEventListenersTest {
         UUID userId = UUID.randomUUID();
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 teamId,
-                executionId,
-                "el-1",
-                HitlKind.QUESTION,
-                HitlResponse.ANSWERED,
-                null,
-                java.util.Map.of("target", "staging"),
-                userId,
-                "Alice"));
+                new ExecutionHitlResolvedResult(
+                        executionId,
+                        "el-1",
+                        HitlKind.QUESTION,
+                        HitlResponse.ANSWERED,
+                        null,
+                        java.util.Map.of("target", "staging"),
+                        userId,
+                        "Alice")));
 
         ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
         verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());

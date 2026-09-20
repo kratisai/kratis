@@ -105,7 +105,9 @@ class GooseExecutionRealTest extends AbstractAgentExecutionRealTest {
 
     @Override
     protected int getExpectedHitlRequestCount() {
-        return 1;
+        // fs/write_text_file for the task script (tool kind "write") + the
+        // chmod/bash execute request.
+        return 2;
     }
 
     @Override

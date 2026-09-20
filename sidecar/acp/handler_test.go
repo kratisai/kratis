@@ -1,11 +1,14 @@
 package acp
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -1893,6 +1896,8 @@ type capturedActivity struct {
 type capturedPermissionRequest struct {
 	command  string
 	actionID string
+	kind     string
+	diff     *ActivityDiff
 	options  []PermissionOption
 }
 
@@ -1914,6 +1919,8 @@ func (m *mockEventSink) RequestPermission(req PermissionRequest) (string, error)
 	m.permRequests = append(m.permRequests, capturedPermissionRequest{
 		command:  req.Command,
 		actionID: req.ActionID,
+		kind:     req.Kind,
+		diff:     req.Diff,
 		options:  req.Options,
 	})
 	if m.approveOnce {
@@ -1938,4 +1945,132 @@ func (m *mockEventSink) CreateElicitation(_ ElicitationRequest) (ElicitationResu
 		return m.elicResult, nil
 	}
 	return ElicitationResult{Action: "cancel"}, nil
+}
+
+func fsWriteTestTransport(t *testing.T) (*AcpTransport, chan string) {
+	t.Helper()
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = stdinW.Close()
+		_ = stdinR.Close()
+	})
+	responses := make(chan string, 4)
+	go func() {
+		scanner := bufio.NewScanner(stdinR)
+		for scanner.Scan() {
+			responses <- scanner.Text()
+		}
+	}()
+	return &AcpTransport{stdin: stdinW}, responses
+}
+
+func runFsWrite(t *testing.T, h *Handler, transport *AcpTransport, params map[string]interface{}) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		h.HandleFsWriteTextFile(transport, params, float64(7))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for HandleFsWriteTextFile")
+	}
+}
+
+func TestHandleFsWriteTextFile_ApprovedWritesFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.txt")
+	if err := os.WriteFile(path, []byte("old content"), 0600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	sink := &mockEventSink{approveOnce: true, approveResult: "allow"}
+	h := NewHandler(sink, nil, "")
+	transport, responses := fsWriteTestTransport(t)
+
+	runFsWrite(t, h, transport, map[string]interface{}{"path": path, "content": "new content"})
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected file written: %v", err)
+	}
+	if string(data) != "new content" {
+		t.Errorf("expected new content, got %q", string(data))
+	}
+
+	if len(sink.permRequests) != 1 {
+		t.Fatalf("expected one permission request, got %+v", sink.permRequests)
+	}
+	req := sink.permRequests[0]
+	if req.kind != "write" {
+		t.Errorf("expected aliased tool kind 'write', got %q", req.kind)
+	}
+	if req.command != path || req.actionID != "" {
+		t.Errorf("expected command=%q actionID='', got %+v", path, req)
+	}
+	if req.diff == nil || req.diff.OldText != "old content" || req.diff.NewText != "new content" {
+		t.Errorf("expected diff with old/new content, got %+v", req.diff)
+	}
+	if len(req.options) != 2 {
+		t.Errorf("expected synthesised option pair, got %+v", req.options)
+	}
+
+	select {
+	case resp := <-responses:
+		if !strings.Contains(resp, `"result"`) || strings.Contains(resp, `"error"`) {
+			t.Errorf("expected success response, got %s", resp)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no response written")
+	}
+}
+
+func TestHandleFsWriteTextFile_DeniedDoesNotWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "denied.txt")
+
+	sink := &mockEventSink{approveOnce: true, approveResult: ""}
+	h := NewHandler(sink, nil, "")
+	transport, responses := fsWriteTestTransport(t)
+
+	runFsWrite(t, h, transport, map[string]interface{}{"path": path, "content": "evil"})
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("expected no file written, stat err=%v", err)
+	}
+	select {
+	case resp := <-responses:
+		if !strings.Contains(resp, "Write denied") || !strings.Contains(resp, "-32000") {
+			t.Errorf("expected denied error response, got %s", resp)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no response written")
+	}
+}
+
+func TestHandleFsWriteTextFile_CancelledReturnsCancelledError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cancelled.txt")
+
+	sink := &mockEventSink{approveOnce: true, approveErr: errors.New("permission request cancelled")}
+	h := NewHandler(sink, nil, "")
+	transport, responses := fsWriteTestTransport(t)
+
+	runFsWrite(t, h, transport, map[string]interface{}{"path": path, "content": "x"})
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("expected no file written, stat err=%v", err)
+	}
+	select {
+	case resp := <-responses:
+		if !strings.Contains(resp, "-32800") {
+			t.Errorf("expected cancelled error response, got %s", resp)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no response written")
+	}
 }

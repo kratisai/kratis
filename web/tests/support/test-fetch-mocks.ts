@@ -41,7 +41,7 @@ export function mockAffectedRepositories(
 
 export function mockCancelPermission(shouldFail = false) {
   addFetchHandler((url, options) => {
-    if (url.includes('/api/v1/permissions/cancel') && options.method === 'POST') {
+    if (url.includes('/api/v1/hitl-rules/cancel') && options.method === 'POST') {
       if (shouldFail) return jsonResponse({ message: 'Not found' }, 404)
       if (!hasBearerToken(options.headers)) return jsonResponse({ message: 'Forbidden' }, 403)
       return new Response(null, { status: 204 })
@@ -530,7 +530,7 @@ export function mockRegister() {
 
 export function mockResolvePermission(shouldFail = false) {
   addFetchHandler((url, options) => {
-    if (url.includes('/api/v1/permissions/resolve') && options.method === 'POST') {
+    if (url.includes('/api/v1/hitl-rules/resolve') && options.method === 'POST') {
       if (shouldFail) return jsonResponse({ message: 'Not found' }, 404)
       if (!hasBearerToken(options.headers)) return jsonResponse({ message: 'Forbidden' }, 403)
       return new Response(null, { status: 204 })

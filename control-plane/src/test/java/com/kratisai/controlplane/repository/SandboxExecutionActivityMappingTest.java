@@ -44,10 +44,8 @@ class SandboxExecutionActivityMappingTest {
     @Autowired
     private SandboxExecutionActivityRepository activityRepository;
 
-    private TestDataFactory.TestContext context;
-
     private SandboxExecution createExecution() {
-        context = testDataFactory.createDefaultContext();
+        TestDataFactory.TestContext context = testDataFactory.createDefaultContext();
 
         ExecutionEnvironment env = new ExecutionEnvironment();
         env.setTeam(context.team());
@@ -83,9 +81,6 @@ class SandboxExecutionActivityMappingTest {
                 ActivityStatus.IN_PROGRESS,
                 "npm run build",
                 "{\"kind\":\"command\"}");
-        activity.setApproved(true);
-        activity.setResolvedByUserId(context.user().getId());
-        activity.setResolvedAt(Instant.now());
         activityRepository.save(activity);
         entityManager.flush();
 
@@ -98,9 +93,6 @@ class SandboxExecutionActivityMappingTest {
         assertThat(found.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
         assertThat(found.getDescription()).isEqualTo("npm run build");
         assertThat(found.getDetail()).contains("\"kind\":\"command\"");
-        assertThat(found.getApproved()).isTrue();
-        assertThat(found.getResolvedByUserId()).isNotNull();
-        assertThat(found.getResolvedAt()).isNotNull();
         assertThat(found.getCreatedAt()).isNotNull();
         assertThat(found.getUpdatedAt()).isNotNull();
     }
@@ -329,9 +321,6 @@ class SandboxExecutionActivityMappingTest {
         activity.setStatus(ActivityStatus.FAILED);
         activity.setDescription("search");
         activity.setDetail("{\"kind\":\"search\"}");
-        activity.setApproved(false);
-        activity.setResolvedByUserId(UUID.randomUUID());
-        activity.setResolvedAt(now);
         activity.setCreatedAt(now);
         activity.setUpdatedAt(now);
 
@@ -343,9 +332,6 @@ class SandboxExecutionActivityMappingTest {
         assertThat(activity.getStatus()).isEqualTo(ActivityStatus.FAILED);
         assertThat(activity.getDescription()).isEqualTo("search");
         assertThat(activity.getDetail()).isEqualTo("{\"kind\":\"search\"}");
-        assertThat(activity.getApproved()).isFalse();
-        assertThat(activity.getResolvedByUserId()).isNotNull();
-        assertThat(activity.getResolvedAt()).isEqualTo(now);
         assertThat(activity.getCreatedAt()).isEqualTo(now);
         assertThat(activity.getUpdatedAt()).isEqualTo(now);
     }
