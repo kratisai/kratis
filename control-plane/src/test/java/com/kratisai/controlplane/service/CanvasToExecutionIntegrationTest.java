@@ -12,10 +12,8 @@ import com.kratisai.controlplane.api.restdto.SandboxExecutionDto;
 import com.kratisai.controlplane.model.AgentHarness;
 import com.kratisai.controlplane.model.CanvasType;
 import com.kratisai.controlplane.model.ChatEntity;
-import com.kratisai.controlplane.model.CredentialType;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ModelProvider;
-import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.User;
@@ -86,7 +84,7 @@ class CanvasToExecutionIntegrationTest {
 
         // Create execution request with canvasId
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null, environment.getId(), null, AgentHarness.OPENCODE, "plan-doc", modelProvider.getId(), "gpt-4o");
+                null, environment.getId(), AgentHarness.OPENCODE, "plan-doc", modelProvider.getId(), "gpt-4o");
 
         SandboxExecutionDto execution = sandboxExecutionService.createExecution(user.getId(), chat.getId(), request);
 
@@ -107,7 +105,7 @@ class CanvasToExecutionIntegrationTest {
         createSpecCanvas("plan-doc-2", planContent);
 
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null, environment.getId(), null, AgentHarness.OPENCODE, "plan-doc-2", modelProvider.getId(), "gpt-4o");
+                null, environment.getId(), AgentHarness.OPENCODE, "plan-doc-2", modelProvider.getId(), "gpt-4o");
 
         SandboxExecutionDto execution = sandboxExecutionService.createExecution(user.getId(), chat.getId(), request);
 
@@ -118,7 +116,7 @@ class CanvasToExecutionIntegrationTest {
     @Test
     void shouldThrowWhenCanvasIdIsNull() {
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null, environment.getId(), null, AgentHarness.OPENCODE, null, modelProvider.getId(), "gpt-4o");
+                null, environment.getId(), AgentHarness.OPENCODE, null, modelProvider.getId(), "gpt-4o");
 
         assertThatThrownBy(() -> sandboxExecutionService.createExecution(user.getId(), chat.getId(), request))
                 .isInstanceOf(ResponseStatusException.class)
@@ -128,7 +126,7 @@ class CanvasToExecutionIntegrationTest {
     @Test
     void shouldThrowWhenCanvasIdIsBlank() {
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null, environment.getId(), null, AgentHarness.OPENCODE, "  ", modelProvider.getId(), "gpt-4o");
+                null, environment.getId(), AgentHarness.OPENCODE, "  ", modelProvider.getId(), "gpt-4o");
 
         assertThatThrownBy(() -> sandboxExecutionService.createExecution(user.getId(), chat.getId(), request))
                 .isInstanceOf(ResponseStatusException.class)
@@ -140,7 +138,6 @@ class CanvasToExecutionIntegrationTest {
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
                 null,
                 environment.getId(),
-                null,
                 AgentHarness.OPENCODE,
                 "nonexistent-canvas",
                 modelProvider.getId(),
@@ -157,7 +154,7 @@ class CanvasToExecutionIntegrationTest {
         createSpecCanvas("plan-mp", planContent);
 
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null, environment.getId(), null, AgentHarness.OPENCODE, "plan-mp", modelProvider.getId(), "gpt-4o");
+                null, environment.getId(), AgentHarness.OPENCODE, "plan-mp", modelProvider.getId(), "gpt-4o");
 
         SandboxExecutionDto dto = sandboxExecutionService.createExecution(user.getId(), chat.getId(), request);
 
@@ -171,7 +168,7 @@ class CanvasToExecutionIntegrationTest {
     @Test
     void createExecution_withNullModelProvider_throwsBadRequest() {
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null, environment.getId(), null, AgentHarness.OPENCODE, "plan-nm", null, null);
+                null, environment.getId(), AgentHarness.OPENCODE, "plan-nm", null, null);
 
         assertThatThrownBy(() -> sandboxExecutionService.createExecution(user.getId(), chat.getId(), request))
                 .isInstanceOf(ResponseStatusException.class)
@@ -181,7 +178,7 @@ class CanvasToExecutionIntegrationTest {
     @Test
     void createExecution_withNullModelName_throwsBadRequest() {
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null, environment.getId(), null, AgentHarness.OPENCODE, "plan-mn", modelProvider.getId(), null);
+                null, environment.getId(), AgentHarness.OPENCODE, "plan-mn", modelProvider.getId(), null);
 
         assertThatThrownBy(() -> sandboxExecutionService.createExecution(user.getId(), chat.getId(), request))
                 .isInstanceOf(ResponseStatusException.class)
@@ -194,7 +191,7 @@ class CanvasToExecutionIntegrationTest {
         createSpecCanvas("plan-bp", planContent);
 
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null, environment.getId(), null, AgentHarness.OPENCODE, "plan-bp", UUID.randomUUID(), "gpt-4o");
+                null, environment.getId(), AgentHarness.OPENCODE, "plan-bp", UUID.randomUUID(), "gpt-4o");
 
         assertThatThrownBy(() -> sandboxExecutionService.createExecution(user.getId(), chat.getId(), request))
                 .isInstanceOf(ResponseStatusException.class)
@@ -206,7 +203,7 @@ class CanvasToExecutionIntegrationTest {
         createSpecCanvas("plan-repo", "# Plan\nRepo work");
 
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null, environment.getId(), null, AgentHarness.OPENCODE, "plan-repo", modelProvider.getId(), "gpt-4o");
+                null, environment.getId(), AgentHarness.OPENCODE, "plan-repo", modelProvider.getId(), "gpt-4o");
 
         SandboxExecutionDto dto = sandboxExecutionService.createExecution(user.getId(), chat.getId(), request);
 
@@ -222,13 +219,7 @@ class CanvasToExecutionIntegrationTest {
                 chat.getId(), "plan-doc-only", "Plain Doc", "# Notes", CanvasType.DOCUMENT, null, null);
 
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null,
-                environment.getId(),
-                null,
-                AgentHarness.OPENCODE,
-                "plan-doc-only",
-                modelProvider.getId(),
-                "gpt-4o");
+                null, environment.getId(), AgentHarness.OPENCODE, "plan-doc-only", modelProvider.getId(), "gpt-4o");
 
         assertThatThrownBy(() -> sandboxExecutionService.createExecution(user.getId(), chat.getId(), request))
                 .isInstanceOf(ResponseStatusException.class)
@@ -236,64 +227,17 @@ class CanvasToExecutionIntegrationTest {
     }
 
     @Test
-    void createExecution_withNewRepoCanvasWithoutCredentialId_rejected() {
+    void createExecution_withNewRepoCanvas_snapshotsNameForPublishTimeSelection() {
         canvasService.createCanvas(
                 chat.getId(), "plan-new-nocred", "New Repo Plan", "# Plan", CanvasType.SPEC, null, "fresh-repo");
 
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null,
-                environment.getId(),
-                null,
-                AgentHarness.OPENCODE,
-                "plan-new-nocred",
-                modelProvider.getId(),
-                "gpt-4o");
-
-        assertThatThrownBy(() -> sandboxExecutionService.createExecution(user.getId(), chat.getId(), request))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("credentialId is required");
-    }
-
-    @Test
-    void createExecution_withNewRepoCanvasAndCredential_snapshotsFields() {
-        RepoCredential credential =
-                testDataFactory.createCredential(chat.getTeam(), "PAT", CredentialType.PAT, "pat-secret");
-        canvasService.createCanvas(
-                chat.getId(), "plan-new", "New Repo Plan", "# Plan", CanvasType.SPEC, null, "fresh-repo");
-
-        CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null,
-                environment.getId(),
-                credential.getId(),
-                AgentHarness.OPENCODE,
-                "plan-new",
-                modelProvider.getId(),
-                "gpt-4o");
+                null, environment.getId(), AgentHarness.OPENCODE, "plan-new-nocred", modelProvider.getId(), "gpt-4o");
 
         SandboxExecutionDto dto = sandboxExecutionService.createExecution(user.getId(), chat.getId(), request);
 
         SandboxExecution saved = sandboxExecutionRepository.findById(dto.id()).orElseThrow();
-        assertThat(saved.getRepository()).isNull();
         assertThat(saved.getNewRepoName()).isEqualTo("fresh-repo");
-        assertThat(saved.getNewRepoCredential().getId()).isEqualTo(credential.getId());
-    }
-
-    @Test
-    void createExecution_withNewRepoCanvasAndUnknownCredentialId_throwsNotFound() {
-        canvasService.createCanvas(
-                chat.getId(), "plan-new-badcred", "New Repo Plan", "# Plan", CanvasType.SPEC, null, "fresh-repo");
-
-        CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                null,
-                environment.getId(),
-                UUID.randomUUID(),
-                AgentHarness.OPENCODE,
-                "plan-new-badcred",
-                modelProvider.getId(),
-                "gpt-4o");
-
-        assertThatThrownBy(() -> sandboxExecutionService.createExecution(user.getId(), chat.getId(), request))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("Credential not found");
+        assertThat(saved.getNewRepoCredential()).isNull();
     }
 }

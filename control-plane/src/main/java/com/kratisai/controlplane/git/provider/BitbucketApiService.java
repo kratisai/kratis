@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 
 @Service
 public class BitbucketApiService {
@@ -168,7 +169,15 @@ public class BitbucketApiService {
 
     public Optional<RemoteRepositoryDto> findRepository(String workspace, String repoSlug, String token) {
         requireToken(token);
-        ResponseEntity<String> response = bitbucketApiClient.getRepository(workspace, repoSlug, bearer(token));
+        ResponseEntity<String> response;
+        try {
+            response = bitbucketApiClient.getRepository(workspace, repoSlug, bearer(token));
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw e;
+        }
         if (response.getStatusCode().value() == 404) {
             return Optional.empty();
         }

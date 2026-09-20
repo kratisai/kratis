@@ -16,7 +16,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.client.HttpClientErrorException;
 
 @ExtendWith(MockitoExtension.class)
 class BitbucketApiServiceTest {
@@ -165,6 +168,25 @@ class BitbucketApiServiceTest {
                 .thenReturn(ResponseEntity.status(404).body("{}"));
 
         assertThat(service.findRepository("myteam", "repo", "tok")).isEmpty();
+    }
+
+    @Test
+    void findRepository_thrownNotFound_returnsEmpty() {
+        when(bitbucketApiClient.getRepository(eq("myteam"), eq("repo"), eq("Bearer tok")))
+                .thenThrow(HttpClientErrorException.create(
+                        HttpStatus.NOT_FOUND, "Not Found", HttpHeaders.EMPTY, new byte[0], null));
+
+        assertThat(service.findRepository("myteam", "repo", "tok")).isEmpty();
+    }
+
+    @Test
+    void findRepository_thrownForbidden_propagates() {
+        when(bitbucketApiClient.getRepository(eq("myteam"), eq("repo"), eq("Bearer tok")))
+                .thenThrow(HttpClientErrorException.create(
+                        HttpStatus.FORBIDDEN, "Forbidden", HttpHeaders.EMPTY, new byte[0], null));
+
+        assertThatThrownBy(() -> service.findRepository("myteam", "repo", "tok"))
+                .isInstanceOf(HttpClientErrorException.Forbidden.class);
     }
 
     @Test

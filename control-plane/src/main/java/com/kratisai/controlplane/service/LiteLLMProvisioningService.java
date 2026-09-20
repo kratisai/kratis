@@ -298,9 +298,17 @@ public class LiteLLMProvisioningService {
             apiBase = apiBase + "/v1";
         }
 
+        ModelCostEntry cost = resolveModelCost(provider, modelName, costLookup);
+        // LiteLLM ignores model_info costs for known models; litellm_params wins.
         LiteLLMParams params = new LiteLLMParams(
-                modelName, provider.getApiKey(), litellmProvider, apiBase, providerModel.getBaseModel());
-        ModelInfo modelInfo = buildModelInfo(provider, modelName, kind, costLookup);
+                modelName,
+                provider.getApiKey(),
+                litellmProvider,
+                apiBase,
+                providerModel.getBaseModel(),
+                cost == null ? null : cost.inputCostPerToken(),
+                cost == null ? null : cost.outputCostPerToken());
+        ModelInfo modelInfo = buildModelInfo(kind, cost);
         AddModelRequest request = new AddModelRequest(litellmName, params, modelInfo);
 
         deleteExistingDeployments(litellmName);
@@ -360,10 +368,8 @@ public class LiteLLMProvisioningService {
         return "kratis-" + scope.name().toLowerCase() + "-" + ownerId;
     }
 
-    private ModelInfo buildModelInfo(
-            ModelProvider provider, String modelName, ModelKind kind, ModelCostLookup costLookup) {
+    private ModelInfo buildModelInfo(ModelKind kind, @Nullable ModelCostEntry entry) {
         String mode = kind == ModelKind.EMBEDDING ? "embedding" : "chat";
-        ModelCostEntry entry = resolveModelCost(provider, modelName, costLookup);
         if (entry == null || (entry.inputCostPerToken() == null && entry.outputCostPerToken() == null)) {
             return new ModelInfo(mode);
         }

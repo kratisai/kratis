@@ -81,9 +81,6 @@ class SandboxExecutionServiceTest {
     private EnvironmentSessionRegistry sessionRegistry;
 
     @Mock
-    private RepoCredentialRepository repoCredentialRepository;
-
-    @Mock
     private GitCredentialResolver credentialResolver;
 
     @Mock
@@ -148,7 +145,6 @@ class SandboxExecutionServiceTest {
                 teamMemberRepository,
                 eventPublisher,
                 sessionRegistry,
-                repoCredentialRepository,
                 canvasService,
                 modelProviderRepository,
                 sandboxProvisioningService,
@@ -979,7 +975,6 @@ class SandboxExecutionServiceTest {
                 teamMemberRepository,
                 eventPublisher,
                 sessionRegistry,
-                repoCredentialRepository,
                 canvasService,
                 modelProviderRepository,
                 sandboxProvisioningService,
@@ -1233,7 +1228,6 @@ class SandboxExecutionServiceTest {
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
                 null,
                 ENVIRONMENT_ID,
-                null,
                 AgentHarness.OPENCODE,
                 "plan-doc",
                 createTestModelProvider().getId(),
@@ -1285,7 +1279,6 @@ class SandboxExecutionServiceTest {
 
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
                 envProvider.getId(),
-                null,
                 null,
                 AgentHarness.OPENCODE,
                 "plan-doc",

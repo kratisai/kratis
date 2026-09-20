@@ -16,7 +16,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.client.HttpClientErrorException;
 
 class GitHubApiServiceTest {
 
@@ -168,6 +171,28 @@ class GitHubApiServiceTest {
                 .thenReturn(ResponseEntity.status(404).body("{}"));
 
         assertThat(gitHubApiService.findRepository("fake-user", "repo", "tok")).isEmpty();
+    }
+
+    @Test
+    void findRepository_thrownNotFound_returnsEmpty() {
+        Mockito.when(gitHubApiClient.getRepository(
+                        Mockito.eq("fake-user"), Mockito.eq("repo"), Mockito.eq("Bearer tok")))
+                .thenThrow(HttpClientErrorException.create(
+                        HttpStatus.NOT_FOUND, "Not Found", HttpHeaders.EMPTY, new byte[0], null));
+
+        assertThat(gitHubApiService.findRepository("fake-user", "repo", "tok")).isEmpty();
+    }
+
+    @Test
+    void findRepository_thrownForbidden_propagates() {
+        Mockito.when(gitHubApiClient.getRepository(
+                        Mockito.eq("fake-user"), Mockito.eq("repo"), Mockito.eq("Bearer tok")))
+                .thenThrow(HttpClientErrorException.create(
+                        HttpStatus.FORBIDDEN, "Forbidden", HttpHeaders.EMPTY, new byte[0], null));
+
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(
+                        () -> gitHubApiService.findRepository("fake-user", "repo", "tok")))
+                .isInstanceOf(HttpClientErrorException.Forbidden.class);
     }
 
     @Test

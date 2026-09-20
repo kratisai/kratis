@@ -408,20 +408,22 @@ func mergeBaseWithHead(workspace string, ref string) (string, error) {
 	return sha, nil
 }
 
-// resolveDiffBase resolves the commit diff RPCs compare the workspace against.
-// A provisioned new repository has no origin remote and therefore no target
-// branch; its stable base is the root commit, which keeps agent commits in the
-// diff. Cloned repositories diff against the merge-base of the target branch
-// and HEAD.
+// resolveDiffBase uses the merge-base of origin/<branch> and HEAD, or the root commit
+// when the origin remote or branch is absent so unpublished commits stay in the diff.
 func resolveDiffBase(workspace, baseBranch string) (string, error) {
 	if !hasOriginRemote(workspace) {
 		return rootCommit(workspace)
 	}
-	baseRef, err := resolveBaseRef(workspace, baseBranch)
-	if err != nil {
-		return "", err
+	branch := strings.TrimSpace(baseBranch)
+	if branch == "" {
+		return "", fmt.Errorf("base branch is required")
 	}
-	return mergeBaseWithHead(workspace, baseRef)
+	checkRemote := exec.Command("git", "rev-parse", "--verify", "origin/"+branch) //nolint:gosec
+	checkRemote.Dir = workspace
+	if checkRemote.Run() == nil {
+		return mergeBaseWithHead(workspace, "origin/"+branch)
+	}
+	return rootCommit(workspace)
 }
 
 func hasOriginRemote(workspace string) bool {

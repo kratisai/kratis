@@ -31,10 +31,10 @@ Your provider key stays in the control plane. Kratis registers the models with L
 |------|-----------|----------------|
 | Public repository | None | Git URL, display name, default branch |
 | Git with SSH key | Kratis generates a 4096-bit RSA key pair; the private key never leaves the server | Add the displayed public key to the host as a deploy key with write access. No PR API: publish pushes a branch, then download the patch or open the PR manually |
-| GitHub | GitHub App (recommended) or fine-grained PAT | App: Installation ID. PAT: Contents Read & write, Metadata Read-only, Pull requests Read & write |
-| GitLab | Group or personal access token, or service account token | `api` + `write_repository`; numeric Group ID for group scope; optional self-hosted URL |
-| Bitbucket | App password or workspace access token | Repositories Read & write, Pull requests Read & write; optional workspace scope |
-| Azure DevOps | PAT | Code Read & write; organization required, project optional; server base URL for self-hosted |
+| GitHub | GitHub App (recommended) or fine-grained PAT | App: Installation ID. PAT: Contents Read & write, Metadata Read-only, Pull requests Read & write. Add Administration Read & write to create new repositories |
+| GitLab | Group or personal access token, or service account token | `api` + `write_repository`; numeric Group ID for group scope; Developer role in the group to create new projects; optional self-hosted URL |
+| Bitbucket | App password, API token, or workspace access token | Repositories Read & write, Pull requests Read & write. Add Repositories Admin to create new repositories; optional workspace scope |
+| Azure DevOps | PAT | Code Read & write. Add Code Read, write, & manage to create new repositories; organization required, project required for repository creation; server base URL for self-hosted |
 
 The GitHub App choice only appears when `KRATIS_GITHUB_APP_ID`, `KRATIS_GITHUB_APP_NAME`, and `KRATIS_GITHUB_PRIVATE_KEY_PATH` are all set in e.g. the compose `.env` file. Otherwise GitHub falls back to PAT.
 
@@ -42,12 +42,12 @@ The GitHub App choice only appears when `KRATIS_GITHUB_APP_ID`, `KRATIS_GITHUB_A
 
 Create your own personal GitHub app under GitHub → Settings → Developer settings → GitHub Apps:
 
-1. Permissions: Contents Read & write, Pull requests Read & write, Metadata Read-only. No webhook needed.
+1. Permissions: Contents Read & write, Pull requests Read & write, Metadata Read-only, and Administration Read & write. Administration is required only for Kratis to create new repositories; omit it when you publish only to existing repositories. No webhook needed.
 2. Generate a private key (.pem); note the App ID and the App slug from the URL.
 3. Set `KRATIS_GITHUB_APP_ID`, `KRATIS_GITHUB_APP_NAME`, and `KRATIS_GITHUB_PRIVATE_KEY_PATH` (PEM path inside the container), then restart the stack.
-4. Install the App on the target organization or repositories. In **Repos → Add Repository**, follow **Install GitHub App** and copy the Installation ID from the resulting GitHub URL.
+4. Install the App on the target organization or repositories. Creating new repositories requires an organization installation. In **Repos → Add Repository**, follow **Install GitHub App** and copy the Installation ID from the resulting GitHub URL.
 
-A GitLab service account must also be invited to the group as Reporter or Developer, or every request returns `404 Group Not Found`.
+A GitLab service account must also be invited to the group as Reporter or Developer, or every request returns `404 Group Not Found`. Creating projects in a group needs the Developer role.
 
 **Details** asks for Repository Git URL, Display Name, and Default Branch. Leave **Start ingesting immediately after onboarding** checked.
 
@@ -62,7 +62,9 @@ Kratis clones the repository, parses it into a code graph, then writes wiki page
 | `401 Unauthorized` | Token expired, revoked, or mis-pasted | Generate a fresh token and update the credential |
 | `403` account blocked | Host anti-abuse flagged a bot or service account, or the billing tier rejects that token type | Use a PAT from a normal user account |
 | `403` on push or PR creation | Token lacks a write or pull-request permission from the table above | Grant the permission and update the credential |
-| `404 Group Not Found` | Missing `read_api`, service account not a group member, or a path used instead of the numeric Group ID | Add the scope, invite the service account as Reporter, enter the numeric ID |
+| `403 Resource not accessible by integration` on repository creation | GitHub App lacks Administration Read & write, or the installation is on a personal account | Add Administration Read & write to the App and approve the new permissions on the installation, or install the App on an organization |
+| `403` on repository creation (GitLab, Bitbucket, Azure DevOps) | Token lacks the provider's create-repository permission | GitLab: `api` plus the Developer role in the group. Bitbucket: Repositories Admin. Azure DevOps: Code Read, write, & manage |
+| `404 Group Not Found` | Missing `read_api`, service account not a group member, or a path used instead of the numeric Group ID | Add the scope, invite the service account as Reporter (Developer or higher to create projects), enter the numeric ID |
 | SSH authentication fails | Public key not registered for that repository | Add the exact public key Kratis displayed as a deploy key on the repository |
 
 ## 4. Planning - Ask Kratis

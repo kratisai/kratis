@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { useCredentials } from '@/hooks/use-credentials'
 import { ApiError } from '@/lib/auth-api'
 import { steerExecution } from '@/lib/diff-api'
 import {
@@ -76,6 +77,7 @@ export function PublishModal({
   const [isSquash, setIsSquash] = useState(true)
   const [repositoryName, setRepositoryName] = useState('')
   const [visibility, setVisibility] = useState<RepositoryVisibility>('PRIVATE')
+  const [credentialId, setCredentialId] = useState('')
   const [prResult, setPrResult] = useState<null | PullRequestResult>(null)
   const [pushResult, setPushResult] = useState<null | PushBranchResponse>(null)
   const [actionError, setActionError] = useState<null | PublishActionError>(null)
@@ -85,6 +87,7 @@ export function PublishModal({
     queryFn: () => fetchPublishCapabilities(chatId, executionId),
     queryKey: ['publish-capabilities', chatId, executionId],
   })
+  const { data: credentials } = useCredentials()
 
   const capabilities = capabilitiesQuery.data
   const stats = capabilities?.stats
@@ -121,8 +124,15 @@ export function PublishModal({
       setActionError(null)
       setIsDraft(false)
       setIsSquash(true)
+      setCredentialId('')
     }
   }, [open, executionId])
+
+  useEffect(() => {
+    if (!open) return
+    const first = credentials?.[0]?.id
+    if (first) setCredentialId((current) => (current ? current : first))
+  }, [open, credentials])
 
   useEffect(() => {
     if (!open || !capabilitiesQuery.data) return
@@ -142,6 +152,7 @@ export function PublishModal({
       pushBranch(chatId, executionId, {
         branchName: branchName.trim(),
         commitMessage: commitMessage.trim() || undefined,
+        credentialId: isNewRepo && credentialId.trim() ? credentialId.trim() : undefined,
         squash: isSquash,
       }),
     onError: (err: Error) => {
@@ -165,6 +176,9 @@ export function PublishModal({
       if (isNewRepo) {
         request.repositoryName = repositoryName.trim()
         request.visibility = visibility
+        if (credentialId.trim()) {
+          request.credentialId = credentialId.trim()
+        }
       }
       if (creatingPr) {
         request.body = body.trim()
@@ -264,14 +278,8 @@ export function PublishModal({
         ) : (
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-2">
             {/* Live Git Stats Banner */}
-            {stats && (
-              <div
-                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium ${
-                  !hasChanges
-                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                    : 'border-border/60 bg-muted/40 text-foreground'
-                }`}
-              >
+            {stats && hasChanges && (
+              <div className="border-border/60 bg-muted/40 text-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium">
                 <GitBranch className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
                 <span>{stats.formattedSummary}</span>
               </div>
@@ -515,6 +523,30 @@ export function PublishModal({
                           {visibilityOptions.map((option) => (
                             <SelectItem key={option} value={option}>
                               {option.charAt(0) + option.slice(1).toLowerCase()}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {isNewRepo && (credentials?.length ?? 0) > 0 && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs" htmlFor="repository-credential">
+                        Credential
+                      </Label>
+                      <Select
+                        disabled={isPending}
+                        onValueChange={(value) => setCredentialId(value)}
+                        value={credentialId}
+                      >
+                        <SelectTrigger className="text-xs" id="repository-credential">
+                          <SelectValue placeholder="Select a credential" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(credentials ?? []).map((credential) => (
+                            <SelectItem key={credential.id} value={credential.id}>
+                              {credential.name}
                             </SelectItem>
                           ))}
                         </SelectContent>

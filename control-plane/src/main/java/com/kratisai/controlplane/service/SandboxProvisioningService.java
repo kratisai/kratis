@@ -153,6 +153,20 @@ public class SandboxProvisioningService {
                 execution.getId());
     }
 
+    /** Deploys git credentials for the execution's sandbox; new-repo credentials are chosen at publish time. */
+    public void registerGitAuth(SandboxExecution execution, RepoCredential credential)
+            throws InterruptedException, TimeoutException {
+        GitAuthMaterial auth = credentialResolver.resolve(credential);
+        EnvironmentConnectorResult.RegisterGitAuth authResult = environmentRpcClient.request(
+                environmentId(execution),
+                new EnvironmentRpcPayload.RegisterGitAuth(
+                        credential.getType().name(), auth.maybeSshKey().orElse(""), GIT_USER_NAME, gitUserEmail()));
+        if (authResult == null || authResult.status() != RegisterGitAuthStatus.SUCCESS) {
+            throw new IllegalStateException(
+                    "Git auth registration failed: " + (authResult != null ? authResult.status() : "no result"));
+        }
+    }
+
     public void dispatchCheckout(SandboxExecution execution) throws Exception {
         Repository repository = execution.getRepository();
         String url = repository.getUrl();
@@ -161,16 +175,7 @@ public class SandboxProvisioningService {
         RepoCredential credential = repository.getCredential();
 
         if (credential != null) {
-            GitAuthMaterial auth = credentialResolver.resolve(credential);
-
-            EnvironmentConnectorResult.RegisterGitAuth authResult = environmentRpcClient.request(
-                    environmentId(execution),
-                    new EnvironmentRpcPayload.RegisterGitAuth(
-                            credential.getType().name(), auth.maybeSshKey().orElse(""), GIT_USER_NAME, gitUserEmail()));
-            if (authResult == null || authResult.status() != RegisterGitAuthStatus.SUCCESS) {
-                throw new IllegalStateException(
-                        "Git auth registration failed: " + (authResult != null ? authResult.status() : "no result"));
-            }
+            registerGitAuth(execution, credential);
             logger.info(
                     "Registered git auth with execution environment {}",
                     execution.getEnvironment().getId());
@@ -194,15 +199,7 @@ public class SandboxProvisioningService {
     private void prepareNewRepository(SandboxExecution execution) throws Exception {
         RepoCredential credential = execution.getNewRepoCredential();
         if (credential != null) {
-            GitAuthMaterial auth = credentialResolver.resolve(credential);
-            EnvironmentConnectorResult.RegisterGitAuth authResult = environmentRpcClient.request(
-                    environmentId(execution),
-                    new EnvironmentRpcPayload.RegisterGitAuth(
-                            credential.getType().name(), auth.maybeSshKey().orElse(""), GIT_USER_NAME, gitUserEmail()));
-            if (authResult == null || authResult.status() != RegisterGitAuthStatus.SUCCESS) {
-                throw new IllegalStateException(
-                        "Git auth registration failed: " + (authResult != null ? authResult.status() : "no result"));
-            }
+            registerGitAuth(execution, credential);
             logger.info(
                     "Registered git auth for new repository '{}' with execution environment {}",
                     execution.getNewRepoName(),
@@ -210,7 +207,7 @@ public class SandboxProvisioningService {
         }
 
         String initCommand =
-                "if [ \"$(ls -A)\" ]; then echo \"Workspace is not empty\" >&2; exit 1; fi; git init && git -c user.name=\""
+                "if [ \"$(ls -A)\" ]; then echo \"Workspace is not empty\" >&2; exit 1; fi; git init -b main && git -c user.name=\""
                         + GIT_USER_NAME + "\" -c user.email=\"" + gitUserEmail()
                         + "\" commit --allow-empty -m \"Initial commit\"";
         EnvironmentConnectorResult.Exec result = environmentRpcClient.request(

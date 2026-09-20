@@ -27,9 +27,11 @@ import com.kratisai.controlplane.model.RepositoryVisibility;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.repository.ChatRepository;
+import com.kratisai.controlplane.repository.RepoCredentialRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -41,7 +43,10 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -55,31 +60,41 @@ public class SandboxExecutionPublishService {
     private final ChatRepository chatRepository;
     private final SandboxExecutionActivityRepository activityRepository;
     private final RepositoryRepository repositoryRepository;
+    private final RepoCredentialRepository credentialRepository;
     private final EnvironmentRpcClient environmentRpcClient;
     private final GitCredentialResolver credentialResolver;
     private final RepoProviderRegistry providerRegistry;
     private final ChatModelFactory chatModelFactory;
     private final ObjectMapper objectMapper;
+    private final SandboxProvisioningService sandboxProvisioningService;
+    private final TransactionTemplate requiresNewTransactionTemplate;
 
     public SandboxExecutionPublishService(
             SandboxExecutionRepository sandboxExecutionRepository,
             ChatRepository chatRepository,
             SandboxExecutionActivityRepository activityRepository,
             RepositoryRepository repositoryRepository,
+            RepoCredentialRepository credentialRepository,
             EnvironmentRpcClient environmentRpcClient,
             GitCredentialResolver credentialResolver,
             RepoProviderRegistry providerRegistry,
             ChatModelFactory chatModelFactory,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            SandboxProvisioningService sandboxProvisioningService,
+            PlatformTransactionManager transactionManager) {
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.chatRepository = chatRepository;
         this.activityRepository = activityRepository;
         this.repositoryRepository = repositoryRepository;
+        this.credentialRepository = credentialRepository;
         this.environmentRpcClient = environmentRpcClient;
         this.credentialResolver = credentialResolver;
         this.providerRegistry = providerRegistry;
         this.chatModelFactory = chatModelFactory;
         this.objectMapper = objectMapper;
+        this.sandboxProvisioningService = sandboxProvisioningService;
+        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     @Transactional(readOnly = true)
@@ -89,7 +104,7 @@ public class SandboxExecutionPublishService {
         boolean newRepo = repo == null && execution.getNewRepoName() != null;
 
         boolean supportsPr = false;
-        String repoType = "GENERIC";
+        RepositoryType repoType = RepositoryType.GENERIC;
         String defaultBranch = resolveTargetBranch(execution);
         boolean canCreateRepository = false;
         List<RepositoryVisibility> visibilityOptions = List.of();
@@ -97,15 +112,23 @@ public class SandboxExecutionPublishService {
         if (repo != null) {
             RepoProvider provider = providerRegistry.getProvider(repo);
             supportsPr = provider.supportsPullRequests();
-            repoType = repo.getRepositoryType().name();
+            repoType = repo.getRepositoryType();
         } else if (newRepo) {
             RepositoryType type = resolveNewRepoType(execution);
             if (type != null) {
-                repoType = type.name();
+                repoType = type;
                 RepoProvider provider = providerRegistry.getProvider(type);
                 canCreateRepository = provider.supportsRepositoryCreation();
                 supportsPr = canCreateRepository && provider.supportsPullRequests();
                 visibilityOptions = visibilityOptionsFor(type);
+            } else {
+                for (RepoProvider provider : providerRegistry.allProviders()) {
+                    canCreateRepository |= provider.supportsRepositoryCreation();
+                    supportsPr |= provider.supportsRepositoryCreation() && provider.supportsPullRequests();
+                    if (canCreateRepository && supportsPr) {
+                        break;
+                    }
+                }
             }
         }
 
@@ -129,9 +152,6 @@ public class SandboxExecutionPublishService {
                     visibilityOptions);
         }
 
-        // After the first publish, stats and suggested messages describe only the
-        // not-yet-pushed delta (working tree vs the published feature branch).
-        // Before any publish they describe the cumulative diff vs the target branch.
         String diffBase = execution.getPublishedBranch() != null ? execution.getPublishedBranch() : defaultBranch;
         EnvironmentConnectorResult.GitDiffSummary summary = fetchGitDiffSummary(env.getId(), executionId, diffBase);
 
@@ -195,7 +215,8 @@ public class SandboxExecutionPublishService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution has no associated environment");
         }
 
-        ensureRemoteRepository(execution, null, null);
+        applyNewRepoCredential(execution, request.credentialId());
+        ensureRemoteRepository(execution, null, null, request.credentialId());
 
         boolean squash = Boolean.TRUE.equals(request.squash());
         EnvironmentConnectorResult.GitPush pushResult = executeGitPush(
@@ -224,7 +245,8 @@ public class SandboxExecutionPublishService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution has no associated environment");
         }
 
-        Repository repo = ensureRemoteRepository(execution, request.repositoryName(), request.visibility());
+        Repository repo = ensureRemoteRepository(
+                execution, request.repositoryName(), request.visibility(), request.credentialId());
         if (repo == null) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST, "Execution repository is not configured for PR creation");
@@ -249,7 +271,6 @@ public class SandboxExecutionPublishService {
 
         executeGitPush(env.getId(), executionId, branchName, request.title(), republish, squash, baseBranch);
 
-        // Re-publish reuses the persisted branch/PR and never opens a second Pull Request
         if (republish) {
             return new PullRequestResultDto(
                     execution.getPublishedPrNumber(), execution.getPublishedPrUrl(), branchName, baseBranch);
@@ -291,28 +312,17 @@ public class SandboxExecutionPublishService {
         if (!hasChanges) {
             return "There are no changes to publish";
         }
-        StringBuilder sb = new StringBuilder();
+        List<String> parts = new ArrayList<>(3);
         if (commitsAhead > 0) {
-            sb.append(commitsAhead).append(commitsAhead == 1 ? " commit" : " commits");
-            if (unstagedFiles > 0) {
-                sb.append(", ")
-                        .append(unstagedFiles)
-                        .append(" unstaged ")
-                        .append(unstagedFiles == 1 ? "file" : "files");
-            }
-        } else if (stagedFiles > 0) {
-            sb.append(stagedFiles).append(" staged ").append(stagedFiles == 1 ? "file" : "files");
-            if (unstagedFiles > 0) {
-                sb.append(", ")
-                        .append(unstagedFiles)
-                        .append(" unstaged ")
-                        .append(unstagedFiles == 1 ? "file" : "files");
-            }
-        } else if (unstagedFiles > 0) {
-            sb.append(unstagedFiles).append(" unstaged ").append(unstagedFiles == 1 ? "file" : "files");
+            parts.add(commitsAhead + (commitsAhead == 1 ? " unpushed commit" : " unpushed commits"));
         }
-        sb.append(" (+").append(additions).append(", -").append(deletions).append(" lines)");
-        return sb.toString();
+        if (stagedFiles > 0) {
+            parts.add(stagedFiles + (stagedFiles == 1 ? " staged file" : " staged files"));
+        }
+        if (unstagedFiles > 0) {
+            parts.add(unstagedFiles + (unstagedFiles == 1 ? " unstaged file" : " unstaged files"));
+        }
+        return String.join(", ", parts) + " (+" + additions + ", -" + deletions + " lines)";
     }
 
     private record SuggestedMessage(String title, String body) {}
@@ -493,17 +503,18 @@ public class SandboxExecutionPublishService {
     /**
      * Creates the remote repository for a new-repo execution on first publish and links it to the
      * execution. Returns the existing repository for a normal execution, and {@code null} when the
-     * execution is not a new-repo execution. The owner is derived from the credential by the
-     * provider; the modal only confirms name and visibility.
+     * execution is not a new-repo execution.
      */
     private Repository ensureRemoteRepository(
-            SandboxExecution execution, String repositoryName, RepositoryVisibility visibility) {
+            SandboxExecution execution, String repositoryName, RepositoryVisibility visibility, UUID credentialId) {
         if (execution.getRepository() != null) {
             return execution.getRepository();
         }
         if (execution.getNewRepoName() == null) {
             return null;
         }
+
+        applyNewRepoCredential(execution, credentialId);
 
         RepositoryType type = resolveNewRepoType(execution);
         if (type == null) {
@@ -522,7 +533,7 @@ public class SandboxExecutionPublishService {
         RepoCredential credential = execution.getNewRepoCredential();
         if (credential == null) {
             throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST, "New repository execution has no credential configured");
+                    HttpStatus.BAD_REQUEST, "A credential is required to create the repository");
         }
 
         String name = repositoryName != null && !repositoryName.isBlank()
@@ -535,7 +546,7 @@ public class SandboxExecutionPublishService {
         }
 
         RepositoryVisibility effectiveVisibility = visibility != null ? visibility : RepositoryVisibility.PRIVATE;
-        String defaultBranch = resolveTargetBranch(execution);
+        String defaultBranch = "main";
         GitAuthMaterial auth = credentialResolver.resolve(credential);
 
         RemoteRepositoryDto remote;
@@ -546,7 +557,9 @@ public class SandboxExecutionPublishService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage(), e);
         }
 
-        // git_push needs a resolvable origin/<defaultBranch>, so seed it before registering origin.
+        // New-repo executions choose credentials at publish time, so register git auth before the seed push.
+        registerNewRepoGitAuth(execution, credential);
+
         executeGitSetRemote(execution.getEnvironment().getId(), execution.getId(), remote.cloneUrl(), defaultBranch);
 
         Repository repository = new Repository(name, remote.cloneUrl(), defaultBranch, type);
@@ -561,6 +574,24 @@ public class SandboxExecutionPublishService {
         sandboxExecutionRepository.save(execution);
 
         return repository;
+    }
+
+    private void registerNewRepoGitAuth(SandboxExecution execution, RepoCredential credential) {
+        try {
+            sandboxProvisioningService.registerGitAuth(execution, credential);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Git auth registration interrupted", e);
+        } catch (TimeoutException e) {
+            throw new ResponseStatusException(
+                    HttpStatus.GATEWAY_TIMEOUT, "Timed out registering git auth in the sandbox", e);
+        } catch (EnvironmentRpcClient.EnvironmentRpcException e) {
+            String detail = e.getData() != null && !e.getData().isBlank() ? ": " + e.getData() : "";
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "Failed to register git auth in the sandbox: " + e.getMessage() + detail,
+                    e);
+        }
     }
 
     private void executeGitSetRemote(UUID envId, UUID executionId, String remoteUrl, String defaultBranch) {
@@ -594,6 +625,31 @@ public class SandboxExecutionPublishService {
             return null;
         }
         return credential.getMetadata().getProviderType().orElse(null);
+    }
+
+    private void applyNewRepoCredential(SandboxExecution execution, UUID credentialId) {
+        if (execution.getNewRepoName() == null || execution.getRepository() != null) {
+            return;
+        }
+        if (credentialId == null) {
+            if (execution.getNewRepoCredential() == null) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST, "A credential is required to create the repository");
+            }
+            return;
+        }
+        RepoCredential current = execution.getNewRepoCredential();
+        if (current != null && credentialId.equals(current.getId())) {
+            return;
+        }
+        UUID teamId = execution.getChat().getTeam().getId();
+        RepoCredential selected = credentialRepository
+                .findByTeamIdAndId(teamId, credentialId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Credential not found"));
+        execution.setNewRepoCredential(selected);
+        // Commit the selection so the token handler's separate transaction sees it.
+        requiresNewTransactionTemplate.executeWithoutResult(
+                status -> sandboxExecutionRepository.updateNewRepoCredential(execution.getId(), credentialId));
     }
 
     private static List<RepositoryVisibility> visibilityOptionsFor(RepositoryType type) {

@@ -54,10 +54,6 @@ vi.mock("@/hooks/use-harnesses", () => ({
   useHarnesses: vi.fn(() => ({ data: [{ name: "OpenCode", value: "OPENCODE" }] })),
 }));
 
-vi.mock("@/hooks/use-credentials", () => ({
-  useCredentials: vi.fn(() => ({ data: [{ id: "cred-1", name: "Test Credential", type: "PAT" }] })),
-}));
-
 vi.mock("@/hooks/use-executions", () => ({
   useChatExecutions: vi.fn(() => ({
     data: [],
@@ -250,20 +246,7 @@ describe("CanvasTabs", () => {
     expect(useExecutionStore.getState().logs["exec-1"]).toBeUndefined();
   });
 
-  it("does not show a credential selector for existing-repo canvases", async () => {
-    const user = userEvent.setup();
-    useCanvasStore.setState({
-      canvases: { "session-1": [executableDoc()] },
-    });
-
-    render(<CanvasTabs chatId="session-1" docId="doc-1" />);
-
-    await user.click(screen.getByRole("button", { name: /run/i }));
-
-    expect(screen.queryByText(/credential for the new repository/i)).not.toBeInTheDocument();
-  });
-
-  it("requires a credential and passes credentialId for new-repo canvases", async () => {
+  it("launches a new-repo canvas without collecting a credential", async () => {
     const user = userEvent.setup();
     useCanvasStore.setState({
       canvases: {
@@ -275,8 +258,7 @@ describe("CanvasTabs", () => {
 
     await user.click(screen.getByRole("button", { name: /run/i }));
 
-    // Credential selector is shown for new-repo canvases
-    expect(screen.getByText(/credential for the new repository/i)).toBeInTheDocument();
+    expect(screen.queryByText(/credential for the new repository/i)).not.toBeInTheDocument();
 
     const triggers = screen.getAllByRole("combobox");
     await user.click(triggers[0]);
@@ -284,17 +266,12 @@ describe("CanvasTabs", () => {
     await user.click(triggers[1]);
     await user.click(screen.getByText("OpenCode"));
 
-    // Launch is disabled until a credential is selected
-    expect(screen.getByRole("button", { name: /launch/i })).toBeDisabled();
-
-    await user.click(triggers[2]);
-    await user.click(screen.getByText("Test Credential"));
+    expect(screen.getByRole("button", { name: /launch/i })).not.toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: /launch/i }));
 
     expect(executionApi.createSandboxExecution).toHaveBeenCalledWith("session-1", {
       canvasId: "doc-1",
-      credentialId: "cred-1",
       harness: "OPENCODE",
       modelName: "gpt-4",
       modelProviderId: "prov-1",

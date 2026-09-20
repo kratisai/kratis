@@ -36,12 +36,6 @@ vi.mock('@/hooks/use-harnesses', () => ({
   useHarnesses: vi.fn(() => ({ data: [{ name: 'OpenCode', value: 'OPENCODE' }] })),
 }))
 
-vi.mock('@/hooks/use-credentials', () => ({
-  useCredentials: vi.fn(() => ({
-    data: [{ id: 'cred-1', name: 'Test Credential', type: 'PAT' }],
-  })),
-}))
-
 vi.mock('@/hooks/use-model-providers', () => ({
   useModelProviders: vi.fn(),
 }))
@@ -121,7 +115,6 @@ describe('ExecutionLaunchDialog', () => {
   it('pre-fills model provider and model name from useUIStore', () => {
     renderWithProviders(
       <ExecutionLaunchDialog
-        docId="doc-1"
         onLaunch={vi.fn()}
         onOpenChange={vi.fn()}
         open={true}
@@ -136,7 +129,6 @@ describe('ExecutionLaunchDialog', () => {
     const user = userEvent.setup()
     renderWithProviders(
       <ExecutionLaunchDialog
-        docId="doc-1"
         onLaunch={vi.fn()}
         onOpenChange={vi.fn()}
         open={true}
@@ -168,7 +160,6 @@ describe('ExecutionLaunchDialog', () => {
 
     renderWithProviders(
       <ExecutionLaunchDialog
-        docId="doc-1"
         onLaunch={vi.fn()}
         onOpenChange={vi.fn()}
         open={true}
@@ -192,7 +183,6 @@ describe('ExecutionLaunchDialog', () => {
 
     renderWithProviders(
       <ExecutionLaunchDialog
-        docId="doc-1"
         onLaunch={onLaunch}
         onOpenChange={vi.fn()}
         open={true}
@@ -220,7 +210,6 @@ describe('ExecutionLaunchDialog', () => {
     await user.click(launchButton)
 
     expect(onLaunch).toHaveBeenCalledWith({
-      credentialId: undefined,
       harness: 'OPENCODE',
       modelName: 'claude-3',
       modelProviderId: 'prov-anthropic',
@@ -233,11 +222,45 @@ describe('ExecutionLaunchDialog', () => {
     expect(useUIStore.getState().selectedProviderId).toBe('prov-openai')
   })
 
+  it('never collects a credential at launch', async () => {
+    const user = userEvent.setup()
+    const onLaunch = vi.fn()
+
+    renderWithProviders(
+      <ExecutionLaunchDialog
+        onLaunch={onLaunch}
+        onOpenChange={vi.fn()}
+        open={true}
+      />,
+    )
+
+    expect(screen.queryByText(/credential/i)).not.toBeInTheDocument()
+
+    const triggers = screen.getAllByRole('combobox')
+    await user.click(triggers[0])
+    await user.click(screen.getByText('Docker (Docker Host)'))
+
+    await user.click(triggers[1])
+    await user.click(screen.getByText('OpenCode'))
+
+    const launchButton = screen.getByRole('button', { name: /launch/i })
+    expect(launchButton).not.toBeDisabled()
+    await user.click(launchButton)
+
+    expect(onLaunch).toHaveBeenCalledWith({
+      harness: 'OPENCODE',
+      modelName: 'gpt-4',
+      modelProviderId: 'prov-openai',
+      name: 'Spawn new Docker Container (Docker Host)',
+      providerId: 'prov-docker',
+    })
+    expect(onLaunch.mock.calls[0][0]).not.toHaveProperty('credentialId')
+  })
+
   it('resets local model selection to useUIStore defaults when reopened', async () => {
     const user = userEvent.setup()
     const { rerender } = renderWithProviders(
       <ExecutionLaunchDialog
-        docId="doc-1"
         onLaunch={vi.fn()}
         onOpenChange={vi.fn()}
         open={true}
@@ -255,7 +278,6 @@ describe('ExecutionLaunchDialog', () => {
     rerender(
       <QueryClientProvider client={createTestQueryClient()}>
         <ExecutionLaunchDialog
-          docId="doc-1"
           onLaunch={vi.fn()}
           onOpenChange={vi.fn()}
           open={false}
@@ -265,7 +287,6 @@ describe('ExecutionLaunchDialog', () => {
     rerender(
       <QueryClientProvider client={createTestQueryClient()}>
         <ExecutionLaunchDialog
-          docId="doc-1"
           onLaunch={vi.fn()}
           onOpenChange={vi.fn()}
           open={true}

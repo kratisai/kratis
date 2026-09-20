@@ -199,6 +199,9 @@ class LiteLLMProvisioningServiceTest {
         assertThat(modelInfo.mode()).isEqualTo("chat");
         assertThat(modelInfo.inputCostPerToken()).isEqualTo(4.7e-07);
         assertThat(modelInfo.outputCostPerToken()).isEqualTo(1.86e-06);
+        assertThat(requestCaptor.getValue().litellmParams().inputCostPerToken()).isEqualTo(4.7e-07);
+        assertThat(requestCaptor.getValue().litellmParams().outputCostPerToken())
+                .isEqualTo(1.86e-06);
     }
 
     @Test
@@ -258,6 +261,9 @@ class LiteLLMProvisioningServiceTest {
         assertThat(modelInfo.mode()).isEqualTo("chat");
         assertThat(modelInfo.inputCostPerToken()).isNull();
         assertThat(modelInfo.outputCostPerToken()).isNull();
+        assertThat(requestCaptor.getValue().litellmParams().inputCostPerToken()).isNull();
+        assertThat(requestCaptor.getValue().litellmParams().outputCostPerToken())
+                .isNull();
     }
 
     @Test
@@ -326,6 +332,9 @@ class LiteLLMProvisioningServiceTest {
         assertThat(modelInfo.mode()).isEqualTo("chat");
         assertThat(modelInfo.inputCostPerToken()).isNull();
         assertThat(modelInfo.outputCostPerToken()).isNull();
+        assertThat(requestCaptor.getValue().litellmParams().inputCostPerToken()).isNull();
+        assertThat(requestCaptor.getValue().litellmParams().outputCostPerToken())
+                .isNull();
     }
 
     @Test

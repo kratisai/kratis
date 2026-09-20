@@ -34,7 +34,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
@@ -316,28 +315,23 @@ class RepositoryCheckoutWebSocketIntegrationTest {
     }
 
     @Test
-    void testNewRepositoryExecution_authRegistrationFailure_failsExecutionWithoutLaunch() throws Exception {
-        RepoCredential credential =
-                testDataFactory.createCredential(team, "Test PAT Failure", CredentialType.PAT, "pat-secret-content");
+    void testNewRepositoryExecution_skipsAuthRegistrationAndLaunchesAgent() throws Exception {
         var scenario = scenarioFactory.startNewRepoOnConnector(
-                auth, chat, "New Repo Failure Connector", "test-plan-newrepo-fail", "fail-repo", credential.getId());
+                auth, chat, "New Repo Connector", "test-plan-newrepo", "fresh-repo");
         UUID executionId = scenario.executionId();
 
-        ObjectMapper localMapper = new ObjectMapper();
         try (WsPair pair = WsPair.connectSidecar(
                 port, scenario, sidecar -> sidecar.whenMethod("env.registerGitAuth", (session, payload) -> {
-                            JsonRpcInboundRequest request = localMapper.readValue(payload, JsonRpcInboundRequest.class);
-                            session.sendMessage(new TextMessage(localMapper.writeValueAsString(Map.of(
-                                    "jsonrpc", "2.0", "id", request.id(), "result", Map.of("status", "failed")))));
+                            throw new AssertionError("env.registerGitAuth must not be sent for a new-repo execution");
                         })
                         .expectTrigger("env.launch_acp_agent", 1))) {
+            assertThat(pair.sidecar().awaitTrigger("env.launch_acp_agent", 30, TimeUnit.SECONDS))
+                    .isTrue();
             await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
                 SandboxExecution exec =
                         sandboxExecutionRepository.findById(executionId).orElseThrow();
-                assertThat(exec.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+                assertThat(exec.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
             });
-            assertThat(pair.sidecar().awaitTrigger("env.launch_acp_agent", 2, TimeUnit.SECONDS))
-                    .isFalse();
         }
     }
 

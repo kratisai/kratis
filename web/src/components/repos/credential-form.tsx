@@ -12,11 +12,13 @@ import type { AuthMode, NewCredentialFormData, ProviderType } from './repository
 import { newCredentialSchema } from './repository-form-types'
 
 const PAT_PERMISSION_HINTS: Partial<Record<ProviderType, string>> = {
-  azure: 'The PAT needs Code: Read & write.',
-  bitbucket: 'The token needs Repositories: Read & write and Pull requests: Read & write.',
+  azure: 'The PAT needs Code: Read & write. Add Code: manage to create new repositories.',
+  bitbucket:
+    'The token needs Repositories: Read & write and Pull requests: Read & write. Add Repositories: Admin to create new repositories.',
   github:
-    'A fine-grained PAT needs Contents: Read & write, Metadata: Read-only, and Pull requests: Read & write.',
-  gitlab: 'The token needs the api and write_repository scopes.',
+    'A fine-grained PAT needs Contents: Read & write, Metadata: Read-only, and Pull requests: Read & write. Add Administration: Read & write to create new repositories.',
+  gitlab:
+    'The token needs the api and write_repository scopes. Creating projects in a group also needs the Developer role.',
 }
 
 interface CredentialFormProps {

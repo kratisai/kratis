@@ -59,6 +59,7 @@ export interface PublishPrRequest {
   baseBranch?: string
   body?: string
   branchName: string
+  credentialId?: string
   draft?: boolean
   repositoryName?: string
   squash?: boolean
@@ -86,6 +87,7 @@ export interface PullRequestResult {
 export interface PushBranchRequest {
   branchName: string
   commitMessage?: string
+  credentialId?: string
   squash?: boolean
 }
 

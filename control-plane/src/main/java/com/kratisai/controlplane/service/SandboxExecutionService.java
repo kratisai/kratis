@@ -68,7 +68,6 @@ public class SandboxExecutionService {
     private final TeamMemberRepository teamMemberRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final EnvironmentSessionRegistry sessionRegistry;
-    private final RepoCredentialRepository repoCredentialRepository;
     private final CanvasService canvasService;
     private final ModelProviderRepository modelProviderRepository;
     private final TransactionTemplate transactionTemplate;
@@ -89,7 +88,6 @@ public class SandboxExecutionService {
             TeamMemberRepository teamMemberRepository,
             ApplicationEventPublisher eventPublisher,
             EnvironmentSessionRegistry sessionRegistry,
-            RepoCredentialRepository repoCredentialRepository,
             CanvasService canvasService,
             ModelProviderRepository modelProviderRepository,
             SandboxProvisioningService sandboxProvisioningService,
@@ -107,7 +105,6 @@ public class SandboxExecutionService {
         this.teamMemberRepository = teamMemberRepository;
         this.eventPublisher = eventPublisher;
         this.sessionRegistry = sessionRegistry;
-        this.repoCredentialRepository = repoCredentialRepository;
         this.canvasService = canvasService;
         this.modelProviderRepository = modelProviderRepository;
         this.sandboxProvisioningService = sandboxProvisioningService;
@@ -182,7 +179,6 @@ public class SandboxExecutionService {
 
             Repository repository = null;
             String newRepoName = null;
-            RepoCredential newRepoCredential = null;
             if (canvas.getCanvasType() == CanvasType.DOCUMENT) {
                 throw new ResponseStatusException(
                         HttpStatus.BAD_REQUEST,
@@ -191,14 +187,7 @@ public class SandboxExecutionService {
             if (canvas.getRepository() != null) {
                 repository = canvas.getRepository();
             } else if (canvas.getNewRepoName() != null) {
-                if (request.credentialId() == null) {
-                    throw new ResponseStatusException(
-                            HttpStatus.BAD_REQUEST, "credentialId is required for a new-repository canvas");
-                }
                 newRepoName = canvas.getNewRepoName();
-                newRepoCredential = repoCredentialRepository
-                        .findByTeamIdAndId(chat.getTeam().getId(), request.credentialId())
-                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Credential not found"));
             }
 
             // Resolve model provider (required)
@@ -206,8 +195,8 @@ public class SandboxExecutionService {
                     .findByTeamIdAndId(chat.getTeam().getId(), request.modelProviderId())
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Model provider not found"));
 
-            SandboxExecution execution = createAndSaveExecution(
-                    chat, environment, canvas, repository, newRepoName, newRepoCredential, modelProvider, request);
+            SandboxExecution execution =
+                    createAndSaveExecution(chat, environment, canvas, repository, newRepoName, modelProvider, request);
 
             eventPublisher.publishEvent(
                     new ExecutionStatusChangedEvent(chat.getTeam().getId(), chat.getId(), execution.getId()));
@@ -263,7 +252,6 @@ public class SandboxExecutionService {
             CanvasEntity canvas,
             Repository repository,
             String newRepoName,
-            RepoCredential newRepoCredential,
             ModelProvider modelProvider,
             CreateSandboxExecutionRequest request) {
         String taskPrompt = "<plan_context>\n" + canvas.getContent() + "\n</plan_context>\n\nExecute the plan.  "
@@ -287,7 +275,6 @@ public class SandboxExecutionService {
                         ? repository.getBranch()
                         : "main");
         execution.setNewRepoName(newRepoName);
-        execution.setNewRepoCredential(newRepoCredential);
         execution.setModelProvider(modelProvider);
         execution.setModelName(request.modelName());
         return sandboxExecutionRepository.save(execution);

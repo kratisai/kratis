@@ -56,6 +56,10 @@ public class RepoProviderRegistry {
         return provider;
     }
 
+    public List<RepoProvider> allProviders() {
+        return List.copyOf(providersByType.values());
+    }
+
     Set<RepositoryType> supportedTypes() {
         return providersByType.keySet();
     }

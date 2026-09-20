@@ -763,7 +763,6 @@ public abstract class AbstractAgentExecutionRealTest {
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
                 provider.getId(),
                 null,
-                null,
                 getHarness(),
                 canvasId,
                 modelProvider.getId(),

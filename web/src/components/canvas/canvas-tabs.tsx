@@ -81,7 +81,6 @@ export function CanvasTabs({ chatId, className, docId }: CanvasTabsProps) {
       const execution = target.providerId
         ? await createSandboxExecution(chatId, {
             canvasId: docId,
-            credentialId: target.credentialId,
             harness: target.harness,
             modelName: target.modelName,
             modelProviderId: target.modelProviderId,
@@ -89,7 +88,6 @@ export function CanvasTabs({ chatId, className, docId }: CanvasTabsProps) {
           })
         : await createSandboxExecution(chatId, {
             canvasId: docId,
-            credentialId: target.credentialId,
             environmentId: target.environmentId,
             harness: target.harness,
             modelName: target.modelName,
@@ -149,7 +147,6 @@ export function CanvasTabs({ chatId, className, docId }: CanvasTabsProps) {
       ) : null}
 
       <ExecutionLaunchDialog
-        docId={docId}
         onLaunch={(target) => {
           void handleLaunch(target)
         }}

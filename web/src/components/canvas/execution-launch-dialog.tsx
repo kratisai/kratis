@@ -19,16 +19,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useCredentials } from '@/hooks/use-credentials'
 import { useEnvironments } from '@/hooks/use-environments'
 import { useHarnesses } from '@/hooks/use-harnesses'
 import { useProviders } from '@/hooks/use-providers'
-import { useCanvasStore } from '@/store/canvas-store'
-import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 
 export interface LaunchTarget {
-  credentialId?: string
   environmentId?: string
   harness: AgentHarness
   modelName: string
@@ -38,14 +34,12 @@ export interface LaunchTarget {
 }
 
 interface ExecutionLaunchDialogProps {
-  docId: string
   onLaunch: (target: LaunchTarget) => void
   onOpenChange: (open: boolean) => void
   open: boolean
 }
 
 export function ExecutionLaunchDialog({
-  docId,
   onLaunch,
   onOpenChange,
   open,
@@ -53,22 +47,12 @@ export function ExecutionLaunchDialog({
   const { data: providers } = useProviders()
   const { data: environments } = useEnvironments()
   const { data: harnesses } = useHarnesses()
-  const { data: credentials } = useCredentials()
 
   const defaultModelName = useUIStore((state) => state.selectedModelName)
   const defaultProviderId = useUIStore((state) => state.selectedProviderId)
 
-  const currentChatId = useChatStore((state) => state.currentChatId)
-  const activeDoc = useCanvasStore((state) =>
-    currentChatId
-      ? (state.canvases[currentChatId] ?? []).find((doc) => doc.documentId === docId)
-      : undefined,
-  )
-  const requiresCredential = activeDoc?.isNewRepo === true
-
   const [selectedTargetKey, setSelectedTargetKey] = useState('')
   const [selectedHarness, setSelectedHarness] = useState<AgentHarness>('')
-  const [selectedCredentialId, setSelectedCredentialId] = useState('')
   const [selectedModelProviderId, setSelectedModelProviderId] = useState<null | string>(
     defaultProviderId,
   )
@@ -86,10 +70,7 @@ export function ExecutionLaunchDialog({
   )
 
   // Build target options: providers first, then workspace connectors
-  type TargetOption = Omit<
-    LaunchTarget,
-    'credentialId' | 'harness' | 'modelName' | 'modelProviderId'
-  >
+  type TargetOption = Omit<LaunchTarget, 'harness' | 'modelName' | 'modelProviderId'>
   const targetOptions: Array<{ key: string; label: string; target: TargetOption }> = []
 
   if (providers) {
@@ -119,18 +100,15 @@ export function ExecutionLaunchDialog({
   const canLaunch =
     selectedTargetKey !== '' &&
     selectedHarness !== '' &&
-    Boolean(selectedModelProviderId && selectedModelName) &&
-    (!requiresCredential || selectedCredentialId !== '')
+    Boolean(selectedModelProviderId && selectedModelName)
 
   const handleLaunch = () => {
     const option = targetOptions.find((o) => o.key === selectedTargetKey)
     if (!option || !selectedHarness) return
     if (!selectedModelProviderId || !selectedModelName) return
-    if (requiresCredential && selectedCredentialId === '') return
 
     onLaunch({
       ...option.target,
-      credentialId: requiresCredential ? selectedCredentialId : undefined,
       harness: selectedHarness,
       modelName: selectedModelName,
       modelProviderId: selectedModelProviderId,
@@ -139,7 +117,6 @@ export function ExecutionLaunchDialog({
     // Reset state
     setSelectedTargetKey('')
     setSelectedHarness('')
-    setSelectedCredentialId('')
     setSelectedModelProviderId(defaultProviderId)
     setSelectedModelName(defaultModelName)
   }
@@ -209,32 +186,6 @@ export function ExecutionLaunchDialog({
               triggerVariant="form"
             />
           </div>
-
-          {requiresCredential ? (
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">
-                Credential for the new repository (required)
-              </label>
-              <Select onValueChange={setSelectedCredentialId} value={selectedCredentialId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select credential" />
-                </SelectTrigger>
-                <SelectContent>
-                  {credentials && credentials.length > 0 ? (
-                    credentials.map((cred) => (
-                      <SelectItem key={cred.id} value={cred.id}>
-                        {cred.name}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem disabled value="none">
-                      No credentials available
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-          ) : null}
         </div>
 
         <DialogFooter>

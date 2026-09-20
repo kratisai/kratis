@@ -6,7 +6,6 @@ import java.util.UUID;
 public record CreateSandboxExecutionRequest(
         UUID providerId,
         UUID environmentId,
-        UUID credentialId,
         AgentHarness harness,
         String canvasId,
         UUID modelProviderId,

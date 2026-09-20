@@ -32,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 
 @Service
 public class GitHubApiService {
@@ -473,7 +474,15 @@ public class GitHubApiService {
     }
 
     public Optional<RemoteRepositoryDto> findRepository(String owner, String repo, String token) {
-        ResponseEntity<String> response = gitHubApiClient.getRepository(owner, repo, "Bearer " + token);
+        ResponseEntity<String> response;
+        try {
+            response = gitHubApiClient.getRepository(owner, repo, "Bearer " + token);
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw e;
+        }
         if (response.getStatusCode().value() == 404) {
             return Optional.empty();
         }

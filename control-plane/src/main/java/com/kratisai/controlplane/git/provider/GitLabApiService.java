@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 import org.springframework.web.util.UriBuilderFactory;
 
@@ -182,7 +183,15 @@ public class GitLabApiService {
     }
 
     public Optional<RemoteRepositoryDto> findProject(String projectPath, String token, String baseUrl) {
-        ResponseEntity<String> response = gitLabApiClient.getProject(baseUriFactory(baseUrl), projectPath, token);
+        ResponseEntity<String> response;
+        try {
+            response = gitLabApiClient.getProject(baseUriFactory(baseUrl), projectPath, token);
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw e;
+        }
         if (response.getStatusCode().value() == 404) {
             return Optional.empty();
         }

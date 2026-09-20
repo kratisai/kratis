@@ -2,6 +2,7 @@ import type { ComponentProps } from 'react'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { PublishCapabilities } from '@/types/diff-types'
@@ -12,6 +13,29 @@ import * as diffApi from '@/lib/diff-api'
 import * as publishApi from '@/lib/publish-api'
 
 let queryClient: QueryClient
+
+vi.mock('@/hooks/use-credentials', () => ({
+  useCredentials: vi.fn(() => ({
+    data: [
+      {
+        createdAt: '2024-01-01T00:00:00Z',
+        id: 'cred-new',
+        name: 'Replacement token',
+        type: 'PAT',
+      },
+    ],
+  })),
+}))
+
+// Polyfills for Radix UI Select in jsdom
+beforeEach(() => {
+  if (typeof Element.prototype.hasPointerCapture !== 'function') {
+    Element.prototype.hasPointerCapture = () => false
+  }
+  if (typeof Element.prototype.scrollIntoView !== 'function') {
+    Element.prototype.scrollIntoView = () => {}
+  }
+})
 
 function makeCapabilities(overrides: Partial<PublishCapabilities> = {}): PublishCapabilities {
   return {
@@ -48,6 +72,10 @@ function renderModal(props: Partial<ComponentProps<typeof PublishModal>> = {}) {
       />
     </QueryClientProvider>,
   )
+}
+
+function renderModalWithUser(props: Partial<ComponentProps<typeof PublishModal>> = {}) {
+  return { user: userEvent.setup(), view: renderModal(props) }
 }
 
 describe('PublishModal', () => {
@@ -136,7 +164,7 @@ describe('PublishModal', () => {
     await waitFor(() => {
       expect(
         screen.getAllByText(/there are no changes to publish/i).length,
-      ).toBeGreaterThanOrEqual(1)
+      ).toBe(1)
     })
 
     expect(screen.getByRole('button', { name: /create pull request/i })).toBeDisabled()
@@ -565,6 +593,9 @@ describe('PublishModal', () => {
 
     expect(screen.getByLabelText(/repository name/i)).toHaveValue('fresh-repo')
     expect(screen.getByTestId('publish-plan')).toHaveTextContent(/creates repository fresh-repo/i)
+    await waitFor(() => {
+      expect(screen.getByLabelText(/credential/i)).toHaveTextContent(/replacement token/i)
+    })
 
     fireEvent.click(screen.getByRole('button', { name: /create repository & pull request/i }))
 
@@ -573,8 +604,69 @@ describe('PublishModal', () => {
         'chat-123',
         '9b3c2a3f-55b7-47a7-83ac-6b9c592f2a07',
         expect.objectContaining({
+          credentialId: 'cred-new',
           repositoryName: 'fresh-repo',
           visibility: 'PRIVATE',
+        }),
+      )
+    })
+  })
+
+  it('sends the selected credential when publishing a new repository', async () => {
+    const { useCredentials } = await import('@/hooks/use-credentials')
+    vi.mocked(useCredentials).mockReturnValue({
+      data: [
+        { createdAt: '2024-01-01T00:00:00Z', id: 'cred-old', name: 'First token', type: 'PAT' },
+        {
+          createdAt: '2024-01-01T00:00:00Z',
+          id: 'cred-new',
+          name: 'Second token',
+          type: 'PAT',
+        },
+      ],
+    } as never)
+    vi.spyOn(publishApi, 'fetchPublishCapabilities').mockResolvedValue(
+      makeCapabilities({
+        canCreateRepository: true,
+        newRepo: true,
+        suggestedRepositoryName: 'fresh-repo',
+        visibilityOptions: ['PRIVATE', 'PUBLIC'],
+      }),
+    )
+
+    const publishSpy = vi.spyOn(publishApi, 'publishPullRequest').mockResolvedValue({
+      baseBranch: 'main',
+      headBranch: 'kratis/feature-9b3c2a3f',
+      prNumber: 8,
+      prUrl: 'https://github.com/fake-user/fresh-repo/pull/8',
+    })
+
+    const { user } = renderModalWithUser()
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /create repository & pull request/i }),
+      ).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(screen.getByLabelText(/credential/i)).toHaveTextContent(/first token/i)
+    })
+
+    await user.click(screen.getByLabelText(/credential/i))
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /second token/i })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('option', { name: /second token/i }))
+
+    fireEvent.click(screen.getByRole('button', { name: /create repository & pull request/i }))
+
+    await waitFor(() => {
+      expect(publishSpy).toHaveBeenCalledWith(
+        'chat-123',
+        '9b3c2a3f-55b7-47a7-83ac-6b9c592f2a07',
+        expect.objectContaining({
+          credentialId: 'cred-new',
+          repositoryName: 'fresh-repo',
         }),
       )
     })

@@ -77,7 +77,6 @@ public class SandboxExecutionScenarioFactory {
                         new CreateSandboxExecutionRequest(
                                 null,
                                 envId,
-                                null,
                                 AgentHarness.OPENCODE,
                                 canvasDocumentId,
                                 ctx.provider().getId(),
@@ -91,14 +90,12 @@ public class SandboxExecutionScenarioFactory {
             ChatEntity chat,
             String connectorName,
             String canvasDocumentId,
-            String newRepoName,
-            UUID credentialId) {
+            String newRepoName) {
         Objects.requireNonNull(ctx, "ctx");
         Objects.requireNonNull(chat, "chat");
         Objects.requireNonNull(connectorName, "connectorName");
         Objects.requireNonNull(canvasDocumentId, "canvasDocumentId");
         Objects.requireNonNull(newRepoName, "newRepoName");
-        Objects.requireNonNull(credentialId, "credentialId");
         var response = executionEnvironmentService.createConnector(
                 ctx.user().getId(), ctx.team().getId(), new CreateExecutionEnvironmentRequest(connectorName));
         UUID envId = response.environment().id();
@@ -112,7 +109,6 @@ public class SandboxExecutionScenarioFactory {
                         new CreateSandboxExecutionRequest(
                                 null,
                                 envId,
-                                credentialId,
                                 AgentHarness.OPENCODE,
                                 canvasDocumentId,
                                 ctx.provider().getId(),

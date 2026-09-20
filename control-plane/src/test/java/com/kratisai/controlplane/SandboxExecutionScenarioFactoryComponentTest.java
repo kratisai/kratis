@@ -3,8 +3,6 @@ package com.kratisai.controlplane;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.kratisai.controlplane.model.ChatEntity;
-import com.kratisai.controlplane.model.CredentialType;
-import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
@@ -81,17 +79,15 @@ class SandboxExecutionScenarioFactoryComponentTest {
     void startNewRepoOnConnector_snapshotsNewRepoFields() {
         TestDataFactory.AuthContext ctx = testDataFactory.createAuthenticatedContext();
         ChatEntity chat = testDataFactory.createChat(ctx.team(), ctx.user(), "New Repo Chat");
-        RepoCredential credential =
-                testDataFactory.createCredential(ctx.team(), "PAT", CredentialType.PAT, "pat-secret");
 
-        SandboxExecutionScenarioFactory.ExecutionScenario scenario = scenarioFactory.startNewRepoOnConnector(
-                ctx, chat, "New Repo Connector", "plan-new", "fresh-repo", credential.getId());
+        SandboxExecutionScenarioFactory.ExecutionScenario scenario =
+                scenarioFactory.startNewRepoOnConnector(ctx, chat, "New Repo Connector", "plan-new", "fresh-repo");
 
         assertThat(scenario.repository()).isNull();
         SandboxExecution saved =
                 sandboxExecutionRepository.findById(scenario.executionId()).orElseThrow();
         assertThat(saved.getRepository()).isNull();
         assertThat(saved.getNewRepoName()).isEqualTo("fresh-repo");
-        assertThat(saved.getNewRepoCredential().getId()).isEqualTo(credential.getId());
+        assertThat(saved.getNewRepoCredential()).isNull();
     }
 }

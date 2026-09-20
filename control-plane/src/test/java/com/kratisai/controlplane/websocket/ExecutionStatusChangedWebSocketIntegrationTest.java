@@ -145,7 +145,7 @@ class ExecutionStatusChangedWebSocketIntegrationTest {
                 createExecutionRepository("status-repo"),
                 null);
         var createExecRequest = new CreateSandboxExecutionRequest(
-                null, envId, null, AgentHarness.OPENCODE, "test-plan-status", modelProvider.getId(), "gpt-4o");
+                null, envId, AgentHarness.OPENCODE, "test-plan-status", modelProvider.getId(), "gpt-4o");
         UUID executionId = sandboxExecutionService
                 .createExecution(user.getId(), chat.getId(), createExecRequest)
                 .id();

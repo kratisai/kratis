@@ -262,6 +262,37 @@ func TestExecuteGitDiffSummary_NewRepoDiffsAgainstRootCommit(t *testing.T) {
 	}
 }
 
+func TestExecuteGitDiffSummary_NewRepoWithOriginButNoUpstreamBranchDiffsAgainstRootCommit(t *testing.T) {
+	dir, rootSHA := setupTestNewRepo(t)
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	// origin exists but main has not been pushed
+	runGitCmd(t, dir, "remote", "add", "origin", "https://github.com/example/new-repo.git")
+	runGitCmd(t, dir, "checkout", "-B", "main")
+
+	client, received := connectedGitClient(t, dir)
+	client.ExecuteGitDiffSummary(
+		GitDiffSummaryParams{BaseBranch: "main", ExecutionID: "exec-new-origin"}, "req-new-origin")
+
+	var envelope struct {
+		Result GitDiffSummaryResult `json:"result"`
+	}
+	if err := json.Unmarshal(captureNextResponse(t, received), &envelope); err != nil {
+		t.Fatalf("Failed to unmarshal diff summary: %v", err)
+	}
+	result := envelope.Result
+
+	if result.BaseCommit != rootSHA {
+		t.Errorf("Expected baseCommit to be the root commit %s, got %s", rootSHA, result.BaseCommit)
+	}
+	if result.CommitsAhead != 1 {
+		t.Errorf("Expected 1 unpushed commit, got %d", result.CommitsAhead)
+	}
+	if !result.HasChanges {
+		t.Error("Expected hasChanges true for unpublished commits")
+	}
+}
+
 func TestExecuteGitFileDiff_NewRepoDiffsAgainstRootCommit(t *testing.T) {
 	dir, _ := setupTestNewRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()

@@ -252,13 +252,7 @@ class GitCredentialFlowRealTest {
         canvasService.createCanvas(
                 chat.getId(), "git-cred-ssh-canvas", "Test Plan", "# Test Plan", CanvasType.SPEC, repository, null);
         launchAndAwaitConnected(new CreateSandboxExecutionRequest(
-                provider.getId(),
-                null,
-                null,
-                AgentHarness.OPENCODE,
-                "git-cred-ssh-canvas",
-                modelProvider.getId(),
-                "gpt-4o"));
+                provider.getId(), null, AgentHarness.OPENCODE, "git-cred-ssh-canvas", modelProvider.getId(), "gpt-4o"));
 
         DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, spawnedContainerId);
         Awaitility.await()
@@ -282,10 +276,7 @@ class GitCredentialFlowRealTest {
 
     @Test
     void realSidecarInitialisesNewRepository() throws Exception {
-        RepoCredential credential =
-                testDataFactory.createCredential(testContext.team(), "New Repo PAT", CredentialType.PAT, FIXTURE_TOKEN);
-
-        launchNewRepositoryExecution(credential, "git-cred-newrepo-canvas", "fresh-repo");
+        launchNewRepositoryExecution("git-cred-newrepo-canvas", "fresh-repo");
 
         DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, spawnedContainerId);
         Awaitility.await()
@@ -319,22 +310,15 @@ class GitCredentialFlowRealTest {
                 chat.getId(), canvasId, "Test Plan", "# Test Plan", CanvasType.SPEC, repository, null);
 
         launchAndAwaitConnected(new CreateSandboxExecutionRequest(
-                provider.getId(), null, null, AgentHarness.OPENCODE, canvasId, modelProvider.getId(), "gpt-4o"));
+                provider.getId(), null, AgentHarness.OPENCODE, canvasId, modelProvider.getId(), "gpt-4o"));
     }
 
-    private void launchNewRepositoryExecution(RepoCredential credential, String canvasId, String newRepoName)
-            throws Exception {
+    private void launchNewRepositoryExecution(String canvasId, String newRepoName) throws Exception {
         canvasService.createCanvas(
                 chat.getId(), canvasId, "Test Plan", "# Test Plan", CanvasType.SPEC, null, newRepoName);
 
         launchAndAwaitConnected(new CreateSandboxExecutionRequest(
-                provider.getId(),
-                null,
-                credential.getId(),
-                AgentHarness.OPENCODE,
-                canvasId,
-                modelProvider.getId(),
-                "gpt-4o"));
+                provider.getId(), null, AgentHarness.OPENCODE, canvasId, modelProvider.getId(), "gpt-4o"));
     }
 
     private void launchAndAwaitConnected(CreateSandboxExecutionRequest request) throws Exception {

@@ -1,12 +1,13 @@
 package com.kratisai.controlplane.api.restdto;
 
+import com.kratisai.controlplane.model.RepositoryType;
 import com.kratisai.controlplane.model.RepositoryVisibility;
 import java.util.List;
 import java.util.Objects;
 
 public record PublishCapabilitiesDto(
         boolean supportsPullRequests,
-        String repositoryType,
+        RepositoryType repositoryType,
         String defaultBaseBranch,
         PublishStatsDto stats,
         String suggestedTitle,

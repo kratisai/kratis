@@ -39,9 +39,15 @@ public final class LiteLLMDto {
             @JsonProperty("api_key") String apiKey,
             @JsonProperty("custom_llm_provider") String customLlmProvider,
             @JsonProperty("api_base") String apiBase,
-            @JsonProperty("base_model") String baseModel) {
+            @JsonProperty("base_model") String baseModel,
+            @JsonProperty("input_cost_per_token") Double inputCostPerToken,
+            @JsonProperty("output_cost_per_token") Double outputCostPerToken) {
         public LiteLLMParams(String model, String apiKey, String customLlmProvider, String apiBase) {
-            this(model, apiKey, customLlmProvider, apiBase, null);
+            this(model, apiKey, customLlmProvider, apiBase, null, null, null);
+        }
+
+        public LiteLLMParams(String model, String apiKey, String customLlmProvider, String apiBase, String baseModel) {
+            this(model, apiKey, customLlmProvider, apiBase, baseModel, null, null);
         }
     }
 

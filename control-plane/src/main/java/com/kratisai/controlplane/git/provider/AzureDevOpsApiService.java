@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 import org.springframework.web.util.UriBuilderFactory;
 
@@ -159,8 +160,16 @@ public class AzureDevOpsApiService {
 
     public Optional<RemoteRepositoryDto> findRepository(String apiBaseUrl, String project, String name, String token) {
         requireToken(token);
-        ResponseEntity<String> response = azureDevOpsApiClient.getRepository(
-                baseUriFactory(apiBaseUrl), project, name, API_VERSION, basic(token));
+        ResponseEntity<String> response;
+        try {
+            response = azureDevOpsApiClient.getRepository(
+                    baseUriFactory(apiBaseUrl), project, name, API_VERSION, basic(token));
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw e;
+        }
         if (response.getStatusCode().value() == 404) {
             return Optional.empty();
         }

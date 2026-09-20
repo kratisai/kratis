@@ -179,6 +179,24 @@ class LiteLLMDtoTest {
     }
 
     @Test
+    void liteLLMParams_serializesPricingOverride() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        String json = objectMapper.writeValueAsString(new LiteLLMParams(
+                "minimax.minimax-m2.5",
+                "key",
+                "openai",
+                "https://bedrock-mantle.eu-west-2.api.aws/v1",
+                null,
+                4.7e-07,
+                1.86e-06));
+
+        Map<?, ?> map = objectMapper.readValue(json, Map.class);
+        assertThat(map.get("input_cost_per_token")).isEqualTo(4.7e-07);
+        assertThat(map.get("output_cost_per_token")).isEqualTo(1.86e-06);
+    }
+
+    @Test
     void modelCostEntry_mapsRatesByKeyFromCostMapResponse() throws Exception {
         String json = """
                 {"bedrock/eu-west-2/minimax.minimax-m2.5":

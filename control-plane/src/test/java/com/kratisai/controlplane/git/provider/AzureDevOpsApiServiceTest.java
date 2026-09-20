@@ -17,7 +17,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.util.UriBuilderFactory;
 
 @ExtendWith(MockitoExtension.class)
@@ -211,6 +214,28 @@ class AzureDevOpsApiServiceTest {
 
         assertThat(service.findRepository("https://dev.azure.com/myorg", "proj", "repo", "tok"))
                 .isEmpty();
+    }
+
+    @Test
+    void findRepository_thrownNotFound_returnsEmpty() {
+        when(azureDevOpsApiClient.getRepository(
+                        any(UriBuilderFactory.class), eq("proj"), eq("repo"), eq("7.1"), eq(basicAuthHeader())))
+                .thenThrow(HttpClientErrorException.create(
+                        HttpStatus.NOT_FOUND, "Not Found", HttpHeaders.EMPTY, new byte[0], null));
+
+        assertThat(service.findRepository("https://dev.azure.com/myorg", "proj", "repo", "tok"))
+                .isEmpty();
+    }
+
+    @Test
+    void findRepository_thrownForbidden_propagates() {
+        when(azureDevOpsApiClient.getRepository(
+                        any(UriBuilderFactory.class), eq("proj"), eq("repo"), eq("7.1"), eq(basicAuthHeader())))
+                .thenThrow(HttpClientErrorException.create(
+                        HttpStatus.FORBIDDEN, "Forbidden", HttpHeaders.EMPTY, new byte[0], null));
+
+        assertThatThrownBy(() -> service.findRepository("https://dev.azure.com/myorg", "proj", "repo", "tok"))
+                .isInstanceOf(HttpClientErrorException.Forbidden.class);
     }
 
     @Test

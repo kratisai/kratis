@@ -139,7 +139,7 @@ class SandboxHitlControllerTest {
         mp = modelProviderRepository.save(mp);
 
         var createExecRequest = new CreateSandboxExecutionRequest(
-                null, envId, null, AgentHarness.OPENCODE, "test-plan", mp.getId(), "gpt-4o");
+                null, envId, AgentHarness.OPENCODE, "test-plan", mp.getId(), "gpt-4o");
         var execDto = sandboxExecutionService.createExecution(user.getId(), chat.getId(), createExecRequest);
         executionId = execDto.id();
     }

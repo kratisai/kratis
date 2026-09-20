@@ -72,15 +72,11 @@ public class EnvironmentGitTokenRpcHandler
                         JsonRpcError.error(-32001, "No execution for environment", "Environment has no execution")));
 
         Repository repository = execution.getRepository();
-        if (repository == null) {
-            throw new RpcErrorException(
-                    JsonRpcError.error(-32001, "No repository for execution", "Execution has no repository"));
-        }
-
-        RepoCredential credential = repository.getCredential();
+        // New-repo executions have no Repository row until first publish.
+        RepoCredential credential = repository != null ? repository.getCredential() : execution.getNewRepoCredential();
         if (credential == null) {
             throw new RpcErrorException(
-                    JsonRpcError.error(-32001, "No credential for repository", "Repository has no credential"));
+                    JsonRpcError.error(-32001, "No credential for execution", "Execution has no credential"));
         }
 
         GitAuthMaterial auth = credentialResolver.resolve(credential);

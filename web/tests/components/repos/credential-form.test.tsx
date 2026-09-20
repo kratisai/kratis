@@ -32,11 +32,14 @@ describe('CredentialForm', () => {
   it.each([
     [
       'github',
-      /fine-grained PAT needs Contents: Read & write, Metadata: Read-only, and Pull requests: Read & write/i,
+      /fine-grained PAT needs Contents: Read & write, Metadata: Read-only, and Pull requests: Read & write\. Add Administration: Read & write to create new repositories/i,
     ],
-    ['gitlab', /needs the api and write_repository scopes/i],
-    ['bitbucket', /needs Repositories: Read & write and Pull requests: Read & write/i],
-    ['azure', /PAT needs Code: Read & write/i],
+    ['gitlab', /needs the api and write_repository scopes\. Creating projects in a group also needs the Developer role/i],
+    [
+      'bitbucket',
+      /needs Repositories: Read & write and Pull requests: Read & write\. Add Repositories: Admin to create new repositories/i,
+    ],
+    ['azure', /PAT needs Code: Read & write\. Add Code: manage to create new repositories/i],
   ] as [ProviderType, RegExp][])('shows the %s permission hint in PAT mode', (provider, hint) => {
     renderForm(provider)
 

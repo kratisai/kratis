@@ -157,7 +157,7 @@ class ExecutionReplayActivitiesRpcIntegrationTest {
                 createExecutionRepository("replay-rpc-repo"),
                 null);
         var createExecRequest = new CreateSandboxExecutionRequest(
-                null, envId, null, AgentHarness.OPENCODE, "replay-rpc-plan", modelProvider.getId(), "gpt-4o");
+                null, envId, AgentHarness.OPENCODE, "replay-rpc-plan", modelProvider.getId(), "gpt-4o");
         var execDto = sandboxExecutionService.createExecution(user.getId(), chat.getId(), createExecRequest);
         UUID executionId = execDto.id();
 

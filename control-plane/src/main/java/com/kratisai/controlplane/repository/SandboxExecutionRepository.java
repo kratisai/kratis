@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -28,4 +29,10 @@ public interface SandboxExecutionRepository extends JpaRepository<SandboxExecuti
 
     @Query("SELECT COALESCE(SUM(e.usage.totalSpend), 0.0) FROM SandboxExecution e")
     double sumTotalSpend();
+
+    @Modifying
+    @Query(
+            value = "UPDATE sandbox_executions SET new_repo_credential_id = :credentialId WHERE id = :executionId",
+            nativeQuery = true)
+    int updateNewRepoCredential(@Param("executionId") UUID executionId, @Param("credentialId") UUID credentialId);
 }

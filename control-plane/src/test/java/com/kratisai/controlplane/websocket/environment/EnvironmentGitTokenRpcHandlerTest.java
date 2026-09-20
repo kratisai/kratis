@@ -135,6 +135,29 @@ class EnvironmentGitTokenRpcHandlerTest {
     }
 
     @Test
+    void handle_newRepoExecution_resolvesPublishCredential() {
+        when(sessionRegistry.getEnvironmentId("session-1")).thenReturn(Optional.of(envId));
+
+        ExecutionEnvironment env = new ExecutionEnvironment();
+        env.setId(envId);
+        when(executionEnvironmentRepository.findById(envId)).thenReturn(Optional.of(env));
+
+        RepoCredential credential = new RepoCredential(new Team(), "cred", CredentialType.PAT, "encrypted");
+        SandboxExecution execution = new SandboxExecution();
+        execution.setNewRepoName("fresh-repo");
+        execution.setNewRepoCredential(credential);
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(envId))
+                .thenReturn(Optional.of(execution));
+        when(credentialResolver.resolve(credential)).thenReturn(GitAuthMaterial.ofToken("new-repo-token"));
+
+        GitTokenResult result = handler.handle("session-1", 1, new EnvironmentRpcPayload.GitToken())
+                .blockLast();
+
+        assertThat(result).isNotNull();
+        assertThat(result.token()).isEqualTo("new-repo-token");
+    }
+
+    @Test
     void handle_executionWithoutRepository_isRejected() {
         when(sessionRegistry.getEnvironmentId("session-1")).thenReturn(Optional.of(envId));
 

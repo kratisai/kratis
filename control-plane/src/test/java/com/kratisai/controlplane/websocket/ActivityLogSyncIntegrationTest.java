@@ -176,7 +176,7 @@ class ActivityLogSyncIntegrationTest {
                 createExecutionRepository("sync-repo"),
                 null);
         var createExecRequest = new CreateSandboxExecutionRequest(
-                null, envId, null, AgentHarness.OPENCODE, "test-plan-sync", modelProvider.getId(), "gpt-4o");
+                null, envId, AgentHarness.OPENCODE, "test-plan-sync", modelProvider.getId(), "gpt-4o");
         var execDto = sandboxExecutionService.createExecution(user.getId(), chat.getId(), createExecRequest);
         UUID executionId = execDto.id();
 
@@ -343,7 +343,7 @@ class ActivityLogSyncIntegrationTest {
                 createExecutionRepository("broadcast-repo"),
                 null);
         var createExecRequest = new CreateSandboxExecutionRequest(
-                null, envId, null, AgentHarness.OPENCODE, "test-plan-broadcast", modelProvider.getId(), "gpt-4o");
+                null, envId, AgentHarness.OPENCODE, "test-plan-broadcast", modelProvider.getId(), "gpt-4o");
         var execDto = sandboxExecutionService.createExecution(user.getId(), chat.getId(), createExecRequest);
         UUID executionId = execDto.id();
 

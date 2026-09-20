@@ -204,7 +204,7 @@ class ChatExecutionControllerTest {
 
         // 2. Perform POST to launch execution
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                provider.getId(), null, null, AgentHarness.OPENCODE, "plan-exec", modelProvider.getId(), "gpt-4o");
+                provider.getId(), null, AgentHarness.OPENCODE, "plan-exec", modelProvider.getId(), "gpt-4o");
 
         mockMvc.perform(post("/api/v1/chats/{chatId}/executions", chat.getId())
                         .header("Authorization", "Bearer " + authToken)
@@ -338,7 +338,7 @@ class ChatExecutionControllerTest {
 
         // 2. Perform POST to launch execution
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
-                provider.getId(), null, null, AgentHarness.OPENCODE, "plan-docker", modelProvider.getId(), "gpt-4o");
+                provider.getId(), null, AgentHarness.OPENCODE, "plan-docker", modelProvider.getId(), "gpt-4o");
 
         // This will trigger the real docker command since we haven't stubbed
         // processExecutor for this command

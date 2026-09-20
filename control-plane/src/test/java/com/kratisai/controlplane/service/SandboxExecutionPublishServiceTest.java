@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -40,9 +41,7 @@ import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
-import com.kratisai.controlplane.repository.ChatRepository;
-import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
-import com.kratisai.controlplane.repository.SandboxExecutionRepository;
+import com.kratisai.controlplane.repository.*;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -53,6 +52,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -61,6 +61,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
@@ -76,7 +77,10 @@ class SandboxExecutionPublishServiceTest {
     private SandboxExecutionActivityRepository sandboxExecutionActivityRepository;
 
     @Mock
-    private com.kratisai.controlplane.repository.RepositoryRepository repositoryRepository;
+    private RepositoryRepository repositoryRepository;
+
+    @Mock
+    private RepoCredentialRepository credentialRepository;
 
     @Mock
     private EnvironmentRpcClient environmentRpcClient;
@@ -89,6 +93,12 @@ class SandboxExecutionPublishServiceTest {
 
     @Mock
     private ChatModelFactory chatModelFactory;
+
+    @Mock
+    private SandboxProvisioningService sandboxProvisioningService;
+
+    @Mock
+    private PlatformTransactionManager transactionManager;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -145,11 +155,14 @@ class SandboxExecutionPublishServiceTest {
                 chatRepository,
                 sandboxExecutionActivityRepository,
                 repositoryRepository,
+                credentialRepository,
                 environmentRpcClient,
                 credentialResolver,
                 providerRegistry,
                 chatModelFactory,
-                objectMapper);
+                objectMapper,
+                sandboxProvisioningService,
+                transactionManager);
     }
 
     private void stubExecutionLookup() {
@@ -183,7 +196,7 @@ class SandboxExecutionPublishServiceTest {
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
 
         assertThat(result.supportsPullRequests()).isTrue();
-        assertThat(result.repositoryType()).isEqualTo("GITHUB");
+        assertThat(result.repositoryType()).isEqualTo(RepositoryType.GITHUB);
         assertThat(result.defaultBaseBranch()).isEqualTo("main");
         assertThat(result.stats().hasChanges()).isFalse();
         assertThat(result.stats().formattedSummary()).isEqualTo("There are no changes to publish");
@@ -200,7 +213,7 @@ class SandboxExecutionPublishServiceTest {
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
 
         assertThat(result.supportsPullRequests()).isFalse();
-        assertThat(result.repositoryType()).isEqualTo("GENERIC");
+        assertThat(result.repositoryType()).isEqualTo(RepositoryType.GENERIC);
         assertThat(result.defaultBaseBranch()).isEqualTo("main");
     }
 
@@ -264,7 +277,7 @@ class SandboxExecutionPublishServiceTest {
 
         assertThat(result.stats().hasChanges()).isTrue();
         assertThat(result.stats().commitsAhead()).isEqualTo(1);
-        assertThat(result.stats().formattedSummary()).isEqualTo("1 commit (+15, -3 lines)");
+        assertThat(result.stats().formattedSummary()).isEqualTo("1 unpushed commit (+15, -3 lines)");
         assertThat(result.suggestedTitle()).isEqualTo("feat: add user profile with test verification");
         assertThat(result.suggestedBody()).isEqualTo("- Implemented profile view\n- Ran full test suite");
     }
@@ -306,7 +319,7 @@ class SandboxExecutionPublishServiceTest {
 
         assertThat(result.stats().commitsAhead()).isEqualTo(2);
         assertThat(result.stats().unstagedFiles()).isEqualTo(1);
-        assertThat(result.stats().formattedSummary()).isEqualTo("2 commits, 1 unstaged file (+20, -5 lines)");
+        assertThat(result.stats().formattedSummary()).isEqualTo("2 unpushed commits, 1 unstaged file (+20, -5 lines)");
         assertThat(result.suggestedTitle()).isEqualTo("feat: synthesized multi-commit title");
         assertThat(result.suggestedBody()).isEqualTo("- Summary item 1\n- Summary item 2");
     }
@@ -436,6 +449,16 @@ class SandboxExecutionPublishServiceTest {
 
         PublishCapabilitiesDto result2 = service.getPublishCapabilities(userId, chatId, executionId);
         assertThat(result2.stats().formattedSummary()).isEqualTo("2 unstaged files (+8, -1 lines)");
+
+        EnvironmentConnectorResult.GitDiffSummary summary3 = new EnvironmentConnectorResult.GitDiffSummary(
+                "base", "head", 12, 4, 3, 2, 1, true, List.of(), List.of());
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(summary3);
+
+        PublishCapabilitiesDto result3 = service.getPublishCapabilities(userId, chatId, executionId);
+        assertThat(result3.stats().formattedSummary())
+                .isEqualTo("3 unpushed commits, 2 staged files, 1 unstaged file (+12, -4 lines)");
     }
 
     @Test
@@ -543,7 +566,7 @@ class SandboxExecutionPublishServiceTest {
         assertThat(result.newRepo()).isTrue();
         assertThat(result.canCreateRepository()).isTrue();
         assertThat(result.supportsPullRequests()).isTrue();
-        assertThat(result.repositoryType()).isEqualTo("GITHUB");
+        assertThat(result.repositoryType()).isEqualTo(RepositoryType.GITHUB);
         assertThat(result.suggestedRepositoryName()).isEqualTo("fresh-repo");
         assertThat(result.visibilityOptions())
                 .containsExactly(RepositoryVisibility.PRIVATE, RepositoryVisibility.PUBLIC);
@@ -606,6 +629,172 @@ class SandboxExecutionPublishServiceTest {
                 payloadCaptor.getAllValues().getFirst();
         assertThat(setRemote.remoteUrl()).isEqualTo(remote.cloneUrl());
         assertThat(setRemote.defaultBranch()).isEqualTo("main");
+
+        ArgumentCaptor<CreateRepositoryCommand> createCaptor = ArgumentCaptor.forClass(CreateRepositoryCommand.class);
+        verify(provider).createRepository(eq(credential), any(GitAuthMaterial.class), createCaptor.capture());
+        assertThat(createCaptor.getValue().defaultBranch()).isEqualTo("main");
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void publishPullRequest_newRepository_alwaysTargetsMainBranch() throws Exception {
+        execution.setRepository(null);
+        execution.setNewRepoName("fresh-repo");
+        execution.setTargetBranch("not-main");
+        RepoCredential credential = githubNewRepoCredential();
+        execution.setNewRepoCredential(credential);
+        stubExecutionLookup();
+
+        RepoProvider provider = newRepoProvider(true, true);
+        when(providerRegistry.getProvider(RepositoryType.GITHUB)).thenReturn(provider);
+        when(providerRegistry.getProvider(any(Repository.class))).thenReturn(provider);
+        when(credentialResolver.resolve(credential)).thenReturn(GitAuthMaterial.ofToken("token"));
+        when(credentialResolver.resolve(any(Repository.class))).thenReturn(GitAuthMaterial.ofToken("token"));
+        when(repositoryRepository.existsByTeamIdAndName(team.getId(), "fresh-repo"))
+                .thenReturn(false);
+        when(repositoryRepository.save(any(Repository.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        RemoteRepositoryDto remote = new RemoteRepositoryDto(
+                "fake-user/fresh-repo",
+                "https://github.com/fake-user/fresh-repo.git",
+                "git@github.com:fake.git",
+                "main");
+        when(provider.createRepository(eq(credential), any(GitAuthMaterial.class), any(CreateRepositoryCommand.class)))
+                .thenReturn(remote);
+        when(provider.createPullRequest(
+                        any(Repository.class), any(GitAuthMaterial.class), any(CreatePullRequestCommand.class)))
+                .thenReturn(new PullRequestResultDto(
+                        42L, "https://github.com/fake-user/fresh-repo/pull/42", "kratis/feature", "main"));
+
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitSetRemote.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(new EnvironmentConnectorResult.GitSetRemote("success", "main", "seedsha"));
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(new EnvironmentConnectorResult.GitPush(
+                        "sha123", "kratis/feature", "refs/heads/kratis/feature", "SUCCESS"));
+
+        PublishPrRequestDto request = new PublishPrRequestDto(
+                "kratis/feature", null, "feat: init", "body", false, false, "fresh-repo", RepositoryVisibility.PRIVATE);
+
+        service.publishPullRequest(userId, chatId, executionId, request);
+
+        ArgumentCaptor<EnvironmentRpcPayload.OutboundRequestPayload> payloadCaptor =
+                ArgumentCaptor.forClass(EnvironmentRpcPayload.OutboundRequestPayload.class);
+        verify(environmentRpcClient, times(2))
+                .request(eq(envId), payloadCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
+        EnvironmentRpcPayload.GitSetRemote setRemote = (EnvironmentRpcPayload.GitSetRemote)
+                payloadCaptor.getAllValues().getFirst();
+        assertThat(setRemote.defaultBranch()).isEqualTo("main");
+        assertThat(execution.getTargetBranch()).isEqualTo("main");
+        assertThat(execution.getRepository().getBranch()).isEqualTo("main");
+    }
+
+    @Test
+    void publishPullRequest_newRepository_credentialSelect_setsCredentialAtPublish() throws Exception {
+        execution.setRepository(null);
+        execution.setNewRepoName("fresh-repo");
+        execution.setNewRepoCredential(null);
+        stubExecutionLookup();
+
+        RepoCredential selected = githubNewRepoCredential();
+        selected.setId(UUID.randomUUID());
+        when(credentialRepository.findByTeamIdAndId(team.getId(), selected.getId()))
+                .thenReturn(Optional.of(selected));
+
+        RepoProvider provider = newRepoProvider(true, true);
+        when(providerRegistry.getProvider(RepositoryType.GITHUB)).thenReturn(provider);
+        when(providerRegistry.getProvider(any(Repository.class))).thenReturn(provider);
+        when(credentialResolver.resolve(selected)).thenReturn(GitAuthMaterial.ofToken("selected-token"));
+        when(credentialResolver.resolve(any(Repository.class))).thenReturn(GitAuthMaterial.ofToken("token"));
+        when(repositoryRepository.existsByTeamIdAndName(team.getId(), "fresh-repo"))
+                .thenReturn(false);
+        when(repositoryRepository.save(any(Repository.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        RemoteRepositoryDto remote = new RemoteRepositoryDto(
+                "fake-user/fresh-repo",
+                "https://github.com/fake-user/fresh-repo.git",
+                "git@github.com:fake.git",
+                "main");
+        when(provider.createRepository(eq(selected), any(GitAuthMaterial.class), any(CreateRepositoryCommand.class)))
+                .thenReturn(remote);
+        when(provider.createPullRequest(
+                        any(Repository.class), any(GitAuthMaterial.class), any(CreatePullRequestCommand.class)))
+                .thenReturn(new PullRequestResultDto(
+                        43L, "https://github.com/fake-user/fresh-repo/pull/43", "kratis/feature", "main"));
+
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitSetRemote.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(new EnvironmentConnectorResult.GitSetRemote("success", "main", "seedsha"));
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(new EnvironmentConnectorResult.GitPush(
+                        "sha123", "kratis/feature", "refs/heads/kratis/feature", "SUCCESS"));
+
+        PublishPrRequestDto request = new PublishPrRequestDto(
+                "kratis/feature",
+                null,
+                "feat: init",
+                "body",
+                false,
+                false,
+                "fresh-repo",
+                RepositoryVisibility.PRIVATE,
+                selected.getId());
+
+        PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
+
+        assertThat(result.prNumber()).isEqualTo(43L);
+        verify(provider).createRepository(eq(selected), any(GitAuthMaterial.class), any(CreateRepositoryCommand.class));
+        assertThat(execution.getRepository().getCredential()).isEqualTo(selected);
+        InOrder inOrder = inOrder(sandboxExecutionRepository, sandboxProvisioningService, environmentRpcClient);
+        inOrder.verify(sandboxExecutionRepository).updateNewRepoCredential(executionId, selected.getId());
+        inOrder.verify(sandboxProvisioningService).registerGitAuth(execution, selected);
+        inOrder.verify(environmentRpcClient)
+                .request(eq(envId), any(EnvironmentRpcPayload.GitSetRemote.class), anyLong(), eq(TimeUnit.SECONDS));
+    }
+
+    @Test
+    void pushBranch_newRepository_credentialSelect_setsCredentialAtPublish() throws Exception {
+        execution.setRepository(null);
+        execution.setNewRepoName("fresh-repo");
+        execution.setNewRepoCredential(null);
+        stubExecutionLookup();
+
+        RepoCredential selected = githubNewRepoCredential();
+        selected.setId(UUID.randomUUID());
+        when(credentialRepository.findByTeamIdAndId(team.getId(), selected.getId()))
+                .thenReturn(Optional.of(selected));
+
+        RepoProvider provider = newRepoProvider(true, false);
+        when(providerRegistry.getProvider(RepositoryType.GITHUB)).thenReturn(provider);
+        when(credentialResolver.resolve(selected)).thenReturn(GitAuthMaterial.ofToken("selected-token"));
+        when(repositoryRepository.existsByTeamIdAndName(team.getId(), "fresh-repo"))
+                .thenReturn(false);
+        when(repositoryRepository.save(any(Repository.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        RemoteRepositoryDto remote = new RemoteRepositoryDto(
+                "fake-user/fresh-repo",
+                "https://github.com/fake-user/fresh-repo.git",
+                "git@github.com:fake.git",
+                "main");
+        when(provider.createRepository(eq(selected), any(GitAuthMaterial.class), any(CreateRepositoryCommand.class)))
+                .thenReturn(remote);
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitSetRemote.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(new EnvironmentConnectorResult.GitSetRemote("success", "main", "seedsha"));
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(new EnvironmentConnectorResult.GitPush(
+                        "sha123", "feature-branch", "refs/heads/feature-branch", "SUCCESS"));
+
+        PushBranchRequestDto request = new PushBranchRequestDto("feature-branch", "commit", true, selected.getId());
+        service.pushBranch(userId, chatId, executionId, request);
+
+        verify(provider).createRepository(eq(selected), any(GitAuthMaterial.class), any(CreateRepositoryCommand.class));
+        assertThat(execution.getNewRepoName()).isNull();
+        verify(sandboxExecutionRepository).updateNewRepoCredential(executionId, selected.getId());
+        verify(sandboxProvisioningService).registerGitAuth(execution, selected);
     }
 
     @Test
@@ -679,11 +868,45 @@ class SandboxExecutionPublishServiceTest {
         stubExecutionLookup();
 
         PublishPrRequestDto request = new PublishPrRequestDto(
-                "kratis/feature", null, "feat: init", "body", false, false, "fresh-repo", RepositoryVisibility.PRIVATE);
+                "kratis/feature",
+                null,
+                "feat: init",
+                "body",
+                false,
+                false,
+                "fresh-repo",
+                RepositoryVisibility.PRIVATE,
+                null);
 
         assertThatThrownBy(() -> service.publishPullRequest(userId, chatId, executionId, request))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("provider");
+    }
+
+    @Test
+    void publishPullRequest_newRepository_unknownCredential_throwsNotFound() {
+        execution.setRepository(null);
+        execution.setNewRepoName("fresh-repo");
+        execution.setNewRepoCredential(githubNewRepoCredential());
+        stubExecutionLookup();
+
+        UUID unknown = UUID.randomUUID();
+        when(credentialRepository.findByTeamIdAndId(team.getId(), unknown)).thenReturn(Optional.empty());
+
+        PublishPrRequestDto request = new PublishPrRequestDto(
+                "kratis/feature",
+                null,
+                "feat: init",
+                "body",
+                false,
+                false,
+                "fresh-repo",
+                RepositoryVisibility.PRIVATE,
+                unknown);
+
+        assertThatThrownBy(() -> service.publishPullRequest(userId, chatId, executionId, request))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Credential not found");
     }
 
     @Test

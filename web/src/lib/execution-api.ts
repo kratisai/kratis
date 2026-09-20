@@ -13,7 +13,6 @@ export interface AgentHarnessOption {
 
 export interface CreateSandboxExecutionRequest {
   canvasId: string
-  credentialId?: string
   environmentId?: string
   harness: AgentHarness
   modelName: string
