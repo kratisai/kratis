@@ -18,7 +18,7 @@ import org.springframework.web.socket.WebSocketSession;
 public class PendingHitlRegistry {
 
     private static final Logger logger = LoggerFactory.getLogger(PendingHitlRegistry.class);
-    private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(5);
+    private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(30);
 
     public record PendingHitl(
             ExecutionHitlRequiredResult request,

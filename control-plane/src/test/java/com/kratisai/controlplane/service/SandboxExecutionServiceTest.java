@@ -1348,4 +1348,58 @@ class SandboxExecutionServiceTest {
         await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> verify(environmentRpcClient)
                 .request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)));
     }
+
+    @Test
+    void dispatchSystemSteering_fromIdle_revivesExecutionAndDispatchesSteeringPrompt() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(environmentRpcClient.request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)))
+                .thenReturn(
+                        new EnvironmentConnectorResult.AcpPrompt(PromptStatus.COMPLETED, StopReason.END_TURN, null));
+
+        sandboxExecutionService.dispatchSystemSteering(execution.getId(), "no response was received");
+
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.RUNNING);
+        verify(sandboxExecutionRepository).save(execution);
+
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        ExecutionStatusChangedEvent statusEvent = (ExecutionStatusChangedEvent) eventCaptor.getValue();
+        assertThat(statusEvent.teamId()).isEqualTo(TEAM_ID);
+        assertThat(statusEvent.chatId()).isEqualTo(CHAT_ID);
+        assertThat(statusEvent.executionId()).isEqualTo(execution.getId());
+
+        await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> {
+            ArgumentCaptor<EnvironmentRpcPayload.AcpPrompt> captor =
+                    ArgumentCaptor.forClass(EnvironmentRpcPayload.AcpPrompt.class);
+            verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), captor.capture());
+            assertThat(captor.getValue().taskPrompt()).isEqualTo("no response was received");
+            assertThat(captor.getValue().isSteering()).isEqualTo(Boolean.TRUE);
+        });
+    }
+
+    @Test
+    void dispatchSystemSteering_terminalExecution_skipsDispatch() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.setStatus(SandboxExecutionStatus.FAILED);
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        sandboxExecutionService.dispatchSystemSteering(execution.getId(), "guidance");
+
+        verify(sandboxExecutionRepository, never()).save(any());
+        verify(environmentRpcClient, never()).request(any(), any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void dispatchSystemSteering_missingExecution_skipsDispatch() throws Exception {
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.empty());
+
+        sandboxExecutionService.dispatchSystemSteering(EXECUTION_ID, "guidance");
+
+        verify(sandboxExecutionRepository, never()).save(any());
+        verify(environmentRpcClient, never()).request(any(), any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
 }

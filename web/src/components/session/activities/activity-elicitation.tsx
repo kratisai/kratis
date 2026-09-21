@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import type { ElicitationActivity } from '@/types/execution-activity-types'
 
+import { HitlFeedbackField } from '@/components/session/activities/hitl-feedback-field'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -41,6 +42,7 @@ interface SchemaProperty {
 export function ActivityElicitation({ activity, executionId }: ActivityElicitationProps) {
   const resolveHitl = useActivityStore((s) => s.resolveHitl)
   const [values, setValues] = useState<Record<string, boolean | string | string[]>>({})
+  const [feedback, setFeedback] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const schema = (activity.form ?? {}) as {
@@ -53,7 +55,15 @@ export function ActivityElicitation({ activity, executionId }: ActivityElicitati
     setIsSubmitting(true)
     try {
       const content = response === 'answered' ? values : undefined
-      await resolveHitl(executionId, activity.hitlId, response, undefined, content)
+      await resolveHitl(
+        executionId,
+        activity.hitlId,
+        response,
+        undefined,
+        content,
+        undefined,
+        feedback,
+      )
     } catch {
       // handled via websocket resolution
     } finally {
@@ -102,6 +112,14 @@ export function ActivityElicitation({ activity, executionId }: ActivityElicitati
             value={values[key]}
           />
         ))}
+
+        <HitlFeedbackField
+          disabled={isSubmitting}
+          id={`${activity.hitlId}-feedback`}
+          onChange={setFeedback}
+          placeholder="Guidance sent with your response, e.g. staging is offline, try preview"
+          value={feedback}
+        />
 
         <div className="flex gap-2">
           <Button
@@ -227,8 +245,13 @@ function SchemaField({
 
   return (
     <div className="space-y-1">
-      {label && <Label className="text-sm font-normal">{label}</Label>}
+      {label && (
+        <Label className="text-sm font-normal" htmlFor={`schema-field-${label}`}>
+          {label}
+        </Label>
+      )}
       <Input
+        id={label ? `schema-field-${label}` : undefined}
         onChange={(event) => onChange(event.target.value)}
         type={property.type === 'number' || property.type === 'integer' ? 'number' : 'text'}
         value={typeof value === 'string' ? value : ''}

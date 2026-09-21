@@ -122,6 +122,7 @@ describe('ActivityApproval', () => {
       'allow-once',
       undefined,
       undefined,
+      '',
     )
   })
 
@@ -145,6 +146,7 @@ describe('ActivityApproval', () => {
       'reject-once',
       undefined,
       undefined,
+      '',
     )
   })
 
@@ -161,7 +163,48 @@ describe('ActivityApproval', () => {
       undefined,
       undefined,
       undefined,
+      '',
     )
+  })
+
+  it('sends typed feedback as steering guidance with the rejection', async () => {
+    const user = userEvent.setup()
+    render(
+      <ActivityApproval
+        activity={pendingActivity({ permissionOptions: [ALLOW_ONCE, REJECT_ONCE] })}
+        executionId="exec-1"
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Message to agent' }))
+    await user.type(screen.getByLabelText('Message to agent'), 'use pnpm instead')
+    await user.click(screen.getByRole('button', { name: /Reject/ }))
+
+    expect(resolveHitl).toHaveBeenCalledWith(
+      'exec-1',
+      'tc-1',
+      'declined',
+      'reject-once',
+      undefined,
+      undefined,
+      'use pnpm instead',
+    )
+  })
+
+  it('hides the feedback textarea until the message toggle is opened', async () => {
+    const user = userEvent.setup()
+    render(
+      <ActivityApproval
+        activity={pendingActivity({ permissionOptions: [ALLOW_ONCE, REJECT_ONCE] })}
+        executionId="exec-1"
+      />,
+    )
+
+    expect(screen.queryByLabelText('Message to agent')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Message to agent' }))
+
+    expect(screen.getByLabelText('Message to agent')).toBeInTheDocument()
   })
 
   it('hides the remember toggle when the approval carries no command segments', () => {
@@ -230,7 +273,7 @@ describe('ActivityApproval', () => {
 
       expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'tc-1', 'approved', 'allow-once', undefined, [
         { action: 'ALLOW', commandRoot: 'npm run test' },
-      ])
+      ], '')
     })
 
     it('edited root text is submitted instead of the suggestion', async () => {
@@ -246,7 +289,7 @@ describe('ActivityApproval', () => {
 
       expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'tc-1', 'approved', 'allow-once', undefined, [
         { action: 'ALLOW', commandRoot: 'npm' },
-      ])
+      ], '')
     })
 
     it('a crossed segment disables Allow and turns Reject into Reject and remember', async () => {
@@ -261,7 +304,7 @@ describe('ActivityApproval', () => {
 
       expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'tc-1', 'declined', 'reject-once', undefined, [
         { action: 'DENY', commandRoot: 'git push' },
-      ])
+      ], '')
     })
 
     it('mixed marks submit allow and deny rules together as a rejection', async () => {
@@ -276,7 +319,7 @@ describe('ActivityApproval', () => {
       expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'tc-1', 'declined', 'reject-once', undefined, [
         { action: 'ALLOW', commandRoot: 'npm run test' },
         { action: 'DENY', commandRoot: 'git push' },
-      ])
+      ], '')
     })
 
     it('toggling a mark off restores the plain allow flow', async () => {
@@ -299,6 +342,7 @@ describe('ActivityApproval', () => {
         'allow-once',
         undefined,
         undefined,
+        '',
       )
     })
 
@@ -324,6 +368,7 @@ describe('ActivityApproval', () => {
         'allow-once',
         undefined,
         undefined,
+        '',
       )
     })
 
@@ -345,7 +390,7 @@ describe('ActivityApproval', () => {
 
       expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'tc-1', 'approved', 'allow-once', undefined, [
         { action: 'ALLOW', commandRoot: 'edit', ruleType: 'TOOL_KIND' },
-      ])
+      ], '')
     })
 
     it('falls back to segments from the persisted hitl detail', async () => {

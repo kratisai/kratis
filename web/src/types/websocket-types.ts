@@ -205,6 +205,8 @@ export type HitlKind = 'approval' | 'question'
 
 export type HitlResponse = 'answered' | 'approved' | 'cancelled' | 'declined'
 
+export const SYSTEM_TIMEOUT_RESOLVED_BY = 'System (timeout)'
+
 export interface IngestionEventPayload {
   batchId: string
   commitHash: null | string

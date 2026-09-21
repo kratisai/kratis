@@ -129,6 +129,12 @@ The execution remains `RUNNING` while the request is unresolved. The control pla
 `outcome.selected{optionId}` per ACP. A real cancel (dismissal/timeout/termination) is the only
 path that returns `outcome.cancelled` — rejection is no longer collapsed into cancellation.
 
+On timeout the control plane unblocks the agent with `outcome.cancelled` and then dispatches a
+system steering turn (`SandboxExecutionService.dispatchSystemSteering`) telling the agent that no
+response was received and that this is not a rejection, so it continues the task without the
+blocked action. A HITL resolution may also carry an optional `feedback` note, which is delivered
+the same way after the sidecar reply.
+
 The control plane owns permission policy:
 
 - `ShellCommandSplitter` splits composite commands into root commands at `&&`, `||`, `;`, `|`,
@@ -168,7 +174,7 @@ The control plane owns permission policy:
 | Initialization | `env.acp_initialized` contains a session ID after `initialize` and `session/new`. |
 | Prompt | Normal completion returns exactly `end_turn`; every reason belongs to the ACP enum. |
 | Output | Expected files, output, activity, and model requests are observed. |
-| HITL | Any selected option resumes the agent with `outcome.selected{optionId}` (allow or reject kind); only dismissal/timeout yields `outcome.cancelled`. |
+| HITL | Any selected option resumes the agent with `outcome.selected{optionId}` (allow or reject kind); only dismissal/timeout yields `outcome.cancelled`. Timeout additionally dispatches a "no response" steering turn, and the execution returns to `RUNNING`. |
 | Cancellation | Pending permission receives cancelled outcome and prompt returns `cancelled`. |
 | Reconnect | Agent process and ACP session survive `/ws/env` interruption; registration and event delivery resume within the lease. |
 | Cleanup | `env.complete` is received, the virtual key is revoked, and the sandbox is removed. |

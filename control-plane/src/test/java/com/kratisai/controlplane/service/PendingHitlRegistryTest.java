@@ -107,7 +107,8 @@ class PendingHitlRegistryTest {
                                 fresh.request(),
                                 fresh.session(),
                                 fresh.requestId(),
-                                Instant.now().minusSeconds(600),
+                                // Well beyond the registry's default timeout.
+                                Instant.now().minusSeconds(3600),
                                 teamId));
 
         Map<UUID, PendingHitlRegistry.PendingHitl> expired = registry.getExpired();
@@ -135,7 +136,8 @@ class PendingHitlRegistryTest {
                                 fresh.request(),
                                 fresh.session(),
                                 fresh.requestId(),
-                                Instant.now().minusSeconds(600),
+                                // Well beyond the registry's default timeout.
+                                Instant.now().minusSeconds(3600),
                                 teamId));
         UUID freshExecution = UUID.randomUUID();
         registry.register(

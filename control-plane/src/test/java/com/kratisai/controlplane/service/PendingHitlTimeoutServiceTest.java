@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.service;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -36,13 +37,17 @@ class PendingHitlTimeoutServiceTest {
     private EnvironmentRealtimeEventListeners environmentListeners;
 
     @Mock
+    private SandboxExecutionService sandboxExecutionService;
+
+    @Mock
     private WebSocketSession session;
 
     private PendingHitlTimeoutService service;
 
     @BeforeEach
     void setUp() {
-        service = new PendingHitlTimeoutService(pendingHitlRegistry, eventPublisher, environmentListeners);
+        service = new PendingHitlTimeoutService(
+                pendingHitlRegistry, eventPublisher, environmentListeners, sandboxExecutionService);
     }
 
     private PendingHitlRegistry.PendingHitl pending(UUID teamId, HitlKind kind, String hitlId, String command) {
@@ -80,6 +85,12 @@ class PendingHitlTimeoutServiceTest {
             }
             verify(environmentListeners)
                     .replyToSidecar(eq(hitl), eq(executionId), eq(HitlResponse.CANCELLED), eq(null), eq(null));
+            ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+            verify(sandboxExecutionService).dispatchSystemSteering(eq(executionId), promptCaptor.capture());
+            Assertions.assertThat(promptCaptor.getValue())
+                    .contains("no response was received")
+                    .contains("not a rejection")
+                    .contains("Continue the task");
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
@@ -110,6 +121,7 @@ class PendingHitlTimeoutServiceTest {
             }
             verify(environmentListeners)
                     .replyToSidecar(eq(hitl), eq(executionId), eq(HitlResponse.CANCELLED), eq(null), eq(null));
+            verify(sandboxExecutionService).dispatchSystemSteering(eq(executionId), any(String.class));
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
@@ -120,5 +132,40 @@ class PendingHitlTimeoutServiceTest {
         when(pendingHitlRegistry.removeExpired()).thenReturn(Map.of());
         service.cleanupExpiredHitl();
         verify(eventPublisher, org.mockito.Mockito.never()).publishEvent(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void timeoutPrompt_mentionsRequestMessageAndNoResponseGuidance() {
+        PendingHitlRegistry.PendingHitl hitl = new PendingHitlRegistry.PendingHitl(
+                new ExecutionHitlRequiredResult(
+                        UUID.randomUUID(), "tool-call-42", HitlKind.APPROVAL, "Remove build artifacts"),
+                session,
+                7,
+                Instant.now(),
+                UUID.randomUUID());
+
+        String prompt = PendingHitlTimeoutService.timeoutPrompt(hitl);
+
+        Assertions.assertThat(prompt)
+                .contains("approval request")
+                .contains("Remove build artifacts")
+                .contains("no response was received")
+                .contains("not a rejection")
+                .contains("Continue the task");
+    }
+
+    @Test
+    void timeoutPrompt_abbreviatesLongRequestMessages() {
+        PendingHitlRegistry.PendingHitl hitl = new PendingHitlRegistry.PendingHitl(
+                new ExecutionHitlRequiredResult(UUID.randomUUID(), "t-1", HitlKind.QUESTION, "x".repeat(500)),
+                session,
+                7,
+                Instant.now(),
+                UUID.randomUUID());
+
+        String prompt = PendingHitlTimeoutService.timeoutPrompt(hitl);
+
+        Assertions.assertThat(prompt).contains("question request").contains("…");
+        Assertions.assertThat(prompt).doesNotContain("x".repeat(500));
     }
 }

@@ -36,6 +36,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -489,6 +490,29 @@ public class SandboxExecutionService {
 
         String compiledPrompt = compileSteeringPrompt(request);
         dispatchSteeringPrompt(execution, compiledPrompt);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void dispatchSystemSteering(UUID executionId, String promptText) {
+        SandboxExecution execution =
+                sandboxExecutionRepository.findById(executionId).orElse(null);
+        if (execution == null || execution.getEnvironment() == null) {
+            logger.warn("Cannot dispatch system steering: execution {} not found or has no environment", executionId);
+            return;
+        }
+        if (execution.getStatus() != SandboxExecutionStatus.RUNNING
+                && execution.getStatus() != SandboxExecutionStatus.IDLE) {
+            logger.info("Skipping system steering for execution {} in state {}", executionId, execution.getStatus());
+            return;
+        }
+
+        touchExecutionGraph(execution);
+        execution.setStatus(SandboxExecutionStatus.RUNNING);
+        sandboxExecutionRepository.save(execution);
+        eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
+                execution.getChat().getTeam().getId(), execution.getChat().getId(), executionId));
+
+        dispatchSteeringPrompt(execution, promptText);
     }
 
     public static String compileSteeringPrompt(SteerExecutionRequest request) {

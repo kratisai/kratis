@@ -51,12 +51,14 @@ export interface BaseActivity {
   collapsed: boolean
   endedAt?: string
   executionId: string
+  hitlResponse?: HitlResponse
   id: string
   permissionDiff?: ActivityDiff
   permissionKind?: string
   permissionOptions?: PermissionOption[]
   permissionSegments?: CommandSegment[]
   permissionTitle?: string
+  resolvedBy?: string
   startedAt: string
   state: ActivityState
   type: ActivityType

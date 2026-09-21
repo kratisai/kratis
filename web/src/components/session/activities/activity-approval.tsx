@@ -1,18 +1,31 @@
-import { Check, CheckCircle2, ChevronDown, ShieldCheck, ShieldX, X, XCircle } from 'lucide-react'
+import {
+  Ban,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  ShieldCheck,
+  ShieldX,
+  X,
+  XCircle,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import type {
   CommandExecutionActivity,
+  HitlResponse,
   PermissionOption,
   ToolExecutionActivity,
 } from '@/types/execution-activity-types'
 import type { CreateHitlRuleRequest } from '@/types/hitl-rule-types'
 
+import { HitlFeedbackField } from '@/components/session/activities/hitl-feedback-field'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { activityCommand, useActivityStore } from '@/store/activity-store'
+import { SYSTEM_TIMEOUT_RESOLVED_BY } from '@/types/websocket-types'
 
 interface ActivityApprovalProps {
   activity: ApprovalActivity
@@ -25,6 +38,7 @@ type SegmentMark = 'allow' | 'deny'
 export function ActivityApproval({ activity, executionId }: ActivityApprovalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [rememberOpen, setRememberOpen] = useState(false)
+  const [feedback, setFeedback] = useState('')
   const cardRef = useRef<HTMLDivElement>(null)
 
   // Expanding the remember panel grows the card; keep its action buttons in view.
@@ -75,7 +89,7 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
   ) => {
     setIsSubmitting(true)
     try {
-      await resolveHitl(executionId, hitlId, response, optionId, undefined, rules)
+      await resolveHitl(executionId, hitlId, response, optionId, undefined, rules, feedback)
     } catch {
       // handled via websocket resolution
     } finally {
@@ -112,17 +126,30 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
   }
 
   if (isResolved) {
-    const wasApproved = activity.approved === true
+    const resolution: HitlResponse =
+      activity.hitlResponse ?? (activity.approved === true ? 'approved' : 'declined')
+    const timedOut =
+      resolution === 'cancelled' && activity.resolvedBy === SYSTEM_TIMEOUT_RESOLVED_BY
     return (
       <Card className="border-border/50 bg-muted/30 min-w-0 p-0">
         <CardContent className="flex min-w-0 items-center gap-2">
-          {wasApproved ? (
+          {resolution === 'approved' ? (
             <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+          ) : timedOut ? (
+            <Clock className="h-4 w-4 shrink-0 text-amber-500" />
+          ) : resolution === 'cancelled' ? (
+            <Ban className="text-muted-foreground h-4 w-4 shrink-0" />
           ) : (
             <XCircle className="h-4 w-4 shrink-0 text-red-500" />
           )}
           <span className="min-w-0 flex-1 truncate text-sm">
-            Permission {wasApproved ? 'approved' : 'rejected'}:{' '}
+            {resolution === 'approved'
+              ? 'Permission approved:'
+              : timedOut
+                ? 'Permission request timed out — no response:'
+                : resolution === 'cancelled'
+                  ? 'Permission request cancelled:'
+                  : 'Permission rejected:'}{' '}
             <code className="bg-muted rounded px-1 font-mono text-xs">{command}</code>
           </span>
         </CardContent>
@@ -231,6 +258,14 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
             )}
           </div>
         )}
+
+        <HitlFeedbackField
+          disabled={isSubmitting}
+          id={`${hitlId}-feedback`}
+          onChange={setFeedback}
+          placeholder="Guidance sent with your response, e.g. use pnpm instead of npm"
+          value={feedback}
+        />
 
         <div className="flex flex-wrap gap-2">
           {allowOption && (

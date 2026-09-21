@@ -83,6 +83,9 @@ class SandboxHitlControllerTest {
     @Autowired
     private PendingHitlRegistry pendingHitlRegistry;
 
+    @Autowired
+    private SandboxExecutionRepository sandboxExecutionRepository;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private MockMvc mockMvc;
@@ -585,6 +588,94 @@ class SandboxHitlControllerTest {
                         .header("Authorization", "Bearer " + userAuthToken)
                         .contentType("application/json")
                         .content(invalidBody))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void resolveApproval_withFeedback_revivesIdleExecutionForSteering() throws Exception {
+        SandboxExecution execution =
+                sandboxExecutionRepository.findById(executionId).orElseThrow();
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+        sandboxExecutionRepository.save(execution);
+        registerPendingApproval();
+
+        ResolveHitlRequest request = new ResolveHitlRequest(
+                executionId,
+                "tool-call-42",
+                HitlResponse.DECLINED,
+                "reject-once",
+                null,
+                null,
+                "Use pnpm instead of npm");
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        assertThat(sandboxExecutionRepository
+                        .findById(executionId)
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(SandboxExecutionStatus.RUNNING);
+    }
+
+    @Test
+    void resolveApproval_withoutFeedback_leavesIdleExecutionUntouched() throws Exception {
+        SandboxExecution execution =
+                sandboxExecutionRepository.findById(executionId).orElseThrow();
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+        sandboxExecutionRepository.save(execution);
+        registerPendingApproval();
+
+        ResolveHitlRequest request =
+                new ResolveHitlRequest(executionId, "tool-call-42", HitlResponse.DECLINED, "reject-once", null);
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        assertThat(sandboxExecutionRepository
+                        .findById(executionId)
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(SandboxExecutionStatus.IDLE);
+    }
+
+    @Test
+    void resolveApproval_blankFeedback_ignoresSteering() throws Exception {
+        SandboxExecution execution =
+                sandboxExecutionRepository.findById(executionId).orElseThrow();
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+        sandboxExecutionRepository.save(execution);
+        registerPendingApproval();
+
+        ResolveHitlRequest request = new ResolveHitlRequest(
+                executionId, "tool-call-42", HitlResponse.DECLINED, "reject-once", null, null, "   ");
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        assertThat(sandboxExecutionRepository
+                        .findById(executionId)
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(SandboxExecutionStatus.IDLE);
+    }
+
+    @Test
+    void resolveApproval_oversizedFeedback_returns400() throws Exception {
+        registerPendingApproval();
+
+        ResolveHitlRequest request = new ResolveHitlRequest(
+                executionId, "tool-call-42", HitlResponse.DECLINED, "reject-once", null, null, "x".repeat(4001));
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest());
     }
 }

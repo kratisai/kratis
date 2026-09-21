@@ -70,6 +70,49 @@ describe('activity-store - HITL REST calls', () => {
     })
   })
 
+  it('sends trimmed feedback with the resolution when provided', async () => {
+    useAuthStore.getState().login(
+      { email: 'test@test.com', id: 'user-1', name: 'Test User' },
+      'test-access-token',
+      'test-refresh-token',
+      3600,
+    )
+
+    await useActivityStore
+      .getState()
+      .resolveHitl('exec-1', 'tc-1', 'declined', 'reject-once', undefined, undefined, '  use pnpm instead  ')
+
+    expect(capturedRequests).toHaveLength(1)
+    expect(JSON.parse(String(capturedRequests[0].init.body))).toEqual({
+      executionId: 'exec-1',
+      feedback: 'use pnpm instead',
+      hitlId: 'tc-1',
+      optionId: 'reject-once',
+      response: 'declined',
+    })
+  })
+
+  it('omits blank feedback from the resolution body', async () => {
+    useAuthStore.getState().login(
+      { email: 'test@test.com', id: 'user-1', name: 'Test User' },
+      'test-access-token',
+      'test-refresh-token',
+      3600,
+    )
+
+    await useActivityStore.getState().resolveHitl('exec-1', 'tc-1', 'declined', 'reject-once', undefined, undefined, '   ')
+
+    expect(capturedRequests).toHaveLength(1)
+    const body = JSON.parse(String(capturedRequests[0].init.body)) as Record<string, unknown>
+    expect(body).toEqual({
+      executionId: 'exec-1',
+      hitlId: 'tc-1',
+      optionId: 'reject-once',
+      response: 'declined',
+    })
+    expect('feedback' in body).toBe(false)
+  })
+
   it('sends an answered question resolution with bearer token and content', async () => {
     useAuthStore.getState().login(
       { email: 'test@test.com', id: 'user-1', name: 'Test User' },

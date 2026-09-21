@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExecutionActivityLog } from '@/components/session/execution-activity-log'
 import { useActivityStore } from '@/store/activity-store'
 
-import { setupFetchMock } from '../support/test-fetch-mocks'
+import { addFetchHandler, setupFetchMock } from '../support/test-fetch-mocks'
 import { renderWithProviders, screen, waitFor } from '../support/test-render'
 import {
   setupConnected,
@@ -352,5 +352,144 @@ describe('Execution Activity Log', () => {
     expect(screen.getByText(/Reading package lists/)).toBeInTheDocument()
     expect(screen.getByText(/Command exited with code 100/)).toBeInTheDocument()
     expect(screen.getByText(/exit: 1/)).toBeInTheDocument()
+  })
+
+  it('sends optional feedback with the rejection as steering guidance', async () => {
+    const ws = setupConnected()
+    triggerMockPermissionRequired(ws, EXECUTION_ID, 'npm run build')
+
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+    })
+
+    const captured: Array<Record<string, unknown>> = []
+    addFetchHandler((url, options) => {
+      if (url.includes('/api/v1/hitl/resolve') && options.method === 'POST') {
+        captured.push(JSON.parse(String(options.body)) as Record<string, unknown>)
+        return new Response(null, { status: 204 })
+      }
+      return null
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Message to agent' }))
+    await user.type(
+      screen.getByLabelText('Message to agent'),
+      'use pnpm instead of npm',
+    )
+    await user.click(screen.getByRole('button', { name: /Reject/i }))
+
+    await waitFor(() => {
+      expect(captured).toHaveLength(1)
+    })
+    expect(captured[0]).toEqual({
+      executionId: EXECUTION_ID,
+      feedback: 'use pnpm instead of npm',
+      hitlId: 'npm run build',
+      optionId: 'reject-once',
+      response: 'declined',
+    })
+  })
+
+  it('sends optional feedback when declining a question', async () => {
+    setupConnected()
+    useActivityStore.getState().handleHitlRequired({
+      executionId: EXECUTION_ID,
+      form: { properties: { target: { type: 'string' } }, type: 'object' },
+      hitlId: 'el-feedback',
+      kind: 'question',
+      message: 'Choose a deployment target',
+      type: 'execution_hitl_required',
+    })
+
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent Question')).toBeInTheDocument()
+    })
+
+    const captured: Array<Record<string, unknown>> = []
+    addFetchHandler((url, options) => {
+      if (url.includes('/api/v1/hitl/resolve') && options.method === 'POST') {
+        captured.push(JSON.parse(String(options.body)) as Record<string, unknown>)
+        return new Response(null, { status: 204 })
+      }
+      return null
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Message to agent' }))
+    await user.type(
+      screen.getByLabelText('Message to agent'),
+      'staging is offline, use preview',
+    )
+    await user.click(screen.getByRole('button', { name: 'Decline' }))
+
+    await waitFor(() => {
+      expect(captured).toHaveLength(1)
+    })
+    expect(captured[0]).toEqual({
+      executionId: EXECUTION_ID,
+      feedback: 'staging is offline, use preview',
+      hitlId: 'el-feedback',
+      response: 'declined',
+    })
+  })
+
+  it('shows a timed-out approval as unanswered instead of rejected', async () => {
+    const ws = setupConnected()
+    triggerMockPermissionRequired(ws, EXECUTION_ID, 'rm -rf /tmp/cache')
+
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+    })
+
+    triggerMockPermissionResolved(
+      ws,
+      EXECUTION_ID,
+      'rm -rf /tmp/cache',
+      false,
+      null,
+      'System (timeout)',
+      'rm -rf /tmp/cache',
+      'reject-once',
+      'cancelled',
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/Permission request timed out/)).toBeInTheDocument()
+    })
+    expect(screen.getByText(/no response/)).toBeInTheDocument()
+    expect(screen.queryByText(/Permission rejected/)).not.toBeInTheDocument()
+  })
+
+  it('shows a user-dismissed approval as cancelled', async () => {
+    const ws = setupConnected()
+    triggerMockPermissionRequired(ws, EXECUTION_ID, 'rm -rf /tmp/cache')
+
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+    })
+
+    triggerMockPermissionResolved(
+      ws,
+      EXECUTION_ID,
+      'rm -rf /tmp/cache',
+      false,
+      'user-1',
+      'Test User',
+      'rm -rf /tmp/cache',
+      'reject-once',
+      'cancelled',
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/Permission request cancelled/)).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/Permission rejected/)).not.toBeInTheDocument()
   })
 })

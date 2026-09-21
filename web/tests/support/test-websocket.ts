@@ -213,10 +213,11 @@ export function triggerMockPermissionResolved(
   executionId: string,
   command: string,
   approved: boolean,
-  resolvedByUserId: string,
+  resolvedByUserId: null | string,
   resolvedByDisplayName: string,
   hitlId = command,
   optionId = approved ? 'allow-once' : 'reject-once',
+  response: 'approved' | 'cancelled' | 'declined' = approved ? 'approved' : 'declined',
 ) {
   ws.onmessage?.({
     data: JSON.stringify({
@@ -226,10 +227,10 @@ export function triggerMockPermissionResolved(
         executionId,
         hitlId,
         kind: 'approval',
-        optionId,
+        optionId: response === 'cancelled' ? null : optionId,
         resolvedByDisplayName,
         resolvedByUserId,
-        response: approved ? 'approved' : 'declined',
+        response,
         type: 'execution_hitl_resolved',
       },
     }),

@@ -51,7 +51,7 @@ describe('ActivityElicitation', () => {
       />,
     )
     expect(screen.getByText('Your name')).toBeInTheDocument()
-    expect(screen.getByRole('textbox')).toBeInTheDocument()
+    expect(screen.getByLabelText('Your name')).toBeInTheDocument()
   })
 
   it('always renders Submit, Decline and Cancel actions', () => {
@@ -59,6 +59,17 @@ describe('ActivityElicitation', () => {
     expect(screen.getByRole('button', { name: /submit/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /decline/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument()
+  })
+
+  it('hides the feedback textarea until the message toggle is opened', async () => {
+    const user = userEvent.setup()
+    render(<ActivityElicitation activity={pendingActivity()} executionId="exec-1" />)
+
+    expect(screen.queryByLabelText('Message to agent')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Message to agent' }))
+
+    expect(screen.getByLabelText('Message to agent')).toBeInTheDocument()
   })
 
   it('submits an answered response with entered values', async () => {
@@ -72,12 +83,39 @@ describe('ActivityElicitation', () => {
       />,
     )
 
-    await user.type(screen.getByRole('textbox'), 'staging')
+    await user.type(screen.getByLabelText('Name'), 'staging')
     await user.click(screen.getByRole('button', { name: /submit/i }))
 
-    expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'el-1', 'answered', undefined, {
-      name: 'staging',
-    })
+    expect(resolveHitl).toHaveBeenCalledWith(
+      'exec-1',
+      'el-1',
+      'answered',
+      undefined,
+      {
+        name: 'staging',
+      },
+      undefined,
+      '',
+    )
+  })
+
+  it('sends typed feedback as steering guidance with the response', async () => {
+    const user = userEvent.setup()
+    render(<ActivityElicitation activity={pendingActivity()} executionId="exec-1" />)
+
+    await user.click(screen.getByRole('button', { name: 'Message to agent' }))
+    await user.type(screen.getByLabelText('Message to agent'), 'staging is offline')
+    await user.click(screen.getByRole('button', { name: /decline/i }))
+
+    expect(resolveHitl).toHaveBeenCalledWith(
+      'exec-1',
+      'el-1',
+      'declined',
+      undefined,
+      undefined,
+      undefined,
+      'staging is offline',
+    )
   })
 
   it('declines without content', async () => {
@@ -86,7 +124,15 @@ describe('ActivityElicitation', () => {
 
     await user.click(screen.getByRole('button', { name: /decline/i }))
 
-    expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'el-1', 'declined', undefined, undefined)
+    expect(resolveHitl).toHaveBeenCalledWith(
+      'exec-1',
+      'el-1',
+      'declined',
+      undefined,
+      undefined,
+      undefined,
+      '',
+    )
   })
 
   it('cancels without content', async () => {
@@ -95,7 +141,15 @@ describe('ActivityElicitation', () => {
 
     await user.click(screen.getByRole('button', { name: /cancel/i }))
 
-    expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'el-1', 'cancelled', undefined, undefined)
+    expect(resolveHitl).toHaveBeenCalledWith(
+      'exec-1',
+      'el-1',
+      'cancelled',
+      undefined,
+      undefined,
+      undefined,
+      '',
+    )
   })
 
   it('renders a select for an enum (oneOf) schema property', () => {

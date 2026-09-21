@@ -18,6 +18,7 @@ import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.repository.UserRepository;
 import com.kratisai.controlplane.service.PendingHitlRegistry;
+import com.kratisai.controlplane.service.SandboxExecutionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,6 +32,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -51,6 +54,7 @@ public class SandboxHitlController {
     private final UserRepository userRepository;
     private final PendingHitlRegistry pendingHitlRegistry;
     private final ApplicationEventPublisher eventPublisher;
+    private final SandboxExecutionService sandboxExecutionService;
 
     public SandboxHitlController(
             SandboxExecutionRepository sandboxExecutionRepository,
@@ -58,20 +62,22 @@ public class SandboxHitlController {
             TeamMemberRepository teamMemberRepository,
             UserRepository userRepository,
             PendingHitlRegistry pendingHitlRegistry,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            SandboxExecutionService sandboxExecutionService) {
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.hitlRuleRepository = hitlRuleRepository;
         this.teamMemberRepository = teamMemberRepository;
         this.userRepository = userRepository;
         this.pendingHitlRegistry = pendingHitlRegistry;
         this.eventPublisher = eventPublisher;
+        this.sandboxExecutionService = sandboxExecutionService;
     }
 
     @PostMapping("/resolve")
     @Operation(
             summary = "Resolve a pending HITL request",
             description =
-                    "Resolves approvals with approved/declined/cancelled (+ optionId) and questions with answered/declined/cancelled (+ content).")
+                    "Resolves approvals with approved/declined/cancelled (+ optionId) and questions with answered/declined/cancelled (+ content). An optional feedback note is delivered to the agent as steering guidance after the resolution.")
     @Transactional
     public ResponseEntity<Void> resolveHitl(@Valid @RequestBody ResolveHitlRequest request) {
         UUID userId = SecurityUtil.getCurrentUserId();
@@ -116,6 +122,8 @@ public class SandboxHitlController {
                         userId,
                         resolvingUser.getDisplayName())));
 
+        dispatchFeedbackSteering(request, execution);
+
         logger.info(
                 "Resolved HITL '{}' (kind={}, response={}) for execution {} by user {}",
                 request.hitlId(),
@@ -124,6 +132,21 @@ public class SandboxHitlController {
                 request.executionId(),
                 userId);
         return ResponseEntity.noContent().build();
+    }
+
+    private void dispatchFeedbackSteering(ResolveHitlRequest request, SandboxExecution execution) {
+        String feedback = request.feedback();
+        if (feedback == null) {
+            return;
+        }
+        String prompt = "The user attached this guidance while responding to the approval request: " + feedback.trim();
+        UUID executionId = execution.getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                sandboxExecutionService.dispatchSystemSteering(executionId, prompt);
+            }
+        });
     }
 
     private void persistRememberedRules(

@@ -46,6 +46,7 @@ interface ExecutionActivityState {
     optionId?: string,
     content?: Record<string, unknown>,
     rules?: CreateHitlRuleRequest[],
+    feedback?: string,
   ) => Promise<void>
   toggleCollapsed: (executionId: string, activityId: string) => void
 }
@@ -822,6 +823,8 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
             ...activity,
             approved: result.response === 'approved',
             collapsed: collapsedOnTransition(activity, nextState),
+            hitlResponse: result.response,
+            resolvedBy: result.resolvedByDisplayName ?? undefined,
             state: nextState,
           }
           break
@@ -844,11 +847,13 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
     optionId?: string,
     content?: Record<string, unknown>,
     rules?: CreateHitlRuleRequest[],
+    feedback?: string,
   ) => {
     const body: Record<string, unknown> = { executionId, hitlId, response }
     if (optionId !== undefined) body.optionId = optionId
     if (content !== undefined) body.content = content
     if (rules !== undefined && rules.length > 0) body.rules = rules
+    if (feedback !== undefined && feedback.trim() !== '') body.feedback = feedback.trim()
     const httpResponse = await fetchWithAuth('/api/v1/hitl/resolve', {
       body: JSON.stringify(body),
       method: 'POST',
