@@ -193,7 +193,7 @@ describe('activity-store', () => {
       expect((exec2[0] as PlanActivity).plan[0].content).toBe('B')
     })
 
-    it('completes a superseded plan snapshot but keeps it expanded', () => {
+    it('keeps a superseded plan snapshot open until the execution completes', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
@@ -216,7 +216,7 @@ describe('activity-store', () => {
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       const plan = activities.find((a) => a.type === 'plan') as PlanActivity
       expect(plan).toBeDefined()
-      expect(plan.state).toBe('completed')
+      expect(plan.state).toBe('active')
       expect(plan.collapsed).toBe(false)
       expect(activities).toHaveLength(2)
     })
@@ -352,19 +352,23 @@ describe('activity-store', () => {
   describe('HITL approval correlation by actionId', () => {
     it('merges the HITL approval into the command activity of the same action', () => {
       const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'tc-4',
+          activityType: 'COMMAND',
+          description: 'chmod +x script.sh',
+          detail: { hitl: { hitlId: 'tc-4', kind: 'approval', message: 'Allow chmod?' } },
+          status: 'pending',
+        }),
+      )
       store.handleHitlRequired(hitlApprovalRequired({ hitlId: 'tc-4' }))
       store.handleActivityEvent(
         activityResult({
           actionId: 'tc-4',
           activityType: 'COMMAND',
           description: 'chmod +x script.sh',
-        }),
-      )
-      store.handleActivityEvent(
-        activityResult({
-          actionId: 'tc-4',
-          activityType: 'COMMAND',
-          description: 'chmod +x script.sh',
+          detail: { hitl: { hitlId: 'tc-4', kind: 'approval', message: 'Allow chmod?' } },
+          status: 'pending',
         }),
       )
 
@@ -423,7 +427,7 @@ describe('activity-store', () => {
       })
     })
 
-    it('keeps separate records when the HITL and command actionIds do not match', () => {
+    it('ignores an approval whose hitlId matches no record', () => {
       const store = useActivityStore.getState()
       store.handleHitlRequired(hitlApprovalRequired({ hitlId: 'other' }))
       store.handleActivityEvent(
@@ -435,13 +439,21 @@ describe('activity-store', () => {
       )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities).toHaveLength(2)
-      expect(activities[0]).toMatchObject({ approvalRequired: true, state: 'pending_approval' })
-      expect(activities[1]).toMatchObject({ actionId: 'tc-7', state: 'active' })
+      expect(activities).toHaveLength(1)
+      expect(activities[0]).toMatchObject({ actionId: 'tc-7', state: 'active' })
     })
 
     it('stores the offered permission options on the pending activity', () => {
       const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'tc-8',
+          activityType: 'COMMAND',
+          description: 'rm -rf tmp',
+          detail: { hitl: { hitlId: 'tc-8', kind: 'approval', message: 'Remove temp dir' } },
+          status: 'pending',
+        }),
+      )
       store.handleHitlRequired(
         hitlApprovalRequired({
           diff: { newText: 'new', oldText: 'old', path: 'a.ts' },
@@ -456,6 +468,7 @@ describe('activity-store', () => {
       )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
       expect(activities[0]).toMatchObject({
         permissionKind: 'execute',
         permissionOptions: [
@@ -469,17 +482,84 @@ describe('activity-store', () => {
       expect(activities[0].permissionDiff).toEqual({ newText: 'new', oldText: 'old', path: 'a.ts' })
     })
 
-    it('resolves by hitlId when the resolution carries no command match', () => {
+    it('ignores a resolution whose hitlId matches no record', () => {
       const store = useActivityStore.getState()
-      store.handleHitlRequired(hitlApprovalRequired({ hitlId: 'tc-9' }))
-      store.handleHitlResolved(hitlApprovalResolved({ hitlId: 'tc-9', response: 'approved' }))
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'tc-9',
+          activityType: 'COMMAND',
+          description: 'chmod +x script.sh',
+          detail: { hitl: { hitlId: 'tc-9', kind: 'approval', message: 'Allow chmod?' } },
+          status: 'pending',
+        }),
+      )
 
-      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities).toHaveLength(1)
-      expect(activities[0]).toMatchObject({
+      store.handleHitlResolved(hitlApprovalResolved({ hitlId: 'unknown', response: 'approved' }))
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0]).toMatchObject({
+        state: 'pending_approval',
+      })
+
+      store.handleHitlResolved(hitlApprovalResolved({ hitlId: 'tc-9', response: 'approved' }))
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0]).toMatchObject({
         approved: true,
         state: 'active',
         type: 'command_execution',
+      })
+    })
+
+    it('produces two records for a message and a thought sharing one messageId', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'm-1',
+          activityType: 'MESSAGE',
+          description: 'visible reply',
+          detail: { messageId: 'm-1', role: 'agent' },
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'm-1',
+          activityType: 'THINKING',
+          description: 'private reasoning',
+          detail: { messageId: 'm-1' },
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(2)
+      expect(activities[0]).toMatchObject({ actionId: 'm-1', text: 'visible reply', type: 'message' })
+      expect(activities[1]).toMatchObject({
+        actionId: 'm-1',
+        thought: 'private reasoning',
+        type: 'thinking',
+      })
+    })
+
+    it('moves one record between buckets when a late kind arrives', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'msg-0',
+          activityType: 'MESSAGE',
+          description: 'preamble',
+          detail: { messageId: 'msg-0', role: 'agent' },
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({ actionId: 'tc-1', activityType: 'COMMAND', description: 'write_file' }),
+      )
+      store.handleActivityEvent(
+        activityResult({ actionId: 'tc-1', activityType: 'EDITED', description: 'write_file' }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(2)
+      expect(activities[1]).toMatchObject({
+        actionId: 'tc-1',
+        state: 'active',
+        toolName: 'write_file',
+        type: 'tool_execution',
       })
     })
   })
@@ -741,7 +821,7 @@ describe('activity-store', () => {
   })
 
   describe('message and thought chunk accumulation', () => {
-    it('appends MESSAGE chunks sharing a messageId into one record', () => {
+    it('replaces MESSAGE text with the cumulative run emission', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
@@ -756,7 +836,7 @@ describe('activity-store', () => {
         activityResult({
           actionId: 'msg-1',
           activityType: 'MESSAGE',
-          description: 'is complete.',
+          description: 'The deletion feature is complete.',
           detail: { messageId: 'msg-1', role: 'agent' },
           status: 'in_progress',
         }),
@@ -796,7 +876,7 @@ describe('activity-store', () => {
       expect(activities[1]).toMatchObject({ role: 'user', text: 'second', type: 'message' })
     })
 
-    it('appends THINKING chunks by messageId instead of replacing', () => {
+    it('replaces THINKING text with the cumulative run emission', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
@@ -810,7 +890,7 @@ describe('activity-store', () => {
         activityResult({
           actionId: 'thought-1',
           activityType: 'THINKING',
-          description: 'reasoning part two',
+          description: 'reasoning part one reasoning part two',
           detail: { messageId: 'thought-1' },
         }),
       )
@@ -925,7 +1005,7 @@ describe('activity-store', () => {
       })
     })
 
-    it('closes the previous message stream when a new message starts', () => {
+    it('keeps the previous message stream open until its terminal status arrives', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
@@ -948,18 +1028,30 @@ describe('activity-store', () => {
       expect(activities).toHaveLength(2)
       expect(activities[0]).toMatchObject({
         actionId: 'msg-1',
-        state: 'completed',
+        state: 'active',
         type: 'message',
       })
-      expect(activities[0].endedAt).toBeDefined()
       expect(activities[1]).toMatchObject({
         actionId: 'msg-2',
         state: 'active',
         type: 'message',
       })
+
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'msg-1',
+          activityType: 'MESSAGE',
+          description: 'first message',
+          detail: { messageId: 'msg-1', role: 'agent' },
+          status: 'completed',
+        }),
+      )
+      const closed = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(closed[0]).toMatchObject({ state: 'completed', type: 'message' })
+      expect(closed[0].endedAt).toBeDefined()
     })
 
-    it('closes the open message stream when a tool activity starts', () => {
+    it('keeps the open message stream open when a tool activity starts', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
@@ -978,11 +1070,11 @@ describe('activity-store', () => {
       )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities[0]).toMatchObject({ state: 'completed', type: 'message' })
+      expect(activities[0]).toMatchObject({ state: 'active', type: 'message' })
       expect(activities[1]).toMatchObject({ actionId: 'tc-1', type: 'tool_execution' })
     })
 
-    it('closes the open message stream when a command activity starts', () => {
+    it('keeps the open message stream open when a command activity starts', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
@@ -1001,11 +1093,11 @@ describe('activity-store', () => {
       )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities[0]).toMatchObject({ state: 'completed', type: 'message' })
+      expect(activities[0]).toMatchObject({ state: 'active', type: 'message' })
       expect(activities[1]).toMatchObject({ actionId: 'tc-2', type: 'command_execution' })
     })
 
-    it('closes the open thinking stream when a message stream starts', () => {
+    it('keeps the open thinking stream open when a message stream starts', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({ activityType: 'THINKING', description: 'reasoning' }),
@@ -1020,7 +1112,7 @@ describe('activity-store', () => {
       )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities[0]).toMatchObject({ state: 'completed', type: 'thinking' })
+      expect(activities[0]).toMatchObject({ state: 'active', type: 'thinking' })
       expect(activities[1]).toMatchObject({ state: 'active', type: 'message' })
     })
 
@@ -1038,7 +1130,7 @@ describe('activity-store', () => {
         activityResult({
           actionId: 'msg-1',
           activityType: 'MESSAGE',
-          description: 'world',
+          description: 'Hello world',
           detail: { messageId: 'msg-1', role: 'agent' },
         }),
       )
@@ -1346,7 +1438,7 @@ describe('activity-store', () => {
       })
     })
 
-    it('auto-collapses the thinking stream closed when a tool activity starts', () => {
+    it('keeps the thinking stream open when a tool activity starts', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({ activityType: 'THINKING', description: 'reasoning' }),
@@ -1360,7 +1452,7 @@ describe('activity-store', () => {
       )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities[0]).toMatchObject({ collapsed: true, state: 'completed' })
+      expect(activities[0]).toMatchObject({ collapsed: false, state: 'active' })
       expect(activities[1]).toMatchObject({ actionId: 'tc-1', state: 'active' })
     })
 
@@ -1381,8 +1473,8 @@ describe('activity-store', () => {
     })
   })
 
-  describe('close-on-next-start for tools and commands', () => {
-    it('closes and collapses the previous active search when a new tool starts', () => {
+  describe('parallel activities stay open until their own terminal status', () => {
+    it('keeps two parallel tool calls active at the same time', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
@@ -1405,8 +1497,8 @@ describe('activity-store', () => {
       expect(activities).toHaveLength(2)
       expect(activities[0]).toMatchObject({
         actionId: 'search-1',
-        collapsed: true,
-        state: 'completed',
+        collapsed: false,
+        state: 'active',
       })
       expect(activities[1]).toMatchObject({
         actionId: 'search-2',
@@ -1415,7 +1507,7 @@ describe('activity-store', () => {
       })
     })
 
-    it('closes the previous active command when a new command starts', () => {
+    it('keeps two parallel commands active at the same time', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({ actionId: 'cmd-1', activityType: 'COMMAND', description: 'npm test' }),
@@ -1432,8 +1524,8 @@ describe('activity-store', () => {
       expect(activities).toHaveLength(2)
       expect(activities[0]).toMatchObject({
         actionId: 'cmd-1',
-        collapsed: true,
-        state: 'completed',
+        collapsed: false,
+        state: 'active',
       })
       expect(activities[1]).toMatchObject({ actionId: 'cmd-2', state: 'active' })
     })
@@ -1465,7 +1557,15 @@ describe('activity-store', () => {
 
     it('leaves a pending approval open when a new tool starts', () => {
       const store = useActivityStore.getState()
-      store.handleHitlRequired(hitlApprovalRequired({ hitlId: 'tc-approve' }))
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'tc-approve',
+          activityType: 'COMMAND',
+          description: 'chmod +x script.sh',
+          detail: { hitl: { hitlId: 'tc-approve', kind: 'approval', message: 'Allow?' } },
+          status: 'pending',
+        }),
+      )
       store.handleActivityEvent(
         activityResult({
           actionId: 'tc-next',

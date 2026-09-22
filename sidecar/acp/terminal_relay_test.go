@@ -289,3 +289,41 @@ func TestTerminalManager_LiveOutputSink_StreamsBeforeExit(t *testing.T) {
 		t.Errorf("expected full buffered output, got %q", stdout)
 	}
 }
+
+// TestHandleSessionUpdate_TerminalRelay_PostExitFlushDoesNotReopen pins the
+// full agent-owned terminal sequence: terminal_exit derives the terminal
+// status before any wire transition, the harness keeps flushing in_progress
+// output afterwards, and its real completed arrives last. The call must not
+// reopen at any point, while the transcript keeps accumulating.
+func TestHandleSessionUpdate_TerminalRelay_PostExitFlushDoesNotReopen(t *testing.T) {
+	sink := &mockEventSink{}
+	h := NewHandler(sink, nil, "")
+
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "tc-flush",
+			"kind":          "execute",
+			"title":         "bash script.sh",
+			"_meta": map[string]interface{}{
+				"terminal_info": map[string]interface{}{"terminal_id": "term-f"},
+			},
+		},
+	})
+	h.handleSessionUpdate(terminalRelayUpdate("in_progress", "tc-flush", "term-f", "done\n", 0, false))
+	h.handleSessionUpdate(terminalRelayUpdate("in_progress", "tc-flush", "term-f", "trailing\n", nil, false))
+	h.handleSessionUpdate(terminalRelayUpdate("completed", "tc-flush", "term-f", "", nil, false))
+
+	var statuses []string
+	for _, a := range sink.activities {
+		if a.actionID == "tc-flush" {
+			statuses = append(statuses, a.status)
+		}
+	}
+	if len(statuses) != 2 || statuses[0] != "pending" || statuses[1] != "completed" {
+		t.Fatalf("expected pending then one derived completed, got %v (activities: %+v)", statuses, sink.activities)
+	}
+	if got := h.toolCalls["tc-flush"].OutputText; !strings.Contains(got, "done\n") || !strings.Contains(got, "trailing\n") {
+		t.Errorf("expected the post-exit flush to keep accumulating, got %q", got)
+	}
+}

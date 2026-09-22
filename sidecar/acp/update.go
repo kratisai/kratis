@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // handleSessionUpdate relays one session/update notification: accumulate state,
@@ -85,6 +86,8 @@ func (h *Handler) handleToolCallUpdate(u ToolCallUpdateMsg, _ map[string]any) {
 		if (info.ExitCode != nil && *info.ExitCode != 0) || info.ExitSignal != nil {
 			newStatus = ActivityFailed
 		}
+		h.debugf("[ACP][TERM] toolCallId=%q finalized as %s from terminal_exit (wire status=%q exit=%v signal=%v)",
+			u.ToolCallID, newStatus, u.Status, info.ExitCode, info.ExitSignal)
 	}
 
 	h.relayToolCallOutputLocked(info, u, newStatus)
@@ -94,6 +97,14 @@ func (h *Handler) handleToolCallUpdate(u ToolCallUpdateMsg, _ map[string]any) {
 	}
 
 	if info.Status == newStatus {
+		return
+	}
+	if info.Status == ActivityCompleted || info.Status == ActivityFailed {
+		// Terminal is absorbing: an explicit earlier status after a recorded
+		// terminal cannot be a lifecycle step (the ACP lifecycle is
+		// monotonic), so suppress the regression instead of reopening.
+		h.debugf("[ACP][TERM] toolCallId=%q suppressed status regression %s → %s (terminal is absorbing)",
+			u.ToolCallID, info.Status, newStatus)
 		return
 	}
 	info.Status = newStatus
@@ -141,15 +152,20 @@ func (h *Handler) relayToolCallOutputLocked(info *ToolCallInfo, u ToolCallUpdate
 }
 
 // accumulateToolCallLocked merges one tool_call message into the accumulated
-// state; nil when the message carries no toolCallId.
+// state; nil when the message carries no toolCallId. ACP requires toolCallId
+// on both tool_call and tool_call_update, so a missing one is a harness
+// protocol violation: it is reported loudly rather than dropped silently.
 func (h *Handler) accumulateToolCallLocked(u ToolCallUpdateMsg) *ToolCallInfo {
 	if u.ToolCallID == "" {
+		h.warnf("[WARN] ACP violation: %s without toolCallId (title=%q kind=%q status=%q) — activity dropped",
+			u.SessionUpdate, u.Title, u.Kind, u.Status)
 		return nil
 	}
 
 	info, exists := h.toolCalls[u.ToolCallID]
 	if !exists {
-		info = &ToolCallInfo{ToolCallID: u.ToolCallID}
+		h.toolCallSeq++
+		info = &ToolCallInfo{ToolCallID: u.ToolCallID, RecordedSeq: h.toolCallSeq}
 		h.toolCalls[u.ToolCallID] = info
 	}
 
@@ -419,12 +435,8 @@ func (h *Handler) buildToolDetail(info *ToolCallInfo) ActivityDetail {
 	return detail
 }
 
-// handleMessageChunk appends one agent/user message chunk: the [Agent]/[User]
-// terminal line plus a MESSAGE activity keyed by the agent messageId, or an
-// inferred ID when the agent omits it (consecutive same-type chunks share the
-// inferred ID so the UI/persistence aggregate them into one record). The
-// chunk _meta bag and the full raw update are preserved in the detail for
-// post-hoc debugging.
+// handleMessageChunk appends one agent/user message chunk to the current
+// chunk run (see appendChunkRun).
 func (h *Handler) handleMessageChunk(u ToolCallUpdateMsg, role string, rawUpdate map[string]any) {
 	text := extractTextFromContentChunk(u)
 	if text == "" {
@@ -440,18 +452,9 @@ func (h *Handler) handleMessageChunk(u ToolCallUpdateMsg, role string, rawUpdate
 	if role == "user" {
 		streamKind = "user_message"
 	}
-	actionID := h.chunkActionID(u, streamKind)
-	detail := ActivityDetail{
-		MessageID: actionID,
-		Role:      role,
-		Meta:      chunkMeta(u),
-		RawUpdate: rawUpdate,
-	}
-	h.sendActivity(ActivityTypeMessage, text, actionID, ActivityInProgress, detail)
+	h.appendChunkRun(streamKind, ActivityTypeMessage, role, u.MessageID, text, chunkMeta(u), rawUpdate)
 }
 
-// handleThoughtChunk relays one agent_thought_chunk as a THINKING activity keyed
-// by the agent messageId, or an inferred ID when the agent omits it.
 func (h *Handler) handleThoughtChunk(u ToolCallUpdateMsg, rawUpdate map[string]any) {
 	text := extractTextFromContentChunk(u)
 	if text == "" {
@@ -459,55 +462,129 @@ func (h *Handler) handleThoughtChunk(u ToolCallUpdateMsg, rawUpdate map[string]a
 	}
 	h.sink.SendOutput("[Thought] "+text, "stdout")
 
-	actionID := h.chunkActionID(u, "thought")
-	detail := ActivityDetail{
-		MessageID: actionID,
-		Role:      "agent",
-		Meta:      chunkMeta(u),
-		RawUpdate: rawUpdate,
-	}
-	h.sendActivity(ActivityTypeThinking, text, actionID, ActivityInProgress, detail)
+	h.appendChunkRun("thought", ActivityTypeThinking, "agent", u.MessageID, text, chunkMeta(u), rawUpdate)
 }
 
-// chunkActionID keys one message/thought chunk: the agent's messageId when
-// present (clears the inferred stream), otherwise the current inferred-<n>
-// key, minted fresh whenever the stream kind differs from the kind the
-// current key was minted for. Decisions are logged ([ACP][MSGID]) so inferred
-// grouping is auditable.
-func (h *Handler) chunkActionID(u ToolCallUpdateMsg, streamKind string) string {
+// Runs emit cumulative text, throttled to bound the wire payload; the
+// terminal relay stays on every delta.
+const (
+	chunkEmitInterval = 250 * time.Millisecond
+	chunkEmitBytes    = 512
+)
+
+// chunkRun is one contiguous run of same-kind message/thought chunks.
+type chunkRun struct {
+	actionID     string
+	activityType ActivityType
+	streamKind   string
+	role         string
+	messageID    string
+	meta         map[string]any
+	rawUpdate    map[string]any
+	text         string
+	lastEmit     time.Time
+	emittedBytes int
+}
+
+func (h *Handler) appendChunkRun(
+	streamKind string,
+	activityType ActivityType,
+	role string,
+	messageID string,
+	text string,
+	meta map[string]any,
+	rawUpdate map[string]any,
+) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if u.MessageID != "" {
-		if h.inferredStreamType != "" {
-			h.debugf("[ACP][MSGID] %s: agent messageId=%q resets inferred stream (was id=%q inferredStreamType=%q)",
-				streamKind, u.MessageID, fmt.Sprintf("inferred-%d", h.inferredSeq), h.inferredStreamType)
-		}
-		h.inferredStreamType = ""
-		return u.MessageID
+	run := h.openChunkRun
+	if run != nil && (run.streamKind != streamKind || run.messageID != messageID) {
+		h.closeChunkRunLocked(fmt.Sprintf("%s chunk (messageId=%q) starts a new run", streamKind, messageID))
+		run = nil
 	}
+	if run == nil {
+		run = h.openChunkRunLocked(streamKind, activityType, role, messageID)
+	}
+	run.activityType = activityType
+	run.role = role
+	run.meta = meta
+	run.rawUpdate = rawUpdate
+	run.text += text
 
-	if streamKind != h.inferredStreamType {
-		h.inferredSeq++
-		h.inferredStreamType = streamKind
-		h.debugf("[ACP][MSGID] %s: no messageId, generated inferred id=%q", streamKind, fmt.Sprintf("inferred-%d", h.inferredSeq))
-	} else {
-		h.debugf("[ACP][MSGID] %s: no messageId, reusing inferred id=%q", streamKind, fmt.Sprintf("inferred-%d", h.inferredSeq))
+	if time.Since(run.lastEmit) >= chunkEmitInterval || len(run.text)-run.emittedBytes >= chunkEmitBytes {
+		h.emitChunkRunLocked(run, ActivityInProgress)
 	}
-	return fmt.Sprintf("inferred-%d", h.inferredSeq)
 }
 
-// resetChunkStream forgets the inferred stream so the next chunk starts
-// fresh. Called before any non-chunk activity (tool call, plan, mode change);
-// metadata-only updates don't reset.
+// Run 1 of a messageId uses it as its key; run n >= 2 uses <messageId>#<n>;
+// a missing messageId mints inferred-<n>.
+func (h *Handler) openChunkRunLocked(streamKind string, activityType ActivityType, role string, messageID string) *chunkRun {
+	var actionID string
+	if messageID != "" {
+		h.chunkRunCounts[messageID]++
+		actionID = messageID
+		if n := h.chunkRunCounts[messageID]; n >= 2 {
+			actionID = fmt.Sprintf("%s#%d", messageID, n)
+		}
+		h.debugf("[ACP][MSGID] %s: opened run messageId=%q actionId=%q", streamKind, messageID, actionID)
+	} else {
+		if streamKind != h.inferredStreamType {
+			h.inferredSeq++
+			h.inferredStreamType = streamKind
+		}
+		actionID = fmt.Sprintf("inferred-%d", h.inferredSeq)
+		h.debugf("[ACP][MSGID] %s: no messageId, opened run with inferred actionId=%q", streamKind, actionID)
+	}
+	run := &chunkRun{
+		actionID:     actionID,
+		activityType: activityType,
+		streamKind:   streamKind,
+		role:         role,
+		messageID:    messageID,
+	}
+	h.openChunkRun = run
+	return run
+}
+
+func (h *Handler) closeChunkRunLocked(reason string) {
+	run := h.openChunkRun
+	if run == nil {
+		return
+	}
+	h.openChunkRun = nil
+	h.inferredStreamType = ""
+	h.debugf("[ACP][MSGID] closing run actionId=%q messageId=%q kind=%s: %s",
+		run.actionID, run.messageID, run.streamKind, reason)
+	if run.text == "" {
+		return
+	}
+	h.emitChunkRunLocked(run, ActivityCompleted)
+}
+
+func (h *Handler) emitChunkRunLocked(run *chunkRun, status ActivityStatus) {
+	run.lastEmit = time.Now()
+	run.emittedBytes = len(run.text)
+	h.sink.SendActivity(Activity{
+		ActivityType: run.activityType,
+		Description:  run.text,
+		ActionID:     run.actionID,
+		Status:       status,
+		Detail: ActivityDetail{
+			MessageID: run.messageID,
+			Role:      run.role,
+			Meta:      run.meta,
+			RawUpdate: run.rawUpdate,
+		},
+	})
+}
+
+// resetChunkStream closes the open chunk run at a non-chunk boundary (tool
+// call, plan, mode change, unknown update); metadata-only updates don't reset.
 func (h *Handler) resetChunkStream(reason string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.inferredStreamType != "" {
-		h.debugf("[ACP][MSGID] resetting inferred stream (id=%q inferredStreamType=%q): %s",
-			fmt.Sprintf("inferred-%d", h.inferredSeq), h.inferredStreamType, reason)
-	}
-	h.inferredStreamType = ""
+	h.closeChunkRunLocked(reason)
 }
 
 // chunkMeta merges the chunk-level _meta bag with the content-block _meta bag

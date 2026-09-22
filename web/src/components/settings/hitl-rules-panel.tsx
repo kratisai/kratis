@@ -229,21 +229,22 @@ export function HitlRulesPanel() {
       />
 
       <Dialog onOpenChange={(open) => !open && setRuleToDelete(null)} open={!!ruleToDelete}>
-        <DialogContent className="sm:max-w-106.25">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[90dvh] flex-col overflow-hidden sm:max-w-lg lg:max-w-2xl">
+          <DialogHeader className="min-w-0 shrink-0">
             <div className="flex items-center gap-2">
-              <TriangleAlert className="text-destructive h-5 w-5" />
+              <TriangleAlert className="text-destructive h-5 w-5 shrink-0" />
               <DialogTitle>Delete HITL Rule</DialogTitle>
             </div>
             <DialogDescription>
-              Are you sure you want to delete the HITL rule for{' '}
-              <span className="text-foreground font-mono font-medium">
-                {ruleToDelete?.commandRoot}
-              </span>
-              ? This action cannot be undone.
+              Are you sure you want to delete this HITL rule? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <div className="bg-muted max-h-[40dvh] min-h-0 min-w-0 shrink overflow-y-auto rounded-md border p-3">
+            <p className="text-foreground font-mono text-xs break-all">
+              {ruleToDelete?.commandRoot}
+            </p>
+          </div>
+          <DialogFooter className="shrink-0">
             <Button onClick={() => setRuleToDelete(null)} type="button" variant="outline">
               Cancel
             </Button>

@@ -490,6 +490,78 @@ func TestRequestPermission_MalformedResult(t *testing.T) {
 	}
 }
 
+// A missing toolCallId still synthesises an id but reports it on stderr.
+func TestRequestPermission_MissingToolCallIDWarnsLoudly(t *testing.T) {
+	var mu sync.Mutex
+	var received []map[string]interface{}
+
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var frame map[string]interface{}
+			if err := json.Unmarshal(msg, &frame); err != nil {
+				continue
+			}
+			mu.Lock()
+			received = append(received, frame)
+			mu.Unlock()
+
+			var req JsonRpcRequest
+			if err := json.Unmarshal(msg, &req); err != nil {
+				continue
+			}
+			if req.Method == "env.hitl_request" {
+				result, _ := json.Marshal(HitlResult{Response: HitlDeclined})
+				_ = conn.WriteJSON(JsonRpcResponse{JsonRPC: "2.0", Result: result, ID: req.ID})
+			}
+		}
+	})
+
+	c := connectClient(t, wsURL(srv), "tok")
+	defer c.Close()
+	errChan := make(chan error, 1)
+	go c.readLoop(errChan)
+
+	if _, err := c.RequestPermission(acp.PermissionRequest{Command: "rm -rf /tmp/x"}); err == nil {
+		t.Fatal("expected error for declined permission")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	var warnLine string
+	var hitlID string
+	for _, frame := range received {
+		method, _ := frame["method"].(string)
+		params, _ := frame["params"].(map[string]interface{})
+		switch method {
+		case "env.output":
+			line, _ := params["line"].(string)
+			stream, _ := params["stream"].(string)
+			if stream == "stderr" && strings.Contains(line, "session/request_permission without toolCallId") {
+				warnLine = line
+			}
+		case "env.hitl_request":
+			hitlID, _ = params["hitlId"].(string)
+		}
+	}
+	if warnLine == "" {
+		t.Fatalf("expected a stderr warning about the missing toolCallId, received frames: %v", received)
+	}
+	if !strings.Contains(warnLine, "rm -rf /tmp/x") {
+		t.Errorf("expected the warning to name the command, got %q", warnLine)
+	}
+	if !strings.HasPrefix(hitlID, "hitl-") {
+		t.Errorf("expected a synthesised hitl-<id> on the HITL request, got %q", hitlID)
+	}
+	if !strings.Contains(warnLine, hitlID) {
+		t.Errorf("expected the warning to carry the synthesised id %q, got %q", hitlID, warnLine)
+	}
+}
+
 func TestClient_HandleServerRequest_Errors(t *testing.T) {
 	srv := newTestServer(t, func(conn *websocket.Conn) {
 		defer func() { _ = conn.Close() }()

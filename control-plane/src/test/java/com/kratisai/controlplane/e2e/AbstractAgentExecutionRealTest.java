@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.*;
 import com.kratisai.controlplane.api.restdto.CreateSandboxExecutionRequest;
 import com.kratisai.controlplane.api.restdto.ResolveHitlRequest;
+import com.kratisai.controlplane.api.wsdto.ActivityDetail;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.ApprovalOptionKind;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
@@ -27,14 +29,21 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 import org.awaitility.Awaitility;
 import org.awaitility.core.ConditionEvaluationListener;
 import org.awaitility.core.ConditionTimeoutException;
@@ -259,6 +268,20 @@ public abstract class AbstractAgentExecutionRealTest {
     private final AtomicReference<ClientPayload.ExecutionAcpInitializedResult> acpInitialized = new AtomicReference<>();
     private final Set<ActivityType> receivedActivityTypes = ConcurrentHashMap.newKeySet();
 
+    private final AtomicInteger conformanceToolEmissionsWithoutId = new AtomicInteger();
+    private final Set<String> conformanceToolActionIds = ConcurrentHashMap.newKeySet();
+    private final Map<String, Set<String>> conformanceToolTitlesByActionId = new ConcurrentHashMap<>();
+    private final Map<String, List<String>> conformanceStatusSequences = new ConcurrentHashMap<>();
+    private final Map<String, ActivityStatus> conformanceLastToolStatus = new ConcurrentHashMap<>();
+    private final Set<String> conformanceResurrectedActionIds = ConcurrentHashMap.newKeySet();
+    private final Map<String, Boolean> conformanceKindOnFirstEmission = new ConcurrentHashMap<>();
+    private final Set<String> conformanceLateKindActionIds = ConcurrentHashMap.newKeySet();
+    private final AtomicInteger conformanceChunkEmissions = new AtomicInteger();
+    private final AtomicInteger conformanceChunksWithMessageId = new AtomicInteger();
+    private final Set<String> conformanceHitlIds = ConcurrentHashMap.newKeySet();
+    private final AtomicBoolean conformanceSawPlanActivity = new AtomicBoolean(false);
+    private final AtomicBoolean conformanceSawTodoToolCall = new AtomicBoolean(false);
+
     /**
      * Returns the {@link AgentHarness} to test.
      */
@@ -307,6 +330,16 @@ public abstract class AbstractAgentExecutionRealTest {
      * Subclasses that use HITL should override this. Defaults to 0.
      */
     abstract int getExpectedHitlRequestCount();
+
+    /**
+     * Whether this harness sends {@code session/request_permission} with a
+     * {@code toolCallId}, as the ACP spec requires. Harnesses that violate this
+     * must override to {@code false}; synthesised {@code hitl-*} ids are then
+     * expected instead of an actionId match.
+     */
+    protected boolean permissionRequestsCarryToolCallId() {
+        return true;
+    }
 
     /**
      * Returns the list of expected files that should be created by the agent during
@@ -443,6 +476,19 @@ public abstract class AbstractAgentExecutionRealTest {
         hitlRequestCount.set(0);
         acpInitialized.set(null);
         receivedActivityTypes.clear();
+        conformanceToolEmissionsWithoutId.set(0);
+        conformanceToolActionIds.clear();
+        conformanceToolTitlesByActionId.clear();
+        conformanceStatusSequences.clear();
+        conformanceLastToolStatus.clear();
+        conformanceResurrectedActionIds.clear();
+        conformanceKindOnFirstEmission.clear();
+        conformanceLateKindActionIds.clear();
+        conformanceChunkEmissions.set(0);
+        conformanceChunksWithMessageId.set(0);
+        conformanceHitlIds.clear();
+        conformanceSawPlanActivity.set(false);
+        conformanceSawTodoToolCall.set(false);
 
         originalServerUrl = "ws://host.docker.internal:8080/ws";
 
@@ -488,6 +534,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 })
                 .whenType(ClientPayload.ExecutionActivityResult.class, (wsSession, msg) -> {
                     receivedActivityTypes.add(msg.activityType());
+                    captureAcpConformance(msg);
                     logger.debug("[execution][activity] {} — {}", msg.activityType(), msg.description());
                 })
                 .whenType(ClientPayload.ExecutionAcpInitializedResult.class, (wsSession, msg) -> {
@@ -502,6 +549,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 // blocking
                 .autoApprovePermissions((executionId, hitlId, command, options) -> {
                     try {
+                        conformanceHitlIds.add(hitlId);
                         String optionId = firstAllowOptionId(options);
                         ResolveHitlRequest approveRequest =
                                 new ResolveHitlRequest(executionId, hitlId, HitlResponse.APPROVED, optionId, null);
@@ -544,6 +592,141 @@ public abstract class AbstractAgentExecutionRealTest {
                 .map(PermissionOption::optionId)
                 .findFirst()
                 .orElse(null);
+    }
+
+    private void captureAcpConformance(ClientPayload.ExecutionActivityResult msg) {
+        ActivityDetail detail = msg.detail();
+        switch (msg.activityType()) {
+            case COMMAND, RESEARCH, EDITED -> {
+                String title = detail != null && detail.title() != null ? detail.title() : msg.description();
+                if (title != null && title.toLowerCase(Locale.ROOT).contains("todo")) {
+                    conformanceSawTodoToolCall.set(true);
+                }
+                String actionId = msg.actionId();
+                if (actionId == null || actionId.isBlank()) {
+                    conformanceToolEmissionsWithoutId.incrementAndGet();
+                    return;
+                }
+                conformanceToolActionIds.add(actionId);
+                if (title != null) {
+                    conformanceToolTitlesByActionId
+                            .computeIfAbsent(actionId, k -> ConcurrentHashMap.newKeySet())
+                            .add(title);
+                }
+                ActivityStatus previous = conformanceLastToolStatus.put(actionId, msg.status());
+                conformanceStatusSequences
+                        .computeIfAbsent(actionId, k -> Collections.synchronizedList(new ArrayList<>()))
+                        .add(title + " → " + msg.status());
+                if (previous != null
+                        && (previous == ActivityStatus.COMPLETED || previous == ActivityStatus.FAILED)
+                        && (msg.status() == ActivityStatus.PENDING || msg.status() == ActivityStatus.IN_PROGRESS)) {
+                    conformanceResurrectedActionIds.add(actionId);
+                }
+                boolean hasKind = detail != null && detail.kind() != null;
+                Boolean firstEmissionHadKind = conformanceKindOnFirstEmission.putIfAbsent(actionId, hasKind);
+                if (Boolean.FALSE.equals(firstEmissionHadKind) && hasKind) {
+                    conformanceLateKindActionIds.add(actionId);
+                }
+            }
+            case MESSAGE, THINKING -> {
+                conformanceChunkEmissions.incrementAndGet();
+                if (detail != null
+                        && detail.messageId() != null
+                        && !detail.messageId().isBlank()) {
+                    conformanceChunksWithMessageId.incrementAndGet();
+                }
+            }
+            case PLAN -> conformanceSawPlanActivity.set(true);
+            case ELICITATION -> {}
+        }
+    }
+
+    private void assertAcpConformanceAndReportMatrix() {
+        String harness = getHarness().getName();
+
+        assertThat(conformanceToolEmissionsWithoutId.get())
+                .as(
+                        "ACP conformance for harness '%s': every tool activity emission must carry "
+                                + "an actionId (ACP toolCallId)",
+                        harness)
+                .isZero();
+
+        assertThat(conformanceResurrectedActionIds)
+                .as(
+                        "ACP conformance for harness '%s': suspected toolCallId reuse — actionIds that "
+                                + "reopened after reaching a terminal status. Observed emission sequences: %s",
+                        harness,
+                        conformanceResurrectedActionIds.stream()
+                                .collect(Collectors.toMap(id -> id, conformanceStatusSequences::get)))
+                .isEmpty();
+
+        Set<String> unmatchedHitlIds = new TreeSet<>(conformanceHitlIds);
+        unmatchedHitlIds.removeAll(conformanceToolActionIds);
+        Set<String> synthesisedHitlIds = unmatchedHitlIds.stream()
+                .filter(id -> id.startsWith("hitl-"))
+                .collect(Collectors.toCollection(TreeSet::new));
+        Set<String> unexplainedHitlIds = new TreeSet<>(unmatchedHitlIds);
+        unexplainedHitlIds.removeAll(synthesisedHitlIds);
+        assertThat(unexplainedHitlIds)
+                .as(
+                        "ACP conformance for harness '%s': permission hitlIds that match no tool "
+                                + "activity and are not sidecar-synthesised",
+                        harness)
+                .isEmpty();
+        if (permissionRequestsCarryToolCallId()) {
+            assertThat(synthesisedHitlIds)
+                    .as(
+                            "ACP conformance for harness '%s': every permission request must carry the "
+                                    + "toolCallId (a synthesised hitl-* id means it was omitted; if this is the "
+                                    + "harness's real behaviour, override permissionRequestsCarryToolCallId())",
+                            harness)
+                    .isEmpty();
+        } else {
+            logger.warn(
+                    "[conformance-matrix] harness={} omits the toolCallId on permission requests; "
+                            + "synthesised hitl ids this run: {}, matched real ids: {}",
+                    harness,
+                    synthesisedHitlIds,
+                    conformanceHitlIds.size() - synthesisedHitlIds.size());
+        }
+
+        long kindOnFirst = conformanceKindOnFirstEmission.values().stream()
+                .filter(Boolean::booleanValue)
+                .count();
+        Map<String, Set<String>> refinedTitles = new TreeMap<>();
+        conformanceToolTitlesByActionId.forEach((actionId, titles) -> {
+            if (titles.size() > 1) {
+                refinedTitles.put(actionId, titles);
+            }
+        });
+        Map<String, List<String>> sequences = new TreeMap<>();
+        conformanceStatusSequences.forEach(sequences::put);
+        logger.info(
+                """
+                [conformance-matrix] harness={}
+                  1. tool emissions missing toolCallId: {} (asserted zero)
+                  2. distinct tool actionIds: {}; reopened after terminal status: {} (asserted none)
+                  3. permission hitlIds: {}; matched tool actionIds: {}
+                  4. kind on first emission: {}/{} actionIds; late kind on: {}
+                  5. chunk emissions: {}; with raw messageId: {}
+                  6. plan activities seen: {}; todo-titled tool calls seen: {}
+                  +. actionIds with refined titles across updates (informational): {}
+                  +. per-actionId emission sequences: {}""",
+                harness,
+                conformanceToolEmissionsWithoutId.get(),
+                conformanceToolActionIds.size(),
+                conformanceResurrectedActionIds.stream().sorted().toList(),
+                conformanceHitlIds.stream().sorted().toList(),
+                conformanceHitlIds.size(),
+                kindOnFirst,
+                conformanceKindOnFirstEmission.size(),
+                conformanceLateKindActionIds.stream().sorted().toList(),
+                conformanceChunkEmissions.get(),
+                conformanceChunksWithMessageId.get(),
+                conformanceSawPlanActivity.get(),
+                conformanceSawTodoToolCall.get(),
+                refinedTitles,
+                sequences);
     }
 
     @AfterEach
@@ -918,6 +1101,8 @@ public abstract class AbstractAgentExecutionRealTest {
                                         + "Expected %d requests but got %d.",
                                 getHarness().getName(), expectedHitl, hitlRequestCount.get())
                         .isEqualTo(expectedHitl));
+
+        assertAcpConformanceAndReportMatrix();
 
         // SUCCESS VERIFICATION: After completion is detected, verify expected files
         // exist on disk. This confirms the agent actually produced the expected output.

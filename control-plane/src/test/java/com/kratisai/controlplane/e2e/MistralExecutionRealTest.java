@@ -89,6 +89,11 @@ class MistralExecutionRealTest extends AbstractAgentExecutionRealTest {
     }
 
     @Override
+    protected boolean permissionRequestsCarryToolCallId() {
+        return false;
+    }
+
+    @Override
     protected List<ExpectedFile> getExpectedFiles() {
         return List.of(
                 ExpectedFile.withContent("/kratis/workspace/kratis_task.sh", "Hello Kratis - what a lovely day"));

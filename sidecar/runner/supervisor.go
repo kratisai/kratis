@@ -781,6 +781,10 @@ func (s *AgentSupervisor) runPromptTurn(session *acp.AcpSession, taskPrompt stri
 		log.Printf("[Supervisor] Warning: failed to set state to SessionActive: %v", setErr)
 	}
 
+	if s.handler != nil {
+		s.handler.CloseChunkRun("prompt turn ended")
+	}
+
 	if err != nil {
 		return &PromptResult{Error: fmt.Errorf("ACP session/prompt failed: %w", err)}, nil
 	}

@@ -70,7 +70,6 @@ export interface CommandExecutionActivity extends BaseActivity {
   command: string
   detail?: ActivityDetail
   exitCode?: number
-  output: string[]
   type: 'command_execution'
 }
 

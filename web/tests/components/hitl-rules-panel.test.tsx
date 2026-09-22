@@ -155,7 +155,9 @@ describe('HitlRulesPanel', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Delete HITL Rule')).toBeInTheDocument()
-      expect(screen.getByText(/Are you sure you want to delete the HITL rule for/)).toBeInTheDocument()
+      expect(
+        screen.getByText(/Are you sure you want to delete this HITL rule/),
+      ).toBeInTheDocument()
     })
 
     const confirmBtn = screen.getByRole('button', { name: 'Delete Rule' })
@@ -185,6 +187,45 @@ describe('HitlRulesPanel', () => {
     const commandCells = await screen.findAllByText(longHitlRule.commandRoot)
     expect(commandCells.length).toBeGreaterThan(0)
     commandCells.forEach((cell) => expect(cell).toHaveClass('break-all'))
+  })
+
+  it('keeps delete actions visible for long commands via a scrollable section', async () => {
+    const longCommand =
+      'a-very-long-command-with-no-spaces-that-would-overflow-the-dialog-'.repeat(10)
+    const longHitlRule: HitlRuleDto = {
+      action: 'ALLOW',
+      commandRoot: longCommand,
+      createdAt: '2026-09-06T12:00:00Z',
+      createdByName: 'Alice',
+      createdByUserId: 'user-1',
+      id: 'rule-long',
+      ruleType: 'PREFIX_WILD',
+      teamId: 'team-1',
+    }
+    vi.mocked(hitlRuleApi.listHitlRules).mockResolvedValue([longHitlRule])
+    vi.mocked(hitlRuleApi.deleteHitlRule).mockResolvedValue(undefined)
+    const user = userEvent.setup()
+
+    renderWithProviders(<HitlRulesPanel />)
+
+    const deleteBtn = (
+      await screen.findAllByRole('button', {
+        name: `Delete rule for ${longCommand}`,
+      })
+    )[0]
+    await user.click(deleteBtn)
+
+    await waitFor(() => {
+      expect(screen.getByText('Delete HITL Rule')).toBeInTheDocument()
+    })
+
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText(longCommand)).toHaveClass('break-all')
+    expect(within(dialog).getByText(longCommand).parentElement).toHaveClass(
+      'overflow-y-auto',
+    )
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Delete Rule' })).toBeInTheDocument()
   })
 
   it('displays empty state when no rules exist', async () => {

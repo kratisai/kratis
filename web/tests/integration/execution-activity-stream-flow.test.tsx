@@ -83,7 +83,14 @@ describe('Execution Activity Stream with HITL', () => {
     const ws = setupConnected()
 
     // 1. Trigger thinking activity
-    triggerMockExecutionActivity(ws, EXECUTION_ID, 'THINKING', 'Analyzing codebase structure')
+    triggerMockExecutionActivity(
+      ws,
+      EXECUTION_ID,
+      'THINKING',
+      'Analyzing codebase structure',
+      'in_progress',
+      'thought-1',
+    )
 
     // Assert thinking card appears (the thought is both the title and the body)
     await waitFor(() => {
@@ -123,7 +130,14 @@ describe('Execution Activity Stream with HITL', () => {
     expect(screen.queryByRole('button', { name: /Reject/i })).not.toBeInTheDocument()
 
     // 6. Trigger more activities after resolution
-    triggerMockExecutionActivity(ws, EXECUTION_ID, 'THINKING', 'Continuing work')
+    triggerMockExecutionActivity(
+      ws,
+      EXECUTION_ID,
+      'THINKING',
+      'Continuing work',
+      'in_progress',
+      'thought-2',
+    )
 
     await waitFor(() => {
       expect(screen.getAllByText('Continuing work').length).toBeGreaterThanOrEqual(1)
@@ -140,7 +154,14 @@ describe('Execution Activity Stream with HITL', () => {
     const ws = setupConnected()
 
     // All frames arrive in the same tick, before the batching flush runs.
-    triggerMockExecutionActivity(ws, EXECUTION_ID, 'THINKING', 'Burst thought')
+    triggerMockExecutionActivity(
+      ws,
+      EXECUTION_ID,
+      'THINKING',
+      'Burst thought',
+      'in_progress',
+      'burst-0',
+    )
     triggerMockExecutionActivity(
       ws,
       EXECUTION_ID,
@@ -157,6 +178,7 @@ describe('Execution Activity Stream with HITL', () => {
       'in_progress',
       'burst-2',
     )
+    triggerMockExecutionActivity(ws, EXECUTION_ID, 'THINKING', 'Burst thought', 'completed', 'burst-0')
 
     await waitFor(() => {
       expect(screen.getByText('Burst thought')).toBeInTheDocument()
@@ -175,9 +197,24 @@ describe('Execution Activity Stream with HITL', () => {
     const ws = setupConnected()
 
     // Trigger multiple activity types
-    triggerMockExecutionActivity(ws, EXECUTION_ID, 'THINKING', 'Planning next steps')
+    triggerMockExecutionActivity(
+      ws,
+      EXECUTION_ID,
+      'THINKING',
+      'Planning next steps',
+      'in_progress',
+      'thought-1',
+    )
     triggerMockExecutionActivity(ws, EXECUTION_ID, 'RESEARCH', 'web_search')
     triggerMockExecutionActivity(ws, EXECUTION_ID, 'COMMAND', 'npm install')
+    triggerMockExecutionActivity(
+      ws,
+      EXECUTION_ID,
+      'THINKING',
+      'Planning next steps',
+      'completed',
+      'thought-1',
+    )
 
     // Assert all appear in order
     await waitFor(() => {

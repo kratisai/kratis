@@ -490,3 +490,246 @@ func TestHandleSessionUpdate_RepeatedIdenticalUpdatesCollapse(t *testing.T) {
 		t.Fatalf("expected exactly 1 activity for repeated identical updates, got %d: %+v", len(sink.activities), sink.activities)
 	}
 }
+
+// TestHandleSessionUpdate_ToolCallWithoutIDWarnsLoudly verifies that an ACP
+// tool_call or tool_call_update missing the required toolCallId is reported on
+// stderr regardless of the debug flag, instead of being dropped silently.
+func TestHandleSessionUpdate_ToolCallWithoutIDWarnsLoudly(t *testing.T) {
+	sink := &mockEventSink{}
+	h := NewHandler(sink, nil, "")
+	h.SetDebug(false)
+
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call",
+			"title":         "write_file",
+			"kind":          "edit",
+			"status":        "in_progress",
+		},
+	})
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call_update",
+			"title":         "write_file",
+			"status":        "completed",
+		},
+	})
+
+	if len(sink.activities) != 0 {
+		t.Errorf("expected no activity without a toolCallId, got %+v", sink.activities)
+	}
+
+	warnings := []string{}
+	for _, o := range sink.outputs {
+		if o.stream == "stderr" && strings.Contains(o.line, "[WARN]") {
+			warnings = append(warnings, o.line)
+		}
+	}
+	if len(warnings) != 2 {
+		t.Fatalf("expected one stderr warning per ID-less tool call message, got %d: %+v", len(warnings), sink.outputs)
+	}
+	for _, expected := range []struct {
+		discriminator string
+		substring     string
+	}{
+		{"tool_call", "write_file"},
+		{"tool_call_update", "write_file"},
+	} {
+		found := false
+		for _, w := range warnings {
+			if strings.Contains(w, expected.discriminator) && strings.Contains(w, expected.substring) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected a warning naming %q and the tool title, got %v", expected.discriminator, warnings)
+		}
+	}
+}
+
+// terminal/create carries no toolCallId: on ambiguity the most recently
+// recorded live match wins and the ambiguity is reported on stderr.
+func TestFindToolCallByCommand_DeterministicOnAmbiguity(t *testing.T) {
+	sink := &mockEventSink{}
+	h := NewHandler(sink, nil, "")
+
+	toolCall := func(id, command string) map[string]interface{} {
+		return map[string]interface{}{
+			"update": map[string]interface{}{
+				"sessionUpdate": "tool_call",
+				"toolCallId":    id,
+				"title":         command,
+				"kind":          "execute",
+				"rawInput":      map[string]interface{}{"command": command},
+			},
+		}
+	}
+
+	h.handleSessionUpdate(toolCall("tc-1", "ls -la"))
+	h.handleSessionUpdate(toolCall("tc-2", "ls -la"))
+
+	if got := h.findToolCallByCommand("ls -la"); got != "tc-2" {
+		t.Errorf("expected most recently recorded match tc-2, got %q", got)
+	}
+
+	warned := false
+	for _, o := range sink.outputs {
+		if o.stream == "stderr" && strings.Contains(o.line, "Ambiguous terminal/create correlation") && strings.Contains(o.line, "tc-2") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("expected an ambiguity warning on stderr, got %+v", sink.outputs)
+	}
+
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call_update",
+			"toolCallId":    "tc-2",
+			"status":        "completed",
+		},
+	})
+	if got := h.findToolCallByCommand("ls -la"); got != "tc-1" {
+		t.Errorf("expected tc-1 once tc-2 completed, got %q", got)
+	}
+}
+
+// A messageId returning after an interruption opens run 2 as <messageId>#2;
+// detail.messageId keeps the raw value.
+func TestChunkRun_RepeatedMessageIdGetsRunSuffix(t *testing.T) {
+	sink := &mockEventSink{}
+	h := NewHandler(sink, nil, "")
+
+	thought := func(messageID, text string) map[string]interface{} {
+		return map[string]interface{}{
+			"update": map[string]interface{}{
+				"sessionUpdate": "agent_thought_chunk",
+				"messageId":     messageID,
+				"content":       map[string]interface{}{"type": "text", "text": text},
+			},
+		}
+	}
+
+	h.handleSessionUpdate(thought("A", "first thought"))
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "tc-1",
+			"kind":          "read",
+			"title":         "Reading",
+		},
+	})
+	h.handleSessionUpdate(thought("A", "second thought"))
+	h.CloseChunkRun("prompt turn ended")
+
+	runs := map[string][]capturedActivity{}
+	for _, a := range sink.activities {
+		if a.activityType == ActivityTypeThinking {
+			runs[a.actionID] = append(runs[a.actionID], a)
+		}
+	}
+	first, second := runs["A"], runs["A#2"]
+	if len(first) != 2 || len(second) != 2 {
+		t.Fatalf("expected runs A and A#2 with in_progress+completed each, got %+v", sink.activities)
+	}
+	if first[1].status != "completed" || second[1].status != "completed" {
+		t.Errorf("expected exactly one completed emission per closed run, got %+v / %+v", first, second)
+	}
+	if first[1].description != "first thought" || second[1].description != "second thought" {
+		t.Errorf("expected per-run cumulative text, got %q / %q", first[1].description, second[1].description)
+	}
+	for _, a := range append(append([]capturedActivity{}, first...), second...) {
+		if a.detail.MessageID != "A" {
+			t.Errorf("expected raw messageId %q in detail, got %q", "A", a.detail.MessageID)
+		}
+	}
+}
+
+// Every emission carries the cumulative run text; the boundary emits exactly
+// one completed.
+func TestChunkRun_CumulativeTextAndSingleCompleted(t *testing.T) {
+	sink := &mockEventSink{}
+	h := NewHandler(sink, nil, "")
+
+	chunk := func(text string) map[string]interface{} {
+		return map[string]interface{}{
+			"update": map[string]interface{}{
+				"sessionUpdate": "agent_message_chunk",
+				"messageId":     "m-1",
+				"content":       map[string]interface{}{"type": "text", "text": text},
+			},
+		}
+	}
+
+	h.handleSessionUpdate(chunk("head"))
+	h.handleSessionUpdate(chunk(strings.Repeat("x", 600)))
+	h.handleSessionUpdate(chunk(strings.Repeat("y", 600)))
+	h.CloseChunkRun("prompt turn ended")
+
+	if len(sink.activities) < 3 {
+		t.Fatalf("expected at least the two byte-throttled emissions plus the boundary, got %d", len(sink.activities))
+	}
+	completed := 0
+	for _, a := range sink.activities {
+		if a.actionID != "m-1" {
+			t.Errorf("expected run key m-1 on every emission, got %q", a.actionID)
+		}
+		if a.status == "completed" {
+			completed++
+		}
+	}
+	if completed != 1 {
+		t.Fatalf("expected exactly one completed emission, got %d", completed)
+	}
+	for i := 1; i < len(sink.activities); i++ {
+		if !strings.HasPrefix(sink.activities[i].description, sink.activities[i-1].description) {
+			t.Errorf("emission %d is not cumulative over emission %d", i, i-1)
+		}
+	}
+	if last := sink.activities[len(sink.activities)-1]; last.status != "completed" ||
+		last.description != "head"+strings.Repeat("x", 600)+strings.Repeat("y", 600) {
+		t.Errorf("expected the boundary emission to carry the full run text as completed, got status=%q len=%d", last.status, len(last.description))
+	}
+}
+
+// A terminal status absorbs later stale updates: a finished tool call never
+// reopens, and the regressed status is not emitted.
+func TestHandleSessionUpdate_TerminalStatusAbsorbsStaleReSend(t *testing.T) {
+	sink := &mockEventSink{}
+	h := NewHandler(sink, nil, "")
+
+	toolCall := func(id, status string) map[string]interface{} {
+		return map[string]interface{}{
+			"update": map[string]interface{}{
+				"sessionUpdate": "tool_call",
+				"toolCallId":    id,
+				"kind":          "execute",
+				"title":         "shell · git status",
+				"status":        status,
+			},
+		}
+	}
+
+	h.handleSessionUpdate(toolCall("tc-1", "in_progress"))
+	h.handleSessionUpdate(toolCall("tc-1", "completed"))
+	h.handleSessionUpdate(toolCall("tc-1", "in_progress"))
+	h.handleSessionUpdate(toolCall("tc-1", "pending"))
+
+	emissions := 0
+	var lastStatus string
+	for _, a := range sink.activities {
+		if a.actionID == "tc-1" {
+			emissions++
+			lastStatus = a.status
+		}
+	}
+	if emissions != 2 {
+		t.Fatalf("expected in_progress and completed emissions only, got %d: %+v", emissions, sink.activities)
+	}
+	if lastStatus != "completed" {
+		t.Errorf("expected the recorded status to stay completed, got %q", lastStatus)
+	}
+	if h.toolCalls["tc-1"].Status != ActivityCompleted {
+		t.Errorf("expected accumulated state to stay completed, got %q", h.toolCalls["tc-1"].Status)
+	}
+}

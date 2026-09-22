@@ -80,6 +80,10 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
 
     static final GenericContainer<?> LITELLM_CONTAINER;
 
+    // LiteLLMImageConformanceTest asserts both compose stacks pin this same digest.
+    static final String LITELLM_IMAGE =
+            "ghcr.io/berriai/litellm@sha256:32cfd7a427f6470033b4dcc9e75dfbea2aa32dbc298b0b511a40e962ce818362";
+
     static {
         ensureTestNetwork();
 
@@ -121,7 +125,7 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
 
         // Start LiteLLM from pre-built cached image (reused across test runs)
         // TestLiteLLMClient tracks models registered per test, and expunges them after each test.
-        LITELLM_CONTAINER = new GenericContainer<>(DockerImageName.parse("ghcr.io/berriai/litellm:main-stable"))
+        LITELLM_CONTAINER = new GenericContainer<>(DockerImageName.parse(LITELLM_IMAGE))
                 .withExposedPorts(4000)
                 .withNetworkMode(TEST_NETWORK_NAME)
                 .withCreateContainerCmdModifier(cmd -> cmd.withAliases(LITELLM_ALIAS))

@@ -76,9 +76,9 @@ func TestExtractPermissionCommand_NoToolCall(t *testing.T) {
 }
 
 func TestExtractPermissionCommand_StateTrackedToolCall(t *testing.T) {
-	h := NewHandler(nil, nil, "")
+	h := NewHandler(&mockEventSink{}, nil, "")
 	// 1. Record tool call from session/update notification
-	h.recordToolCall(map[string]interface{}{
+	h.handleSessionUpdate(map[string]interface{}{
 		"update": map[string]interface{}{
 			"sessionUpdate": "tool_call",
 			"toolCallId":    "call_789",
@@ -788,21 +788,29 @@ func TestHandleSessionUpdate_InferredMessageID_ConsecutiveChunksShareID(t *testi
 
 	h.handleSessionUpdate(sessionUpdateParams("agent_message_chunk", "", "Hello "))
 	h.handleSessionUpdate(sessionUpdateParams("agent_message_chunk", "", "world"))
+	h.CloseChunkRun("prompt turn ended")
 
 	if len(sink.activities) != 2 {
-		t.Fatalf("expected 2 activities, got %d: %+v", len(sink.activities), sink.activities)
+		t.Fatalf("expected one in_progress plus one completed emission for the run, got %d: %+v", len(sink.activities), sink.activities)
 	}
-	if sink.activities[0].activityType != "MESSAGE" || sink.activities[1].activityType != "MESSAGE" {
-		t.Fatalf("expected MESSAGE activities, got %q and %q", sink.activities[0].activityType, sink.activities[1].activityType)
+	first, closed := sink.activities[0], sink.activities[1]
+	if first.activityType != "MESSAGE" || closed.activityType != "MESSAGE" {
+		t.Fatalf("expected MESSAGE activities, got %q and %q", first.activityType, closed.activityType)
 	}
-	if sink.activities[0].actionID == "" || sink.activities[0].actionID != sink.activities[1].actionID {
-		t.Errorf("consecutive message chunks must share one inferred ID, got %q then %q", sink.activities[0].actionID, sink.activities[1].actionID)
+	if first.actionID == "" || first.actionID != closed.actionID {
+		t.Errorf("one run must keep one inferred actionID, got %q then %q", first.actionID, closed.actionID)
 	}
-	if !strings.HasPrefix(sink.activities[0].actionID, "inferred-") {
-		t.Errorf("expected inferred-* actionID, got %q", sink.activities[0].actionID)
+	if !strings.HasPrefix(first.actionID, "inferred-") {
+		t.Errorf("expected inferred-* actionID, got %q", first.actionID)
 	}
-	if sink.activities[0].detail.MessageID != sink.activities[0].actionID {
-		t.Errorf("expected detail.messageId to mirror the inferred actionID, got %q", sink.activities[0].detail.MessageID)
+	if first.status != "in_progress" || closed.status != "completed" {
+		t.Errorf("expected in_progress then completed, got %q then %q", first.status, closed.status)
+	}
+	if first.description != "Hello " || closed.description != "Hello world" {
+		t.Errorf("expected cumulative run text, got %q then %q", first.description, closed.description)
+	}
+	if first.detail.MessageID != "" || closed.detail.MessageID != "" {
+		t.Errorf("expected empty detail.messageId for an inferred run, got %q / %q", first.detail.MessageID, closed.detail.MessageID)
 	}
 }
 
@@ -818,15 +826,21 @@ func TestHandleSessionUpdate_InferredMessageID_ThoughtMessageThought_ThreeStream
 		h.handleSessionUpdate(sessionUpdateParams(tc.kind, "", tc.text))
 	}
 
-	if len(sink.activities) != 3 {
-		t.Fatalf("expected 3 activities, got %d: %+v", len(sink.activities), sink.activities)
+	if len(sink.activities) != 5 {
+		t.Fatalf("expected 5 activities, got %d: %+v", len(sink.activities), sink.activities)
 	}
 	a := sink.activities
-	if a[0].actionID == a[1].actionID || a[1].actionID == a[2].actionID || a[0].actionID == a[2].actionID {
-		t.Errorf("thought→message→thought must yield three distinct IDs, got %q, %q, %q", a[0].actionID, a[1].actionID, a[2].actionID)
+	if a[0].actionID == a[2].actionID || a[2].actionID == a[4].actionID || a[0].actionID == a[4].actionID {
+		t.Errorf("thought→message→thought must yield three distinct run IDs, got %q, %q, %q", a[0].actionID, a[2].actionID, a[4].actionID)
 	}
-	if a[0].activityType != "THINKING" || a[1].activityType != "MESSAGE" || a[2].activityType != "THINKING" {
-		t.Errorf("unexpected activity types: %q, %q, %q", a[0].activityType, a[1].activityType, a[2].activityType)
+	if a[0].activityType != "THINKING" || a[2].activityType != "MESSAGE" || a[4].activityType != "THINKING" {
+		t.Errorf("unexpected activity types: %q, %q, %q", a[0].activityType, a[2].activityType, a[4].activityType)
+	}
+	if a[0].status != "in_progress" || a[1].status != "completed" || a[2].status != "in_progress" || a[3].status != "completed" || a[4].status != "in_progress" {
+		t.Errorf("expected closed runs to emit completed, got statuses %q %q %q %q %q", a[0].status, a[1].status, a[2].status, a[3].status, a[4].status)
+	}
+	if a[1].description != "thought one" || a[3].description != "message" || a[4].description != "thought two" {
+		t.Errorf("expected cumulative text per run, got %q, %q, %q", a[1].description, a[3].description, a[4].description)
 	}
 }
 
@@ -838,17 +852,21 @@ func TestHandleSessionUpdate_InferredMessageID_RealMessageIdResetsStream(t *test
 	h.handleSessionUpdate(sessionUpdateParams("agent_message_chunk", "real-1", "real"))
 	h.handleSessionUpdate(sessionUpdateParams("agent_message_chunk", "", " again"))
 
-	if len(sink.activities) != 3 {
-		t.Fatalf("expected 3 activities, got %d: %+v", len(sink.activities), sink.activities)
+	if len(sink.activities) != 5 {
+		t.Fatalf("expected 5 activities, got %d: %+v", len(sink.activities), sink.activities)
 	}
-	if sink.activities[1].actionID != "real-1" {
-		t.Errorf("expected the agent messageId as actionID, got %q", sink.activities[1].actionID)
+	a := sink.activities
+	if a[2].actionID != "real-1" || a[3].actionID != "real-1" {
+		t.Errorf("expected the agent messageId as actionID, got %q / %q", a[2].actionID, a[3].actionID)
 	}
-	if sink.activities[2].actionID == sink.activities[0].actionID {
+	if a[2].detail.MessageID != "real-1" {
+		t.Errorf("expected detail.messageId to carry the raw ACP messageId, got %q", a[2].detail.MessageID)
+	}
+	if a[4].actionID == a[0].actionID {
 		t.Errorf("chunk after a real messageId must not reuse the previous inferred ID")
 	}
-	if sink.activities[2].actionID == "real-1" {
-		t.Errorf("chunk without messageId after a real messageId must start a fresh inferred stream, got %q", sink.activities[2].actionID)
+	if a[4].actionID == "real-1" || !strings.HasPrefix(a[4].actionID, "inferred-") {
+		t.Errorf("chunk without messageId after a real messageId must start a fresh inferred run, got %q", a[4].actionID)
 	}
 }
 
@@ -865,10 +883,14 @@ func TestHandleSessionUpdate_InferredMessageID_ToolCallResetsStream(t *testing.T
 	}})
 	h.handleSessionUpdate(sessionUpdateParams("agent_message_chunk", "", "second message"))
 
-	if len(sink.activities) != 3 {
-		t.Fatalf("expected 3 activities, got %d: %+v", len(sink.activities), sink.activities)
+	if len(sink.activities) != 4 {
+		t.Fatalf("expected 4 activities, got %d: %+v", len(sink.activities), sink.activities)
 	}
-	if sink.activities[0].actionID == sink.activities[2].actionID {
+	a := sink.activities
+	if a[1].status != "completed" || a[1].description != "first message" {
+		t.Errorf("expected the tool call to close the run with completed, got %+v", a[1])
+	}
+	if a[0].actionID == a[3].actionID {
 		t.Errorf("message chunks separated by a tool call must not share an inferred ID")
 	}
 }
@@ -951,14 +973,18 @@ func TestHandleSessionUpdate_UserMessageChunkSeparatesAgentMessageStream(t *test
 	h.handleSessionUpdate(sessionUpdateParams("user_message_chunk", "", "user follow-up"))
 	h.handleSessionUpdate(sessionUpdateParams("agent_message_chunk", "", "agent reply two"))
 
-	if len(sink.activities) != 3 {
-		t.Fatalf("expected 3 activities, got %d: %+v", len(sink.activities), sink.activities)
+	if len(sink.activities) != 5 {
+		t.Fatalf("expected 5 activities, got %d: %+v", len(sink.activities), sink.activities)
 	}
-	if sink.activities[0].actionID == sink.activities[2].actionID {
+	a := sink.activities
+	if a[0].actionID == a[4].actionID {
 		t.Errorf("agent message chunks separated by a user message must not share an inferred ID")
 	}
-	if sink.activities[1].detail.Role != "user" {
-		t.Errorf("expected user role on the user message chunk, got %q", sink.activities[1].detail.Role)
+	if a[2].detail.Role != "user" {
+		t.Errorf("expected user role on the user message chunk, got %q", a[2].detail.Role)
+	}
+	if a[1].status != "completed" || a[3].status != "completed" {
+		t.Errorf("expected both closed runs to emit completed, got %q and %q", a[1].status, a[3].status)
 	}
 }
 

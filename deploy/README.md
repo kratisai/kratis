@@ -92,10 +92,13 @@ Use `--wait-timeout <seconds>` to bound the wait.
 
 - **kratis-db:** `pgvector/pgvector:pg16`
 - **kratis:** GraalVM native control plane + embedded SPA (`ghcr.io/kratisai/kratis:latest`)
-- **litellm:** `ghcr.io/berriai/litellm:main-stable`
+- **litellm:** `ghcr.io/berriai/litellm:v1.102.0` (pinned by digest)
 - **registry-cache:** optional Docker Hub pull-through cache
 **NOTE** - additional containers spun up as needed for agent-harness executions
 
-Health: database `pg_isready`; API `/actuator/health`; LiteLLM `/health/readiness`. The API waits for the database and LiteLLM.
+## Health
+
+LiteLLM health is checked by a Python script (deploy/litellm/healthcheck.py) that probes LiteLLM's /health/readiness 
+and an authenticated /v2/model/info, and reads the litellm-worker-heartbeat directly from Postgres.
 
 Parser binaries are baked into the control-plane image. For local parser setup, see [`build/README.md`](../build/README.md).

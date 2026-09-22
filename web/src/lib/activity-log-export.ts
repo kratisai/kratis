@@ -63,8 +63,8 @@ function formatCommandExecution(activity: CommandExecutionActivity): string[] {
       `Approval: ${activity.approved === undefined ? 'pending' : activity.approved ? 'approved' : 'rejected'}`,
     )
   }
-  if (activity.output.length > 0) {
-    lines.push('Output:', ...activity.output.map((line) => indent(line)))
+  if (activity.detail?.output) {
+    lines.push('Output:', indent(activity.detail.output))
   }
   return lines
 }

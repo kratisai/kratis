@@ -39,11 +39,11 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
         approvalRequired: false,
         collapsed: true,
         command: 'npm run build',
+        detail: { output: 'Building project...\nBuild complete' },
         endedAt: '2024-06-15T10:31:00.000Z',
         executionId: EXECUTION_ID,
         exitCode: 0,
         id: 'cmd-1',
-        output: ['Building project...', 'Build complete'],
         startedAt: '2024-06-15T10:30:00.000Z',
         state: 'completed',
         type: 'command_execution',
@@ -53,15 +53,15 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     await waitFor(() => {
       expect(screen.getByText('npm run build')).toBeInTheDocument()
     })
-    expect(screen.queryByText('Building project...')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Building project/)).not.toBeInTheDocument()
 
     const expandButton = screen.getByText('npm run build').closest('button')!
     await user.click(expandButton)
 
     await waitFor(() => {
-      expect(screen.getByText('Building project...')).toBeInTheDocument()
+      expect(screen.getByText(/Building project\.\.\./)).toBeInTheDocument()
     })
-    expect(screen.getByText('Build complete')).toBeInTheDocument()
+    expect(screen.getByText(/Build complete/)).toBeInTheDocument()
   })
 
   it('renders error command execution auto-collapsed with X icon', async () => {
@@ -72,11 +72,11 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
         approvalRequired: false,
         collapsed: true,
         command: 'rm -rf /tmp/cache',
+        detail: { output: 'Permission denied' },
         endedAt: '2024-06-15T10:31:00.000Z',
         executionId: EXECUTION_ID,
         exitCode: 1,
         id: 'cmd-err-1',
-        output: ['Permission denied'],
         startedAt: '2024-06-15T10:30:00.000Z',
         state: 'error',
         type: 'command_execution',
@@ -104,9 +104,9 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
         approvalRequired: false,
         collapsed: false,
         command: 'npm test',
+        detail: { output: 'Test suite running...\nPASS src/app.test.ts' },
         executionId: EXECUTION_ID,
         id: 'cmd-active-1',
-        output: ['Test suite running...', 'PASS src/app.test.ts'],
         startedAt: '2024-06-15T10:30:00.000Z',
         state: 'active',
         type: 'command_execution',
@@ -117,8 +117,8 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       expect(screen.getByText('npm test')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('Test suite running...')).toBeInTheDocument()
-    expect(screen.getByText('PASS src/app.test.ts')).toBeInTheDocument()
+    expect(screen.getByText(/Test suite running\.\.\./)).toBeInTheDocument()
+    expect(screen.getByText(/PASS src\/app\.test\.ts/)).toBeInTheDocument()
   })
 
   it('renders completed thinking activity auto-collapsed with a single-line summary title', async () => {
@@ -285,9 +285,9 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
         approvalRequired: false,
         collapsed: false,
         command: 'echo hello',
+        detail: { output: 'hello' },
         executionId: EXECUTION_ID,
         id: 'cmd-toggle-1',
-        output: ['hello'],
         startedAt: '2024-06-15T10:30:00.000Z',
         state: 'active',
         type: 'command_execution',
@@ -296,11 +296,11 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
         approvalRequired: false,
         collapsed: false,
         command: 'echo done',
+        detail: { output: 'done' },
         endedAt: '2024-06-15T10:31:00.000Z',
         executionId: EXECUTION_ID,
         exitCode: 0,
         id: 'cmd-toggle-2',
-        output: ['done'],
         startedAt: '2024-06-15T10:30:00.000Z',
         state: 'completed',
         type: 'command_execution',
@@ -342,11 +342,14 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       expect(screen.getByText('npm test')).toBeInTheDocument()
     })
 
-    useActivityStore.getState().handleExecutionOutput({
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'cmd-stream-1',
+      activityType: 'COMMAND',
+      description: 'npm test',
+      detail: { output: 'PASS src/a.test.ts' },
       executionId: EXECUTION_ID,
-      line: 'PASS src/a.test.ts',
-      stream: 'stdout',
-      type: 'execution_output',
+      status: 'in_progress',
+      type: 'execution_activity',
     })
     await waitFor(() => {
       expect(screen.getByText('PASS src/a.test.ts')).toBeInTheDocument()
@@ -359,19 +362,33 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       actionId: 'cmd-stream-1',
       activityType: 'COMMAND',
       description: 'npm test',
+      detail: { output: 'PASS src/a.test.ts\nPASS src/b.test.ts' },
       executionId: EXECUTION_ID,
       status: 'in_progress',
       type: 'execution_activity',
     })
-    useActivityStore.getState().handleExecutionOutput({
-      executionId: EXECUTION_ID,
-      line: 'PASS src/b.test.ts',
-      stream: 'stdout',
-      type: 'execution_output',
-    })
 
     expect(screen.queryByText('PASS src/a.test.ts')).not.toBeInTheDocument()
-    expect(screen.queryByText('PASS src/b.test.ts')).not.toBeInTheDocument()
+    expect(screen.queryByText(/PASS src\/b\.test\.ts/)).not.toBeInTheDocument()
+  })
+
+  it('renders a command record from detail.output only', async () => {
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'cmd-detail-1',
+      activityType: 'COMMAND',
+      description: 'rm -rf build',
+      detail: { output: 'removed build/' },
+      executionId: EXECUTION_ID,
+      status: 'completed',
+      type: 'execution_activity',
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('removed build/')).toBeInTheDocument()
+    })
+    expect(screen.getAllByText(/removed build\//)).toHaveLength(1)
   })
 
   it('shows exit code for completed command execution', async () => {
@@ -385,7 +402,6 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
         executionId: EXECUTION_ID,
         exitCode: 0,
         id: 'cmd-exit-1',
-        output: [],
         startedAt: '2024-06-15T10:30:00.000Z',
         state: 'active',
         type: 'command_execution',
@@ -411,7 +427,6 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
         executionId: EXECUTION_ID,
         exitCode: 0,
         id: 'cmd-long-1',
-        output: [],
         startedAt: '2024-06-15T10:30:00.000Z',
         state: 'completed',
         type: 'command_execution',
@@ -432,9 +447,9 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
         approvalRequired: false,
         collapsed: false,
         command: 'cat file',
+        detail: { output: longOutput },
         executionId: EXECUTION_ID,
         id: 'cmd-out-1',
-        output: [longOutput],
         startedAt: '2024-06-15T10:30:00.000Z',
         state: 'active',
         type: 'command_execution',

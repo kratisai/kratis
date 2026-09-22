@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.TestDataFactory;
@@ -20,6 +21,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.annotation.Transactional;
 
 @SpringIntegrationTest
@@ -121,6 +123,35 @@ class SandboxExecutionActivityMappingTest {
     }
 
     @Test
+    void uniqueIndex_rejectsDuplicateActionIdForSameExecution() {
+        SandboxExecution execution = createExecution();
+        activityRepository.save(new SandboxExecutionActivity(
+                execution.getId(), 1, "tc-1", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "first", null));
+        entityManager.flush();
+
+        SandboxExecutionActivity duplicate = new SandboxExecutionActivity(
+                execution.getId(), 2, "tc-1", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "second", null);
+
+        // A collision must fail loudly instead of silently merging two actions.
+        assertThatThrownBy(() -> activityRepository.saveAndFlush(duplicate))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("uq_sandbox_execution_activities_exec_action");
+    }
+
+    @Test
+    void uniqueIndex_allowsMultipleStandaloneRowsWithoutActionId() {
+        SandboxExecution execution = createExecution();
+        activityRepository.save(new SandboxExecutionActivity(
+                execution.getId(), 1, null, ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "first", null));
+        activityRepository.save(new SandboxExecutionActivity(
+                execution.getId(), 2, null, ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "second", null));
+        entityManager.flush();
+
+        assertThat(activityRepository.findByExecutionIdOrderBySequenceAsc(execution.getId()))
+                .hasSize(2);
+    }
+
+    @Test
     void findByExecutionIdOrderBySequenceAsc_returnsRowsInArrivalOrder() {
         SandboxExecution execution = createExecution();
         activityRepository.save(new SandboxExecutionActivity(
@@ -141,26 +172,29 @@ class SandboxExecutionActivityMappingTest {
     }
 
     @Test
-    void findFirstByExecutionIdAndActionIdAndActivityType_mergesChunksIntoSingleRow() {
+    void findByExecutionIdAndActionId_returnsTheMatchingRow() {
         SandboxExecution execution = createExecution();
         SandboxExecutionActivity first = new SandboxExecutionActivity(
                 execution.getId(), 1, "msg-1", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "Hello ", null);
         activityRepository.save(first);
+        activityRepository.save(new SandboxExecutionActivity(
+                execution.getId(), 2, "msg-2", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "other", null));
         entityManager.flush();
 
         Optional<SandboxExecutionActivity> found =
-                activityRepository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        execution.getId(), "msg-1", ActivityType.MESSAGE);
+                activityRepository.findByExecutionIdAndActionId(execution.getId(), "msg-1");
 
         assertThat(found).isPresent();
         assertThat(found.get().getId()).isEqualTo(first.getId());
+        assertThat(activityRepository.findByExecutionIdAndActionId(execution.getId(), "missing"))
+                .isEmpty();
     }
 
     @Test
-    void findFirstByExecutionIdAndActionId_returnsNewestRowWhenActionIdReusedAcrossTypes() {
+    void findFirstByExecutionIdAndActionId_returnsTheMatchingRow() {
         SandboxExecution execution = createExecution();
         activityRepository.save(new SandboxExecutionActivity(
-                execution.getId(), 1, "msg-1", ActivityType.THINKING, ActivityStatus.IN_PROGRESS, "thought", null));
+                execution.getId(), 1, "msg-2", ActivityType.THINKING, ActivityStatus.IN_PROGRESS, "thought", null));
         SandboxExecutionActivity message = new SandboxExecutionActivity(
                 execution.getId(), 2, "msg-1", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "Hello ", null);
         activityRepository.save(message);
@@ -168,31 +202,9 @@ class SandboxExecutionActivityMappingTest {
 
         Optional<SandboxExecutionActivity> byAction =
                 activityRepository.findFirstByExecutionIdAndActionIdOrderBySequenceDesc(execution.getId(), "msg-1");
-        Optional<SandboxExecutionActivity> byActionAndType =
-                activityRepository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        execution.getId(), "msg-1", ActivityType.MESSAGE);
 
         assertThat(byAction).isPresent();
         assertThat(byAction.get().getId()).isEqualTo(message.getId());
-        assertThat(byActionAndType).isPresent();
-        assertThat(byActionAndType.get().getId()).isEqualTo(message.getId());
-    }
-
-    @Test
-    void findFirstByExecutionIdAndStatusOrderBySequenceDesc_returnsNewestPendingRow() {
-        SandboxExecution execution = createExecution();
-        activityRepository.save(new SandboxExecutionActivity(
-                execution.getId(), 1, "tc-1", ActivityType.COMMAND, ActivityStatus.PENDING, "first", null));
-        activityRepository.save(new SandboxExecutionActivity(
-                execution.getId(), 2, "tc-2", ActivityType.COMMAND, ActivityStatus.PENDING, "second", null));
-        entityManager.flush();
-
-        Optional<SandboxExecutionActivity> found =
-                activityRepository.findFirstByExecutionIdAndStatusOrderBySequenceDesc(
-                        execution.getId(), ActivityStatus.PENDING);
-
-        assertThat(found).isPresent();
-        assertThat(found.get().getDescription()).isEqualTo("second");
     }
 
     @Test
@@ -225,38 +237,6 @@ class SandboxExecutionActivityMappingTest {
         assertThat(found.get(0).getDescription()).isEqualTo("first");
         assertThat(found.get(1).getDescription()).isEqualTo("second");
         assertThat(found.get(2).getDescription()).isEqualTo("third");
-    }
-
-    @Test
-    void findByExecutionIdAndStatusAndOpenActionIdNot_excludesIncomingActionId() {
-        SandboxExecution execution = createExecution();
-        activityRepository.save(new SandboxExecutionActivity(
-                execution.getId(), 1, "search-1", ActivityType.RESEARCH, ActivityStatus.IN_PROGRESS, "first", null));
-        activityRepository.save(new SandboxExecutionActivity(
-                execution.getId(), 2, "cmd-1", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "second", null));
-        entityManager.flush();
-
-        List<SandboxExecutionActivity> found = activityRepository.findByExecutionIdAndStatusAndOpenActionIdNot(
-                execution.getId(), ActivityStatus.IN_PROGRESS, "cmd-1");
-
-        assertThat(found).hasSize(1);
-        assertThat(found.getFirst().getDescription()).isEqualTo("first");
-    }
-
-    @Test
-    void findByExecutionIdAndStatusAndOpenActionIdNot_includesNullActionIdRows() {
-        SandboxExecution execution = createExecution();
-        activityRepository.save(new SandboxExecutionActivity(
-                execution.getId(), 1, null, ActivityType.RESEARCH, ActivityStatus.IN_PROGRESS, "standalone", null));
-        activityRepository.save(new SandboxExecutionActivity(
-                execution.getId(), 2, "cmd-1", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "second", null));
-        entityManager.flush();
-
-        List<SandboxExecutionActivity> found = activityRepository.findByExecutionIdAndStatusAndOpenActionIdNot(
-                execution.getId(), ActivityStatus.IN_PROGRESS, "cmd-1");
-
-        assertThat(found).hasSize(1);
-        assertThat(found.getFirst().getDescription()).isEqualTo("standalone");
     }
 
     @Test

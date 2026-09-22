@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.wsdto.ActivityDetail;
 import com.kratisai.controlplane.api.wsdto.ActivityHitl;
-import com.kratisai.controlplane.api.wsdto.ActivityKind;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
@@ -17,14 +16,16 @@ import com.kratisai.controlplane.model.event.SandboxExecutionHitlRequiredEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 @Service
 public class ExecutionActivityPersistenceService {
+    private static final Logger logger = LoggerFactory.getLogger(ExecutionActivityPersistenceService.class);
 
     private final SandboxExecutionActivityRepository repository;
     private final ObjectMapper objectMapper;
@@ -42,19 +43,14 @@ public class ExecutionActivityPersistenceService {
             String actionId,
             ActivityStatus status,
             ActivityDetail detail) {
-        closePreviousOpenStream(executionId, actionId);
         if (actionId == null || actionId.isBlank()) {
             insert(executionId, activityType, description, null, status, detail);
             return;
         }
-        // The same actionId can back rows of different types (e.g. a THINKING
-        // and a MESSAGE chunk sharing the agent's messageId), so only merge
-        // when the incoming type matches the existing row.
         repository
-                .findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, actionId, activityType)
+                .findByExecutionIdAndActionId(executionId, actionId)
                 .ifPresentOrElse(
-                        existing -> merge(existing, description, status, detail),
+                        existing -> merge(existing, activityType, description, status, detail),
                         () -> insert(executionId, activityType, description, actionId, status, detail));
     }
 
@@ -72,19 +68,6 @@ public class ExecutionActivityPersistenceService {
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Stored activity detail is not valid JSON", e);
         }
-    }
-
-    // Agents do not reliably send a terminal status for every tool call
-    private void closePreviousOpenStream(UUID executionId, String actionId) {
-        List<SandboxExecutionActivity> open = actionId == null || actionId.isBlank()
-                ? repository.findByExecutionIdAndStatusOrderBySequenceAsc(executionId, ActivityStatus.IN_PROGRESS)
-                : repository.findByExecutionIdAndStatusAndOpenActionIdNot(
-                        executionId, ActivityStatus.IN_PROGRESS, actionId);
-        if (open.isEmpty()) {
-            return;
-        }
-        open.forEach(activity -> activity.setStatus(ActivityStatus.COMPLETED));
-        repository.saveAll(open);
     }
 
     public void closeOpenStreams(UUID executionId) {
@@ -109,14 +92,8 @@ public class ExecutionActivityPersistenceService {
     private void onApprovalRequired(SandboxExecutionHitlRequiredEvent event) {
         ExecutionHitlRequiredResult request = event.result();
         ActivityHitl hitl = ActivityHitl.from(request);
-        // The tool activity the agent emits for the approved call is typed by
-        // its tool kind; the approval row must share that type so both merge
-        // into one activity instead of duplicating the actionId.
-        ActivityType type = activityTypeForToolKind(request.toolKind());
-
         repository
-                .findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        request.executionId(), request.hitlId(), type)
+                .findByExecutionIdAndActionId(request.executionId(), request.hitlId())
                 .ifPresentOrElse(
                         existing -> {
                             ActivityDetail detail = detailOf(existing);
@@ -127,15 +104,10 @@ public class ExecutionActivityPersistenceService {
                             existing.setDetail(toJson(merged));
                             repository.save(existing);
                         },
-                        () -> recordActivity(
-                                request.executionId(),
-                                type,
-                                request.message() != null ? request.message() : request.command(),
+                        () -> logger.warn(
+                                "Approval {} has no activity row for execution {}; ignored",
                                 request.hitlId(),
-                                ActivityStatus.PENDING,
-                                new ActivityDetail(
-                                        null, null, null, null, null, null, null, null, null, null, null, null, null,
-                                        hitl)));
+                                request.executionId()));
     }
 
     private void onQuestionRequired(SandboxExecutionHitlRequiredEvent event) {
@@ -175,21 +147,17 @@ public class ExecutionActivityPersistenceService {
 
     private void onApprovalResolved(SandboxExecutionHitlResolvedEvent event) {
         ExecutionHitlResolvedResult resolution = event.result();
-        Optional<SandboxExecutionActivity> row = repository.findFirstByExecutionIdAndActionIdOrderBySequenceDesc(
-                resolution.executionId(), resolution.hitlId());
-        if (row.isEmpty()) {
-            row = repository.findFirstByExecutionIdAndStatusOrderBySequenceDesc(
-                    resolution.executionId(), ActivityStatus.PENDING);
-        }
-        row.ifPresent(activity -> {
-            boolean approved = resolution.response() == HitlResponse.APPROVED;
-            activity.setStatus(approved ? ActivityStatus.IN_PROGRESS : ActivityStatus.FAILED);
-            ActivityDetail detail = detailOf(activity);
-            if (detail != null && detail.hitl() != null) {
-                activity.setDetail(toJson(detail.withHitl(detail.hitl().withResolution(resolution))));
-            }
-            repository.save(activity);
-        });
+        repository
+                .findByExecutionIdAndActionId(resolution.executionId(), resolution.hitlId())
+                .ifPresent(activity -> {
+                    boolean approved = resolution.response() == HitlResponse.APPROVED;
+                    activity.setStatus(approved ? ActivityStatus.IN_PROGRESS : ActivityStatus.FAILED);
+                    ActivityDetail detail = detailOf(activity);
+                    if (detail != null && detail.hitl() != null) {
+                        activity.setDetail(toJson(detail.withHitl(detail.hitl().withResolution(resolution))));
+                    }
+                    repository.save(activity);
+                });
     }
 
     private void onQuestionResolved(SandboxExecutionHitlResolvedEvent event) {
@@ -218,24 +186,6 @@ public class ExecutionActivityPersistenceService {
         return new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
-    // Mirrors the sidecar's mapToolKindToActivity so an approval row and the
-    // tool activity emitted for the same call share one activity type.
-    private static ActivityType activityTypeForToolKind(String toolKind) {
-        if (toolKind == null || toolKind.isBlank()) {
-            return ActivityType.COMMAND;
-        }
-        try {
-            return switch (ActivityKind.fromString(toolKind)) {
-                case READ, SEARCH, FETCH -> ActivityType.RESEARCH;
-                case EDIT, DELETE, MOVE -> ActivityType.EDITED;
-                case THINK -> ActivityType.THINKING;
-                case EXECUTE, OTHER, SWITCH_MODE -> ActivityType.COMMAND;
-            };
-        } catch (IllegalArgumentException e) {
-            return ActivityType.COMMAND;
-        }
-    }
-
     @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
     public void onExecutionComplete(SandboxExecutionCompleteEvent event) {
         closeOpenStreams(event.executionId());
@@ -259,12 +209,13 @@ public class ExecutionActivityPersistenceService {
     }
 
     private void merge(
-            SandboxExecutionActivity existing, String description, ActivityStatus status, ActivityDetail detail) {
-        if (existing.getActivityType() == ActivityType.MESSAGE || existing.getActivityType() == ActivityType.THINKING) {
-            existing.setDescription(existing.getDescription() + description);
-        } else {
-            existing.setDescription(description);
-        }
+            SandboxExecutionActivity existing,
+            ActivityType activityType,
+            String description,
+            ActivityStatus status,
+            ActivityDetail detail) {
+        existing.setActivityType(activityType);
+        existing.setDescription(description);
         existing.setStatus(status);
         if (detail != null) {
             existing.setDetail(toJson(detail));

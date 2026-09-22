@@ -12,7 +12,7 @@
     "executionId": { "type": "string" },
     "actionId": {
       "type": "string",
-      "description": "Correlation ID for the agent action this activity belongs to (ACP toolCallId, or messageId for message/thought chunks). Messages sharing an actionId render as one activity record."
+      "description": "Correlation ID for the agent action this activity belongs to; exactly one activity per actionId per execution. Tool activities carry the ACP toolCallId. Message/thought chunk activities carry the run key of one contiguous same-kind chunk run: the raw messageId for its first run, <messageId>#<n> for run n >= 2 (the same messageId may return after an interruption), or inferred-<n> when the agent omits the messageId. All emissions sharing an actionId are the same record: chunk emissions carry cumulative text and downstream layers replace, never concatenate. The sidecar closes a run at its boundary (kind change, messageId change, any non-chunk update, prompt-turn end) and emits the terminal status itself."
     },
     "status": {
       "type": "string",

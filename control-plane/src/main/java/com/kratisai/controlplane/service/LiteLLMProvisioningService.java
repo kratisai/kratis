@@ -182,12 +182,16 @@ public class LiteLLMProvisioningService {
 
     private boolean isModelRegisteredInLiteLLM(String litellmModelName) {
         try {
-            ListModelsV2Response response = liteLLMClient.listModelByName(litellmModelName);
-            return response.data() != null && !response.data().isEmpty();
+            return hasDeployment(litellmModelName);
         } catch (RestClientException e) {
             logger.debug("Error checking model '{}' in LiteLLM: {}", litellmModelName, e.getMessage());
             return false;
         }
+    }
+
+    private boolean hasDeployment(String litellmModelName) {
+        ListModelsV2Response response = liteLLMClient.listModelByName(litellmModelName);
+        return response != null && response.data() != null && !response.data().isEmpty();
     }
 
     private void ensureModelRegistered(
@@ -217,7 +221,7 @@ public class LiteLLMProvisioningService {
 
         boolean registeredInLiteLLM = knownExistingLiteLLMModels != null
                 ? knownExistingLiteLLMModels.contains(buildLiteLLMModelName(provider, modelName))
-                : isModelRegisteredInLiteLLM(buildLiteLLMModelName(provider, modelName));
+                : hasDeployment(buildLiteLLMModelName(provider, modelName));
 
         // Self-heal: LiteLLM lost the model, or (on startup) the deployment is missing the
         // Bedrock cost override LiteLLM cannot apply itself.
@@ -251,34 +255,37 @@ public class LiteLLMProvisioningService {
     }
 
     private void deleteExistingDeployments(String litellmName) {
-        Set<String> deletedIds = new HashSet<>(); // Delete each ID only once.
         try {
-            // LiteLLM pages at 50
-            while (true) {
-                ListModelsV2Response response = liteLLMClient.listModelByName(litellmName);
-                if (response == null
-                        || response.data() == null
-                        || response.data().isEmpty()) {
-                    return;
-                }
-                int deletedThisPass = 0;
-                for (ModelConfig config : response.data()) {
-                    if (!litellmName.equals(config.modelName())
-                            || config.modelInfo() == null
-                            || config.modelInfo().id() == null
-                            || !deletedIds.add(config.modelInfo().id())) {
-                        continue;
-                    }
-                    liteLLMClient.deleteModel(
-                            new DeleteModelRequest(config.modelInfo().id()));
-                    deletedThisPass++;
-                }
-                if (deletedThisPass == 0) {
-                    return;
-                }
-            }
+            deleteAllDeployments(litellmName);
         } catch (RestClientException e) {
             logger.debug("No existing deployments for '{}' in LiteLLM: {}", litellmName, e.getMessage());
+        }
+    }
+
+    /** Provisioning must not add a deployment when LiteLLM cannot confirm the current ones. */
+    private void deleteAllDeployments(String litellmName) {
+        Set<String> deletedIds = new HashSet<>(); // Delete each ID only once.
+        // LiteLLM pages at 50
+        while (true) {
+            ListModelsV2Response response = liteLLMClient.listModelByName(litellmName);
+            if (response == null || response.data() == null || response.data().isEmpty()) {
+                return;
+            }
+            int deletedThisPass = 0;
+            for (ModelConfig config : response.data()) {
+                if (!litellmName.equals(config.modelName())
+                        || config.modelInfo() == null
+                        || config.modelInfo().id() == null
+                        || !deletedIds.add(config.modelInfo().id())) {
+                    continue;
+                }
+                liteLLMClient.deleteModel(
+                        new DeleteModelRequest(config.modelInfo().id()));
+                deletedThisPass++;
+            }
+            if (deletedThisPass == 0) {
+                return;
+            }
         }
     }
 
@@ -311,11 +318,32 @@ public class LiteLLMProvisioningService {
         ModelInfo modelInfo = buildModelInfo(kind, cost);
         AddModelRequest request = new AddModelRequest(litellmName, params, modelInfo);
 
-        deleteExistingDeployments(litellmName);
+        deleteAllDeployments(litellmName);
         logger.info(
                 "Provisioning model '{}' as '{}' (provider: {}) to LiteLLM", modelName, litellmName, litellmProvider);
-        liteLLMClient.addModel(request);
+        try {
+            liteLLMClient.addModel(request);
+        } catch (RestClientException e) {
+            // LiteLLM commits /model/new before writing the response; a timeout can still mean the deployment exists.
+            if (isModelRegisteredAfterTimeout(litellmName)) {
+                logger.warn(
+                        "LiteLLM did not return a response for '{}', but the deployment is registered; treating it "
+                                + "as provisioned",
+                        litellmName);
+                return;
+            }
+            throw e;
+        }
         logger.info("Successfully provisioned model '{}' to LiteLLM", litellmName);
+    }
+
+    private boolean isModelRegisteredAfterTimeout(String litellmName) {
+        try {
+            return hasDeployment(litellmName);
+        } catch (RestClientException e) {
+            logger.debug("Could not verify '{}' after the add request failed: {}", litellmName, e.getMessage());
+            return false;
+        }
     }
 
     public void removeModel(ModelProvider provider) {

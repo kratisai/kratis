@@ -232,7 +232,6 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
   function handleExecutionOutputResult(result: ExecutionOutputResult) {
     const linePrefix = result.stream === 'stderr' ? '[Error]' : '[Output]'
     useExecutionStore.getState().addLog(result.executionId, `${linePrefix} ${result.line}`)
-    useActivityStore.getState().handleExecutionOutput(result)
   }
 
   function handleExecutionReplayCompleteResult(result: ExecutionReplayCompleteResult) {

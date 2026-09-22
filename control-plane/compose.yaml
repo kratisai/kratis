@@ -24,17 +24,14 @@ services:
       retries: 5
 
   litellm:
-    # main-stable tracks the latest official LiteLLM release (currently 1.98.0) — the same image
-    # used by the control-plane test suite (PostgresTestInitializer) and deploy/compose.yaml.
-    # pull_policy: always ensures the moving tag is refreshed on every `docker compose up`,
-    # preventing the local cache from drifting behind the registry.
-    image: 'ghcr.io/berriai/litellm:main-stable'
+    # Pinned by digest: `main-stable` is a moving tag. Refresh deliberately with
+    #   docker buildx imagetools inspect ghcr.io/berriai/litellm:v<version> --format '{{.Manifest.Digest}}'
+    image: 'ghcr.io/berriai/litellm:v1.102.0@sha256:32cfd7a427f6470033b4dcc9e75dfbea2aa32dbc298b0b511a40e962ce818362'
     container_name: kratis-dev-litellm
-    pull_policy: always
     environment:
       - 'LITELLM_MASTER_KEY=sk-litellm-master'
       - 'LITELLM_SALT_KEY=sk-litellm-salt'
-      - 'LITELLM_LOG=DEBUG'
+      - 'LITELLM_LOG=INFO'
       - 'STORE_MODEL_IN_DB=True'
       - 'LITELLM_DROP_PARAMS=True'
       # Schema separation via the `?schema=` query param on DATABASE_URL — the DATABASE_SCHEMA
@@ -49,21 +46,18 @@ services:
       # Code) records zero usage. The script is idempotent and a no-op once an upstream release
       # contains the fixes.
       - ../deploy/litellm/patch_response_logging.py:/tmp/patch_response_logging.py:ro
+      - ../deploy/litellm/healthcheck.py:/tmp/healthcheck.py:ro
     depends_on:
       kratis-db:
         condition: service_healthy
     healthcheck:
-      # The litellm image is built on the "wolfi" distro, which has neither `curl` nor `wget`.
-      # `python3` is always present since it's the runtime the proxy itself runs on.
-      test:
-        [
-          'CMD-SHELL',
-          "python3 -c \"import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:4000/health/readiness', timeout=3).status == 200 else 1)\"",
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 20s
+      # The litellm image is built on the "wolfi" distro, which has neither `curl` nor `wget`;
+      # `python3` is the runtime the proxy itself runs on.
+      test: ['CMD-SHELL', 'python3 /tmp/healthcheck.py']
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 30s
     # Patch the module before litellm imports it (patching the .py file after launch has no effect),
     # then start the proxy. Replaces the image's default `docker/prod_entrypoint.sh` (which only
     # execs `litellm "$@"` when USE_DDTRACE is unset).

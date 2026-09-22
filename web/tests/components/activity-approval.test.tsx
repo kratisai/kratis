@@ -17,7 +17,6 @@ function pendingActivity(overrides: Partial<CommandExecutionActivity> = {}): Com
     command: 'rm -rf node_modules',
     executionId: 'exec-1',
     id: 'act-1',
-    output: [],
     startedAt: '2026-01-01T00:00:00Z',
     state: 'pending_approval',
     type: 'command_execution',

@@ -24,7 +24,7 @@ See the [root README](../README.md) for product context.
 
 JaCoCo: `>90%` instruction and line, `>85%` branch. After `./mvnw test`, read `target/site/jacoco/jacoco.csv`.
 
-Dev stack lifecycle: Spring orchestrates `compose.yaml` (`spring-boot-docker-compose`) with `lifecycle-management=start-only`: the stack is started if needed but never torn down on exit — restarts reuse the running containers. Inert in prod/native, where the runtime image ships no compose file. LiteLLM refreshes its moving tag on every `up` (`pull_policy: always`); only a recreated container pays its ~20s health-wait.
+Dev stack lifecycle: Spring orchestrates `compose.yaml` (`spring-boot-docker-compose`) with `lifecycle-management=start-only`: the stack is started if needed but never torn down on exit — restarts reuse the running containers. Inert in prod/native, where the runtime image ships no compose file. LiteLLM is pinned by digest (`v1.102.0`) instead of tracking `main-stable`, so `up` reuses the cached image and only a recreated container pays its ~20s health-wait.
 
 Never use `@SpringBootTest` directly. Use `@SpringIntegrationTest`. Do not mock `ChatModel` with Mockito; use `FakeChatModel` and `PromptMatcher`. Details: [`docs/skills/control-plane-testing.md`](../docs/skills/control-plane-testing.md) and [`docs/skills/control-plane.md`](../docs/skills/control-plane.md).
 

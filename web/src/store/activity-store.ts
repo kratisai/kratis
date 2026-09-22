@@ -18,7 +18,6 @@ import type {
   ExecutionCompleteResult,
   ExecutionHitlRequiredResult,
   ExecutionHitlResolvedResult,
-  ExecutionOutputResult,
   HitlResponse,
   WireActivityStatus,
 } from '@/types/websocket-types'
@@ -33,10 +32,8 @@ interface ExecutionActivityState {
   activitiesByExecution: Record<string, Activity[]>
   cancelHitl: (executionId: string, hitlId: string) => Promise<void>
   clearActivities: (executionId: string) => void
-  getPendingApproval: (executionId: string) => CommandExecutionActivity | null
   handleActivityEvent: (result: ExecutionActivityResult) => void
   handleExecutionComplete: (result: ExecutionCompleteResult) => void
-  handleExecutionOutput: (result: ExecutionOutputResult) => void
   handleHitlRequired: (result: ExecutionHitlRequiredResult) => void
   handleHitlResolved: (result: ExecutionHitlResolvedResult) => void
   resolveHitl: (
@@ -50,6 +47,8 @@ interface ExecutionActivityState {
   ) => Promise<void>
   toggleCollapsed: (executionId: string, activityId: string) => void
 }
+
+type ToolRecord = CommandExecutionActivity | ToolExecutionActivity
 
 export function activityCommand(activity: Activity): string {
   if (activity.type === 'command_execution') {
@@ -131,41 +130,6 @@ function appendActivity(existing: Activity[], activity: Activity): Activity[] {
   return next
 }
 
-// Agents do not reliably send a terminal status for every tool call
-function closeOpenActivities(
-  activities: Activity[],
-  exceptActionId: string | undefined,
-): Activity[] {
-  let changed = false
-  const updated = [...activities]
-  for (let i = 0; i < updated.length; i++) {
-    const activity = updated[i]
-    if (activity.state !== 'active') continue
-    if (activity.type === 'elicitation') continue
-    if (activity.type === 'plan') {
-      // Plan snapshots are superseded by the next activity but stay expanded
-      // unless the user closed them — closing must not collapse them out of
-      // view.
-      changed = true
-      updated[i] = {
-        ...activity,
-        endedAt: new Date().toISOString(),
-        state: 'completed',
-      }
-      continue
-    }
-    if (exceptActionId !== undefined && activity.actionId === exceptActionId) continue
-    changed = true
-    updated[i] = {
-      ...activity,
-      collapsed: activity.type === 'message' ? activity.collapsed : true,
-      endedAt: new Date().toISOString(),
-      state: 'completed',
-    }
-  }
-  return changed ? updated : activities
-}
-
 function collapsedOnTransition(
   current: { collapsed: boolean; state: ActivityState },
   next: ActivityState,
@@ -174,6 +138,32 @@ function collapsedOnTransition(
     return true
   }
   return current.collapsed
+}
+
+function commandRecordFrom(current: ToolRecord, command: string): CommandExecutionActivity {
+  if (current.type === 'command_execution') return current
+  return {
+    actionId: current.actionId,
+    approvalRequired: current.approvalRequired ?? false,
+    approved: current.approved,
+    collapsed: current.collapsed,
+    command,
+    detail: current.detail,
+    endedAt: current.endedAt,
+    executionId: current.executionId,
+    exitCode: current.detail?.exitCode,
+    hitlResponse: current.hitlResponse,
+    id: current.id,
+    permissionDiff: current.permissionDiff,
+    permissionKind: current.permissionKind,
+    permissionOptions: current.permissionOptions,
+    permissionSegments: current.permissionSegments,
+    permissionTitle: current.permissionTitle,
+    resolvedBy: current.resolvedBy,
+    startedAt: current.startedAt,
+    state: current.state,
+    type: 'command_execution',
+  }
 }
 
 async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
@@ -189,6 +179,16 @@ async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Re
   }
 
   return window.fetch(`${API_BASE_URL}${url}`, { ...options, headers })
+}
+
+// One actionId is one record; a late tool kind moves the record between the
+// command and tool buckets without duplicating it or changing its position.
+function findToolRecordIndex(activities: Activity[], actionId: string | undefined): number {
+  if (!actionId) return -1
+  return activities.findIndex(
+    (a) =>
+      (a.type === 'command_execution' || a.type === 'tool_execution') && a.actionId === actionId,
+  )
 }
 
 function isTerminalState(state: ActivityState): boolean {
@@ -216,6 +216,33 @@ function nextActivityState(
   return next
 }
 
+function toolRecordFrom(current: ToolRecord): ToolExecutionActivity {
+  if (current.type === 'tool_execution') return current
+  return {
+    actionId: current.actionId,
+    approvalRequired: current.approvalRequired,
+    approved: current.approved,
+    collapsed: current.collapsed,
+    detail: current.detail,
+    endedAt: current.endedAt,
+    executionId: current.executionId,
+    hitlResponse: current.hitlResponse,
+    id: current.id,
+    permissionDiff: current.permissionDiff,
+    permissionKind: current.permissionKind,
+    permissionOptions: current.permissionOptions,
+    permissionSegments: current.permissionSegments,
+    permissionTitle: current.permissionTitle,
+    resolvedBy: current.resolvedBy,
+    startedAt: current.startedAt,
+    state: current.state,
+    taskId: '',
+    thought: '',
+    toolName: current.command,
+    type: 'tool_execution',
+  }
+}
+
 function toolTarget(detail: ActivityDetail | undefined): string | undefined {
   if (!detail) return undefined
   const input = detail.input
@@ -234,7 +261,7 @@ function toolTarget(detail: ActivityDetail | undefined): string | undefined {
   return undefined
 }
 
-function withHitlApproval<T extends { approvalRequired: boolean; approved?: boolean }>(
+function withHitlApproval<T extends { approvalRequired?: boolean; approved?: boolean }>(
   activity: T,
   hitl: ActivityHitl | undefined,
 ): T {
@@ -245,12 +272,12 @@ function withHitlApproval<T extends { approvalRequired: boolean; approved?: bool
   const hasResponse = hitl.response !== undefined
   return {
     ...activity,
-    approvalRequired: hasResponse || activity.approvalRequired,
+    approvalRequired: hasResponse || (activity.approvalRequired ?? false),
     approved: hasResponse ? approved : activity.approved,
   }
 }
 
-export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
+export const useActivityStore = create<ExecutionActivityState>((set) => ({
   activitiesByExecution: {},
   cancelHitl: async (executionId: string, hitlId: string) => {
     const response = await fetchWithAuth('/api/v1/hitl/resolve', {
@@ -273,16 +300,6 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
       const { [executionId]: _removed, ...rest } = state.activitiesByExecution
       return { activitiesByExecution: rest }
     })
-  },
-
-  getPendingApproval: (executionId: string) => {
-    const activities = get().activitiesByExecution[executionId] ?? []
-    if (activities.length === 0) return null
-    const last = activities[activities.length - 1]
-    if (last.type === 'command_execution' && last.state === 'pending_approval') {
-      return last
-    }
-    return null
   },
 
   handleActivityEvent: (result: ExecutionActivityResult) => {
@@ -311,7 +328,6 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
             },
           }
         }
-        const withClosed = closeOpenActivities(existing, planActionId)
         const activity: PlanActivity = {
           actionId: planActionId,
           collapsed: false,
@@ -326,7 +342,7 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
         return {
           activitiesByExecution: {
             ...state.activitiesByExecution,
-            [executionId]: appendActivity(withClosed, activity),
+            [executionId]: appendActivity(existing, activity),
           },
         }
       })
@@ -343,16 +359,13 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
         if (idx >= 0) {
           const updated = [...existing]
           const current = updated[idx] as MessageActivity
-          const nextText = description.startsWith(current.text)
-            ? description
-            : current.text + description
           const nextState = activityStateFrom(status, detail)
           updated[idx] = {
             ...current,
             endedAt:
               nextState === 'completed' ? (current.endedAt ?? new Date().toISOString()) : undefined,
             state: nextState,
-            text: nextText,
+            text: description,
           }
           return {
             activitiesByExecution: {
@@ -361,7 +374,6 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
             },
           }
         }
-        const withClosed = closeOpenActivities(existing, messageId)
         const activity: MessageActivity = {
           actionId: messageId,
           collapsed: false,
@@ -377,7 +389,7 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
         return {
           activitiesByExecution: {
             ...state.activitiesByExecution,
-            [executionId]: appendActivity(withClosed, activity),
+            [executionId]: appendActivity(existing, activity),
           },
         }
       })
@@ -385,22 +397,12 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
       set((state) => {
         const existing = state.activitiesByExecution[executionId] ?? []
         const messageId = actionId ?? detail?.messageId
-        let idx = messageId
+        const idx = messageId
           ? existing.findIndex((a) => a.type === 'thinking' && a.actionId === messageId)
           : -1
-        if (idx < 0 && messageId === undefined) {
-          const lastIdx = existing.length - 1
-          const last = existing.at(-1)
-          if (last && last.type === 'thinking' && last.state === 'active') {
-            idx = lastIdx
-          }
-        }
         if (idx >= 0) {
           const updated = [...existing]
           const current = updated[idx] as ThinkingActivity
-          const nextThought = description.startsWith(current.thought)
-            ? description
-            : current.thought + description
           const nextState = activityStateFrom(status, detail)
           updated[idx] = {
             ...current,
@@ -409,7 +411,7 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
             endedAt:
               nextState === 'completed' ? (current.endedAt ?? new Date().toISOString()) : undefined,
             state: nextState,
-            thought: nextThought,
+            thought: description,
           }
           return {
             activitiesByExecution: {
@@ -418,7 +420,6 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
             },
           }
         }
-        const withClosed = closeOpenActivities(existing, messageId)
         const activity: ThinkingActivity = {
           actionId: messageId,
           collapsed: false,
@@ -433,30 +434,23 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
         return {
           activitiesByExecution: {
             ...state.activitiesByExecution,
-            [executionId]: appendActivity(withClosed, activity),
+            [executionId]: appendActivity(existing, activity),
           },
         }
       })
     } else if (activityType === 'RESEARCH' || activityType === 'EDITED') {
       set((state) => {
         const existing = state.activitiesByExecution[executionId] ?? []
-        const withClosed = closeOpenActivities(existing, actionId)
-        const idx = actionId
-          ? withClosed.findIndex((a) => a.type === 'tool_execution' && a.actionId === actionId)
-          : -1
-        if (idx >= 0) {
-          const updated = [...withClosed]
-          const current = updated[idx] as ToolExecutionActivity
+        const idx = findToolRecordIndex(existing, actionId)
+        const current = idx >= 0 ? existing[idx] : undefined
+        if (
+          current &&
+          (current.type === 'tool_execution' || current.type === 'command_execution')
+        ) {
           const nextState = nextActivityState(current, status, detail)
+          const updated = [...existing]
           updated[idx] = {
-            ...current,
-            ...withHitlApproval(
-              {
-                approvalRequired: false,
-                ...current,
-              },
-              detail?.hitl,
-            ),
+            ...withHitlApproval(toolRecordFrom(current), detail?.hitl),
             collapsed: collapsedOnTransition(current, nextState),
             detail,
             state: nextState,
@@ -487,29 +481,28 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
         return {
           activitiesByExecution: {
             ...state.activitiesByExecution,
-            [executionId]: appendActivity(withClosed, activity),
+            [executionId]: appendActivity(existing, activity),
           },
         }
       })
     } else if (activityType === 'COMMAND') {
       set((state) => {
         const existing = state.activitiesByExecution[executionId] ?? []
-        const withClosed = closeOpenActivities(existing, actionId)
         const command = getDetailCommand(detail) ?? description
-        const idx = actionId
-          ? withClosed.findIndex((a) => a.type === 'command_execution' && a.actionId === actionId)
-          : -1
-        if (idx >= 0) {
-          const updated = [...withClosed]
-          const current = updated[idx] as CommandExecutionActivity
+        const idx = findToolRecordIndex(existing, actionId)
+        const current = idx >= 0 ? existing[idx] : undefined
+        if (
+          current &&
+          (current.type === 'tool_execution' || current.type === 'command_execution')
+        ) {
           const nextState = nextActivityState(current, status, detail)
+          const updated = [...existing]
           updated[idx] = {
-            ...current,
-            ...withHitlApproval(current, detail?.hitl),
+            ...withHitlApproval(commandRecordFrom(current, command), detail?.hitl),
             collapsed: collapsedOnTransition(current, nextState),
             command,
             detail,
-            exitCode: detail?.exitCode ?? current.exitCode,
+            exitCode: detail?.exitCode ?? current.detail?.exitCode,
             state: nextState,
           }
           return {
@@ -529,7 +522,6 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
           executionId,
           exitCode: detail?.exitCode,
           id: nextActivityId(),
-          output: [],
           startedAt: new Date().toISOString(),
           state: activityStateFrom(status, detail),
           type: 'command_execution',
@@ -537,7 +529,7 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
         return {
           activitiesByExecution: {
             ...state.activitiesByExecution,
-            [executionId]: appendActivity(withClosed, activity),
+            [executionId]: appendActivity(existing, activity),
           },
         }
       })
@@ -568,7 +560,6 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
             },
           }
         }
-        const withClosed = closeOpenActivities(existing, actionId)
         const activity: ElicitationActivity = {
           actionId,
           collapsed: false,
@@ -587,7 +578,7 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
         return {
           activitiesByExecution: {
             ...state.activitiesByExecution,
-            [executionId]: appendActivity(withClosed, activity),
+            [executionId]: appendActivity(existing, activity),
           },
         }
       })
@@ -632,34 +623,6 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
     })
   },
 
-  handleExecutionOutput: (result: ExecutionOutputResult) => {
-    set((state) => {
-      const activities = state.activitiesByExecution[result.executionId] ?? []
-      if (activities.length === 0) {
-        return state
-      }
-
-      const updated = [...activities]
-      for (let i = updated.length - 1; i >= 0; i--) {
-        const activity = updated[i]
-        if (activity.type === 'command_execution') {
-          updated[i] = {
-            ...activity,
-            output: [...activity.output, result.line],
-          }
-          break
-        }
-      }
-
-      return {
-        activitiesByExecution: {
-          ...state.activitiesByExecution,
-          [result.executionId]: updated,
-        },
-      }
-    })
-  },
-
   handleHitlRequired: (result: ExecutionHitlRequiredResult) => {
     if (result.kind === 'question') {
       set((state) => {
@@ -670,7 +633,6 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
         if (idx >= 0) {
           return state
         }
-        const withClosed = closeOpenActivities(existing, result.hitlId)
         const activity: ElicitationActivity = {
           actionId: result.hitlId,
           collapsed: false,
@@ -686,7 +648,7 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
         return {
           activitiesByExecution: {
             ...state.activitiesByExecution,
-            [result.executionId]: appendActivity(withClosed, activity),
+            [result.executionId]: appendActivity(existing, activity),
           },
         }
       })
@@ -694,7 +656,6 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
     }
     set((state) => {
       const existing = state.activitiesByExecution[result.executionId] ?? []
-      const withClosed = closeOpenActivities(existing, result.hitlId)
       const permission = {
         permissionDiff: result.diff,
         permissionKind: result.toolKind,
@@ -702,56 +663,35 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
         permissionSegments: result.commandSegments,
         permissionTitle: result.title,
       }
-      const findIdx = (type: 'command_execution' | 'tool_execution') => {
-        if (!result.hitlId) return -1
-        return withClosed.findIndex((a) => a.type === type && a.actionId === result.hitlId)
+      const idx = findToolRecordIndex(existing, result.hitlId)
+      const current = idx >= 0 ? existing[idx] : undefined
+      if (
+        current === undefined ||
+        (current.type !== 'tool_execution' && current.type !== 'command_execution')
+      ) {
+        return state
       }
-
-      const idx =
-        findIdx('command_execution') >= 0 ? findIdx('command_execution') : findIdx('tool_execution')
-      if (idx >= 0) {
-        const updated = [...withClosed]
-        const current = updated[idx]
-        if (current.type === 'tool_execution') {
-          updated[idx] = {
-            ...current,
-            ...permission,
-            approvalRequired: true,
-            state: 'pending_approval' as const,
-          }
-        } else if (current.type === 'command_execution') {
-          updated[idx] = {
-            ...current,
-            ...permission,
-            approvalRequired: true,
-            command: result.command ?? current.command,
-            state: 'pending_approval' as const,
-          }
+      const updated = [...existing]
+      if (current.type === 'tool_execution') {
+        updated[idx] = {
+          ...current,
+          ...permission,
+          approvalRequired: true,
+          state: 'pending_approval' as const,
         }
-        return {
-          activitiesByExecution: {
-            ...state.activitiesByExecution,
-            [result.executionId]: updated,
-          },
+      } else {
+        updated[idx] = {
+          ...current,
+          ...permission,
+          approvalRequired: true,
+          command: result.command ?? current.command,
+          state: 'pending_approval' as const,
         }
-      }
-      const activity: CommandExecutionActivity = {
-        actionId: result.hitlId,
-        approvalRequired: true,
-        collapsed: false,
-        command: result.command ?? result.message,
-        executionId: result.executionId,
-        id: nextActivityId(),
-        output: [],
-        ...permission,
-        startedAt: new Date().toISOString(),
-        state: 'pending_approval',
-        type: 'command_execution',
       }
       return {
         activitiesByExecution: {
           ...state.activitiesByExecution,
-          [result.executionId]: appendActivity(withClosed, activity),
+          [result.executionId]: updated,
         },
       }
     })
@@ -802,23 +742,15 @@ export const useActivityStore = create<ExecutionActivityState>((set, get) => ({
         const activity = updated[i]
         if (
           (activity.type === 'command_execution' || activity.type === 'tool_execution') &&
-          activity.state === 'pending_approval'
+          result.hitlId &&
+          activity.actionId === result.hitlId
         ) {
-          if (
-            activity.actionId === undefined &&
-            result.command !== undefined &&
-            activityCommand(activity) !== result.command
-          ) {
-            continue
-          }
-          if (
-            result.hitlId &&
-            activity.actionId !== undefined &&
-            activity.actionId !== result.hitlId
-          ) {
-            continue
-          }
-          const nextState = result.response === 'approved' ? 'active' : 'error'
+          const nextState =
+            activity.state === 'pending_approval'
+              ? result.response === 'approved'
+                ? 'active'
+                : 'error'
+              : activity.state
           updated[i] = {
             ...activity,
             approved: result.response === 'approved',

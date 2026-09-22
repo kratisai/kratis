@@ -1004,10 +1004,13 @@ func (c *Client) RequestPermission(req acp.PermissionRequest) (string, error) {
 	}
 	hitlID := req.ActionID
 	if hitlID == "" {
-		// Some ACP agents (e.g. Goose) send session/request_permission without a
-		// toolCallId; synthesise a stable correlation id so the control plane can
-		// register and resolve the pending HITL request.
+		// Some agents omit the required toolCallId; synthesise an id so the
+		// request still resolves, and report it loudly.
 		hitlID = newHitlID()
+		msg := fmt.Sprintf("[WARN] ACP violation: session/request_permission without toolCallId (command=%q title=%q) — synthesised hitlId=%q, approval will not attach to a tool activity",
+			req.Command, req.Title, hitlID)
+		log.Printf("%s", msg)
+		c.SendOutput(msg, "stderr")
 	}
 	c.mu.Lock()
 	execID := c.currentExecutionID

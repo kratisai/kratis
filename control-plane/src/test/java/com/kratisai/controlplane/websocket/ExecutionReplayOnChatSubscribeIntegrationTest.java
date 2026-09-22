@@ -189,10 +189,38 @@ class ExecutionReplayOnChatSubscribeIntegrationTest {
                                     "Reading main.go",
                                     "status",
                                     ActivityStatus.IN_PROGRESS.getValue(),
+                                    "actionId",
+                                    "tc-read",
                                     "executionId",
                                     executionId.toString())),
                             null);
                     session.sendMessage(new TextMessage(objectMapper.writeValueAsString(activity)));
+
+                    JsonRpcInboundRequest toolActivity = new JsonRpcInboundRequest(
+                            EnvironmentRpcPayload.Activity.METHOD,
+                            objectMapper.valueToTree(Map.of(
+                                    "activityType",
+                                    ActivityType.COMMAND.getValue(),
+                                    "description",
+                                    "rm -rf /",
+                                    "status",
+                                    ActivityStatus.PENDING.getValue(),
+                                    "actionId",
+                                    "tool-call-100",
+                                    "detail",
+                                    Map.of(
+                                            "hitl",
+                                            Map.of(
+                                                    "hitlId",
+                                                    "tool-call-100",
+                                                    "kind",
+                                                    "approval",
+                                                    "message",
+                                                    "Approve rm -rf /")),
+                                    "executionId",
+                                    executionId.toString())),
+                            null);
+                    session.sendMessage(new TextMessage(objectMapper.writeValueAsString(toolActivity)));
 
                     JsonRpcInboundRequest permRequest = new JsonRpcInboundRequest(
                             EnvironmentRpcPayload.HitlRequest.METHOD,
@@ -222,9 +250,10 @@ class ExecutionReplayOnChatSubscribeIntegrationTest {
         List<SandboxExecutionActivity> activities = activityRepository.findByExecutionIdOrderBySequenceAsc(executionId);
         assertThat(activities.getFirst().getActivityType()).isEqualTo(ActivityType.RESEARCH);
         assertThat(activities.getFirst().getDescription()).isEqualTo("Reading main.go");
-        assertThat(activities.getFirst().getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+        assertThat(activities.getFirst().getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
         assertThat(activities.get(1).getActivityType()).isEqualTo(ActivityType.COMMAND);
         assertThat(activities.get(1).getStatus()).isEqualTo(ActivityStatus.PENDING);
+        assertThat(activities.get(1).getActionId()).isEqualTo("tool-call-100");
 
         // 4. Connect a NEW client (simulating a reconnect) that sends chat.subscribe after auth
         ClientWebSocketFixtureWithChatSubscribe lateJoinerFixture =

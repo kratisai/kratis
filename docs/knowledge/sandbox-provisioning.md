@@ -131,7 +131,7 @@ outside the sibling listens on.
   Do not replace this with the bridge gateway plus published port (`172.17.0.1:<mapped>`): that
   listener exists only in the sibling's parent namespace, so from inside LiteLLM it refuses the
   connection and Prisma dies with `httpx.ConnectError`, which surfaces as
-  `Container startup failed for image ghcr.io/berriai/litellm:main-stable`, then a
+  `Container startup failed for image ghcr.io/berriai/litellm`, then a
   class-initialization error in `PostgresTestInitializer`, then cascading Spring context
   failures. The network name is fixed so the container reuse hash stays stable across runs.
 - *Test JVM → LiteLLM* (`kratis.litellm.base-url`) must be reachable from the JVM's own

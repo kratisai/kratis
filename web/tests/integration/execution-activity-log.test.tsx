@@ -305,7 +305,6 @@ describe('Execution Activity Log', () => {
     triggerMockPermissionRequired(ws, EXECUTION_ID, 'echo hello')
     triggerMockPermissionResolved(ws, EXECUTION_ID, 'echo hello', true, 'user-1', 'Test User')
 
-    // Now trigger execution output
     triggerMockExecutionOutput(ws, '$ hello', 'stdout', EXECUTION_ID)
     triggerMockExecutionOutput(ws, '$ world', 'stdout', EXECUTION_ID)
 
@@ -316,6 +315,8 @@ describe('Execution Activity Log', () => {
     await waitFor(() => {
       expect(screen.getByText(/echo hello/)).toBeInTheDocument()
     })
+    expect(screen.queryByText(/\$ hello/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\$ world/)).not.toBeInTheDocument()
   })
 
   it('renders replayed command output from the persisted detail transcript', () => {
@@ -338,7 +339,6 @@ describe('Execution Activity Log', () => {
             executionId: EXECUTION_ID,
             exitCode: 1,
             id: 'cmd-1',
-            output: [],
             startedAt: '2024-06-15T10:30:00.000Z',
             state: 'error',
             type: 'command_execution' as const,

@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -404,6 +405,112 @@ class LiteLLMProvisioningServiceTest {
 
         verify(liteLLMClient, times(0)).deleteModel(org.mockito.ArgumentMatchers.any(DeleteModelRequest.class));
         verify(liteLLMClient).addModel(org.mockito.ArgumentMatchers.any(AddModelRequest.class));
+    }
+
+    @Test
+    void provisionModel_treatsTimedOutAddAsProvisioned_whenDeploymentIsRegistered() {
+        ModelProvider provider = new ModelProvider("Test Provider", ProviderType.OPENAI, "sk-test-key", null);
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("gpt-4", ModelKind.CHAT)));
+        String alias = provisioningService.buildLiteLLMModelName(provider, "gpt-4");
+        when(liteLLMClient.listModelByName(alias))
+                .thenReturn(new ListModelsV2Response(List.of()))
+                .thenReturn(new ListModelsV2Response(List.of(new ModelConfig(
+                        alias,
+                        new LiteLLMParams("gpt-4", "sk-test-key", "openai", null),
+                        new ModelInfo("deployment-1", "chat", null, null)))));
+        when(liteLLMClient.addModel(org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new ResourceAccessException("Read timed out"));
+
+        provisioningService.provisionModel(provider);
+
+        verify(liteLLMClient).addModel(org.mockito.ArgumentMatchers.any());
+        verify(liteLLMClient, times(2)).listModelByName(alias);
+    }
+
+    @Test
+    void provisionModel_propagatesAddFailure_whenDeploymentIsStillMissing() {
+        ModelProvider provider = new ModelProvider("Test Provider", ProviderType.OPENAI, "sk-test-key", null);
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("gpt-4", ModelKind.CHAT)));
+        String alias = provisioningService.buildLiteLLMModelName(provider, "gpt-4");
+        when(liteLLMClient.listModelByName(alias)).thenReturn(new ListModelsV2Response(List.of()));
+        when(liteLLMClient.addModel(org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new ResourceAccessException("Read timed out"));
+
+        assertThatThrownBy(() -> provisioningService.provisionModel(provider))
+                .isInstanceOf(ResourceAccessException.class);
+
+        verify(liteLLMClient).addModel(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void provisionModel_doesNotCreate_whenExistingDeploymentsCannotBeListed() {
+        ModelProvider provider = new ModelProvider("Test Provider", ProviderType.OPENAI, "sk-test-key", null);
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("gpt-4", ModelKind.CHAT)));
+        String alias = provisioningService.buildLiteLLMModelName(provider, "gpt-4");
+        when(liteLLMClient.listModelByName(alias)).thenThrow(new ResourceAccessException("Read timed out"));
+
+        assertThatThrownBy(() -> provisioningService.provisionModel(provider))
+                .isInstanceOf(ResourceAccessException.class);
+        verify(liteLLMClient, times(0)).addModel(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void ensureModelRegistered_doesNotCreate_whenExistenceCheckFails() {
+        ModelProvider provider = new ModelProvider("Test Provider", ProviderType.OPENAI, "sk-test-key", null);
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("gpt-4", ModelKind.CHAT)));
+        String alias = provisioningService.buildLiteLLMModelName(provider, "gpt-4");
+        when(liteLLMClient.listModelByName(alias)).thenThrow(new ResourceAccessException("Read timed out"));
+
+        assertThatThrownBy(() -> provisioningService.ensureModelRegistered(provider, "gpt-4", ModelKind.CHAT))
+                .isInstanceOf(ResourceAccessException.class);
+
+        verify(liteLLMClient, times(0)).addModel(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void ensureModelRegistered_provisions_whenExistenceCheckConfirmsAbsent() {
+        ModelProvider provider = new ModelProvider("Test Provider", ProviderType.OPENAI, "sk-test-key", null);
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("gpt-4", ModelKind.CHAT)));
+        String alias = provisioningService.buildLiteLLMModelName(provider, "gpt-4");
+        when(liteLLMClient.listModelByName(alias)).thenReturn(new ListModelsV2Response(List.of()));
+
+        provisioningService.ensureModelRegistered(provider, "gpt-4", ModelKind.CHAT);
+
+        verify(liteLLMClient).addModel(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void verifyModelRegistered_withModelName_returnsFalse_whenLiteLLMIsUnreachable() {
+        String modelName = "gpt-4";
+        String expectedLiteLLMName = provisioningService.buildLiteLLMModelName(testProvider, modelName);
+        when(liteLLMClient.listModelByName(expectedLiteLLMName))
+                .thenThrow(new ResourceAccessException("Read timed out"));
+
+        // The sandbox dispatch hot path needs "not registered", not a failure, when the proxy is unreachable.
+        assertThat(provisioningService.verifyModelRegistered(testProvider, modelName))
+                .isFalse();
+    }
+
+    @Test
+    void provisionModel_propagatesOriginalAddFailure_whenVerificationAlsoFails() {
+        ModelProvider provider = new ModelProvider("Test Provider", ProviderType.OPENAI, "sk-test-key", null);
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("gpt-4", ModelKind.CHAT)));
+        String alias = provisioningService.buildLiteLLMModelName(provider, "gpt-4");
+        when(liteLLMClient.listModelByName(alias))
+                .thenReturn(new ListModelsV2Response(List.of()))
+                .thenThrow(new ResourceAccessException("verification timed out"));
+        when(liteLLMClient.addModel(org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new ResourceAccessException("Read timed out"));
+
+        assertThatThrownBy(() -> provisioningService.provisionModel(provider))
+                .isInstanceOf(ResourceAccessException.class)
+                .hasMessage("Read timed out");
     }
 
     @Test

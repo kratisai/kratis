@@ -1,0 +1,40 @@
+databaseChangeLog:
+- changeSet:
+    id: 004-rekey-historical-duplicate-activity-action-ids
+    author: kratis
+    dbms: postgresql
+    comment: >-
+      Rekey pre-unique-index duplicates as <action_id>#hist-<row id>. '#hist-'
+      cannot collide with live ids: run keys use '#<n>' and tool ids come from
+      the harness.
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: true
+        stripComments: true
+        sql: >-
+          UPDATE sandbox_execution_activities a
+          SET action_id = a.action_id || '#hist-' || a.id::text
+          WHERE a.action_id IS NOT NULL
+            AND EXISTS (
+              SELECT 1 FROM sandbox_execution_activities b
+              WHERE b.execution_id = a.execution_id
+                AND b.action_id = a.action_id
+                AND b.sequence > a.sequence
+            );
+- changeSet:
+    id: 004-unique-sandbox-execution-activities-execution-action
+    author: kratis
+    dbms: postgresql
+    comment: >-
+      One actionId is one activity per execution. action_id hashes because
+      harness ids can exceed the btree row-size limit; NULL hashes stay
+      distinct, so standalone rows without an id remain legal.
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: true
+        stripComments: true
+        sql: >-
+          CREATE UNIQUE INDEX uq_sandbox_execution_activities_exec_action
+          ON sandbox_execution_activities (execution_id, sha256(action_id::bytea));

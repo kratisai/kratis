@@ -21,6 +21,7 @@ fi
 curl -fsSL "$BASE/compose.yaml" -o compose.yaml
 mkdir -p litellm
 curl -fsSL "$BASE/litellm/patch_response_logging.py" -o litellm/patch_response_logging.py
+curl -fsSL "$BASE/litellm/healthcheck.py" -o litellm/healthcheck.py
 curl -fsSL "$BASE/.env.example" -o .env
 
 sed -i.bak \

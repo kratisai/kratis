@@ -62,4 +62,34 @@ class LiteLLMPropertiesTest {
 
         assertThat(properties.getUsageFinalizeDelay()).isEqualTo(Duration.ofSeconds(7));
     }
+
+    @Test
+    void getConnectTimeout_defaultsTo5Seconds() {
+        LiteLLMProperties properties = new LiteLLMProperties();
+
+        assertThat(properties.getConnectTimeout()).isEqualTo(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void getConnectTimeout_returnsConfiguredValue() {
+        LiteLLMProperties properties = new LiteLLMProperties();
+        properties.setConnectTimeout(Duration.ofSeconds(2));
+
+        assertThat(properties.getConnectTimeout()).isEqualTo(Duration.ofSeconds(2));
+    }
+
+    @Test
+    void getReadTimeout_defaultsTo30Seconds() {
+        LiteLLMProperties properties = new LiteLLMProperties();
+
+        assertThat(properties.getReadTimeout()).isEqualTo(Duration.ofSeconds(30));
+    }
+
+    @Test
+    void getReadTimeout_returnsConfiguredValue() {
+        LiteLLMProperties properties = new LiteLLMProperties();
+        properties.setReadTimeout(Duration.ofSeconds(11));
+
+        assertThat(properties.getReadTimeout()).isEqualTo(Duration.ofSeconds(11));
+    }
 }

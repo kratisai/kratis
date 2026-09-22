@@ -142,6 +142,8 @@ type ToolCallInfo struct {
 	ExitCode       *int
 	Truncated      bool
 	Hitl           *ActivityHitl
+	// Insertion order; Go map iteration is unordered.
+	RecordedSeq uint64
 }
 
 // TerminalOutputState buffers one agent-owned terminal's relayed output
@@ -182,6 +184,9 @@ type Handler struct {
 	// guarded by mu.
 	inferredStreamType string
 	inferredSeq        int
+	toolCallSeq        uint64
+	openChunkRun       *chunkRun
+	chunkRunCounts map[string]int
 }
 
 func NewHandler(sink EventSink, terminals *TerminalManager, workspace string) *Handler {
@@ -195,6 +200,7 @@ func NewHandler(sink EventSink, terminals *TerminalManager, workspace string) *H
 		toolCalls:       make(map[string]*ToolCallInfo),
 		terminalOutputs: make(map[string]*TerminalOutputState),
 		sessionMetadata: make(map[string][]map[string]any),
+		chunkRunCounts:  make(map[string]int),
 	}
 }
 
@@ -216,6 +222,22 @@ func (h *Handler) debugf(format string, args ...interface{}) {
 		}
 	}
 	h.sink.SendOutput(msg, "stdout")
+}
+
+// warnf reports an ACP protocol violation: always logged, always relayed to
+// the control-plane terminal on stderr, never gated by the debug flag. Silent
+// drops hide harness non-conformance and leave activity-log gaps that cannot
+// be explained after the fact.
+func (h *Handler) warnf(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	log.Printf("%s", msg)
+	h.sink.SendOutput(msg, "stderr")
+}
+
+func (h *Handler) CloseChunkRun(reason string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.closeChunkRunLocked(reason)
 }
 
 func (h *Handler) NotificationHandler(transport *AcpTransport) func(string, map[string]interface{}, interface{}, bool) {
@@ -261,22 +283,6 @@ func (h *Handler) OutputHandler() func(string, string) {
 	return func(line string, stream string) {
 		h.sink.SendOutput(line, stream)
 	}
-}
-
-// recordToolCall parses and accumulates a session/update notification. Kept as
-// the raw-params entry point for tests; production goes through
-// handleSessionUpdate.
-func (h *Handler) recordToolCall(params map[string]interface{}) {
-	u, ok := parseToolCallUpdate(params)
-	if !ok {
-		return
-	}
-	if u.SessionUpdate != "tool_call" && u.SessionUpdate != "tool_call_update" {
-		return
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.accumulateToolCallLocked(u)
 }
 
 func (h *Handler) HandlePermissionRequest(transport *AcpTransport, params map[string]interface{}, id interface{}) {
@@ -429,7 +435,8 @@ func (h *Handler) beginPermission(toolCallID string, command string, title strin
 	defer h.mu.Unlock()
 	info := h.toolCalls[toolCallID]
 	if info == nil {
-		info = &ToolCallInfo{ToolCallID: toolCallID}
+		h.toolCallSeq++
+		info = &ToolCallInfo{ToolCallID: toolCallID, RecordedSeq: h.toolCallSeq}
 		h.toolCalls[toolCallID] = info
 	}
 	if info.Command == "" {
@@ -598,19 +605,31 @@ func (h *Handler) HandleTerminalCreate(transport *AcpTransport, params map[strin
 }
 
 // findToolCallByCommand correlates a terminal/create command with the
-// accumulated tool call that triggered it.
+// accumulated tool call that triggered it. terminal/create carries no
+// toolCallId per spec, so on ambiguity the most recently recorded match wins.
 func (h *Handler) findToolCallByCommand(command string) string {
 	if command == "" {
 		return ""
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	var best string
+	var bestSeq uint64
+	matches := 0
 	for id, info := range h.toolCalls {
-		if info.Command == command && info.Status != ActivityCompleted && info.Status != ActivityFailed {
-			return id
+		if info.Command != command || info.Status == ActivityCompleted || info.Status == ActivityFailed {
+			continue
+		}
+		matches++
+		if best == "" || info.RecordedSeq > bestSeq {
+			best, bestSeq = id, info.RecordedSeq
 		}
 	}
-	return ""
+	if matches > 1 {
+		h.warnf("[WARN] Ambiguous terminal/create correlation: command=%q matches %d live tool calls — selected %q (most recently recorded)",
+			command, matches, best)
+	}
+	return best
 }
 
 func (h *Handler) HandleTerminalOutput(transport *AcpTransport, params map[string]interface{}, id interface{}) {

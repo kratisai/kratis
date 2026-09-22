@@ -191,6 +191,9 @@ export function triggerMockPermissionRequired(
   ],
   hitlId = command,
 ) {
+  triggerMockExecutionActivity(ws, executionId, 'COMMAND', command, 'pending', hitlId, {
+    hitl: { hitlId, kind: 'approval', message: `Allow ${command}?`, options },
+  })
   ws.onmessage?.({
     data: JSON.stringify({
       jsonrpc: '2.0',

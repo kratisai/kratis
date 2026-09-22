@@ -124,6 +124,12 @@ class OpenCodeExecutionRealTest extends AbstractAgentExecutionRealTest {
     }
 
     @Override
+    protected boolean permissionRequestsCarryToolCallId() {
+        // Omits the toolCallId on some session/request_permission calls.
+        return false;
+    }
+
+    @Override
     protected List<ExpectedFile> getExpectedFiles() {
         return List.of(
                 ExpectedFile.withContent("/kratis/workspace/kratis_task.sh", "Hello Kratis - what a lovely day"));

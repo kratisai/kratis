@@ -111,15 +111,14 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
-    void recordActivity_messageChunksMergeIntoExistingRow() {
+    void recordActivity_messageEmissionReplacesDescription() {
         UUID executionId = UUID.randomUUID();
         SandboxExecutionActivity existing =
                 row(executionId, 1, "msg-1", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "Hello ");
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "msg-1", ActivityType.MESSAGE))
-                .thenReturn(Optional.of(existing));
+        when(repository.findByExecutionIdAndActionId(executionId, "msg-1")).thenReturn(Optional.of(existing));
 
-        service.recordActivity(executionId, ActivityType.MESSAGE, "world", "msg-1", ActivityStatus.IN_PROGRESS, null);
+        service.recordActivity(
+                executionId, ActivityType.MESSAGE, "Hello world", "msg-1", ActivityStatus.IN_PROGRESS, null);
 
         assertThat(existing.getDescription()).isEqualTo("Hello world");
         verify(repository).save(existing);
@@ -127,16 +126,14 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
-    void recordActivity_thinkingChunksMergeIntoExistingRow() {
+    void recordActivity_thinkingEmissionReplacesDescription() {
         UUID executionId = UUID.randomUUID();
         SandboxExecutionActivity existing =
                 row(executionId, 1, "thought-1", ActivityType.THINKING, ActivityStatus.IN_PROGRESS, "part one ");
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "thought-1", ActivityType.THINKING))
-                .thenReturn(Optional.of(existing));
+        when(repository.findByExecutionIdAndActionId(executionId, "thought-1")).thenReturn(Optional.of(existing));
 
         service.recordActivity(
-                executionId, ActivityType.THINKING, "part two", "thought-1", ActivityStatus.IN_PROGRESS, null);
+                executionId, ActivityType.THINKING, "part one part two", "thought-1", ActivityStatus.IN_PROGRESS, null);
 
         assertThat(existing.getDescription()).isEqualTo("part one part two");
         verify(repository).save(existing);
@@ -147,9 +144,7 @@ class ExecutionActivityPersistenceServiceTest {
         UUID executionId = UUID.randomUUID();
         SandboxExecutionActivity existing =
                 row(executionId, 1, "tc-1", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "npm run build");
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "tc-1", ActivityType.COMMAND))
-                .thenReturn(Optional.of(existing));
+        when(repository.findByExecutionIdAndActionId(executionId, "tc-1")).thenReturn(Optional.of(existing));
 
         service.recordActivity(
                 executionId, ActivityType.COMMAND, "npm run build", "tc-1", ActivityStatus.COMPLETED, null);
@@ -166,12 +161,8 @@ class ExecutionActivityPersistenceServiceTest {
                 row(executionId, 1, "r-1", ActivityType.RESEARCH, ActivityStatus.IN_PROGRESS, "search");
         SandboxExecutionActivity edited =
                 row(executionId, 2, "e-1", ActivityType.EDITED, ActivityStatus.IN_PROGRESS, "edit");
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "r-1", ActivityType.RESEARCH))
-                .thenReturn(Optional.of(research));
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "e-1", ActivityType.EDITED))
-                .thenReturn(Optional.of(edited));
+        when(repository.findByExecutionIdAndActionId(executionId, "r-1")).thenReturn(Optional.of(research));
+        when(repository.findByExecutionIdAndActionId(executionId, "e-1")).thenReturn(Optional.of(edited));
 
         service.recordActivity(executionId, ActivityType.RESEARCH, "search", "r-1", ActivityStatus.FAILED, null);
         service.recordActivity(executionId, ActivityType.EDITED, "edit", "e-1", ActivityStatus.COMPLETED, null);
@@ -183,9 +174,7 @@ class ExecutionActivityPersistenceServiceTest {
     @Test
     void recordActivity_withUnknownActionId_insertsNewRow() {
         UUID executionId = UUID.randomUUID();
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "tc-1", ActivityType.COMMAND))
-                .thenReturn(Optional.empty());
+        when(repository.findByExecutionIdAndActionId(executionId, "tc-1")).thenReturn(Optional.empty());
         when(repository.nextSequence(executionId)).thenReturn(1L);
 
         service.recordActivity(executionId, ActivityType.COMMAND, "ls", "tc-1", ActivityStatus.PENDING, null);
@@ -194,44 +183,24 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
-    void recordActivity_actionIdReusedAcrossTypes_insertsSeparateRow() {
+    void recordActivity_lateToolKindRefinesTypeInPlace_insertsOnce() {
         UUID executionId = UUID.randomUUID();
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "same-id", ActivityType.MESSAGE))
-                .thenReturn(Optional.empty());
-        when(repository.nextSequence(executionId)).thenReturn(2L);
+        SandboxExecutionActivity existing =
+                row(executionId, 1, "tc-1", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "write_file");
+        when(repository.findByExecutionIdAndActionId(executionId, "tc-1")).thenReturn(Optional.of(existing));
 
-        service.recordActivity(executionId, ActivityType.MESSAGE, "hello", "same-id", ActivityStatus.IN_PROGRESS, null);
+        service.recordActivity(
+                executionId, ActivityType.EDITED, "write_file", "tc-1", ActivityStatus.IN_PROGRESS, null);
 
-        assertInsertedRow(
-                capturedSave(), executionId, 2, "same-id", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "hello");
-    }
-
-    @Test
-    void recordActivity_sameActionIdAcrossTypes_mergesChunkIntoSameTypeRow() {
-        UUID executionId = UUID.randomUUID();
-        SandboxExecutionActivity thinking =
-                row(executionId, 1, "msg-1", ActivityType.THINKING, ActivityStatus.IN_PROGRESS, "ponder ");
-        SandboxExecutionActivity message =
-                row(executionId, 2, "msg-1", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "Hello ");
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "msg-1", ActivityType.MESSAGE))
-                .thenReturn(Optional.of(message));
-
-        service.recordActivity(executionId, ActivityType.MESSAGE, "world", "msg-1", ActivityStatus.IN_PROGRESS, null);
-
-        assertThat(message.getDescription()).isEqualTo("Hello world");
-        assertThat(thinking.getDescription()).isEqualTo("ponder ");
-        verify(repository).save(message);
+        assertThat(existing.getActivityType()).isEqualTo(ActivityType.EDITED);
+        verify(repository).save(existing);
         verify(repository, never()).nextSequence(executionId);
     }
 
     @Test
     void recordActivity_serializesDetailIntoJsonb() {
         UUID executionId = UUID.randomUUID();
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "tc-1", ActivityType.COMMAND))
-                .thenReturn(Optional.empty());
+        when(repository.findByExecutionIdAndActionId(executionId, "tc-1")).thenReturn(Optional.empty());
         when(repository.nextSequence(executionId)).thenReturn(1L);
         ActivityDetail detail = new ActivityDetail(
                 null, "echo hello", null, null, null, null, null, null, null, null, null, null, null, null);
@@ -270,9 +239,7 @@ class ExecutionActivityPersistenceServiceTest {
         UUID executionId = UUID.randomUUID();
         SandboxExecutionActivity existing =
                 row(executionId, 1, "plan", ActivityType.PLAN, ActivityStatus.IN_PROGRESS, "Agent plan updated");
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "plan", ActivityType.PLAN))
-                .thenReturn(Optional.of(existing));
+        when(repository.findByExecutionIdAndActionId(executionId, "plan")).thenReturn(Optional.of(existing));
         ActivityDetail detail = new ActivityDetail(
                 null,
                 null,
@@ -302,9 +269,7 @@ class ExecutionActivityPersistenceServiceTest {
     @Test
     void recordActivity_planUpdateWithNoExistingRow_insertsOnce() {
         UUID executionId = UUID.randomUUID();
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "plan", ActivityType.PLAN))
-                .thenReturn(Optional.empty());
+        when(repository.findByExecutionIdAndActionId(executionId, "plan")).thenReturn(Optional.empty());
         when(repository.nextSequence(executionId)).thenReturn(1L);
         ActivityDetail detail = new ActivityDetail(
                 null,
@@ -361,103 +326,35 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
-    void recordActivity_newMessageClosesPreviousOpenStream() {
+    void recordActivity_parallelToolCallsBothRemainOpen() {
         UUID executionId = UUID.randomUUID();
-        SandboxExecutionActivity previous =
-                row(executionId, 1, "msg-1", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "first message");
-        when(repository.findByExecutionIdAndStatusAndOpenActionIdNot(executionId, ActivityStatus.IN_PROGRESS, "msg-2"))
-                .thenReturn(List.of(previous));
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "msg-2", ActivityType.MESSAGE))
-                .thenReturn(Optional.empty());
-        when(repository.nextSequence(executionId)).thenReturn(2L);
+        when(repository.findByExecutionIdAndActionId(executionId, "search-1")).thenReturn(Optional.empty());
+        when(repository.findByExecutionIdAndActionId(executionId, "search-2")).thenReturn(Optional.empty());
+        when(repository.nextSequence(executionId)).thenReturn(1L, 2L);
 
         service.recordActivity(
-                executionId, ActivityType.MESSAGE, "second message", "msg-2", ActivityStatus.IN_PROGRESS, null);
-
-        assertThat(previous.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
-        verify(repository).saveAll(List.of(previous));
-
-        ArgumentCaptor<SandboxExecutionActivity> captor = ArgumentCaptor.forClass(SandboxExecutionActivity.class);
-        verify(repository, times(1)).save(captor.capture());
-        assertInsertedRow(
-                captor.getValue(),
-                executionId,
-                2,
-                "msg-2",
-                ActivityType.MESSAGE,
-                ActivityStatus.IN_PROGRESS,
-                "second message");
-    }
-
-    @Test
-    void recordActivity_newToolClosesPreviousOpenTool() {
-        UUID executionId = UUID.randomUUID();
-        SandboxExecutionActivity openSearch =
-                row(executionId, 1, "search-1", ActivityType.RESEARCH, ActivityStatus.IN_PROGRESS, "glob");
-        when(repository.findByExecutionIdAndStatusAndOpenActionIdNot(
-                        executionId, ActivityStatus.IN_PROGRESS, "search-2"))
-                .thenReturn(List.of(openSearch));
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "search-2", ActivityType.RESEARCH))
-                .thenReturn(Optional.empty());
-        when(repository.nextSequence(executionId)).thenReturn(2L);
-
+                executionId, ActivityType.RESEARCH, "glob", "search-1", ActivityStatus.IN_PROGRESS, null);
         service.recordActivity(
                 executionId, ActivityType.RESEARCH, "grep", "search-2", ActivityStatus.IN_PROGRESS, null);
 
-        assertThat(openSearch.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
-        verify(repository).saveAll(List.of(openSearch));
+        ArgumentCaptor<SandboxExecutionActivity> captor = ArgumentCaptor.forClass(SandboxExecutionActivity.class);
+        verify(repository, times(2)).save(captor.capture());
+        assertThat(captor.getAllValues())
+                .allSatisfy(saved -> assertThat(saved.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS));
+        assertThat(captor.getAllValues().get(0).getActionId()).isEqualTo("search-1");
+        assertThat(captor.getAllValues().get(1).getActionId()).isEqualTo("search-2");
+        verify(repository, never()).saveAll(any());
     }
 
     @Test
-    void recordActivity_closesStandaloneOpenActivityWithoutActionId() {
-        UUID executionId = UUID.randomUUID();
-        SandboxExecutionActivity standalone =
-                row(executionId, 1, null, ActivityType.RESEARCH, ActivityStatus.IN_PROGRESS, "Reading main.go");
-        when(repository.findByExecutionIdAndStatusAndOpenActionIdNot(
-                        executionId, ActivityStatus.IN_PROGRESS, "tool-call-100"))
-                .thenReturn(List.of(standalone));
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "tool-call-100", ActivityType.COMMAND))
-                .thenReturn(Optional.empty());
-        when(repository.nextSequence(executionId)).thenReturn(2L);
-
-        service.recordActivity(
-                executionId, ActivityType.COMMAND, "Approve rm -rf /", "tool-call-100", ActivityStatus.PENDING, null);
-
-        assertThat(standalone.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
-        verify(repository).saveAll(List.of(standalone));
-    }
-
-    @Test
-    void recordActivity_withoutActionId_closesPreviousOpenStream() {
-        UUID executionId = UUID.randomUUID();
-        SandboxExecutionActivity openMessage =
-                row(executionId, 1, "msg-1", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "message");
-        when(repository.findByExecutionIdAndStatusOrderBySequenceAsc(executionId, ActivityStatus.IN_PROGRESS))
-                .thenReturn(List.of(openMessage));
-        when(repository.nextSequence(executionId)).thenReturn(2L);
-
-        service.recordActivity(
-                executionId, ActivityType.THINKING, "plan update", null, ActivityStatus.IN_PROGRESS, null);
-
-        assertThat(openMessage.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
-        verify(repository).saveAll(List.of(openMessage));
-    }
-
-    @Test
-    void recordActivity_continuationChunkDoesNotCloseItsOwnStream() {
+    void recordActivity_continuationChunkMergesIntoItsRow() {
         UUID executionId = UUID.randomUUID();
         SandboxExecutionActivity existing =
                 row(executionId, 1, "msg-1", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "Hello ");
-        when(repository.findByExecutionIdAndStatusAndOpenActionIdNot(executionId, ActivityStatus.IN_PROGRESS, "msg-1"))
-                .thenReturn(List.of());
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "msg-1", ActivityType.MESSAGE))
-                .thenReturn(Optional.of(existing));
+        when(repository.findByExecutionIdAndActionId(executionId, "msg-1")).thenReturn(Optional.of(existing));
 
-        service.recordActivity(executionId, ActivityType.MESSAGE, "world", "msg-1", ActivityStatus.IN_PROGRESS, null);
+        service.recordActivity(
+                executionId, ActivityType.MESSAGE, "Hello world", "msg-1", ActivityStatus.IN_PROGRESS, null);
 
         assertThat(existing.getDescription()).isEqualTo("Hello world");
         assertThat(existing.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
@@ -531,7 +428,7 @@ class ExecutionActivityPersistenceServiceTest {
         UUID resolvedBy = UUID.randomUUID();
         SandboxExecutionActivity row =
                 row(executionId, 1, "tool-call-42", ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
-        when(repository.findFirstByExecutionIdAndActionIdOrderBySequenceDesc(executionId, "tool-call-42"))
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
                 .thenReturn(Optional.of(row));
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
@@ -555,7 +452,7 @@ class ExecutionActivityPersistenceServiceTest {
         UUID executionId = UUID.randomUUID();
         SandboxExecutionActivity row =
                 row(executionId, 1, "tool-call-42", ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
-        when(repository.findFirstByExecutionIdAndActionIdOrderBySequenceDesc(executionId, "tool-call-42"))
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
                 .thenReturn(Optional.of(row));
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
@@ -574,36 +471,9 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
-    void onHitlResolved_approvalWithoutMatchingRow_fallsBackToNewestPendingRow() {
+    void onHitlResolved_approvalUnknownId_doesNotTouchPendingRows() {
         UUID executionId = UUID.randomUUID();
-        SandboxExecutionActivity pending =
-                row(executionId, 2, "tc-2", ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
-        when(repository.findFirstByExecutionIdAndActionIdOrderBySequenceDesc(executionId, "tool-call-42"))
-                .thenReturn(Optional.empty());
-        when(repository.findFirstByExecutionIdAndStatusOrderBySequenceDesc(executionId, ActivityStatus.PENDING))
-                .thenReturn(Optional.of(pending));
-
-        service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
-                UUID.randomUUID(),
-                new ExecutionHitlResolvedResult(
-                        executionId,
-                        "tool-call-42",
-                        HitlKind.APPROVAL,
-                        HitlResponse.APPROVED,
-                        "allow-once",
-                        null,
-                        null,
-                        "Alice")));
-
-        assertThat(pending.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
-    }
-
-    @Test
-    void onHitlResolved_approvalNoMatchingRow_isNoOp() {
-        UUID executionId = UUID.randomUUID();
-        when(repository.findFirstByExecutionIdAndActionIdOrderBySequenceDesc(executionId, "tool-call-42"))
-                .thenReturn(Optional.empty());
-        when(repository.findFirstByExecutionIdAndStatusOrderBySequenceDesc(executionId, ActivityStatus.PENDING))
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
                 .thenReturn(Optional.empty());
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
@@ -619,6 +489,7 @@ class ExecutionActivityPersistenceServiceTest {
                         "Alice")));
 
         verify(repository, never()).save(any());
+        verify(repository, never()).findFirstByExecutionIdAndActionIdOrderBySequenceDesc(any(), any());
     }
 
     @Test
@@ -626,8 +497,7 @@ class ExecutionActivityPersistenceServiceTest {
         UUID executionId = UUID.randomUUID();
         SandboxExecutionActivity existing =
                 row(executionId, 1, "tool-call-42", ActivityType.EDITED, ActivityStatus.IN_PROGRESS, "Write file");
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "tool-call-42", ActivityType.EDITED))
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
                 .thenReturn(Optional.of(existing));
 
         service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
@@ -652,12 +522,10 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
-    void onHitlRequired_approvalWithoutExistingActivity_insertsCommandRow() {
+    void onHitlRequired_approvalWithoutMatchingRow_isNoOpAndLogs() {
         UUID executionId = UUID.randomUUID();
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "tool-call-42", ActivityType.COMMAND))
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
                 .thenReturn(Optional.empty());
-        when(repository.nextSequence(executionId)).thenReturn(1L);
 
         service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
                 UUID.randomUUID(),
@@ -674,51 +542,8 @@ class ExecutionActivityPersistenceServiceTest {
                         null,
                         null)));
 
-        SandboxExecutionActivity saved = capturedSave();
-        assertInsertedRow(
-                saved,
-                executionId,
-                1,
-                "tool-call-42",
-                ActivityType.COMMAND,
-                ActivityStatus.PENDING,
-                "Approve rm -rf /");
-        assertThat(saved.getDetail()).contains("tool-call-42").contains("approval");
-    }
-
-    @Test
-    void onHitlRequired_approvalWithoutExistingActivity_insertsToolKindDerivedTypeRow() {
-        UUID executionId = UUID.randomUUID();
-        when(repository.findFirstByExecutionIdAndActionIdAndActivityTypeOrderBySequenceDesc(
-                        executionId, "tool-call-42", ActivityType.EDITED))
-                .thenReturn(Optional.empty());
-        when(repository.nextSequence(executionId)).thenReturn(1L);
-
-        service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
-                UUID.randomUUID(),
-                new ExecutionHitlRequiredResult(
-                        executionId,
-                        "tool-call-42",
-                        HitlKind.APPROVAL,
-                        "Approve Write file",
-                        "Write file",
-                        null,
-                        "Write",
-                        "edit",
-                        null,
-                        null,
-                        null)));
-
-        SandboxExecutionActivity saved = capturedSave();
-        assertInsertedRow(
-                saved,
-                executionId,
-                1,
-                "tool-call-42",
-                ActivityType.EDITED,
-                ActivityStatus.PENDING,
-                "Approve Write file");
-        assertThat(saved.getDetail()).contains("tool-call-42").contains("approval");
+        verify(repository, never()).save(any());
+        verify(repository, never()).nextSequence(any());
     }
 
     @Test

@@ -216,15 +216,7 @@ function CommandExecutionActivityItem({
     <ActivityItemShell
       activity={activity}
       content={
-        activity.output.length > 0 ? (
-          <div className="mt-1 overflow-x-auto rounded bg-zinc-950 p-2 font-mono text-xs text-zinc-100">
-            {activity.output.map((line, index) => (
-              <div className="whitespace-pre" key={index}>
-                {line}
-              </div>
-            ))}
-          </div>
-        ) : activity.detail?.output ? (
+        activity.detail?.output ? (
           <div className="mt-1 overflow-x-auto rounded bg-zinc-950 p-2 font-mono text-xs text-zinc-100">
             <div className="whitespace-pre">{activity.detail.output}</div>
           </div>

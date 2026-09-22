@@ -461,9 +461,9 @@ are relayed.
 
 | `sessionUpdate` | Terminal relay | Activity relay |
 |-----------------|----------------|----------------|
-| `user_message_chunk` | `[User] <text>` | `MESSAGE` (role `user`), keyed by `messageId` |
-| `agent_message_chunk` | `[Agent] <text>` | `MESSAGE` (role `agent`), keyed by `messageId` |
-| `agent_thought_chunk` | `[Thought] <text>` | `THINKING`, keyed by `messageId` |
+| `user_message_chunk` | `[User] <text>` | `MESSAGE` (role `user`), keyed by the chunk-run key |
+| `agent_message_chunk` | `[Agent] <text>` | `MESSAGE` (role `agent`), keyed by the chunk-run key |
+| `agent_thought_chunk` | `[Thought] <text>` | `THINKING`, keyed by the chunk-run key |
 | `tool_call` | `[Tool] <title> (<status>)` | one per lifecycle transition, keyed by `toolCallId` |
 | `tool_call_update` | delta-emitted output; status-only transitions print `[Tool] <title> (<status>)` | one per lifecycle transition, keyed by `toolCallId` |
 | `plan` | `[Plan] Agent plan updated` | `PLAN` with structured `detail.plan` (`PlanEntry[]`, replace-all), unique `plan-<n>` actionId per snapshot |
@@ -474,12 +474,32 @@ are relayed.
 | `available_commands_update` | — | captured as session metadata |
 | unknown / future | `[Update] <type>` | `THINKING` with `detail.rawUpdate` capture |
 
-ACP `messageId` is optional. When an agent omits it, the sidecar infers a
-per-stream correlation key (`inferred-<n>`): consecutive chunks of the same
-kind (`agent_message`, `user_message`, or `agent_thought`) share one key, and a
-kind change, a real `messageId`, or any non-chunk activity starts a fresh
-stream. Every inference/reuse/reset decision is logged with the `[ACP][MSGID]`
-prefix (always in the sidecar log, in `env.output` only under `--debug`).
+Message and thought chunks are grouped into **chunk runs**: one contiguous run
+of same-kind chunks is one activity. The run owns its `actionId` (the run key)
+from open to close:
+
+- Run 1 of an ACP `messageId` uses that `messageId` as its key.
+- Run *n* ≥ 2 of the same `messageId` (the id may return after an
+  interruption, e.g. `thought → tool → thought`) uses `<messageId>#<n>`.
+  Continuity is not identity: each run is its own activity.
+- ACP `messageId` is optional. When an agent omits it, the sidecar mints
+  `inferred-<n>` from a monotonic counter; each new inferred run gets a fresh
+  key.
+- `detail.messageId` always carries the raw ACP `messageId` (empty when
+  absent) — never the run key.
+
+A run ends, and the sidecar emits its accumulated text with status
+`completed`, when any of these arrives: a chunk of a different stream kind, a
+chunk with a different `messageId` (including present-vs-absent), any
+non-chunk `sessionUpdate` (`tool_call`, `tool_call_update`, `plan`,
+`current_mode_update`, unknown), or the end of the prompt turn. Metadata-only
+updates (`usage_update`, `session_info_update`, `available_commands_update`,
+`config_option_update`) do not end a run. Chunk activity emissions carry
+**cumulative** run text, throttled to at most one per 250 ms or per 512 new
+bytes, and always at the run boundary; downstream layers replace, never
+concatenate. The terminal relay (`[Agent]`/`[Thought]` lines) stays on every
+delta. Every open/key/close decision is logged with the `[ACP][MSGID]` prefix
+(always in the sidecar log, in `env.output` only under `--debug`).
 
 ACP `plan` updates are replace-all per update (the agent sends the complete
 entry list) and Kratis displays every update as a fresh activity in the
@@ -499,10 +519,13 @@ activities in the UI.
 Each activity carries the lifecycle `status` (`pending | in_progress | completed |
 failed`) and a structured `detail` bag (tool kind/title/locations, input params,
 output text, diff, exit code, approval state, messageId, harness `_meta`
-preserved verbatim). Activities sharing an `actionId` (ACP `toolCallId`, or
-`messageId` for message/thought chunks, real or sidecar-inferred) render as one
-activity record in the UI, with status driving the lifecycle transitions. The
-ACP `_meta` extension bag (chunk-level and content-block-level) is preserved
+preserved verbatim). Activities sharing an `actionId` (ACP `toolCallId` for
+tools, the chunk-run key for message/thought runs; see §9.1) are exactly one
+activity record in the UI and one row per execution in the control plane
+(enforced by the `(execution_id, action_id)` unique index). Chunk emissions
+carry cumulative text, so both layers replace the description on merge and
+never concatenate. The ACP `_meta` extension bag (chunk-level and
+content-block-level) is preserved
 verbatim in `detail.meta` and never parsed for behavior; the full raw update
 payload is preserved in `detail.rawUpdate` for post-hoc debugging. One
 negotiated exception: the `_meta.terminal_output` capability advertised in
@@ -515,12 +538,13 @@ chunks live to `env.output`, buffering them per `terminal_id` when they arrive
 before the announcing `tool_call` (see `applyTerminalMetaLocked` in
 [`update.go`](../../sidecar/acp/update.go)).
 
-Message/thought streams never carry their own `completed` transition. The
-control plane closes the previous still-`in_progress` MESSAGE/THINKING stream
-when any new activity with a different `actionId` begins (close-on-next-start,
-mirrored in the UI store), and completes all remaining open streams when the
-execution completes — so replay shows the same terminal statuses as the live
-stream.
+Message/thought streams carry their own `completed` transition: the sidecar
+closes a chunk run at its boundary and emits the accumulated text with the
+terminal status (§9.1). The control plane and the web UI only record and
+render what arrives — no layer closes a stream because a different activity
+started. When the execution completes, all remaining open activities are
+completed as a backstop, so replay shows the same terminal statuses as the
+live stream.
 
 ---
 
