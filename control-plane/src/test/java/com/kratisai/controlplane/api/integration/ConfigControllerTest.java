@@ -49,8 +49,8 @@ class ConfigControllerTest {
     }
 
     @Test
-    void getInstallationInfo_unauthenticated_returns403() throws Exception {
-        mockMvc.perform(get("/api/v1/config/installation")).andExpect(status().isForbidden());
+    void getInstallationInfo_unauthenticated_returns401() throws Exception {
+        mockMvc.perform(get("/api/v1/config/installation")).andExpect(status().isUnauthorized());
     }
 
     @Test

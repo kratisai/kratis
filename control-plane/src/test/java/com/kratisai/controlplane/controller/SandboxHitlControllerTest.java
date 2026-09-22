@@ -413,14 +413,14 @@ class SandboxHitlControllerTest {
     }
 
     @Test
-    void resolveApproval_unauthenticated_returns403() throws Exception {
+    void resolveApproval_unauthenticated_returns401() throws Exception {
         ResolveHitlRequest request =
                 new ResolveHitlRequest(executionId, "tool-call-42", HitlResponse.APPROVED, "allow-once", null);
 
         mockMvc.perform(post("/api/v1/hitl/resolve")
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -571,13 +571,13 @@ class SandboxHitlControllerTest {
     }
 
     @Test
-    void resolveQuestion_unauthenticated_returns403() throws Exception {
+    void resolveQuestion_unauthenticated_returns401() throws Exception {
         ResolveHitlRequest request = new ResolveHitlRequest(executionId, "el-1", HitlResponse.ANSWERED, null, null);
 
         mockMvc.perform(post("/api/v1/hitl/resolve")
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

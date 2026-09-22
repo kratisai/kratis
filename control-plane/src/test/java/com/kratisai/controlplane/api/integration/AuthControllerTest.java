@@ -333,13 +333,13 @@ class AuthControllerTest {
     }
 
     @Test
-    void updateProfile_unauthenticated_shouldReturn403() throws Exception {
+    void updateProfile_unauthenticated_shouldReturn401() throws Exception {
         UpdateUserRequest updateRequest = new UpdateUserRequest("Updated Name", null);
 
         mockMvc.perform(put("/api/v1/auth/me")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateRequest)))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

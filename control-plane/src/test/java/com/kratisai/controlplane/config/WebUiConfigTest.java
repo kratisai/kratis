@@ -62,6 +62,6 @@ class WebUiConfigTest {
     @Test
     @DisplayName("requires authentication for API routes")
     void requiresAuthenticationForApiRoutes() throws Exception {
-        mockMvc.perform(get("/api/v1/config/installation")).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/config/installation")).andExpect(status().isUnauthorized());
     }
 }

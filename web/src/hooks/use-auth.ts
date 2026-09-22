@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { TEAMS_QUERY_KEY } from '@/hooks/use-teams.ts'
-import { login, refreshAccessToken, register } from '@/lib/auth-api'
+import { isRefreshTokenRejected, login, refreshAccessToken, register } from '@/lib/auth-api'
 import { useAuthStore } from '@/store/auth-store'
 
 export function useLogin() {
@@ -31,6 +31,11 @@ export function useRefreshToken() {
 
   return useMutation({
     mutationFn: refreshAccessToken,
+    onError: (error) => {
+      if (isRefreshTokenRejected(error)) {
+        useAuthStore.getState().logout()
+      }
+    },
     onSuccess: (data) => {
       updateTokens(data.accessToken, data.refreshToken, data.expiresIn)
     },

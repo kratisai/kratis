@@ -323,9 +323,9 @@ class ChatControllerTest {
     }
 
     @Test
-    void listChats_unauthenticated_shouldReturn403() throws Exception {
+    void listChats_unauthenticated_shouldReturn401() throws Exception {
         mockMvc.perform(get("/api/v1/chats").param("teamId", teamId).param("filter", "mine"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

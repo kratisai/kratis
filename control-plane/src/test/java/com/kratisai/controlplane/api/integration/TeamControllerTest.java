@@ -435,12 +435,12 @@ class TeamControllerTest {
     }
 
     @Test
-    void updateTavilyApiKey_unauthorized_shouldReturn403() throws Exception {
+    void updateTavilyApiKey_unauthorized_shouldReturn401() throws Exception {
         // Try to update Tavily API key without authentication
         TavilyApiKeyRequest apiKeyRequest = new TavilyApiKeyRequest("tvly-test-api-key-12345");
         mockMvc.perform(patch("/api/v1/teams/00000000-0000-0000-0000-000000000000/tavily-api-key")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(apiKeyRequest)))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 }

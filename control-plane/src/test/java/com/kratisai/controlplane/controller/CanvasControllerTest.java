@@ -120,11 +120,11 @@ class CanvasControllerTest {
     }
 
     @Test
-    void deleteCanvasDocument_unauthenticated_returns403() throws Exception {
+    void deleteCanvasDocument_unauthenticated_returns401() throws Exception {
         canvasService.createCanvas(chatId, "doc-1", "Doc One", "# Content", CanvasType.DOCUMENT, null, null);
 
         mockMvc.perform(delete("/api/v1/chats/" + chatId + "/canvas/documents/doc-1"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

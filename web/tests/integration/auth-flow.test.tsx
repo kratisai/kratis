@@ -1,6 +1,12 @@
+import type { ReactNode } from 'react'
+
+import { QueryClientProvider } from '@tanstack/react-query'
+import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthDialog } from '@/components/auth/auth-dialog'
+import { useRefreshToken } from '@/hooks/use-auth'
+import { queryClient } from '@/lib/query-client'
 import { useAuthStore } from '@/store/auth-store'
 
 import {
@@ -19,6 +25,10 @@ import {
   setUnauthenticated,
   waitFor,
 } from '../support/test-render'
+
+function QueryWrapper({ children }: { children: ReactNode }) {
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+}
 
 describe('Authentication Flow', () => {
   setupFetchMock()
@@ -277,6 +287,44 @@ describe('Authentication Flow', () => {
     const { refreshAccessToken } = await import('@/lib/auth-api')
     const res = await refreshAccessToken({ refreshToken: 'old-refresh-token' })
     expect(res.accessToken).toBe('refreshed-access-token')
+  })
+
+  it('logs out when the refresh token is rejected', async () => {
+    setAuthenticated()
+    const authApi = await import('@/lib/auth-api')
+    const spy = vi
+      .spyOn(authApi, 'refreshAccessToken')
+      .mockRejectedValue(new authApi.ApiError('Invalid refresh token', 401))
+    try {
+      const { result } = renderHook(() => useRefreshToken(), { wrapper: QueryWrapper })
+      await act(async () => {
+        await result.current.mutateAsync({ refreshToken: 'stale' }).catch(() => undefined)
+      })
+
+      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+      expect(useAuthStore.getState().accessToken).toBeNull()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('keeps the session when the refresh call fails for other reasons', async () => {
+    setAuthenticated()
+    const authApi = await import('@/lib/auth-api')
+    const spy = vi
+      .spyOn(authApi, 'refreshAccessToken')
+      .mockRejectedValue(new authApi.ApiError('Service Unavailable', 503))
+    try {
+      const { result } = renderHook(() => useRefreshToken(), { wrapper: QueryWrapper })
+      await act(async () => {
+        await result.current.mutateAsync({ refreshToken: 'stale' }).catch(() => undefined)
+      })
+
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().accessToken).toBe('test-access-token')
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('throws ApiError with HTTP status fallback when message is not present in response', async () => {

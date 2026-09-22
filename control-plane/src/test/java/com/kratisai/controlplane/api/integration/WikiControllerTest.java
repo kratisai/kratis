@@ -148,9 +148,9 @@ class WikiControllerTest {
     }
 
     @Test
-    void getTopLevelPages_unauthenticated_returns403() throws Exception {
+    void getTopLevelPages_unauthenticated_returns401() throws Exception {
         mockMvc.perform(get("/api/v1/teams/{teamId}/repositories/{repoId}/wiki/pages", teamId, repoId))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

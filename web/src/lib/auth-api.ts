@@ -52,6 +52,12 @@ export function getFieldErrors(error: unknown): Record<string, string> {
   return data?.errors ?? {}
 }
 
+// The refresh endpoint answers 401 only for an expired or invalid refresh token; a network failure
+// or any other status (e.g. 5xx) leaves the session intact.
+export function isRefreshTokenRejected(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401
+}
+
 export async function login(data: LoginRequest): Promise<AuthTokensResponse> {
   const response = await fetchWithAuth('/api/v1/auth/login', {
     body: JSON.stringify(data),

@@ -101,8 +101,8 @@ class TeamControllerHarnessTest {
     }
 
     @Test
-    void shouldReturn403WhenUnauthenticated() throws Exception {
-        mockMvc.perform(get("/api/v1/teams/" + teamId + "/harnesses")).andExpect(status().isForbidden());
+    void shouldReturn401WhenUnauthenticated() throws Exception {
+        mockMvc.perform(get("/api/v1/teams/" + teamId + "/harnesses")).andExpect(status().isUnauthorized());
     }
 
     @Test
