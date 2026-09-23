@@ -1,7 +1,5 @@
 package com.kratisai.controlplane.service.command;
 
-import com.kratisai.controlplane.api.wsdto.CommandSegment;
-import com.kratisai.controlplane.model.HitlRuleType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -18,13 +16,6 @@ public final class ShellCommandSplitter {
     public record ParseResult(String command, List<ParsedSegment> segments, boolean fullyParsed) {
         public ParseResult {
             segments = List.copyOf(segments);
-        }
-
-        public List<CommandSegment> toWireSegments() {
-            return segments.stream()
-                    .map(segment ->
-                            new CommandSegment(segment.text(), segment.suggestedRoot(), HitlRuleType.PREFIX_WILD))
-                    .toList();
         }
     }
 

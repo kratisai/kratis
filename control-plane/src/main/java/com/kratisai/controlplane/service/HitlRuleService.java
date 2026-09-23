@@ -171,7 +171,7 @@ public class HitlRuleService {
         return Optional.of(HitlResponse.APPROVED);
     }
 
-    private static boolean anyAllowMatches(List<HitlRule> rules, String text) {
+    public static boolean anyAllowMatches(List<HitlRule> rules, String text) {
         for (HitlRule rule : rules) {
             if (rule.getRuleType() != HitlRuleType.TOOL_KIND
                     && rule.getAction() == HitlRuleAction.ALLOW

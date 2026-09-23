@@ -23,7 +23,8 @@
         "properties": {
           "text": { "type": "string", "description": "The segment text as written." },
           "suggestedRoot": { "type": "string", "description": "Derived rule candidate for a remembered rule; empty when not derivable." },
-          "ruleType": { "type": "string", "enum": ["EXACT", "PREFIX_WILD", "TOOL_KIND"], "description": "Rule type a remembered choice for this segment persists as; absent on segments stored before rule types were carried." }
+          "ruleType": { "type": "string", "enum": ["EXACT", "PREFIX_WILD", "TOOL_KIND"], "description": "Rule type a remembered choice for this segment persists as; absent on segments stored before rule types were carried." },
+          "preApproved": { "type": "boolean", "description": "True when this segment matches an existing team ALLOW rule." }
         },
         "additionalProperties": false
       }

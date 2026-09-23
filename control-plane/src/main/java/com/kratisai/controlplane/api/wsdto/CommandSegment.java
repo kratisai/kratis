@@ -10,9 +10,14 @@ import java.util.Objects;
 public record CommandSegment(
         @JsonProperty("text") String text,
         @JsonProperty("suggestedRoot") String suggestedRoot,
-        @JsonProperty("ruleType") HitlRuleType ruleType) {
+        @JsonProperty("ruleType") HitlRuleType ruleType,
+        @JsonProperty("preApproved") Boolean preApproved) {
     public CommandSegment {
         Objects.requireNonNull(text, "text is required");
         Objects.requireNonNull(suggestedRoot, "suggestedRoot is required");
+    }
+
+    public CommandSegment(String text, String suggestedRoot, HitlRuleType ruleType) {
+        this(text, suggestedRoot, ruleType, null);
     }
 }

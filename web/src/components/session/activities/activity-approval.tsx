@@ -47,13 +47,21 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
       cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
     }
   }, [rememberOpen])
-  const [marks, setMarks] = useState<Record<number, SegmentMark>>({})
   const [roots, setRoots] = useState<Record<number, string | undefined>>({})
   const resolveHitl = useActivityStore((s) => s.resolveHitl)
   const command = activityCommand(activity)
   const hitlDetail = activity.detail?.hitl
   const options = activity.permissionOptions ?? hitlDetail?.options ?? []
   const segments = activity.permissionSegments ?? hitlDetail?.commandSegments ?? []
+  const [marks, setMarks] = useState<Record<number, SegmentMark>>(() => {
+    const initial: Record<number, SegmentMark> = {}
+    segments.forEach((seg, idx) => {
+      if (seg.preApproved) {
+        initial[idx] = 'allow'
+      }
+    })
+    return initial
+  })
   const diff = activity.permissionDiff ?? activity.detail?.diff
   const hitlId = activity.actionId ?? command
 

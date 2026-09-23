@@ -109,11 +109,15 @@ class EnvironmentHitlRequestRpcHandlerTest {
     }
 
     private EnvironmentRpcPayload.HitlRequest approvalParams(String command, String hitlId) {
+        return approvalParams(command, hitlId, UUID.randomUUID());
+    }
+
+    private EnvironmentRpcPayload.HitlRequest approvalParams(String command, String hitlId, UUID executionId) {
         return new EnvironmentRpcPayload.HitlRequest(
                 hitlId,
                 "Approve " + command,
                 HitlKind.APPROVAL,
-                UUID.randomUUID().toString(),
+                executionId.toString(),
                 command,
                 "Run " + command,
                 "execute",
@@ -644,6 +648,38 @@ class EnvironmentHitlRequestRpcHandlerTest {
         verify(pendingHitlRegistry).register(eq(execution.getId()), payloadCaptor.capture(), any(), any(), any());
         assertThat(payloadCaptor.getValue().commandSegments())
                 .containsExactly(new CommandSegment("edit", "edit", HitlRuleType.TOOL_KIND));
+    }
+
+    @Test
+    void handle_approvalCompoundCommand_mixedAllowedAndUnmatched_setsPreApprovedOnAllowedSegment() {
+        stubSessionAndEnvironment();
+
+        HitlRule rule1 = new HitlRule();
+        rule1.setCommandRoot("git status");
+        rule1.setRuleType(HitlRuleType.PREFIX_WILD);
+        rule1.setAction(HitlRuleAction.ALLOW);
+        when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of(rule1));
+
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.HitlRequest params =
+                approvalParams("git status && git push origin main", "tool-call-1", execution.getId());
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+
+        handler.handle(sessionId, request, params).blockLast();
+
+        ArgumentCaptor<ExecutionHitlRequiredResult> payloadCaptor =
+                ArgumentCaptor.forClass(ExecutionHitlRequiredResult.class);
+        verify(pendingHitlRegistry).register(eq(execution.getId()), payloadCaptor.capture(), any(), any(), any());
+
+        List<CommandSegment> segments = payloadCaptor.getValue().commandSegments();
+        assertThat(segments).hasSize(2);
+        assertThat(segments.get(0).text()).isEqualTo("git status");
+        assertThat(segments.get(0).preApproved()).isTrue();
+        assertThat(segments.get(1).text()).isEqualTo("git push origin main");
+        assertThat(segments.get(1).preApproved()).isNull();
     }
 
     private static HitlRule toolKindRule(String kind, HitlRuleAction action) {

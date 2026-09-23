@@ -151,7 +151,7 @@ public class EnvironmentHitlRequestRpcHandler
                 HitlKind.APPROVAL,
                 params.message(),
                 command,
-                approvalSegments(command, toolKind),
+                approvalSegments(command, toolKind, rules),
                 params.title(),
                 toolKind,
                 sanitizeOptions(params.options()),
@@ -206,9 +206,19 @@ public class EnvironmentHitlRequestRpcHandler
     }
 
     /** Unknown tool kinds get no segments, so nothing unrememberable can be persisted. */
-    private static List<CommandSegment> approvalSegments(String command, String toolKind) {
+    private static List<CommandSegment> approvalSegments(String command, String toolKind, List<HitlRule> rules) {
         if (ToolKind.isCommandLike(toolKind)) {
-            return ShellCommandSplitter.parse(command).toWireSegments();
+            var parse = ShellCommandSplitter.parse(command);
+            return parse.segments().stream()
+                    .map(segment -> {
+                        Boolean preApproved = null;
+                        if (segment.autoAllowable() && HitlRuleService.anyAllowMatches(rules, segment.text())) {
+                            preApproved = true;
+                        }
+                        return new CommandSegment(
+                                segment.text(), segment.suggestedRoot(), HitlRuleType.PREFIX_WILD, preApproved);
+                    })
+                    .toList();
         }
         String kind = ToolKind.effectiveWireValue(toolKind);
         if (ToolKind.fromWireValue(kind).isEmpty()) {

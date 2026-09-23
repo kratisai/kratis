@@ -275,6 +275,38 @@ describe('ActivityApproval', () => {
       ], '')
     })
 
+    it('pre-ticks segments already covered by a team allow rule', async () => {
+      const user = userEvent.setup()
+      render(
+        <ActivityApproval
+          activity={pendingActivity({
+            permissionOptions: [ALLOW_ONCE, REJECT_ONCE],
+            permissionSegments: [
+              { preApproved: true, suggestedRoot: 'git status', text: 'git status' },
+              { suggestedRoot: 'git push', text: 'git push origin main' },
+            ],
+          })}
+          executionId="exec-1"
+        />,
+      )
+      await user.click(screen.getByRole('button', { name: /Remember choices/ }))
+
+      expect(screen.getByRole('button', { name: 'Always allow git status' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      )
+      expect(screen.getByRole('button', { name: 'Always allow git push origin main' })).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      )
+
+      await user.click(screen.getByRole('button', { name: /Allow and remember/ }))
+
+      expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'tc-1', 'approved', 'allow-once', undefined, [
+        { action: 'ALLOW', commandRoot: 'git status' },
+      ], '')
+    })
+
     it('edited root text is submitted instead of the suggestion', async () => {
       const user = userEvent.setup()
       render(<ActivityApproval activity={segmentedActivity()} executionId="exec-1" />)

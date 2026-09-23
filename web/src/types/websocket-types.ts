@@ -119,6 +119,7 @@ export interface ClientRpcMethods {
 }
 
 export interface CommandSegment {
+  preApproved?: boolean
   ruleType?: HitlRuleType
   suggestedRoot: string
   text: string

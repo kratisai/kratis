@@ -164,15 +164,4 @@ class ShellCommandSplitterTest {
     void parse_quotedProgram_keepsQuotesInRoot() {
         assertThat(roots("\"my tool\" run")).containsExactly("\"my tool\" run");
     }
-
-    @Test
-    void toWireSegments_mapsTextAndSuggestedRoot() {
-        var wire =
-                ShellCommandSplitter.parse("npm run test file.txt && git push").toWireSegments();
-        assertThat(wire).hasSize(2);
-        assertThat(wire.get(0).text()).isEqualTo("npm run test file.txt");
-        assertThat(wire.get(0).suggestedRoot()).isEqualTo("npm run test");
-        assertThat(wire.get(1).text()).isEqualTo("git push");
-        assertThat(wire.get(1).suggestedRoot()).isEqualTo("git push");
-    }
 }
