@@ -259,7 +259,9 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
     /** Report sandbox command completion. */
     record Complete(
             @JsonProperty("exitCode") Integer exitCode,
-            @JsonProperty("executionId") String executionId) implements InboundNotificationPayload {
+            @JsonProperty("executionId") String executionId,
+            @JsonProperty("reason") String reason)
+            implements InboundNotificationPayload {
         public static final String METHOD = "env.complete";
 
         @Override
@@ -268,8 +270,12 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         }
 
         public Complete(Integer exitCode, String executionId) {
-            this.exitCode = Objects.requireNonNull(exitCode, "exitCode is required");
-            this.executionId = Objects.requireNonNull(executionId, "executionId is required");
+            this(exitCode, executionId, null);
+        }
+
+        public Complete {
+            Objects.requireNonNull(exitCode, "exitCode is required");
+            Objects.requireNonNull(executionId, "executionId is required");
         }
     }
 
@@ -430,7 +436,8 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
     record AcpPrompt(
             @JsonProperty("taskPrompt") String taskPrompt,
             @JsonProperty("executionId") String executionId,
-            @JsonProperty("isSteering") Boolean isSteering)
+            @JsonProperty("isSteering") Boolean isSteering,
+            @JsonProperty("relaunch") Boolean relaunch)
             implements OutboundRequestPayload<EnvironmentConnectorResult.AcpPrompt> {
         public static final String METHOD = "env.acp_prompt";
 
@@ -440,13 +447,14 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         }
 
         public AcpPrompt(String taskPrompt, String executionId) {
-            this(taskPrompt, executionId, null);
+            this(taskPrompt, executionId, null, null);
         }
 
-        public AcpPrompt(String taskPrompt, String executionId, Boolean isSteering) {
+        public AcpPrompt(String taskPrompt, String executionId, Boolean isSteering, Boolean relaunch) {
             this.taskPrompt = Objects.requireNonNull(taskPrompt, "taskPrompt is required");
             this.executionId = Objects.requireNonNull(executionId, "executionId is required");
             this.isSteering = isSteering;
+            this.relaunch = relaunch;
         }
     }
 

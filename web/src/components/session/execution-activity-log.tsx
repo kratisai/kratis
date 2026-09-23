@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -13,6 +14,7 @@ import type {
   Activity,
   CommandExecutionActivity,
   ElicitationActivity,
+  ErrorActivity,
   MessageActivity,
   PlanActivity,
   ThinkingActivity,
@@ -134,6 +136,8 @@ const ActivityItem = memo(function ActivityItem({ activity, executionId }: Activ
       return <CommandExecutionActivityItem activity={activity} executionId={executionId} />
     case 'elicitation':
       return <ElicitationActivityItem activity={activity} executionId={executionId} />
+    case 'error':
+      return <ErrorActivityItem activity={activity} />
     case 'message':
       return <MessageActivityItem activity={activity} executionId={executionId} />
     case 'plan':
@@ -249,6 +253,27 @@ function ElicitationActivityItem({
   executionId: string
 }) {
   return <ActivityElicitation activity={activity} executionId={executionId} />
+}
+
+function ErrorActivityItem({ activity }: { activity: ErrorActivity }) {
+  return (
+    <ActivityItemShell
+      activity={activity}
+      content={
+        <div className="mt-1 space-y-1 pl-5">
+          <p className="text-xs break-words whitespace-pre-wrap text-red-600 dark:text-red-400">
+            {activity.message}
+          </p>
+          {activity.exitCode !== undefined && (
+            <p className="text-muted-foreground text-xs">Exit code: {activity.exitCode}</p>
+          )}
+        </div>
+      }
+      executionId=""
+      icon={<AlertTriangle className="h-3 w-3 shrink-0 text-red-500" />}
+      title={activityTitle(activity)}
+    />
+  )
 }
 
 function MessageActivityItem({

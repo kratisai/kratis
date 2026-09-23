@@ -5,12 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
@@ -73,6 +75,9 @@ class ExecutionEnvironmentServiceTest {
     @Mock
     private WebSocketSession webSocketSession;
 
+    @Mock
+    private SandboxExecutionActivityRepository activityRepository;
+
     private ExecutionEnvironmentService executionEnvironmentService;
 
     private static final UUID USER_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
@@ -82,6 +87,8 @@ class ExecutionEnvironmentServiceTest {
 
     @BeforeEach
     void setUp() {
+        ExecutionActivityPersistenceService activityPersistenceService = new ExecutionActivityPersistenceService(
+                activityRepository, sandboxExecutionRepository, new ObjectMapper(), eventPublisher);
         executionEnvironmentService = new ExecutionEnvironmentService(
                 executionEnvironmentRepository,
                 teamMemberRepository,
@@ -93,6 +100,7 @@ class ExecutionEnvironmentServiceTest {
                 sessionRegistry,
                 virtualKeyService,
                 sandboxExecutionService,
+                activityPersistenceService,
                 "ws://localhost:8080/ws/env",
                 transactionManager);
     }

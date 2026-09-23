@@ -19,6 +19,9 @@ public class ProviderModel {
     @Column(name = "model_kind", nullable = false, length = 20)
     private ModelKind kind;
 
+    @Column(name = "context_window_tokens")
+    private Long contextWindowTokens;
+
     public ProviderModel() {}
 
     public ProviderModel(String modelName, ModelKind kind) {
@@ -26,9 +29,14 @@ public class ProviderModel {
     }
 
     public ProviderModel(String modelName, String baseModel, ModelKind kind) {
+        this(modelName, baseModel, kind, null);
+    }
+
+    public ProviderModel(String modelName, String baseModel, ModelKind kind, Long contextWindowTokens) {
         this.modelName = modelName;
         this.baseModel = baseModel;
         this.kind = kind;
+        this.contextWindowTokens = contextWindowTokens;
     }
 
     public String getModelName() {
@@ -55,6 +63,14 @@ public class ProviderModel {
         this.kind = kind;
     }
 
+    public Long getContextWindowTokens() {
+        return contextWindowTokens;
+    }
+
+    public void setContextWindowTokens(Long contextWindowTokens) {
+        this.contextWindowTokens = contextWindowTokens;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -62,11 +78,12 @@ public class ProviderModel {
         ProviderModel that = (ProviderModel) o;
         return Objects.equals(modelName, that.modelName)
                 && Objects.equals(baseModel, that.baseModel)
-                && kind == that.kind;
+                && kind == that.kind
+                && Objects.equals(contextWindowTokens, that.contextWindowTokens);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(modelName, baseModel, kind);
+        return Objects.hash(modelName, baseModel, kind, contextWindowTokens);
     }
 }

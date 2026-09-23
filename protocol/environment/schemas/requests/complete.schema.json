@@ -5,7 +5,11 @@
   "required": ["exitCode", "executionId"],
   "properties": {
     "exitCode": { "type": "integer" },
-    "executionId": { "type": "string" }
+    "executionId": { "type": "string" },
+    "reason": {
+      "type": "string",
+      "description": "Optional terminal reason as reported by the agent (its own error message on a fatal abort, or the exit detail on an unexpected process death). Empty for natural completions."
+    }
   },
   "additionalProperties": false
 }

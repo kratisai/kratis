@@ -22,42 +22,7 @@ func (c *Client) ExecuteLaunchAcpAgent(params LaunchAcpAgentParams, reqID interf
 		c.currentExecutionID = params.ExecutionID
 		c.mu.Unlock()
 	}
-	envFile := c.envFilePath()
-
-	// Ensure env file exists so sourcing is a no-op when no prior env.exec ran
-	if _, err := os.Stat(envFile); os.IsNotExist(err) {
-		initEnvCmd := fmt.Sprintf("mkdir -p %s && export -p > %s", filepath.Dir(envFile), envFile)
-		c.mu.Lock()
-		c.executor.Dir = c.workspace
-		c.executor.Env = os.Environ()
-		c.mu.Unlock()
-		_, _ = c.executor.Execute(context.Background(), initEnvCmd, nil)
-	}
-
-	c.SendOutput(fmt.Sprintf("[ACP] Starting agent: %s", params.AgentCommand), "stdout")
-	c.SendOutput(fmt.Sprintf("[ACP] Working directory: %s", c.workspace), "stdout")
-
-	// Source the persisted environment file before running the agent command
-	agentCmd := fmt.Sprintf("set -a && . %s 2>/dev/null; set +a; %s", envFile, params.AgentCommand)
-	cmd := exec.CommandContext(context.Background(), "sh", "-c", agentCmd) //nolint:gosec // G204: launches the ACP agent binary via shell
-	c.mu.Lock()
-	cmd.Dir = c.workspace
-	c.mu.Unlock()
-	cmd.Env = os.Environ()
-	// Start in its own process group so we can signal the entire group (including child processes)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	// Create supervisor with client as event sink
-	sup := runner.NewAgentSupervisor(c.workspace, c.terminalManager, c)
-	sup.SetDebug(c.debug)
-	sup.Timeouts = c.supervisorTimeouts
-	c.mu.Lock()
-	c.supervisor = sup
-	c.mu.Unlock()
-
-	// Launch agent (creates transport, starts process, performs handshake)
-	result, err := sup.Launch(cmd)
-	if err != nil {
+	if err := c.launchAcpAgentProcess(params.AgentCommand); err != nil {
 		c.sendSuccessResponse(reqID, LaunchAcpAgentResult{
 			Status: LaunchFailed,
 			Error:  err.Error(),
@@ -65,7 +30,9 @@ func (c *Client) ExecuteLaunchAcpAgent(params LaunchAcpAgentParams, reqID interf
 		return
 	}
 
-	c.SendOutput(fmt.Sprintf("[ACP] Agent process started with PID: %d", cmd.Process.Pid), "stdout")
+	sup := c.currentSupervisor()
+	result := sup.LastLaunchResult()
+	c.SendOutput(fmt.Sprintf("[ACP] Agent process started with PID: %d", sup.PID()), "stdout")
 
 	// Send env.acp_initialized notification (ACP-agnostic payload)
 	c.mu.Lock()
@@ -85,6 +52,64 @@ func (c *Client) ExecuteLaunchAcpAgent(params LaunchAcpAgentParams, reqID interf
 	})
 }
 
+// launchAcpAgentProcess tears down any existing ACP agent, spawns a fresh
+// agent subprocess for the given command, and performs the ACP handshake.
+func (c *Client) launchAcpAgentProcess(agentCommand string) error {
+	envFile := c.envFilePath()
+
+	// Ensure env file exists so sourcing is a no-op when no prior env.exec ran
+	if _, err := os.Stat(envFile); os.IsNotExist(err) {
+		initEnvCmd := fmt.Sprintf("mkdir -p %s && export -p > %s", filepath.Dir(envFile), envFile)
+		c.mu.Lock()
+		c.executor.Dir = c.workspace
+		c.executor.Env = os.Environ()
+		c.mu.Unlock()
+		_, _ = c.executor.Execute(context.Background(), initEnvCmd, nil)
+	}
+
+	c.SendOutput(fmt.Sprintf("[ACP] Starting agent: %s", agentCommand), "stdout")
+	c.SendOutput(fmt.Sprintf("[ACP] Working directory: %s", c.workspace), "stdout")
+
+	// Source the persisted environment file before running the agent command
+	agentCmd := fmt.Sprintf("set -a && . %s 2>/dev/null; set +a; %s", envFile, agentCommand)
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", agentCmd) //nolint:gosec // G204: launches the ACP agent binary via shell
+	c.mu.Lock()
+	cmd.Dir = c.workspace
+	c.mu.Unlock()
+	cmd.Env = os.Environ()
+	// Start in its own process group so we can signal the entire group (including child processes)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	// Create supervisor with client as event sink
+	sup := runner.NewAgentSupervisor(c.workspace, c.terminalManager, c)
+	sup.SetDebug(c.debug)
+	sup.Timeouts = c.supervisorTimeouts
+	c.mu.Lock()
+	c.supervisor = sup
+	c.mu.Unlock()
+
+	// Launch agent (creates transport, starts process, performs handshake)
+	if _, err := sup.Launch(cmd); err != nil {
+		sup.CleanupFailedLaunch(err.Error())
+		c.mu.Lock()
+		c.supervisor = nil
+		c.mu.Unlock()
+		return err
+	}
+
+	c.mu.Lock()
+	c.acpAgentCommand = agentCommand
+	c.mu.Unlock()
+	return nil
+}
+
+// currentSupervisor returns the active supervisor snapshot.
+func (c *Client) currentSupervisor() *runner.AgentSupervisor {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.supervisor
+}
+
 // ExecuteAcpPrompt sends a session/prompt to an existing ACP session and streams output.
 // It does NOT close stdin or wait for process exit.
 func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
@@ -95,6 +120,17 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 		c.mu.Lock()
 		c.currentExecutionID = params.ExecutionID
 		c.mu.Unlock()
+	}
+
+	if params.Relaunch {
+		if err := c.relaunchAgent(); err != nil {
+			log.Printf("[ACP] Relaunch before prompt failed: %v", err)
+			c.sendSuccessResponse(reqID, AcpPromptResult{
+				Status: PromptFailed,
+				Error:  fmt.Sprintf("agent relaunch failed: %v", err),
+			})
+			return
+		}
 	}
 
 	c.mu.Lock()
@@ -182,14 +218,20 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 			c.mu.Unlock()
 		}
 	} else if promptErr != nil || (stopReason != "" && !ValidStopReasons[stopReason]) {
-		errorMsg := "unknown error"
+		reason := "unknown error"
 		if promptErr != nil {
-			errorMsg = promptErr.Error()
+			reason = truncateReason(result.ErrMessage)
 		} else if stopReason != "" {
-			errorMsg = fmt.Sprintf("invalid stop reason: %s", stopReason)
+			reason = truncateReason(fmt.Sprintf("invalid stop reason: %s", stopReason))
 		}
-		log.Printf("[ACP] Fatal prompt error for session %s: %s", session.SessionID, errorMsg)
-		c.SendComplete(1)
+		log.Printf("[ACP] Fatal prompt error for session %s: %s", session.SessionID, reason)
+		// Echo the abort into the output stream so the UI activity log shows the
+		// agent's own error text without requiring control-plane logs.
+		c.SendOutput(fmt.Sprintf("[ACP] Fatal prompt error: %s", reason), "stderr")
+		c.SendComplete(runner.CompletionInfo{
+			ExitCode: 1,
+			Reason:   reason,
+		})
 	}
 
 	var errStr string
@@ -209,6 +251,59 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 	})
 }
 
+// relaunchAgent tears down the current ACP agent (if any) and launches a fresh
+// session using the originally recorded agent command. No env.complete is
+// reported for the teardown — the caller's prompt outcome drives the terminal
+// state.
+func (c *Client) relaunchAgent() error {
+	c.mu.Lock()
+	sup := c.supervisor
+	agentCommand := c.acpAgentCommand
+	c.mu.Unlock()
+
+	if agentCommand == "" {
+		return fmt.Errorf("no agent command recorded; cannot relaunch")
+	}
+
+	if sup != nil {
+		log.Printf("[ACP] Relaunch: terminating existing agent session")
+		if _, err := sup.TerminateQuietly(); err != nil {
+			log.Printf("[ACP] Relaunch: terminate of existing agent: %v", err)
+		}
+		c.mu.Lock()
+		c.supervisor = nil
+		c.mu.Unlock()
+	}
+
+	if err := c.launchAcpAgentProcess(agentCommand); err != nil {
+		return err
+	}
+
+	// Notify the control plane about the fresh session so the UI tracks the
+	// new ACP session id.
+	result := c.currentSupervisor().LastLaunchResult()
+	c.mu.Lock()
+	execID := c.currentExecutionID
+	c.mu.Unlock()
+	_ = c.sendNotification("env.acp_initialized", AcpInitializedParams{
+		SessionID:    result.Session.SessionID,
+		AgentName:    result.AgentName,
+		AgentVersion: result.AgentVersion,
+		ExecutionID:  execID,
+	})
+	return nil
+}
+
+// truncateReason bounds an agent error message for the terminal reason string.
+func truncateReason(msg string) string {
+	const maxReasonRunes = 512
+	runes := []rune(msg)
+	if len(runes) <= maxReasonRunes {
+		return msg
+	}
+	return string(runes[:maxReasonRunes]) + "…"
+}
+
 // ExecuteTerminate terminates the ACP agent process gracefully.
 // Delegates to the supervisor for process lifecycle management.
 func (c *Client) ExecuteTerminate(_ TerminateParams, reqID interface{}) {
@@ -218,7 +313,7 @@ func (c *Client) ExecuteTerminate(_ TerminateParams, reqID interface{}) {
 
 	if sup == nil {
 		c.SendOutput("[Terminate] No active ACP session found - nothing to terminate", "stdout")
-		c.SendComplete(0)
+		c.SendComplete(runner.CompletionInfo{ExitCode: 0, Reason: "terminated (no active agent session)"})
 		c.sendSuccessResponse(reqID, TerminateResult{Status: TerminateCompleted, ExitCode: 0})
 		return
 	}

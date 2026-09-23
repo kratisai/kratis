@@ -115,4 +115,31 @@ describe('SteeringPublishBar', () => {
 
     expect(screen.queryByRole('button', { name: /Publish/i })).not.toBeInTheDocument()
   })
+
+  it('allows steering when execution status is FAILED (recovery)', async () => {
+    const steerSpy = vi.spyOn(diffApi, 'steerExecution').mockResolvedValue()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SteeringPublishBar chatId="chat-1" executionId="exec-1" executionStatus="FAILED" />
+      </QueryClientProvider>,
+    )
+
+    const idleBar = screen.getByText(/Tap to steer agent/i)
+    fireEvent.click(idleBar)
+
+    const textarea = screen.getByLabelText('Steering guidance input')
+    fireEvent.change(textarea, { target: { value: 'Recover from the context overflow' } })
+
+    const sendBtn = screen.getByRole('button', { name: /Send Guidance/i })
+    expect(sendBtn).toBeEnabled()
+    fireEvent.click(sendBtn)
+
+    await waitFor(() => {
+      expect(steerSpy).toHaveBeenCalledWith('chat-1', 'exec-1', {
+        comments: [],
+        prompt: 'Recover from the context overflow',
+      })
+    })
+  })
 })

@@ -7,6 +7,7 @@ import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
+import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import com.kratisai.controlplane.service.SandboxExecutionService;
 import java.time.Instant;
 import java.util.UUID;
@@ -26,16 +27,19 @@ public class EnvironmentCompleteRpcHandler
     private final EnvironmentExecutionGuard executionGuard;
     private final ApplicationEventPublisher eventPublisher;
     private final SandboxExecutionService sandboxExecutionService;
+    private final ExecutionActivityPersistenceService activityPersistenceService;
 
     public EnvironmentCompleteRpcHandler(
             SandboxExecutionRepository executionRepository,
             EnvironmentExecutionGuard executionGuard,
             ApplicationEventPublisher eventPublisher,
-            SandboxExecutionService sandboxExecutionService) {
+            SandboxExecutionService sandboxExecutionService,
+            ExecutionActivityPersistenceService activityPersistenceService) {
         this.executionRepository = executionRepository;
         this.executionGuard = executionGuard;
         this.eventPublisher = eventPublisher;
         this.sandboxExecutionService = sandboxExecutionService;
+        this.activityPersistenceService = activityPersistenceService;
     }
 
     @Override
@@ -73,8 +77,14 @@ public class EnvironmentCompleteRpcHandler
 
         UUID teamId = execution.getChat().getTeam().getId();
 
-        eventPublisher.publishEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), exitCode, execution.getStatus()));
+        // Persist a faithful ERROR activity for any abnormal termination so the
+        // activity log records the agent's own error message.
+        if (exitCode != 0) {
+            activityPersistenceService.recordExecutionError(execution.getId(), params.reason(), exitCode);
+        }
+
+        eventPublisher.publishEvent(new SandboxExecutionCompleteEvent(
+                teamId, execution.getId(), exitCode, execution.getStatus(), params.reason()));
 
         eventPublisher.publishEvent(
                 new ExecutionStatusChangedEvent(teamId, execution.getChat().getId(), execution.getId()));

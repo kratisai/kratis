@@ -311,8 +311,9 @@ public sealed interface ClientPayload {
         }
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record ExecutionCompleteResult(
-            ClientPayloadType type, UUID executionId, int exitCode, SandboxExecutionStatus status)
+            ClientPayloadType type, UUID executionId, int exitCode, SandboxExecutionStatus status, String reason)
             implements ClientPayload {
         public ExecutionCompleteResult {
             Objects.requireNonNull(type, "type is required");
@@ -321,7 +322,11 @@ public sealed interface ClientPayload {
         }
 
         public ExecutionCompleteResult(UUID executionId, int exitCode, SandboxExecutionStatus status) {
-            this(ClientPayloadType.EXECUTION_COMPLETE, executionId, exitCode, status);
+            this(ClientPayloadType.EXECUTION_COMPLETE, executionId, exitCode, status, null);
+        }
+
+        public ExecutionCompleteResult(UUID executionId, int exitCode, SandboxExecutionStatus status, String reason) {
+            this(ClientPayloadType.EXECUTION_COMPLETE, executionId, exitCode, status, reason);
         }
     }
 

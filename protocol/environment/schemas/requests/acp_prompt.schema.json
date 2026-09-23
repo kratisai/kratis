@@ -6,7 +6,11 @@
   "properties": {
     "taskPrompt": { "type": "string" },
     "executionId": { "type": "string" },
-    "isSteering": { "type": "boolean" }
+    "isSteering": { "type": "boolean" },
+    "relaunch": {
+      "type": "boolean",
+      "description": "When true, the sidecar terminates any existing agent process and launches a fresh ACP session before sending the prompt. Used to recover a failed execution with a clean session in the same workspace."
+    }
   },
   "additionalProperties": false
 }

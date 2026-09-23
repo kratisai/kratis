@@ -6,7 +6,7 @@
   "properties": {
     "activityType": {
       "type": "string",
-      "enum": ["THINKING", "RESEARCH", "EDITED", "COMMAND", "MESSAGE", "ELICITATION", "PLAN"]
+      "enum": ["THINKING", "RESEARCH", "EDITED", "COMMAND", "MESSAGE", "ELICITATION", "PLAN", "ERROR"]
     },
     "description": { "type": "string" },
     "executionId": { "type": "string" },
@@ -25,7 +25,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["read", "edit", "delete", "move", "search", "execute", "think", "fetch", "switch_mode", "other"]
+          "enum": ["read", "edit", "write", "delete", "move", "search", "execute", "think", "fetch", "switch_mode", "other"]
         },
         "title": { "type": "string" },
         "locations": {

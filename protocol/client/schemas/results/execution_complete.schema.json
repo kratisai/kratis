@@ -31,6 +31,10 @@
         "COMPLETED",
         "FAILED"
       ]
+    },
+    "reason": {
+      "type": "string",
+      "description": "Optional human-readable terminal reason (e.g. the agent error message) when the execution did not complete naturally."
     }
   },
   "additionalProperties": true

@@ -30,6 +30,7 @@ type ActivityKind string
 const (
 	KindRead       ActivityKind = "read"
 	KindEdit       ActivityKind = "edit"
+	KindWrite      ActivityKind = "write"
 	KindDelete     ActivityKind = "delete"
 	KindMove       ActivityKind = "move"
 	KindSearch     ActivityKind = "search"

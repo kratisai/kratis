@@ -2,6 +2,7 @@ import type {
   Activity,
   CommandExecutionActivity,
   ElicitationActivity,
+  ErrorActivity,
   MessageActivity,
   PlanActivity,
   ThinkingActivity,
@@ -41,6 +42,8 @@ function formatActivity(activity: Activity): string[] {
       return formatCommandExecution(activity)
     case 'elicitation':
       return formatElicitation(activity)
+    case 'error':
+      return formatError(activity)
     case 'message':
       return formatMessage(activity)
     case 'plan':
@@ -86,6 +89,15 @@ function formatElicitation(activity: ElicitationActivity): string[] {
   formatCommon(lines, activity)
   if (activity.response) {
     lines.push(`Response: ${activity.response}`)
+  }
+  return lines
+}
+
+function formatError(activity: ErrorActivity): string[] {
+  const lines = [`[Error] ${activity.message}`]
+  formatCommon(lines, activity)
+  if (activity.exitCode !== undefined) {
+    lines.push(`Exit code: ${activity.exitCode}`)
   }
   return lines
 }

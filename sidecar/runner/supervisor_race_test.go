@@ -17,7 +17,7 @@ type mockEventSink struct {
 	outputLines    []string
 	activityCalls  []string
 	activities     []acp.Activity
-	completeCalls  []int
+	completions    []CompletionInfo
 	permRequests   []string
 	permCancelChan chan struct{}
 	permResponse   chan bool
@@ -38,10 +38,10 @@ func (m *mockEventSink) SendActivity(activity acp.Activity) {
 	m.activities = append(m.activities, activity)
 }
 
-func (m *mockEventSink) SendComplete(exitCode int) {
+func (m *mockEventSink) SendComplete(info CompletionInfo) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.completeCalls = append(m.completeCalls, exitCode)
+	m.completions = append(m.completions, info)
 }
 
 func (m *mockEventSink) RequestPermission(req acp.PermissionRequest) (string, error) {
@@ -126,7 +126,7 @@ exit 0
 	time.Sleep(100 * time.Millisecond)
 
 	sink.mu.Lock()
-	actualCompleteCount := len(sink.completeCalls)
+	actualCompleteCount := len(sink.completions)
 	sink.mu.Unlock()
 
 	if actualCompleteCount != 1 {
@@ -805,7 +805,7 @@ exit 0
 	time.Sleep(100 * time.Millisecond)
 
 	sink.mu.Lock()
-	actualCompleteCount := len(sink.completeCalls)
+	actualCompleteCount := len(sink.completions)
 	sink.mu.Unlock()
 
 	if actualCompleteCount != 1 {

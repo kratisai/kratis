@@ -88,6 +88,22 @@ class WsDtoEnumTest {
     }
 
     @Test
+    void activityKind_wireValueHelpers() {
+        assertThat(ActivityKind.fromWireValue("EXECUTE")).contains(ActivityKind.EXECUTE);
+        assertThat(ActivityKind.fromWireValue(" switch_mode ")).contains(ActivityKind.SWITCH_MODE);
+        assertThat(ActivityKind.fromWireValue("notebook_edit")).isEmpty();
+        assertThat(ActivityKind.fromWireValue(null)).isEmpty();
+
+        assertThat(ActivityKind.effectiveWireValue(null)).isEqualTo("execute");
+        assertThat(ActivityKind.effectiveWireValue("  ")).isEqualTo("execute");
+        assertThat(ActivityKind.effectiveWireValue(" EDIT ")).isEqualTo("edit");
+
+        assertThat(ActivityKind.isCommandLike(null)).isTrue();
+        assertThat(ActivityKind.isCommandLike("execute")).isTrue();
+        assertThat(ActivityKind.isCommandLike("edit")).isFalse();
+    }
+
+    @Test
     void approvalOptionKind_valuesAndLookup() {
         assertThat(ApprovalOptionKind.ALLOW_ONCE.getValue()).isEqualTo("allow_once");
         assertThat(ApprovalOptionKind.ALLOW_ALWAYS.getValue()).isEqualTo("allow_always");

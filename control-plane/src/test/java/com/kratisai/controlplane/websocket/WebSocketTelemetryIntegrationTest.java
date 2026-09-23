@@ -125,7 +125,7 @@ class WebSocketTelemetryIntegrationTest {
                 ProviderType.OPENAI,
                 "test-api-key",
                 null,
-                List.of(new ModelEntryDto("gpt-4o", ModelKind.CHAT)));
+                List.of(new ModelEntryDto("gpt-4o", ModelKind.CHAT, null, null)));
         MvcResult providerResult = mockMvc.perform(post("/api/v1/model-providers/teams/" + teamId)
                         .header("Authorization", "Bearer " + authToken)
                         .contentType("application/json")

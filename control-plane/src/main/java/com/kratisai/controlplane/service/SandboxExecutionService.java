@@ -80,6 +80,7 @@ public class SandboxExecutionService {
     private final EnvironmentRpcClient environmentRpcClient;
     private final LiteLLMProperties litellmProperties;
     private final Executor finalizeExecutor;
+    private final ExecutionActivityPersistenceService activityPersistenceService;
 
     public SandboxExecutionService(
             PlatformTransactionManager transactionManager,
@@ -97,7 +98,8 @@ public class SandboxExecutionService {
             VirtualKeyService virtualKeyService,
             EnvironmentRpcClient environmentRpcClient,
             LiteLLMProperties litellmProperties,
-            @Qualifier("agentTaskExecutor") Executor finalizeExecutor) {
+            @Qualifier("agentTaskExecutor") Executor finalizeExecutor,
+            ExecutionActivityPersistenceService activityPersistenceService) {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.finalizeUsageTransactionTemplate = new TransactionTemplate(transactionManager);
         this.sandboxExecutionRepository = sandboxExecutionRepository;
@@ -115,6 +117,7 @@ public class SandboxExecutionService {
         this.environmentRpcClient = environmentRpcClient;
         this.litellmProperties = litellmProperties;
         this.finalizeExecutor = finalizeExecutor;
+        this.activityPersistenceService = activityPersistenceService;
     }
 
     private void requireTeamMembership(UUID userId, UUID teamId) {
@@ -394,14 +397,26 @@ public class SandboxExecutionService {
      * WebSocket handler thread, so blocking it would deadlock the connection.
      */
     public void dispatchAcpPrompt(SandboxExecution execution) {
-        dispatchAcpPrompt(execution, execution.getTaskPrompt() != null ? execution.getTaskPrompt() : "", true);
+        dispatchAcpPrompt(execution, execution.getTaskPrompt() != null ? execution.getTaskPrompt() : "", true, false);
     }
 
     public void dispatchSteeringPrompt(SandboxExecution execution, String promptText) {
-        dispatchAcpPrompt(execution, promptText, false);
+        dispatchAcpPrompt(execution, promptText, false, false);
     }
 
-    private void dispatchAcpPrompt(SandboxExecution execution, String promptText, boolean failOnError) {
+    /** Prefix prepended to a recovery prompt dispatched after a fatal execution error. */
+    static final String RECOVERY_PROMPT_PREFIX = """
+            ### Session Recovery
+
+            The previous agent session in this workspace ended unexpectedly. A fresh agent \
+            session has been started in the same checkout. Before continuing, inspect the \
+            current state yourself (`git status`, `git diff`, recent files) to determine what \
+            was already completed, then continue with the request below.
+
+            """;
+
+    private void dispatchAcpPrompt(
+            SandboxExecution execution, String promptText, boolean failOnError, boolean relaunch) {
         UUID executionId = execution.getId();
         UUID environmentId = execution.getEnvironment().getId();
         Thread.startVirtualThread(() -> {
@@ -411,7 +426,8 @@ public class SandboxExecutionService {
                         new EnvironmentRpcPayload.AcpPrompt(
                                 promptText != null ? promptText : "",
                                 executionId.toString(),
-                                failOnError ? null : Boolean.TRUE));
+                                failOnError ? null : Boolean.TRUE,
+                                relaunch ? Boolean.TRUE : null));
                 if (result == null || result.status() == PromptStatus.FAILED) {
                     handlePromptDispatchFailure(
                             executionId,
@@ -420,7 +436,10 @@ public class SandboxExecutionService {
                             failOnError);
                 } else {
                     logger.info(
-                            "Sent ACP prompt to execution environment {} for execution {}", environmentId, executionId);
+                            "Sent ACP prompt to execution environment {} for execution {}{}",
+                            environmentId,
+                            executionId,
+                            relaunch ? " (relaunched agent session)" : "");
                 }
             } catch (EnvironmentRpcClient.EnvironmentRpcException e) {
                 handlePromptDispatchFailure(
@@ -472,7 +491,8 @@ public class SandboxExecutionService {
         }
 
         if (execution.getStatus() != SandboxExecutionStatus.RUNNING
-                && execution.getStatus() != SandboxExecutionStatus.IDLE) {
+                && execution.getStatus() != SandboxExecutionStatus.IDLE
+                && execution.getStatus() != SandboxExecutionStatus.FAILED) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST, "Cannot steer execution in state " + execution.getStatus());
         }
@@ -482,6 +502,7 @@ public class SandboxExecutionService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution has no associated environment");
         }
 
+        boolean recovering = execution.getStatus() == SandboxExecutionStatus.FAILED;
         touchExecutionGraph(execution);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         sandboxExecutionRepository.save(execution);
@@ -489,7 +510,14 @@ public class SandboxExecutionService {
                 new ExecutionStatusChangedEvent(chat.getTeam().getId(), chatId, executionId));
 
         String compiledPrompt = compileSteeringPrompt(request);
-        dispatchSteeringPrompt(execution, compiledPrompt);
+        if (recovering) {
+            if (logger.isInfoEnabled()) {
+                logger.info("Recovering failed execution {} with fresh agent session", executionId);
+            }
+            dispatchAcpPrompt(execution, RECOVERY_PROMPT_PREFIX + compiledPrompt, true, true);
+        } else {
+            dispatchSteeringPrompt(execution, compiledPrompt);
+        }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -556,7 +584,7 @@ public class SandboxExecutionService {
                     return;
                 }
                 logger.error(message);
-                markFailedAndPublish(execution);
+                markFailedAndPublish(execution, message);
             });
         } catch (Exception e) {
             logger.error("Failed to mark execution {} failed after prompt dispatch error", executionId, e);
@@ -718,9 +746,10 @@ public class SandboxExecutionService {
             execution.setCompletedAt(Instant.now());
             sandboxExecutionRepository.save(execution);
             cancelPendingPermissions(execution, "execution refused");
+            activityPersistenceService.recordExecutionError(executionId, "agent refused the task", 0);
 
-            eventPublisher.publishEvent(
-                    new SandboxExecutionCompleteEvent(teamId, execution.getId(), 0, execution.getStatus()));
+            eventPublisher.publishEvent(new SandboxExecutionCompleteEvent(
+                    teamId, execution.getId(), 0, execution.getStatus(), "agent refused the task"));
             eventPublisher.publishEvent(
                     new ExecutionStatusChangedEvent(teamId, execution.getChat().getId(), execution.getId()));
 
@@ -775,18 +804,18 @@ public class SandboxExecutionService {
                 SandboxExecution execution =
                         sandboxExecutionRepository.findById(executionId).orElse(null);
                 if (execution == null && fallback != null) {
-                    markFailedAndPublish(fallback);
+                    markFailedAndPublish(fallback, logMessage);
                     return;
                 }
                 if (execution == null) {
                     return;
                 }
-                markFailedAndPublish(execution);
+                markFailedAndPublish(execution, logMessage);
             });
         } catch (Exception nested) {
             if (fallback != null) {
                 try {
-                    transactionTemplate.executeWithoutResult(status -> markFailedAndPublish(fallback));
+                    transactionTemplate.executeWithoutResult(status -> markFailedAndPublish(fallback, logMessage));
                 } catch (Exception ignored) {
                     // best effort for unit tests without a real TM
                 }
@@ -800,13 +829,20 @@ public class SandboxExecutionService {
     }
 
     private void markFailedAndPublish(SandboxExecution execution) {
+        markFailedAndPublish(execution, null);
+    }
+
+    private void markFailedAndPublish(SandboxExecution execution, String reason) {
         execution.setStatus(SandboxExecutionStatus.FAILED);
         execution.setCompletedAt(Instant.now());
         sandboxExecutionRepository.save(execution);
         cancelPendingPermissions(execution, "execution failed");
+        if (reason != null && !reason.isBlank()) {
+            activityPersistenceService.recordExecutionError(execution.getId(), reason, null);
+        }
         UUID teamId = execution.getChat().getTeam().getId();
         eventPublisher.publishEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), -1, execution.getStatus()));
+                new SandboxExecutionCompleteEvent(teamId, execution.getId(), -1, execution.getStatus(), reason));
         eventPublisher.publishEvent(
                 new ExecutionStatusChangedEvent(teamId, execution.getChat().getId(), execution.getId()));
     }

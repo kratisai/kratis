@@ -105,6 +105,7 @@ type AgentSupervisor struct {
 	permCtx    context.Context
 	permLock   sync.Mutex
 	debug      bool
+	lastLaunch *LaunchResult
 
 	promptMu       sync.Mutex
 	queuedPrompts  []queuedPrompt
@@ -122,7 +123,7 @@ type AgentSupervisor struct {
 type EventSink interface {
 	SendOutput(line string, stream string)
 	SendActivity(activity acp.Activity)
-	SendComplete(exitCode int)
+	SendComplete(info CompletionInfo)
 	RequestPermission(req acp.PermissionRequest) (selectedOptionID string, err error)
 	CreateElicitation(req acp.ElicitationRequest) (acp.ElicitationResult, error)
 	PermissionCancelChan() <-chan struct{}
@@ -228,7 +229,8 @@ func (s *AgentSupervisor) watchExit() {
 
 		s.completeOnce.Do(func() {
 			if s.eventSink != nil {
-				s.eventSink.SendComplete(exitCode)
+				reason := fmt.Sprintf("agent process exited unexpectedly (exit code %d)", exitCode)
+				s.eventSink.SendComplete(CompletionInfo{ExitCode: exitCode, Reason: reason})
 			}
 		})
 	}
@@ -291,7 +293,18 @@ func (s *AgentSupervisor) PermCtx() context.Context {
 	return s.permCtx
 }
 
+// Terminate terminates the agent process and reports the terminal env.complete.
 func (s *AgentSupervisor) Terminate() (int, error) {
+	return s.terminate(true)
+}
+
+// TerminateQuietly tears the agent down without reporting env.complete: used
+// when the supervisor is being replaced (session relaunch), not ended.
+func (s *AgentSupervisor) TerminateQuietly() (int, error) {
+	return s.terminate(false)
+}
+
+func (s *AgentSupervisor) terminate(emitComplete bool) (int, error) {
 	s.stateLock.RLock()
 	cmd := s.cmd
 	transport := s.transport
@@ -389,8 +402,9 @@ func (s *AgentSupervisor) Terminate() (int, error) {
 	s.stateLock.Unlock()
 
 	s.completeOnce.Do(func() {
-		if s.eventSink != nil {
-			s.eventSink.SendComplete(exitCode)
+		if s.eventSink != nil && emitComplete {
+			reason := "agent terminated by user request"
+			s.eventSink.SendComplete(CompletionInfo{ExitCode: exitCode, Reason: reason})
 		}
 	})
 
@@ -615,11 +629,42 @@ func (s *AgentSupervisor) Launch(cmd *exec.Cmd) (*LaunchResult, error) {
 	default:
 	}
 
-	return &LaunchResult{
+	result := &LaunchResult{
 		Session:      session,
 		AgentName:    agentName,
 		AgentVersion: agentVersion,
-	}, nil
+	}
+	s.stateLock.Lock()
+	s.lastLaunch = result
+	s.stateLock.Unlock()
+	return result, nil
+}
+
+// LastLaunchResult returns the handshake result of the most recent successful
+// Launch (session id, agent name/version) for this supervisor.
+func (s *AgentSupervisor) LastLaunchResult() LaunchResult {
+	s.stateLock.RLock()
+	defer s.stateLock.RUnlock()
+	if s.lastLaunch != nil {
+		return *s.lastLaunch
+	}
+	return LaunchResult{}
+}
+
+// PID returns the launched agent process id, or 0 before a successful start.
+func (s *AgentSupervisor) PID() int {
+	s.stateLock.RLock()
+	defer s.stateLock.RUnlock()
+	if s.cmd != nil && s.cmd.Process != nil {
+		return s.cmd.Process.Pid
+	}
+	return 0
+}
+
+// CleanupFailedLaunch tears down a half-initialized launch (transport closed,
+// agent terminated) and reports the terminal env.complete.
+func (s *AgentSupervisor) CleanupFailedLaunch(errMsg string) {
+	s.cleanupFailedLaunch(errMsg)
 }
 
 func (s *AgentSupervisor) cleanupFailedLaunch(errMsg string) {
@@ -640,6 +685,9 @@ type queuedPrompt struct {
 type PromptResult struct {
 	StopReason string
 	Error      error
+	// ErrMessage is the ACP session/prompt error message as reported by the
+	// agent, preserved so a fatal abort can be surfaced verbatim.
+	ErrMessage string
 }
 
 // Prompt sends a session/prompt turn. A prompt arriving while another turn is
@@ -789,8 +837,13 @@ func (s *AgentSupervisor) runPromptTurn(session *acp.AcpSession, taskPrompt stri
 		return &PromptResult{Error: fmt.Errorf("ACP session/prompt failed: %w", err)}, nil
 	}
 
-	if resp["error"] != nil {
-		return &PromptResult{Error: fmt.Errorf("ACP session/prompt error: %v", resp["error"])}, nil
+	if errObj, ok := resp["error"].(map[string]interface{}); ok {
+		result := &PromptResult{Error: fmt.Errorf("ACP session/prompt error: %v", errObj)}
+		if msg, ok := errObj["message"].(string); ok {
+			result.ErrMessage = msg
+			result.Error = fmt.Errorf("ACP session/prompt error: %s", msg)
+		}
+		return result, nil
 	}
 
 	var stopReason string

@@ -157,7 +157,8 @@ public class ModelProviderService {
 
     private ModelProviderDto toDto(ModelProvider provider) {
         List<ModelEntryDto> models = provider.getModels().stream()
-                .map(pm -> new ModelEntryDto(pm.getModelName(), pm.getKind(), pm.getBaseModel()))
+                .map(pm -> new ModelEntryDto(
+                        pm.getModelName(), pm.getKind(), pm.getBaseModel(), pm.getContextWindowTokens()))
                 .toList();
         return new ModelProviderDto(
                 provider.getId(),
@@ -194,7 +195,8 @@ public class ModelProviderService {
                 new ModelProvider(request.displayName(), request.providerType(), request.apiKey(), request.baseUrl());
         List<ProviderModel> models = request.models() != null
                 ? new ArrayList<>(request.models().stream()
-                        .map(dto -> new ProviderModel(dto.modelName(), dto.baseModel(), dto.kind()))
+                        .map(dto -> new ProviderModel(
+                                dto.modelName(), dto.baseModel(), dto.kind(), dto.contextWindowTokens()))
                         .toList())
                 : new ArrayList<>();
         provider.setModels(models);
@@ -236,7 +238,8 @@ public class ModelProviderService {
         }
         if (request.models() != null) {
             List<ProviderModel> models = new ArrayList<>(request.models().stream()
-                    .map(dto -> new ProviderModel(dto.modelName(), dto.baseModel(), dto.kind()))
+                    .map(dto ->
+                            new ProviderModel(dto.modelName(), dto.baseModel(), dto.kind(), dto.contextWindowTokens()))
                     .toList());
             provider.setModels(models);
         }
@@ -265,9 +268,7 @@ public class ModelProviderService {
         try {
             List<ModelEntryDto> models =
                     modelDiscoveryService.discoverModels(request.providerType(), request.apiKey(), request.baseUrl());
-            List<String> modelNames =
-                    models.stream().map(ModelEntryDto::modelName).toList();
-            return TestConnectionResponse.success(modelNames);
+            return TestConnectionResponse.success(models);
         } catch (Exception e) {
             return TestConnectionResponse.failure(e.getMessage());
         }

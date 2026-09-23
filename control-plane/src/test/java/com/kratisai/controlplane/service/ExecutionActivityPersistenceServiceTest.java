@@ -25,6 +25,7 @@ import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlRequiredEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -35,6 +36,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class ExecutionActivityPersistenceServiceTest {
@@ -42,12 +44,19 @@ class ExecutionActivityPersistenceServiceTest {
     @Mock
     private SandboxExecutionActivityRepository repository;
 
+    @Mock
+    private SandboxExecutionRepository executionRepository;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private ExecutionActivityPersistenceService service;
 
     @BeforeEach
     void setUp() {
-        service = new ExecutionActivityPersistenceService(repository, objectMapper);
+        service =
+                new ExecutionActivityPersistenceService(repository, executionRepository, objectMapper, eventPublisher);
     }
 
     private static SandboxExecutionActivity row(
@@ -522,10 +531,11 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
-    void onHitlRequired_approvalWithoutMatchingRow_isNoOpAndLogs() {
+    void onHitlRequired_approvalWithoutMatchingRow_insertsPlaceholder() {
         UUID executionId = UUID.randomUUID();
         when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
                 .thenReturn(Optional.empty());
+        when(repository.nextSequence(executionId)).thenReturn(2L);
 
         service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
                 UUID.randomUUID(),
@@ -542,8 +552,38 @@ class ExecutionActivityPersistenceServiceTest {
                         null,
                         null)));
 
-        verify(repository, never()).save(any());
-        verify(repository, never()).nextSequence(any());
+        SandboxExecutionActivity saved = capturedSave();
+        assertInsertedRow(
+                saved, executionId, 2, "tool-call-42", ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
+        assertThat(saved.getDetail()).contains("tool-call-42").contains("approval");
+    }
+
+    @Test
+    void onHitlRequired_approvalWithoutMatchingRowEditKind_insertsEditedPlaceholder() {
+        UUID executionId = UUID.randomUUID();
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
+                .thenReturn(Optional.empty());
+        when(repository.nextSequence(executionId)).thenReturn(2L);
+
+        service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
+                UUID.randomUUID(),
+                new ExecutionHitlRequiredResult(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        "Approve Write file",
+                        "Write file",
+                        null,
+                        "Write",
+                        "edit",
+                        null,
+                        null,
+                        null)));
+
+        SandboxExecutionActivity saved = capturedSave();
+        assertInsertedRow(
+                saved, executionId, 2, "tool-call-42", ActivityType.EDITED, ActivityStatus.PENDING, "Write file");
+        assertThat(saved.getDetail()).contains("tool-call-42").contains("approval");
     }
 
     @Test

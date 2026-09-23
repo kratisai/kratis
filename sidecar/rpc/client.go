@@ -106,6 +106,11 @@ type Client struct {
 	// supervisor manages the ACP agent lifecycle
 	supervisor *runner.AgentSupervisor
 
+	// acpAgentCommand remembers the agent command used for the current ACP
+	// session so env.acp_prompt with relaunch=true can spawn a fresh session
+	// with the same command.
+	acpAgentCommand string
+
 	// terminalManager manages ACP terminal sessions
 	terminalManager *acp.TerminalManager
 
@@ -500,11 +505,15 @@ func convertHitl(hitl *acp.ActivityHitl) *ActivityHitl {
 	return out
 }
 
-func (c *Client) SendComplete(exitCode int) {
+func (c *Client) SendComplete(info runner.CompletionInfo) {
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	c.mu.Unlock()
-	_ = c.sendNotification("env.complete", CompleteParams{ExitCode: exitCode, ExecutionID: execID})
+	_ = c.sendNotification("env.complete", CompleteParams{
+		ExitCode:    info.ExitCode,
+		ExecutionID: execID,
+		Reason:      info.Reason,
+	})
 }
 
 func (c *Client) PermissionCancelChan() <-chan struct{} {

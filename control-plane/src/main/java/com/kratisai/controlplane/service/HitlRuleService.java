@@ -2,8 +2,8 @@ package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.api.restdto.CreateHitlRuleRequest;
 import com.kratisai.controlplane.api.restdto.HitlRuleDto;
+import com.kratisai.controlplane.api.wsdto.ActivityKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
-import com.kratisai.controlplane.api.wsdto.ToolKind;
 import com.kratisai.controlplane.model.HitlRule;
 import com.kratisai.controlplane.model.HitlRuleAction;
 import com.kratisai.controlplane.model.HitlRuleType;
@@ -126,7 +126,7 @@ public class HitlRuleService {
         if (rules == null) {
             return Optional.empty();
         }
-        String effectiveKind = ToolKind.effectiveWireValue(toolKind);
+        String effectiveKind = ActivityKind.effectiveWireValue(toolKind);
         boolean toolKindAllowed = false;
         for (HitlRule rule : rules) {
             if (rule.getRuleType() != HitlRuleType.TOOL_KIND
@@ -140,7 +140,7 @@ public class HitlRuleService {
                 toolKindAllowed = true;
             }
         }
-        if (!ToolKind.isCommandLike(toolKind)) {
+        if (!ActivityKind.isCommandLike(toolKind)) {
             return toolKindAllowed ? Optional.of(HitlResponse.APPROVED) : Optional.empty();
         }
         ParseResult parse = ShellCommandSplitter.parse(command);

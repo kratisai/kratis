@@ -7,6 +7,7 @@ import type {
   ActivityState,
   CommandExecutionActivity,
   ElicitationActivity,
+  ErrorActivity,
   MessageActivity,
   PlanActivity,
   ThinkingActivity,
@@ -23,6 +24,7 @@ import type {
 } from '@/types/websocket-types'
 
 import { useAuthStore } from '@/store/auth-store'
+import { toActivityKind } from '@/types/activity-kind'
 
 let activityIdCounter = 0
 
@@ -74,6 +76,8 @@ export function activityTitle(activity: Activity): string {
       return activity.command
     case 'elicitation':
       return activity.message
+    case 'error':
+      return 'Execution failed'
     case 'message':
       return activity.role === 'user' ? 'User' : 'Agent'
     case 'plan':
@@ -533,6 +537,35 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
           },
         }
       })
+    } else if (activityType === 'ERROR') {
+      set((state) => {
+        const existing = state.activitiesByExecution[executionId] ?? []
+        const idx = existing.findIndex((a) => a.type === 'error')
+        const now = new Date().toISOString()
+        const activity: ErrorActivity = {
+          actionId,
+          collapsed: false,
+          detail,
+          endedAt: now,
+          executionId,
+          exitCode: detail?.exitCode,
+          id: idx >= 0 ? existing[idx].id : nextActivityId(),
+          message: description,
+          startedAt: idx >= 0 ? existing[idx].startedAt : now,
+          state: 'error',
+          type: 'error',
+        }
+        const updated =
+          idx >= 0
+            ? existing.map((a, i) => (i === idx ? activity : a))
+            : appendActivity(existing, activity)
+        return {
+          activitiesByExecution: {
+            ...state.activitiesByExecution,
+            [executionId]: updated,
+          },
+        }
+      })
     } else {
       set((state) => {
         const existing = state.activitiesByExecution[executionId] ?? []
@@ -665,21 +698,23 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
       }
       const idx = findToolRecordIndex(existing, result.hitlId)
       const current = idx >= 0 ? existing[idx] : undefined
-      if (
-        current === undefined ||
-        (current.type !== 'tool_execution' && current.type !== 'command_execution')
-      ) {
-        return state
-      }
-      const updated = [...existing]
-      if (current.type === 'tool_execution') {
+      if (current !== undefined && current.type === 'tool_execution') {
+        const updated = [...existing]
         updated[idx] = {
           ...current,
           ...permission,
           approvalRequired: true,
           state: 'pending_approval' as const,
         }
-      } else {
+        return {
+          activitiesByExecution: {
+            ...state.activitiesByExecution,
+            [result.executionId]: updated,
+          },
+        }
+      }
+      if (current !== undefined && current.type === 'command_execution') {
+        const updated = [...existing]
         updated[idx] = {
           ...current,
           ...permission,
@@ -687,11 +722,81 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
           command: result.command ?? current.command,
           state: 'pending_approval' as const,
         }
+        return {
+          activitiesByExecution: {
+            ...state.activitiesByExecution,
+            [result.executionId]: updated,
+          },
+        }
+      }
+      const isCommandLike = !result.toolKind || result.toolKind === 'execute'
+      if (isCommandLike) {
+        const activity: CommandExecutionActivity = {
+          actionId: result.hitlId,
+          approvalRequired: true,
+          approved: false,
+          collapsed: false,
+          command: result.command ?? result.title ?? result.message,
+          detail: {
+            diff: result.diff,
+            hitl: {
+              command: result.command,
+              commandSegments: result.commandSegments,
+              hitlId: result.hitlId,
+              kind: 'approval',
+              message: result.message,
+              options: result.options,
+              title: result.title,
+              toolKind: result.toolKind,
+            },
+            title: result.title,
+          },
+          executionId: result.executionId,
+          id: nextActivityId(),
+          startedAt: new Date().toISOString(),
+          state: 'pending_approval',
+          type: 'command_execution',
+        }
+        return {
+          activitiesByExecution: {
+            ...state.activitiesByExecution,
+            [result.executionId]: appendActivity(existing, activity),
+          },
+        }
+      }
+      const activity: ToolExecutionActivity = {
+        actionId: result.hitlId,
+        approvalRequired: true,
+        approved: false,
+        collapsed: false,
+        detail: {
+          diff: result.diff,
+          hitl: {
+            command: result.command,
+            commandSegments: result.commandSegments,
+            hitlId: result.hitlId,
+            kind: 'approval',
+            message: result.message,
+            options: result.options,
+            title: result.title,
+            toolKind: result.toolKind,
+          },
+          kind: toActivityKind(result.toolKind),
+          title: result.title ?? result.command ?? result.message,
+        },
+        executionId: result.executionId,
+        id: nextActivityId(),
+        startedAt: new Date().toISOString(),
+        state: 'pending_approval',
+        taskId: '',
+        thought: '',
+        toolName: result.title ?? result.command ?? result.message,
+        type: 'tool_execution',
       }
       return {
         activitiesByExecution: {
           ...state.activitiesByExecution,
-          [result.executionId]: updated,
+          [result.executionId]: appendActivity(existing, activity),
         },
       }
     })

@@ -130,7 +130,7 @@ class ModelDiscoveryIntegrationTest {
     @Test
     void shouldDiscoverGoogleGenAiModels() {
         String responseBody =
-                "{\"models\": [{\"name\": \"models/gemini-2.0-flash\"}, {\"name\": \"models/gemini-2.0-flash-lite\"}, {\"name\": \"models/gemini-1.5-pro\"}]}";
+                "{\"models\": [{\"name\": \"models/gemini-2.0-flash\", \"inputTokenLimit\": 1048576}, {\"name\": \"models/gemini-2.0-flash-lite\"}, {\"name\": \"models/gemini-1.5-pro\"}]}";
         server.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models?key=dummy-key"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(responseBody, MediaType.APPLICATION_JSON));
@@ -140,6 +140,7 @@ class ModelDiscoveryIntegrationTest {
         assertThat(models)
                 .extracting(ModelEntryDto::modelName)
                 .containsExactly("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro");
+        assertThat(models).extracting(ModelEntryDto::contextWindowTokens).containsExactly(1048576L, null, null);
         server.verify();
     }
 

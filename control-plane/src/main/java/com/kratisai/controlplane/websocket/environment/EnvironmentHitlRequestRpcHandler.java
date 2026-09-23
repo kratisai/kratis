@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.websocket.environment;
 
+import com.kratisai.controlplane.api.wsdto.ActivityKind;
 import com.kratisai.controlplane.api.wsdto.ApprovalOptionKind;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.CommandSegment;
@@ -11,7 +12,6 @@ import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
-import com.kratisai.controlplane.api.wsdto.ToolKind;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.HitlRule;
 import com.kratisai.controlplane.model.HitlRuleType;
@@ -207,7 +207,7 @@ public class EnvironmentHitlRequestRpcHandler
 
     /** Unknown tool kinds get no segments, so nothing unrememberable can be persisted. */
     private static List<CommandSegment> approvalSegments(String command, String toolKind, List<HitlRule> rules) {
-        if (ToolKind.isCommandLike(toolKind)) {
+        if (ActivityKind.isCommandLike(toolKind)) {
             var parse = ShellCommandSplitter.parse(command);
             return parse.segments().stream()
                     .map(segment -> {
@@ -220,8 +220,8 @@ public class EnvironmentHitlRequestRpcHandler
                     })
                     .toList();
         }
-        String kind = ToolKind.effectiveWireValue(toolKind);
-        if (ToolKind.fromWireValue(kind).isEmpty()) {
+        String kind = ActivityKind.effectiveWireValue(toolKind);
+        if (ActivityKind.fromWireValue(kind).isEmpty()) {
             return List.of();
         }
         return List.of(new CommandSegment(kind, kind, HitlRuleType.TOOL_KIND));

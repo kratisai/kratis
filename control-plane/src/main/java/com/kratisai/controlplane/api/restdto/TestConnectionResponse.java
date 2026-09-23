@@ -11,10 +11,12 @@ public record TestConnectionResponse(
         @Schema(description = "Error message if the connection test failed", example = "Invalid API key")
         String error,
 
-        @Schema(description = "List of available models discovered from the provider")
-        List<String> models) {
+        @Schema(
+                description =
+                        "Models discovered from the provider, including kind and context window when the provider reports one")
+        List<ModelEntryDto> models) {
 
-    public static TestConnectionResponse success(List<String> models) {
+    public static TestConnectionResponse success(List<ModelEntryDto> models) {
         return new TestConnectionResponse(true, null, models);
     }
 

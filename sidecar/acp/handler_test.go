@@ -2038,6 +2038,9 @@ func TestHandleFsWriteTextFile_ApprovedWritesFile(t *testing.T) {
 	if req.command != path || req.actionID != "" {
 		t.Errorf("expected command=%q actionID='', got %+v", path, req)
 	}
+	if len(sink.activities) != 0 {
+		t.Errorf("expected no tool activity without a live tool call, got %+v", sink.activities)
+	}
 	if req.diff == nil || req.diff.OldText != "old content" || req.diff.NewText != "new content" {
 		t.Errorf("expected diff with old/new content, got %+v", req.diff)
 	}
@@ -2098,5 +2101,44 @@ func TestHandleFsWriteTextFile_CancelledReturnsCancelledError(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no response written")
+	}
+}
+
+func TestHandleFsWriteTextFile_CorrelatesLiveToolCallByPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.txt")
+	if err := os.WriteFile(path, []byte("old content"), 0600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	sink := &mockEventSink{approveOnce: true, approveResult: "allow"}
+	h := NewHandler(sink, nil, "")
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "call-edit-1",
+			"title":         "edit",
+			"kind":          "edit",
+			"locations":     []interface{}{map[string]interface{}{"path": path}},
+		},
+	})
+	transport, _ := fsWriteTestTransport(t)
+
+	runFsWrite(t, h, transport, map[string]interface{}{"path": path, "content": "new content"})
+
+	if len(sink.permRequests) != 1 {
+		t.Fatalf("expected one permission request, got %+v", sink.permRequests)
+	}
+	if got := sink.permRequests[0].actionID; got != "call-edit-1" {
+		t.Errorf("expected correlated actionID 'call-edit-1', got %q", got)
+	}
+	pending := false
+	for _, activity := range sink.activities {
+		if activity.actionID == "call-edit-1" && activity.status == string(ActivityPending) {
+			pending = true
+		}
+	}
+	if !pending {
+		t.Errorf("expected pending tool activity for call-edit-1, got %+v", sink.activities)
 	}
 }

@@ -10,7 +10,8 @@ public enum ActivityType {
     COMMAND("COMMAND"),
     MESSAGE("MESSAGE"),
     ELICITATION("ELICITATION"),
-    PLAN("PLAN");
+    PLAN("PLAN"),
+    ERROR("ERROR");
 
     private final String value;
 

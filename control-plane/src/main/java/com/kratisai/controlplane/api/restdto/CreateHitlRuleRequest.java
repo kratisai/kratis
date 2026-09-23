@@ -1,7 +1,7 @@
 package com.kratisai.controlplane.api.restdto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.kratisai.controlplane.api.wsdto.ToolKind;
+import com.kratisai.controlplane.api.wsdto.ActivityKind;
 import com.kratisai.controlplane.model.HitlRuleAction;
 import com.kratisai.controlplane.model.HitlRuleType;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -41,9 +41,9 @@ public record CreateHitlRuleRequest(
         }
         if (ruleType == HitlRuleType.TOOL_KIND) {
             String requested = commandRoot;
-            commandRoot = ToolKind.fromWireValue(requested)
+            commandRoot = ActivityKind.fromWireValue(requested)
                     .orElseThrow(() -> new IllegalArgumentException("Unknown tool kind: " + requested))
-                    .wireValue();
+                    .getValue();
         }
     }
 }

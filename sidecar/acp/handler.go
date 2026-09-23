@@ -186,7 +186,7 @@ type Handler struct {
 	inferredSeq        int
 	toolCallSeq        uint64
 	openChunkRun       *chunkRun
-	chunkRunCounts map[string]int
+	chunkRunCounts     map[string]int
 }
 
 func NewHandler(sink EventSink, terminals *TerminalManager, workspace string) *Handler {
@@ -632,6 +632,112 @@ func (h *Handler) findToolCallByCommand(command string) string {
 	return best
 }
 
+// findToolCallByPath correlates an fs/write_text_file path with the live tool
+// call that triggered it. fs/write_text_file carries no toolCallId per spec
+// (Goose bridges developer edit/write through the client), so the most
+// recently recorded live match wins.
+func (h *Handler) findToolCallByPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	target := normalizeFsPath(h.workspace, path)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var best string
+	var bestSeq uint64
+	matches := 0
+	for id, info := range h.toolCalls {
+		if info.Status == ActivityCompleted || info.Status == ActivityFailed {
+			continue
+		}
+		matched := target != "" && normalizeFsPath(h.workspace, info.FilePath) == target
+		if !matched {
+			for _, loc := range info.Locations {
+				if target != "" && normalizeFsPath(h.workspace, loc.Path) == target {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			if cmd := info.Command; cmd != "" && target != "" && (cmd == target || strings.Contains(cmd, target)) {
+				matched = true
+			}
+		}
+		if !matched && matchesRawPath(info, target, path) {
+			matched = true
+		}
+		if !matched {
+			continue
+		}
+		matches++
+		if best == "" || info.RecordedSeq > bestSeq {
+			best, bestSeq = id, info.RecordedSeq
+		}
+	}
+	if matches > 1 {
+		h.warnf("[WARN] Ambiguous fs/write correlation: path=%q matches %d live tool calls — selected %q (most recently recorded)",
+			path, matches, best)
+	}
+	return best
+}
+
+// normalizeFsPath resolves agent and fs paths to a comparable absolute form so
+// relative tool-call paths match absolute fs/write_text_file paths.
+func normalizeFsPath(workspace string, path string) string {
+	if path == "" {
+		return ""
+	}
+	cleaned := path
+	if workspace != "" && !isAbsPath(cleaned) {
+		cleaned = workspace + "/" + cleaned
+	}
+	parts := strings.Split(cleaned, "/")
+	var out []string
+	for _, part := range parts {
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			if len(out) > 0 {
+				out = out[:len(out)-1]
+			}
+		default:
+			out = append(out, part)
+		}
+	}
+	return "/" + strings.Join(out, "/")
+}
+
+func isAbsPath(path string) bool {
+	return strings.HasPrefix(path, "/")
+}
+
+// matchesRawPath falls back to suffix matching for tool calls that never
+// announced a path (e.g. Goose content-only updates before fs/write).
+func matchesRawPath(info *ToolCallInfo, target string, rawPath string) bool {
+	if target == "" || info == nil {
+		return false
+	}
+	raw := info.RawInputMap
+	if len(raw) == 0 {
+		return false
+	}
+	for _, key := range []string{"path", "file_path", "filePath", "file", "filename"} {
+		if value, ok := raw[key].(string); ok {
+			if candidate := normalizeFsPath("", value); candidate != "" && candidate == target {
+				return true
+			}
+		}
+	}
+	for _, value := range []string{info.Title, info.Command} {
+		if value != "" && rawPath != "" && strings.Contains(value, rawPath) {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *Handler) HandleTerminalOutput(transport *AcpTransport, params map[string]interface{}, id interface{}) {
 	terminalID, _ := params["terminalId"].(string)
 	if terminalID == "" {
@@ -838,11 +944,22 @@ func (h *Handler) HandleFsWriteTextFile(transport *AcpTransport, params map[stri
 		diff.OldText = string(old)
 	}
 
-	// No toolCallId and no agent option set; synthesise the default pair for a uniform shape.
+	// fs/write_text_file carries no toolCallId per ACP spec (Goose bridges
+	// developer edit/write through the client). Correlate with the live tool
+	// call for this path so the HITL approval attaches to the tool activity
+	// instead of synthesising an orphan hitlId downstream.
+	toolCallID := h.findToolCallByPath(path)
+	info := h.beginPermission(toolCallID, path, path, "write")
+	if info != nil {
+		h.emitToolActivity(info, ActivityPending)
+	}
+
+	// No agent option set; synthesise the default pair for a uniform shape.
 	req := PermissionRequest{
-		Command: path,
-		Title:   path,
-		Kind:    "write",
+		Command:  path,
+		ActionID: toolCallID,
+		Title:    path,
+		Kind:     "write",
 		Options: []PermissionOption{
 			{OptionID: "allow", Name: "Allow", Kind: string(ApprovalAllowOnce)},
 			{OptionID: "reject", Name: "Reject", Kind: string(ApprovalRejectOnce)},
@@ -852,11 +969,19 @@ func (h *Handler) HandleFsWriteTextFile(transport *AcpTransport, params map[stri
 	selectedOptionID, err := h.sink.RequestPermission(req)
 	h.debugf("[ACP][FS] HITL permission result: selectedOptionID=%q, err=%v", selectedOptionID, err)
 
-	if err != nil && strings.Contains(err.Error(), "cancelled") {
+	cancelled := err != nil && strings.Contains(err.Error(), "cancelled")
+	selected := err == nil && selectedOptionID != ""
+	optionKind := ApprovalOptionKind("")
+	if selected {
+		optionKind = optionKindForOptions(req.Options, selectedOptionID)
+	}
+	h.resolvePermission(toolCallID, selected && isAllowKind(optionKind), selectedOptionID, optionKind, cancelled && !selected)
+
+	if cancelled && !selected {
 		h.sendErrorResponse(transport, id, -32800, "Cancelled", "Write cancelled before a decision")
 		return
 	}
-	if selectedOptionID == "" || err != nil {
+	if !selected {
 		h.sendErrorResponse(transport, id, -32000, "Write denied", "The user denied permission to write "+path)
 		return
 	}

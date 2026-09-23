@@ -86,6 +86,86 @@ describe('activity-store', () => {
     useActivityStore.setState({ activitiesByExecution: {} })
   })
 
+  describe('handleActivityEvent terminal errors', () => {
+    it('creates an error activity carrying the agent message and exit code', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'execution-error',
+          activityType: 'ERROR',
+          description:
+            'litellm.ContextWindowExceededError: The input token count exceeds the maximum number of tokens allowed 1048576',
+          detail: { exitCode: 1 },
+          status: 'failed',
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
+      expect(activities[0]).toMatchObject({
+        actionId: 'execution-error',
+        exitCode: 1,
+        state: 'error',
+        type: 'error',
+      })
+      expect((activities[0] as { message: string }).message).toContain('ContextWindowExceededError')
+      expect(activityTitle(activities[0])).toBe('Execution failed')
+    })
+
+    it('merges a late ERROR event into the existing error record instead of duplicating', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'execution-error',
+          activityType: 'ERROR',
+          description: 'first failure',
+          status: 'failed',
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'execution-error',
+          activityType: 'ERROR',
+          description: 'second, richer reason',
+          detail: { exitCode: 1 },
+          status: 'failed',
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
+      expect(activities[0]).toMatchObject({
+        exitCode: 1,
+        type: 'error',
+      })
+      expect((activities[0] as { message: string }).message).toBe('second, richer reason')
+    })
+
+    it('coexists with activities of other types', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'cmd-1',
+          activityType: 'COMMAND',
+          description: 'ls',
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'execution-error',
+          activityType: 'ERROR',
+          description: 'agent aborted',
+          detail: { exitCode: 1 },
+          status: 'failed',
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(2)
+      expect(activities.map((a) => a.type)).toEqual(['command_execution', 'error'])
+    })
+  })
+
   describe('handleActivityEvent plan updates', () => {
     it('appends a new plan activity per update, expanded by default', () => {
       const store = useActivityStore.getState()
@@ -405,7 +485,7 @@ describe('activity-store', () => {
       })
     })
 
-    it('keeps the merged record pending until the resolution event marks it active', () => {
+    it('creates a placeholder when the approval arrives before the activity', () => {
       const store = useActivityStore.getState()
       store.handleHitlRequired(hitlApprovalRequired({ hitlId: 'tc-6' }))
       store.handleActivityEvent(
@@ -427,7 +507,58 @@ describe('activity-store', () => {
       })
     })
 
-    it('ignores an approval whose hitlId matches no record', () => {
+    it('creates a tool placeholder for an edit approval with no activity row', () => {
+      const store = useActivityStore.getState()
+      store.handleHitlRequired(
+        hitlApprovalRequired({
+          command: '/kratis/workspace/web/src/router.tsx',
+          hitlId: 'tc-edit-1',
+          message: 'Allow edit /kratis/workspace/web/src/router.tsx?',
+          title: '/kratis/workspace/web/src/router.tsx',
+          toolKind: 'edit',
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
+      expect(activities[0]).toMatchObject({
+        actionId: 'tc-edit-1',
+        approvalRequired: true,
+        state: 'pending_approval',
+        type: 'tool_execution',
+      })
+    })
+
+    it('carries the write toolKind onto the placeholder detail', () => {
+      const store = useActivityStore.getState()
+      store.handleHitlRequired(
+        hitlApprovalRequired({
+          hitlId: 'tc-write-1',
+          message: 'Allow write /kratis/workspace/main.go?',
+          title: '/kratis/workspace/main.go',
+          toolKind: 'write',
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
+      expect(activities[0]).toMatchObject({
+        detail: { kind: 'write' },
+        type: 'tool_execution',
+      })
+    })
+
+    it('degrades an unknown toolKind to other', () => {
+      const store = useActivityStore.getState()
+      store.handleHitlRequired(
+        hitlApprovalRequired({ hitlId: 'tc-unknown-1', toolKind: 'notebook_edit' }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities[0]).toMatchObject({ detail: { kind: 'other' } })
+    })
+
+    it('creates a placeholder for an approval whose hitlId matches no record yet', () => {
       const store = useActivityStore.getState()
       store.handleHitlRequired(hitlApprovalRequired({ hitlId: 'other' }))
       store.handleActivityEvent(
@@ -439,8 +570,9 @@ describe('activity-store', () => {
       )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities).toHaveLength(1)
-      expect(activities[0]).toMatchObject({ actionId: 'tc-7', state: 'active' })
+      expect(activities).toHaveLength(2)
+      expect(activities[0]).toMatchObject({ actionId: 'other', state: 'pending_approval' })
+      expect(activities[1]).toMatchObject({ actionId: 'tc-7', state: 'active' })
     })
 
     it('stores the offered permission options on the pending activity', () => {

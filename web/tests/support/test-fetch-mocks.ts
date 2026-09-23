@@ -2,7 +2,7 @@ import { afterEach, beforeEach, vi } from 'vitest'
 
 import type { ChatDto } from '@/lib/chat-api'
 import type { ExecutionEnvironmentDto } from '@/lib/environment-api'
-import type { AuthTokensResponse, RepositoryDto, TeamDto } from '@/types/auth-types'
+import type { AuthTokensResponse, ModelEntryDto, RepositoryDto, TeamDto } from '@/types/auth-types'
 
 import { useWebSocketStore } from '@/store/websocket-store'
 
@@ -234,7 +234,7 @@ export function mockDeleteModelProvider(providerId: string) {
   })
 }
 
-export function mockDiscoverModels(models: Array<{ kind: string; modelName: string }> = []) {
+export function mockDiscoverModels(models: ModelEntryDto[] = []) {
   addFetchHandler((url) => {
     const match = url.match(/\/api\/v1\/model-providers\/[^/]+\/discover-models$/)
     if (match) {
@@ -592,8 +592,11 @@ export function mockTerminateEnvironment(envId: string) {
 }
 
 export function mockTestConnection(
-  result: { error?: string; models?: string[]; success: boolean } = {
-    models: ['gpt-4', 'gpt-3.5-turbo'],
+  result: { error?: string; models?: ModelEntryDto[]; success: boolean } = {
+    models: [
+      { kind: 'CHAT', modelName: 'gpt-4' },
+      { kind: 'CHAT', modelName: 'gpt-3.5-turbo' },
+    ],
     success: true,
   },
   shouldFail = false,

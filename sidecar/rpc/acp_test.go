@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1242,10 +1243,13 @@ sleep 30
 	// Verify env.complete notification WAS sent with non-zero exit code on failure.
 	// This ensures the control-plane is notified that the execution failed
 	// so it doesn't hang forever waiting for a completion signal.
-	if !gotComplete.Load() {
+	switch {
+	case !gotComplete.Load():
 		t.Error("expected env.complete notification on failure")
-	} else if completeMsg.ExitCode == 0 {
+	case completeMsg.ExitCode == 0:
 		t.Error("expected non-zero exit code in env.complete notification")
+	case completeMsg.Reason == "":
+		t.Error("expected the agent's error message as the terminal reason")
 	}
 
 	c.Close()
@@ -3561,6 +3565,215 @@ sleep 10
 	}
 	if !foundSteeringActivity {
 		t.Fatalf("expected steering activity with role 'user' and description prefix 'User provided steering guidance:', got activities: %+v", acts)
+	}
+
+	c.Close()
+}
+
+// TestExecuteAcpPrompt_RelaunchSpawnsFreshSession verifies that a prompt with
+// relaunch=true tears down the existing agent (without emitting env.complete
+// for the teardown) and spawns a fresh session before sending the prompt.
+func TestExecuteAcpPrompt_RelaunchSpawnsFreshSession(t *testing.T) {
+	tempDir := t.TempDir()
+	pidsFile := filepath.Join(tempDir, "pids.txt")
+	scriptPath := filepath.Join(tempDir, "mock_agent.sh")
+
+	scriptContent := fmt.Sprintf(`#!/bin/bash
+echo "$$" >> %q
+read -r line
+echo '{"jsonrpc":"2.0","result":{"protocolVersion":1,"serverInfo":{"name":"mock-agent","version":"1.0.0"}},"id":1}'
+read -r line
+echo "{\"jsonrpc\":\"2.0\",\"result\":{\"sessionId\":\"session-$$\"},\"id\":2}"
+# Answer each prompt turn with end_turn, echoing the request id back.
+while read -r line; do
+  id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  echo "{\"jsonrpc\":\"2.0\",\"result\":{\"stopReason\":\"end_turn\"},\"id\":$id}"
+done
+`, pidsFile)
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil { //nolint:gosec // G306: test script must remain executable
+		t.Fatalf("failed to write mock agent script: %v", err)
+	}
+
+	var (
+		mu           sync.Mutex
+		sessionIds   []string
+		responseMsgs [][]byte
+		launchDone   = make(chan struct{})
+		firstDone    = make(chan struct{})
+		relaunchDone = make(chan struct{})
+	)
+
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req JsonRpcRequest
+			if json.Unmarshal(msg, &req) != nil {
+				continue
+			}
+
+			if req.Method == "env.acp_initialized" {
+				var p AcpInitializedParams
+				b, _ := json.Marshal(req.Params)
+				_ = json.Unmarshal(b, &p)
+				mu.Lock()
+				sessionIds = append(sessionIds, p.SessionID)
+				mu.Unlock()
+				continue
+			}
+
+			if req.ID != nil {
+				idNum := uint64(req.ID.(float64))
+				switch idNum {
+				case 3101:
+					close(launchDone)
+				case 3102:
+					mu.Lock()
+					responseMsgs = append(responseMsgs, msg)
+					mu.Unlock()
+					close(firstDone)
+				case 3103:
+					mu.Lock()
+					responseMsgs = append(responseMsgs, msg)
+					mu.Unlock()
+					close(relaunchDone)
+				}
+			}
+		}
+	})
+
+	c := connectClient(t, wsURL(srv), "tok")
+	c.workspace = tempDir
+	errChan := make(chan error, 1)
+	go c.readLoop(errChan)
+
+	go c.ExecuteLaunchAcpAgent(LaunchAcpAgentParams{
+		AgentCommand: "/bin/bash " + scriptPath,
+		ExecutionID:  "exec-relaunch-test-1",
+	}, uint64(3101))
+	select {
+	case <-launchDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Timeout waiting for agent launch")
+	}
+
+	// First (normal) prompt turn against the initial session.
+	go c.ExecuteAcpPrompt(AcpPromptParams{
+		TaskPrompt:  "First turn",
+		ExecutionID: "exec-relaunch-test-1",
+	}, uint64(3102))
+	select {
+	case <-firstDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for first prompt response")
+	}
+
+	// Relaunching prompt: fresh session, same workspace and agent command.
+	go c.ExecuteAcpPrompt(AcpPromptParams{
+		TaskPrompt:  "Continue after recovery",
+		ExecutionID: "exec-relaunch-test-1",
+		Relaunch:    true,
+	}, uint64(3103))
+	select {
+	case <-relaunchDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for relaunch prompt response")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sessionIds) != 2 {
+		t.Fatalf("expected 2 acp_initialized notifications (one per fresh session), got %d", len(sessionIds))
+	}
+	if sessionIds[0] == sessionIds[1] {
+		t.Errorf("expected a fresh session after relaunch, got same sessionId %q twice", sessionIds[0])
+	}
+
+	pidsRaw, err := os.ReadFile(pidsFile)
+	if err != nil {
+		t.Fatalf("failed to read pids file: %v", err)
+	}
+	pidLines := strings.Split(strings.TrimSpace(string(pidsRaw)), "\n")
+	if len(pidLines) != 2 || pidLines[0] == pidLines[1] {
+		t.Errorf("expected two distinct agent processes, got pids: %v", pidLines)
+	}
+
+	// Both prompts must have completed successfully.
+	for i, respBytes := range responseMsgs {
+		var resp JsonRpcResponse
+		if err := json.Unmarshal(respBytes, &resp); err != nil {
+			t.Fatalf("failed to parse response %d: %v", i, err)
+		}
+		var result AcpPromptResult
+		if err := json.Unmarshal(resp.Result, &result); err != nil {
+			t.Fatalf("failed to parse result %d: %v", i, err)
+		}
+		if result.Status != PromptCompleted {
+			t.Errorf("expected prompt %d to complete, got status %q error %q", i, result.Status, result.Error)
+		}
+	}
+
+	c.Close()
+}
+
+// TestExecuteAcpPrompt_RelaunchWithoutRecordedCommand verifies the failure
+// path when relaunch=true is requested but no agent command was ever recorded.
+func TestExecuteAcpPrompt_RelaunchWithoutRecordedCommand(t *testing.T) {
+	responseChan := make(chan []byte, 1)
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req JsonRpcRequest
+			if json.Unmarshal(msg, &req) != nil {
+				continue
+			}
+			if req.ID != nil && req.Method == "" {
+				select {
+				case responseChan <- msg:
+				default:
+				}
+			}
+		}
+	})
+
+	c := connectClient(t, wsURL(srv), "tok")
+	c.workspace = t.TempDir()
+	errChan := make(chan error, 1)
+	go c.readLoop(errChan)
+
+	go c.ExecuteAcpPrompt(AcpPromptParams{
+		TaskPrompt:  "Should fail",
+		ExecutionID: "exec-relaunch-test-2",
+		Relaunch:    true,
+	}, uint64(3102))
+
+	var respBytes []byte
+	select {
+	case respBytes = <-responseChan:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Timeout waiting for relaunch failure response")
+	}
+
+	var resp JsonRpcResponse
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	var result AcpPromptResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("failed to parse result: %v", err)
+	}
+	if result.Status != PromptFailed {
+		t.Errorf("expected status 'failed', got '%s'", result.Status)
+	}
+	if !strings.Contains(result.Error, "relaunch failed") {
+		t.Errorf("expected relaunch failure error, got: %s", result.Error)
 	}
 
 	c.Close()

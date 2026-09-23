@@ -81,7 +81,7 @@ public enum AgentHarness {
                     // Provide a dummy project to bypass GCP project validation
                     "export GOOGLE_CLOUD_PROJECT=kratis-test",
                     "mkdir -p $HOME/.gemini",
-                    "echo '{\"security\":{\"auth\":{\"selectedType\":\"gemini-api-key\"}}, \"apiKey\":\"${VIRTUAL_KEY}\", \"baseUrl\":\"${LLM_BASE_URL}\"}' > $HOME/.gemini/settings.json",
+                    "echo '{\"security\":{\"auth\":{\"selectedType\":\"gemini-api-key\"}}, \"apiKey\":\"${VIRTUAL_KEY}\", \"baseUrl\":\"${LLM_BASE_URL}\", \"model\":{\"compressionThreshold\":0.4}, \"experimental\":{\"contextManagement\":true}, \"contextManagement\":{\"historyWindow\":{\"maxTokens\":${LLM_HISTORY_MAX_TOKENS},\"retainedTokens\":40000}, \"tools\":{\"distillation\":{\"maxOutputTokens\":8000,\"summarizationThresholdTokens\":20000}}}}' > $HOME/.gemini/settings.json",
                     "npm install --prefix $HOME/gemini @google/gemini-cli"),
             "gemini --acp"),
     GOOSE(
@@ -154,8 +154,9 @@ public enum AgentHarness {
                     // 1. auth.json - API key for openai provider
                     "echo '{\"openai\": {\"type\": \"api_key\", \"key\": \"${VIRTUAL_KEY}\"}}' > $HOME/.pi/auth.json",
                     "cp $HOME/.pi/auth.json $HOME/.pi/agent/auth.json",
-                    // 2. models.json - openai provider with LLM_BASE_URL and LLM_MODEL
-                    "echo '{\"providers\": {\"openai\": {\"baseUrl\": \"${LLM_BASE_URL}/v1\", \"api\": \"openai-completions\", \"models\": [{\"id\": \"${LLM_MODEL}\", \"name\": \"${LLM_MODEL}\", \"provider\": \"openai\", \"api\": \"openai-completions\", \"baseUrl\": \"${LLM_BASE_URL}/v1\", \"contextWindow\": 128000, \"maxTokens\": 4096}]}}}' > $HOME/.pi/models.json",
+                    // 2. models.json - openai provider with LLM_BASE_URL, LLM_MODEL and the
+                    //    model's declared context window (fallback default when unset)
+                    "echo '{\"providers\": {\"openai\": {\"baseUrl\": \"${LLM_BASE_URL}/v1\", \"api\": \"openai-completions\", \"models\": [{\"id\": \"${LLM_MODEL}\", \"name\": \"${LLM_MODEL}\", \"provider\": \"openai\", \"api\": \"openai-completions\", \"baseUrl\": \"${LLM_BASE_URL}/v1\", \"contextWindow\": ${LLM_CONTEXT_WINDOW}, \"maxTokens\": 4096}]}}}' > $HOME/.pi/models.json",
                     "cp $HOME/.pi/models.json $HOME/.pi/agent/models.json",
                     // 3. settings.json - default model and provider
                     "echo '{\"defaultModel\": \"${LLM_MODEL}\", \"defaultProvider\": \"openai\"}' > $HOME/.pi/settings.json",

@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.complete",
+  "params": {
+    "exitCode": 1,
+    "executionId": "123e4567-e89b-12d3-a456-426614174000",
+    "reason": "litellm.ContextWindowExceededError: The input token count exceeds the maximum number of tokens allowed 1048576"
+  }
+}

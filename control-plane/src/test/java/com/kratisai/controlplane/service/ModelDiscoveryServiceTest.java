@@ -515,6 +515,79 @@ class ModelDiscoveryServiceTest {
     }
 
     @Test
+    void discoverModels_google_shouldExtractInputTokenLimitAsContextWindow() {
+        String response = """
+                {"models":[{"name":"models/gemini-2.0-flash","inputTokenLimit":1048576,"outputTokenLimit":8192}]}
+                """;
+        when(modelDiscoveryClient.getModels(any())).thenReturn(response);
+
+        List<ModelEntryDto> models = service.discoverModels(ProviderType.GOOGLE, "test-key", null);
+
+        assertThat(models).extracting(ModelEntryDto::contextWindowTokens).containsExactly(1048576L);
+    }
+
+    @Test
+    void discoverModels_groq_shouldExtractContextWindow() {
+        String response = """
+                {"data":[{"id":"llama-3.1-70b","context_window":131072}]}
+                """;
+        when(modelDiscoveryClient.getModels(any(), any())).thenReturn(response);
+
+        List<ModelEntryDto> models = service.discoverModels(ProviderType.GROQ, "test-key", null);
+
+        assertThat(models).extracting(ModelEntryDto::contextWindowTokens).containsExactly(131072L);
+    }
+
+    @Test
+    void discoverModels_mistral_shouldExtractMaxContextLength() {
+        String response = """
+                {"data":[{"id":"mistral-large","max_context_length":128000}]}
+                """;
+        when(modelDiscoveryClient.getModels(any(), any())).thenReturn(response);
+
+        List<ModelEntryDto> models = service.discoverModels(ProviderType.MISTRAL, "test-key", null);
+
+        assertThat(models).extracting(ModelEntryDto::contextWindowTokens).containsExactly(128000L);
+    }
+
+    @Test
+    void discoverModels_openAiCompatible_shouldExtractMaxModelLen() {
+        String response = """
+                {"data":[{"id":"local-llama","max_model_len":32768}]}
+                """;
+        when(modelDiscoveryClient.getModels(any(), any())).thenReturn(response);
+
+        List<ModelEntryDto> models = service.discoverModels(ProviderType.OTHER, "test-key", "https://vllm.internal/v1");
+
+        assertThat(models).extracting(ModelEntryDto::contextWindowTokens).containsExactly(32768L);
+    }
+
+    @Test
+    void discoverModels_openAiCompatible_shouldExtractLiteLlmMaxInputTokens() {
+        String response = """
+                {"data":[{"id":"routed-model","max_input_tokens":"200000"}]}
+                """;
+        when(modelDiscoveryClient.getModels(any(), any())).thenReturn(response);
+
+        List<ModelEntryDto> models =
+                service.discoverModels(ProviderType.OTHER, "test-key", "https://gateway.internal/v1");
+
+        assertThat(models).extracting(ModelEntryDto::contextWindowTokens).containsExactly(200000L);
+    }
+
+    @Test
+    void discoverModels_withoutContextWindowField_shouldLeaveContextWindowNull() {
+        String response = """
+                {"data":[{"id":"gpt-4o"},{"id":"gpt-4o-mini","context_window":0}]}
+                """;
+        when(modelDiscoveryClient.getModels(any(), any())).thenReturn(response);
+
+        List<ModelEntryDto> models = service.discoverModels(ProviderType.OPENAI, "test-key", null);
+
+        assertThat(models).extracting(ModelEntryDto::contextWindowTokens).containsOnlyNulls();
+    }
+
+    @Test
     void looksLikeEmbeddingModel_shouldDetectEmbeddingPatterns() {
         assertThat(service.looksLikeEmbeddingModel("text-embedding-3-small")).isTrue();
         assertThat(service.looksLikeEmbeddingModel("bge-m3")).isTrue();

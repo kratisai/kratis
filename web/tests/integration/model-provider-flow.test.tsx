@@ -1,7 +1,7 @@
 import { within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ModelProviderDto, TeamDto } from '@/types/auth-types'
+import type { ModelEntryDto, ModelProviderDto, TeamDto } from '@/types/auth-types'
 
 import { ModelProviderList } from '@/components/settings/model-provider-list'
 
@@ -177,8 +177,15 @@ describe('Model Provider Flow', () => {
     return calls
   }
 
+  const chat = (modelName: string, contextWindowTokens?: number): ModelEntryDto => ({
+    contextWindowTokens,
+    kind: 'CHAT',
+    modelName,
+  })
+  const embed = (modelName: string): ModelEntryDto => ({ kind: 'EMBEDDING', modelName })
+
   function mockTestConnection(
-    result: { error?: string; models?: string[]; success: boolean },
+    result: { error?: string; models?: ModelEntryDto[]; success: boolean },
     shouldFail = false,
   ) {
     let calls = 0
@@ -302,7 +309,7 @@ describe('Model Provider Flow', () => {
     const createCalls = mockCreateModelProvider()
     const teamCalls = mockUpdateTeam()
     const connection = mockTestConnection({
-      models: ['gpt-4', 'gpt-3.5-turbo', 'text-embedding-ada-002'],
+      models: [chat('gpt-4'), chat('gpt-3.5-turbo'), embed('text-embedding-ada-002')],
       success: true,
     })
 
@@ -364,7 +371,7 @@ describe('Model Provider Flow', () => {
     mockListModelProviders([])
     const createCalls = mockCreateModelProvider()
     const teamCalls = mockUpdateTeam()
-    mockTestConnection({ models: ['gpt-4'], success: true })
+    mockTestConnection({ models: [chat('gpt-4')], success: true })
 
     const teamWithDefaults: TeamDto = {
       ...mockTeam,
@@ -404,7 +411,7 @@ describe('Model Provider Flow', () => {
   it('shows a retryable error when the team defaults update fails', async () => {
     mockListModelProviders([])
     const createCalls = mockCreateModelProvider()
-    mockTestConnection({ models: ['gpt-4'], success: true })
+    mockTestConnection({ models: [chat('gpt-4')], success: true })
     let teamUpdateAttempts = 0
     addFetchHandler((url, options) => {
       if (url.includes('/teams/') && options.method === 'PUT') {
@@ -477,7 +484,7 @@ describe('Model Provider Flow', () => {
 
   it('shows the server validation message when creating the provider is rejected', async () => {
     mockListModelProviders([])
-    mockTestConnection({ models: ['gpt-4'], success: true })
+    mockTestConnection({ models: [chat('gpt-4')], success: true })
     addFetchHandler((url, options) => {
       if (url.includes('/model-providers/teams/') && options.method === 'POST') {
         return jsonResponse(
@@ -517,7 +524,7 @@ describe('Model Provider Flow', () => {
   it('filters models within a section on step 3', async () => {
     mockListModelProviders([])
     mockTestConnection({
-      models: ['gpt-4', 'gpt-4-turbo', 'gpt-4o', 'text-embedding-ada-002'],
+      models: [chat('gpt-4'), chat('gpt-4-turbo'), chat('gpt-4o'), embed('text-embedding-ada-002')],
       success: true,
     })
 
@@ -541,7 +548,12 @@ describe('Model Provider Flow', () => {
   it('lists discovered models alphabetically on the models step', async () => {
     mockListModelProviders([])
     mockTestConnection({
-      models: ['gpt-4o', 'gpt-4', 'gpt-3.5-turbo', 'text-embedding-ada-002'],
+      models: [
+        chat('gpt-4o', 1048576),
+        chat('gpt-4'),
+        chat('gpt-3.5-turbo'),
+        embed('text-embedding-ada-002'),
+      ],
       success: true,
     })
 
@@ -559,11 +571,14 @@ describe('Model Provider Flow', () => {
       .getAllByRole('checkbox')
       .map((box) => box.getAttribute('aria-label'))
     expect(names).toEqual(['gpt-3.5-turbo', 'gpt-4', 'gpt-4o'])
+
+    // Provider-reported context window is surfaced on the model row.
+    expect(dialog().getByText('1M ctx')).toBeInTheDocument()
   })
 
   it('connects keyless Ollama with a pre-filled base URL', async () => {
     mockListModelProviders([])
-    mockTestConnection({ models: ['llama3:latest'], success: true })
+    mockTestConnection({ models: [chat('llama3:latest')], success: true })
 
     setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
     const { user } = renderList()
@@ -583,7 +598,7 @@ describe('Model Provider Flow', () => {
 
   it('requires an API key for key-based providers', async () => {
     mockListModelProviders([])
-    const connection = mockTestConnection({ models: ['gpt-4'], success: true })
+    const connection = mockTestConnection({ models: [chat('gpt-4')], success: true })
 
     setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
     const { user } = renderList()
@@ -640,7 +655,7 @@ describe('Model Provider Flow', () => {
 
   it('preserves form values when navigating back and forward', async () => {
     mockListModelProviders([])
-    mockTestConnection({ models: ['gpt-4'], success: true })
+    mockTestConnection({ models: [chat('gpt-4')], success: true })
 
     setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
     const { user } = renderList()

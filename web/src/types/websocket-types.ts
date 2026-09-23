@@ -1,8 +1,11 @@
 // JSON-RPC 2.0 WebSocket message types for Kratis API
 
+import type { ActivityKind } from './activity-kind'
 import type { IngestionStatus } from './auth-types'
 import type { CanvasEvent } from './canvas-types'
 import type { HitlRuleType } from './hitl-rule-types'
+
+export type { ActivityKind } from './activity-kind'
 
 export interface ActivityDetail {
   diff?: ActivityDiff
@@ -42,18 +45,6 @@ export interface ActivityHitl {
   title?: string
   toolKind?: string
 }
-
-export type ActivityKind =
-  | 'delete'
-  | 'edit'
-  | 'execute'
-  | 'fetch'
-  | 'move'
-  | 'other'
-  | 'read'
-  | 'search'
-  | 'switch_mode'
-  | 'think'
 
 export interface ActivityLocation {
   line?: number
@@ -145,6 +136,7 @@ export interface ExecutionActivityResult {
 export interface ExecutionCompleteResult {
   executionId: string
   exitCode: number
+  reason?: string
   status: string
   type: 'execution_complete'
 }
@@ -370,6 +362,7 @@ export type WireActivityType =
   | 'COMMAND'
   | 'EDITED'
   | 'ELICITATION'
+  | 'ERROR'
   | 'MESSAGE'
   | 'PLAN'
   | 'RESEARCH'

@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.acp_prompt",
+  "params": {
+    "taskPrompt": "Continue the task in a fresh agent session",
+    "executionId": "123e4567-e89b-12d3-a456-426614174000",
+    "relaunch": true
+  },
+  "id": 14
+}

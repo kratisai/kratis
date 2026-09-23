@@ -297,6 +297,7 @@ type SidecarErrorParams struct {
 type CompleteParams struct {
 	ExitCode    int    `json:"exitCode"`
 	ExecutionID string `json:"executionId"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 // RegisterGitAuthParams is the parameters payload for the env.registerGitAuth method.
@@ -348,6 +349,7 @@ type AcpPromptParams struct {
 	TaskPrompt  string `json:"taskPrompt"`
 	ExecutionID string `json:"executionId"`
 	IsSteering  bool   `json:"isSteering,omitempty"`
+	Relaunch    bool   `json:"relaunch,omitempty"`
 }
 
 // AcpPromptResult is the success response payload for env.acp_prompt.
@@ -511,6 +513,7 @@ type ActivityKind string
 const (
 	KindRead       ActivityKind = "read"
 	KindEdit       ActivityKind = "edit"
+	KindWrite      ActivityKind = "write"
 	KindDelete     ActivityKind = "delete"
 	KindMove       ActivityKind = "move"
 	KindSearch     ActivityKind = "search"

@@ -44,7 +44,7 @@ export async function testConnection(data: {
   apiKey?: string
   baseUrl?: string
   providerType: string
-}): Promise<{ error?: string; models?: string[]; success: boolean }> {
+}): Promise<{ error?: string; models?: ModelEntryDto[]; success: boolean }> {
   const response = await fetchWithAuth('/api/v1/model-providers/test-connection', {
     body: JSON.stringify(data),
     method: 'POST',

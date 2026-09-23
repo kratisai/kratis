@@ -6,6 +6,7 @@ import type { ModelEntryDto, ModelKind } from '@/types/auth-types'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { formatContextWindow } from '@/lib/context-window'
 
 interface ModelProviderModelsStepProps {
   discoveredModels: ModelEntryDto[]
@@ -87,6 +88,15 @@ export function ModelProviderModelsStep({
                       onCheckedChange={() => onToggle(model.modelName)}
                     />
                     <span className="truncate text-sm">{model.modelName}</span>
+                    {model.contextWindowTokens !== undefined && (
+                      <Badge
+                        className="shrink-0 text-[10px]"
+                        title={`${model.contextWindowTokens.toLocaleString()} token context window`}
+                        variant="secondary"
+                      >
+                        {formatContextWindow(model.contextWindowTokens)} ctx
+                      </Badge>
+                    )}
                     {checked && <CheckCircle2 className="text-primary ml-auto h-4 w-4 shrink-0" />}
                   </label>
                 </li>

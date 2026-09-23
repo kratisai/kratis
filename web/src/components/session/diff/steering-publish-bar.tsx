@@ -47,7 +47,8 @@ export function SteeringPublishBar({
   }
 
   const isReadyToPublish = executionStatus === 'IDLE' || executionStatus === 'COMPLETED'
-  const canSteer = executionStatus === 'RUNNING' || executionStatus === 'IDLE'
+  const canSteer =
+    executionStatus === 'RUNNING' || executionStatus === 'IDLE' || executionStatus === 'FAILED'
   const commentCount = draftComments.length
 
   const handleSendFeedback = async () => {

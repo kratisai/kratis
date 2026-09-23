@@ -27,6 +27,14 @@ public class ModelDiscoveryService {
     private static final String ANTHROPIC_VERSION = "2023-06-01";
     private static final String AZURE_OPENAI_API_VERSION = "2023-03-15-preview";
 
+    private static final List<String> CONTEXT_WINDOW_FIELDS = List.of(
+            "inputTokenLimit", // Google GenAI
+            "context_window", // Groq
+            "max_context_length", // Mistral
+            "max_model_len", // vLLM and other OpenAI-compatible servers
+            "max_input_tokens", // LiteLLM-style gateways
+            "context_length");
+
     private final ModelDiscoveryClient modelDiscoveryClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -184,9 +192,10 @@ public class ModelDiscoveryService {
         List<?> list = objectMapper.convertValue(data, List.class);
         return list.stream()
                 .map(m -> {
-                    String modelName = ((Map<?, ?>) m).get("id").toString();
+                    Map<?, ?> entry = (Map<?, ?>) m;
+                    String modelName = entry.get("id").toString();
                     ModelKind kind = looksLikeEmbeddingModel(modelName) ? ModelKind.EMBEDDING : ModelKind.CHAT;
-                    return new ModelEntryDto(modelName, kind);
+                    return new ModelEntryDto(modelName, kind, null, extractContextWindow(entry));
                 })
                 .toList();
     }
@@ -208,7 +217,7 @@ public class ModelDiscoveryService {
                     ModelKind kind = looksLikeEmbeddingModel(baseModel != null ? baseModel : deploymentName)
                             ? ModelKind.EMBEDDING
                             : ModelKind.CHAT;
-                    return new ModelEntryDto(deploymentName, kind, baseModel);
+                    return new ModelEntryDto(deploymentName, kind, baseModel, extractContextWindow(entry));
                 })
                 .toList();
     }
@@ -223,9 +232,10 @@ public class ModelDiscoveryService {
         List<?> list = objectMapper.convertValue(models, List.class);
         return list.stream()
                 .map(m -> {
-                    String modelName = ((Map<?, ?>) m).get("name").toString();
+                    Map<?, ?> entry = (Map<?, ?>) m;
+                    String modelName = entry.get("name").toString();
                     ModelKind kind = looksLikeEmbeddingModel(modelName) ? ModelKind.EMBEDDING : ModelKind.CHAT;
-                    return new ModelEntryDto(modelName, kind);
+                    return new ModelEntryDto(modelName, kind, null, extractContextWindow(entry));
                 })
                 .toList();
     }
@@ -242,13 +252,40 @@ public class ModelDiscoveryService {
         List<?> list = objectMapper.convertValue(models, List.class);
         return list.stream()
                 .map(m -> {
-                    String fullName = ((Map<?, ?>) m).get("name").toString();
+                    Map<?, ?> entry = (Map<?, ?>) m;
+                    String fullName = entry.get("name").toString();
                     // Extract the model ID from "models/gemini-2.0-flash" format
                     String modelName = fullName.contains("/") ? fullName.split("/")[1] : fullName;
                     ModelKind kind = looksLikeEmbeddingModel(modelName) ? ModelKind.EMBEDDING : ModelKind.CHAT;
-                    return new ModelEntryDto(modelName, kind);
+                    return new ModelEntryDto(modelName, kind, null, extractContextWindow(entry));
                 })
                 .toList();
+    }
+
+    private Long extractContextWindow(Map<?, ?> entry) {
+        for (String field : CONTEXT_WINDOW_FIELDS) {
+            Long tokens = toPositiveLong(entry.get(field));
+            if (tokens != null) {
+                return tokens;
+            }
+        }
+        return null;
+    }
+
+    private static Long toPositiveLong(Object value) {
+        if (value instanceof Number number) {
+            long tokens = number.longValue();
+            return tokens > 0 ? tokens : null;
+        }
+        if (value instanceof String text) {
+            try {
+                long tokens = Long.parseLong(text.trim());
+                return tokens > 0 ? tokens : null;
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /**

@@ -20,7 +20,6 @@ import {
   useTestConnection,
 } from '@/hooks/use-model-providers'
 import { getFieldErrors } from '@/lib/auth-api'
-import { classifyDiscoveredModels } from '@/lib/model-classification'
 import { discoverModels } from '@/lib/model-provider-api'
 
 import {
@@ -223,7 +222,7 @@ export function ModelProviderWizardDialog({
           actions.setConnectionError(result.error ?? 'Connection failed')
           return
         }
-        discovered = classifyDiscoveredModels(result.models ?? [])
+        discovered = result.models ?? []
       }
       if (discovered.length === 0) {
         actions.setConnectionError('Connected, but no models were discovered')
@@ -321,10 +320,14 @@ export function ModelProviderWizardDialog({
 
   const handleFinish = () => {
     const values = form.getValues()
-    const selectedModels: ModelEntryDto[] = state.selectedModelNames.map((modelName) => ({
-      kind: state.discoveredModels.find((model) => model.modelName === modelName)?.kind ?? 'CHAT',
-      modelName,
-    }))
+    const selectedModels: ModelEntryDto[] = state.selectedModelNames.map((modelName) => {
+      const discovered = state.discoveredModels.find((model) => model.modelName === modelName)
+      return {
+        contextWindowTokens: discovered?.contextWindowTokens,
+        kind: discovered?.kind ?? 'CHAT',
+        modelName,
+      }
+    })
     const models = selectedModels.length > 0 ? selectedModels : undefined
 
     if (!provider) {

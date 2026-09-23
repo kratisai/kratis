@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.wsdto.ActivityDetail;
 import com.kratisai.controlplane.api.wsdto.ActivityHitl;
+import com.kratisai.controlplane.api.wsdto.ActivityKind;
+import com.kratisai.controlplane.api.wsdto.ActivityLocation;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
@@ -11,15 +13,20 @@ import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedRe
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
+import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlRequiredEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
@@ -27,13 +34,23 @@ import org.springframework.transaction.event.TransactionalEventListener;
 public class ExecutionActivityPersistenceService {
     private static final Logger logger = LoggerFactory.getLogger(ExecutionActivityPersistenceService.class);
 
+    private static final String ERROR_ACTION_ID = "execution-error";
+    private static final int MAX_ERROR_DESCRIPTION = 2000;
+
     private final SandboxExecutionActivityRepository repository;
+    private final SandboxExecutionRepository executionRepository;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     public ExecutionActivityPersistenceService(
-            SandboxExecutionActivityRepository repository, ObjectMapper objectMapper) {
+            SandboxExecutionActivityRepository repository,
+            SandboxExecutionRepository executionRepository,
+            ObjectMapper objectMapper,
+            ApplicationEventPublisher eventPublisher) {
         this.repository = repository;
+        this.executionRepository = executionRepository;
         this.objectMapper = objectMapper;
+        this.eventPublisher = eventPublisher;
     }
 
     public void recordActivity(
@@ -104,10 +121,20 @@ public class ExecutionActivityPersistenceService {
                             existing.setDetail(toJson(merged));
                             repository.save(existing);
                         },
-                        () -> logger.warn(
-                                "Approval {} has no activity row for execution {}; ignored",
-                                request.hitlId(),
-                                request.executionId()));
+                        () -> {
+                            logger.warn(
+                                    "Approval {} has no activity row for execution {}; inserting placeholder",
+                                    request.hitlId(),
+                                    request.executionId());
+                            ActivityDetail detail = placeholderDetail(request).withHitl(hitl);
+                            insert(
+                                    request.executionId(),
+                                    placeholderType(request.toolKind()),
+                                    request.command() != null ? request.command() : request.message(),
+                                    request.hitlId(),
+                                    ActivityStatus.PENDING,
+                                    detail);
+                        });
     }
 
     private void onQuestionRequired(SandboxExecutionHitlRequiredEvent event) {
@@ -186,9 +213,58 @@ public class ExecutionActivityPersistenceService {
         return new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
+    private static ActivityDetail placeholderDetail(ExecutionHitlRequiredResult request) {
+        ActivityKind kind = ActivityKind.fromWireValue(request.toolKind()).orElse(null);
+        ActivityLocation location = request.diff() != null && request.diff().path() != null
+                ? new ActivityLocation(request.diff().path(), null)
+                : null;
+        List<ActivityLocation> locations = location != null ? List.of(location) : null;
+        return new ActivityDetail(
+                kind,
+                request.title(),
+                locations,
+                null,
+                null,
+                request.diff(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    private static ActivityType placeholderType(String toolKind) {
+        return ActivityKind.isCommandLike(toolKind) ? ActivityType.COMMAND : ActivityType.EDITED;
+    }
+
     @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
     public void onExecutionComplete(SandboxExecutionCompleteEvent event) {
         closeOpenStreams(event.executionId());
+    }
+
+    @Transactional
+    public void recordExecutionError(UUID executionId, String reason, Integer exitCode) {
+        String description = reason != null && !reason.isBlank()
+                ? truncate(reason)
+                : "Execution failed (exit code " + exitCode + ")";
+        ActivityDetail detail = new ActivityDetail(
+                null, null, null, null, null, null, exitCode, null, null, null, null, null, null, null);
+
+        recordActivity(executionId, ActivityType.ERROR, description, ERROR_ACTION_ID, ActivityStatus.FAILED, detail);
+
+        Optional<UUID> teamId = executionRepository
+                .findById(executionId)
+                .map(execution -> execution.getChat().getTeam().getId());
+        teamId.ifPresent(uuid -> eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
+                uuid, executionId, ActivityType.ERROR, description, ERROR_ACTION_ID, ActivityStatus.FAILED, detail)));
+    }
+
+    private static String truncate(String value) {
+        String trimmed = value.strip();
+        return trimmed.length() <= MAX_ERROR_DESCRIPTION ? trimmed : trimmed.substring(0, MAX_ERROR_DESCRIPTION);
     }
 
     private void insert(

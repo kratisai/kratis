@@ -86,6 +86,7 @@ export interface LoginRequest {
 }
 
 export interface ModelEntryDto {
+  contextWindowTokens?: number
   kind: ModelKind
   modelName: string
 }

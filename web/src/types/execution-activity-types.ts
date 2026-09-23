@@ -29,6 +29,7 @@ export type {
 export type Activity =
   | CommandExecutionActivity
   | ElicitationActivity
+  | ErrorActivity
   | MessageActivity
   | PlanActivity
   | ThinkingActivity
@@ -39,6 +40,7 @@ export type ActivityState = 'active' | 'completed' | 'error' | 'pending_approval
 export type ActivityType =
   | 'command_execution'
   | 'elicitation'
+  | 'error'
   | 'message'
   | 'plan'
   | 'thinking'
@@ -81,6 +83,13 @@ export interface ElicitationActivity extends BaseActivity {
   message: string
   response?: HitlResponse
   type: 'elicitation'
+}
+
+export interface ErrorActivity extends BaseActivity {
+  detail?: ActivityDetail
+  exitCode?: number
+  message: string
+  type: 'error'
 }
 
 export interface MessageActivity extends BaseActivity {

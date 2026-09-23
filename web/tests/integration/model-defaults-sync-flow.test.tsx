@@ -98,7 +98,10 @@ describe('Model Defaults Sync Flow', () => {
     addFetchHandler((url, options) => {
       if (url.includes('/model-providers/test-connection') && options.method === 'POST') {
         return jsonResponse({
-          models: ['gpt-4', 'text-embedding-ada-002'],
+          models: [
+            { kind: 'CHAT', modelName: 'gpt-4' },
+            { kind: 'EMBEDDING', modelName: 'text-embedding-ada-002' },
+          ],
           success: true,
         })
       }

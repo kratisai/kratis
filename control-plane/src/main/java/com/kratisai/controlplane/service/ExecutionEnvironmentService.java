@@ -54,6 +54,7 @@ public class ExecutionEnvironmentService {
     private final EnvironmentSessionRegistry sessionRegistry;
     private final VirtualKeyService virtualKeyService;
     private final SandboxExecutionService sandboxExecutionService;
+    private final ExecutionActivityPersistenceService executionActivityPersistenceService;
     private final String websocketUrl;
     private final TransactionTemplate terminationTemplate;
     private final TransactionTemplate pollTemplate;
@@ -69,6 +70,7 @@ public class ExecutionEnvironmentService {
             EnvironmentSessionRegistry sessionRegistry,
             VirtualKeyService virtualKeyService,
             SandboxExecutionService sandboxExecutionService,
+            ExecutionActivityPersistenceService executionActivityPersistenceService,
             @Value("${kratis.server.websocket.url:ws://localhost:8080/ws/env}") String websocketUrl,
             PlatformTransactionManager transactionManager) {
         this.executionEnvironmentRepository = executionEnvironmentRepository;
@@ -81,6 +83,7 @@ public class ExecutionEnvironmentService {
         this.sessionRegistry = sessionRegistry;
         this.virtualKeyService = virtualKeyService;
         this.sandboxExecutionService = sandboxExecutionService;
+        this.executionActivityPersistenceService = executionActivityPersistenceService;
         this.websocketUrl = websocketUrl;
         this.terminationTemplate = new TransactionTemplate(transactionManager);
         this.terminationTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -275,6 +278,8 @@ public class ExecutionEnvironmentService {
         execution.setStatus(SandboxExecutionStatus.FAILED);
         execution.setCompletedAt(Instant.now());
         sandboxExecutionRepository.save(execution);
+        String reason = "execution force-terminated because its environment was deleted";
+        executionActivityPersistenceService.recordExecutionError(executionId, reason, 1);
 
         if (execution.getVirtualKey() != null) {
             try {
@@ -289,7 +294,7 @@ public class ExecutionEnvironmentService {
 
         UUID teamId = execution.getChat().getTeam().getId();
         eventPublisher.publishEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), 1, execution.getStatus()));
+                new SandboxExecutionCompleteEvent(teamId, execution.getId(), 1, execution.getStatus(), reason));
         eventPublisher.publishEvent(
                 new ExecutionStatusChangedEvent(teamId, execution.getChat().getId(), execution.getId()));
     }

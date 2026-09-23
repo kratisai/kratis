@@ -2,15 +2,18 @@ package com.kratisai.controlplane.api.wsdto;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
+import java.util.Locale;
+import java.util.Optional;
 
 /**
- * Categories of tools that can be invoked.
- * Tool kinds help clients choose appropriate icons and optimize how they
- * display tool execution progress.
+ * Closed ACP tool-kind set plus WRITE, the sidecar alias for fs/write_text_file.
+ * Backs both activity detail kinds and HITL permission/rule matching, so the
+ * vocabulary is defined exactly once.
  */
 public enum ActivityKind {
     READ("read"),
     EDIT("edit"),
+    WRITE("write"),
     DELETE("delete"),
     MOVE("move"),
     SEARCH("search"),
@@ -31,13 +34,34 @@ public enum ActivityKind {
         return value;
     }
 
-    @JsonCreator
-    public static ActivityKind fromString(String val) {
+    /** Lenient wire-value lookup: empty when the value is absent or unknown. */
+    public static Optional<ActivityKind> fromWireValue(String value) {
+        if (value == null) {
+            return Optional.empty();
+        }
+        String normalized = value.trim();
         for (ActivityKind kind : values()) {
-            if (kind.value.equalsIgnoreCase(val) || kind.name().equalsIgnoreCase(val)) {
-                return kind;
+            if (kind.value.equalsIgnoreCase(normalized) || kind.name().equalsIgnoreCase(normalized)) {
+                return Optional.of(kind);
             }
         }
-        throw new IllegalArgumentException("Unknown activity kind: " + val);
+        return Optional.empty();
+    }
+
+    @JsonCreator
+    public static ActivityKind fromString(String val) {
+        return fromWireValue(val).orElseThrow(() -> new IllegalArgumentException("Unknown activity kind: " + val));
+    }
+
+    /** Wire value for a possibly-absent tool kind, defaulting to EXECUTE. */
+    public static String effectiveWireValue(String toolKind) {
+        if (toolKind == null || toolKind.isBlank()) {
+            return EXECUTE.value;
+        }
+        return toolKind.trim().toLowerCase(Locale.ROOT);
+    }
+
+    public static boolean isCommandLike(String toolKind) {
+        return EXECUTE.value.equals(effectiveWireValue(toolKind));
     }
 }

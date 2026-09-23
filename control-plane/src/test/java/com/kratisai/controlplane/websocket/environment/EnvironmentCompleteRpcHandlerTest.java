@@ -2,23 +2,30 @@ package com.kratisai.controlplane.websocket.environment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
+import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.SandboxExecution;
+import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
+import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
+import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import com.kratisai.controlplane.service.SandboxExecutionService;
 import java.util.Optional;
 import java.util.UUID;
@@ -45,6 +52,9 @@ class EnvironmentCompleteRpcHandlerTest {
     @Mock
     private SandboxExecutionService sandboxExecutionService;
 
+    @Mock
+    private SandboxExecutionActivityRepository activityRepository;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private EnvironmentCompleteRpcHandler handler;
 
@@ -57,8 +67,14 @@ class EnvironmentCompleteRpcHandlerTest {
     @BeforeEach
     void setUp() {
         EnvironmentExecutionGuard executionGuard = new EnvironmentExecutionGuard(sessionRegistry, executionRepository);
+        ExecutionActivityPersistenceService activityPersistenceService = new ExecutionActivityPersistenceService(
+                activityRepository, executionRepository, objectMapper, eventPublisher);
         handler = new EnvironmentCompleteRpcHandler(
-                executionRepository, executionGuard, eventPublisher, sandboxExecutionService);
+                executionRepository,
+                executionGuard,
+                eventPublisher,
+                sandboxExecutionService,
+                activityPersistenceService);
     }
 
     private SandboxExecution createExecution() {
@@ -122,6 +138,51 @@ class EnvironmentCompleteRpcHandlerTest {
         verify(executionRepository).save(savedCaptor.capture());
         assertThat(savedCaptor.getValue().getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
         assertThat(savedCaptor.getValue().getExitCode()).isEqualTo(1);
+    }
+
+    @Test
+    void handle_withReason_recordsErrorActivityWithAgentMessage() {
+        stubOwnedExecution();
+        when(activityRepository.findByExecutionIdAndActionId(executionId, "execution-error"))
+                .thenReturn(Optional.empty());
+
+        EnvironmentRpcPayload.Complete params = new EnvironmentRpcPayload.Complete(
+                1,
+                executionId.toString(),
+                "litellm.ContextWindowExceededError: The input token count exceeds the maximum"
+                        + " number of tokens allowed 1048576");
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.Complete.METHOD, objectMapper.valueToTree(params), null);
+
+        handler.handle(sessionId, request, params);
+
+        ArgumentCaptor<SandboxExecutionActivity> activityCaptor =
+                ArgumentCaptor.forClass(SandboxExecutionActivity.class);
+        verify(activityRepository).save(activityCaptor.capture());
+        SandboxExecutionActivity activity = activityCaptor.getValue();
+        assertThat(activity.getActivityType()).isEqualTo(ActivityType.ERROR);
+        assertThat(activity.getStatus()).isEqualTo(ActivityStatus.FAILED);
+        assertThat(activity.getActionId()).isEqualTo("execution-error");
+        assertThat(activity.getDescription()).contains("ContextWindowExceededError");
+
+        ArgumentCaptor<SandboxExecutionCompleteEvent> completeCaptor =
+                ArgumentCaptor.forClass(SandboxExecutionCompleteEvent.class);
+        verify(eventPublisher).publishEvent(completeCaptor.capture());
+        assertThat(completeCaptor.getValue().reason()).contains("1048576");
+        assertThat(completeCaptor.getValue().exitCode()).isEqualTo(1);
+    }
+
+    @Test
+    void handle_withExitCodeZero_recordsNoErrorActivity() {
+        stubOwnedExecution();
+
+        EnvironmentRpcPayload.Complete params = new EnvironmentRpcPayload.Complete(0, executionId.toString());
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.Complete.METHOD, objectMapper.valueToTree(params), null);
+
+        handler.handle(sessionId, request, params);
+
+        verify(activityRepository, never()).save(any());
     }
 
     @Test

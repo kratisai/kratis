@@ -6,7 +6,7 @@
   "properties": {
     "type": { "type": "string", "const": "execution_activity", "enum": ["execution_activity"] },
     "executionId": { "type": "string", "format": "uuid" },
-    "activityType": { "type": "string", "enum": ["THINKING", "RESEARCH", "EDITED", "COMMAND", "MESSAGE", "ELICITATION", "PLAN"] },
+    "activityType": { "type": "string", "enum": ["THINKING", "RESEARCH", "EDITED", "COMMAND", "MESSAGE", "ELICITATION", "PLAN", "ERROR"] },
     "description": { "type": "string" },
     "actionId": { "type": "string", "description": "Correlation ID for the agent action this activity belongs to; exactly one activity per actionId per execution. Tool activities carry the ACP toolCallId. Message/thought chunk activities carry the run key of one contiguous same-kind chunk run: the raw messageId for its first run, <messageId>#<n> for run n >= 2 (the same messageId may return after an interruption), or inferred-<n> when the agent omits the messageId. All emissions sharing an actionId are the same record: chunk emissions carry cumulative text and downstream layers replace, never concatenate. The sidecar closes a run at its boundary (kind change, messageId change, any non-chunk update, prompt-turn end) and emits the terminal status itself." },
     "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "failed"], "description": "ACP ToolCallStatus lifecycle: pending → in_progress → completed | failed." },
@@ -14,7 +14,7 @@
       "type": "object",
       "description": "Structured accumulated tool/message state for the expandable activity record.",
       "properties": {
-        "kind": { "type": "string", "enum": ["read", "edit", "delete", "move", "search", "execute", "think", "fetch", "switch_mode", "other"] },
+        "kind": { "type": "string", "enum": ["read", "edit", "write", "delete", "move", "search", "execute", "think", "fetch", "switch_mode", "other"] },
         "title": { "type": "string" },
         "locations": { "type": "array", "items": { "type": "object", "properties": { "path": { "type": "string" }, "line": { "type": "integer" } } } },
         "input": { "type": "object" },

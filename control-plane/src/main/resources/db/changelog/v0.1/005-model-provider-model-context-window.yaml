@@ -1,0 +1,13 @@
+databaseChangeLog:
+- changeSet:
+    id: 005-model-provider-model-context-window
+    author: kratis
+    dbms: postgresql
+    changes:
+    - addColumn:
+        columns:
+        - column:
+            name: context_window_tokens
+            remarks: Model context window in tokens; supplied to harnesses at launch as ${LLM_CONTEXT_WINDOW}. NULL falls back to the harness default.
+            type: BIGINT
+        tableName: model_provider_models

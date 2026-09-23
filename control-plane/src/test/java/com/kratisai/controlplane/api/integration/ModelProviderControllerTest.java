@@ -338,7 +338,7 @@ class ModelProviderControllerTest {
                 ProviderType.OPENAI,
                 "sk-test-key",
                 null,
-                List.of(new ModelEntryDto("gpt-4o", ModelKind.CHAT)));
+                List.of(new ModelEntryDto("gpt-4o", ModelKind.CHAT, null, null)));
         String providerId = objectMapper
                 .readTree(mockMvc.perform(post("/api/v1/model-providers/teams/{teamId}", teamId)
                                 .contentType(MediaType.APPLICATION_JSON)
@@ -358,8 +358,8 @@ class ModelProviderControllerTest {
                 null,
                 null,
                 List.of(
-                        new ModelEntryDto("gpt-4o", ModelKind.CHAT),
-                        new ModelEntryDto("text-embedding-ada-002", ModelKind.EMBEDDING)));
+                        new ModelEntryDto("gpt-4o", ModelKind.CHAT, null, null),
+                        new ModelEntryDto("text-embedding-ada-002", ModelKind.EMBEDDING, null, null)));
         mockMvc.perform(put("/api/v1/model-providers/teams/{teamId}/{providerId}", teamId, providerId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("Authorization", "Bearer " + authToken)
@@ -583,8 +583,33 @@ class ModelProviderControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.models[0]").value("gpt-4o"))
-                .andExpect(jsonPath("$.models[1]").value("text-embedding-3-small"));
+                .andExpect(jsonPath("$.models[0].modelName").value("gpt-4o"))
+                .andExpect(jsonPath("$.models[0].kind").value("CHAT"))
+                .andExpect(jsonPath("$.models[1].modelName").value("text-embedding-3-small"))
+                .andExpect(jsonPath("$.models[1].kind").value("EMBEDDING"));
+
+        modelDiscoveryServer.verify();
+    }
+
+    @Test
+    void testConnection_reportsDiscoveredContextWindow() throws Exception {
+        modelDiscoveryServer
+                .expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models?key=test-key"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"models\": [{\"name\": \"models/gemini-2.0-flash\", \"inputTokenLimit\": 1048576}]}",
+                        MediaType.APPLICATION_JSON));
+
+        TestConnectionRequest request = new TestConnectionRequest(ProviderType.GOOGLE, "test-key", null);
+
+        mockMvc.perform(post("/api/v1/model-providers/test-connection")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + authToken)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.models[0].modelName").value("gemini-2.0-flash"))
+                .andExpect(jsonPath("$.models[0].contextWindowTokens").value(1048576));
 
         modelDiscoveryServer.verify();
     }
@@ -604,7 +629,7 @@ class ModelProviderControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.models[0]").value("llama3:latest"));
+                .andExpect(jsonPath("$.models[0].modelName").value("llama3:latest"));
 
         modelDiscoveryServer.verify();
     }
@@ -656,7 +681,7 @@ class ModelProviderControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.models[0]").value("anthropic.claude-3"));
+                .andExpect(jsonPath("$.models[0].modelName").value("anthropic.claude-3"));
 
         modelDiscoveryServer.verify();
     }

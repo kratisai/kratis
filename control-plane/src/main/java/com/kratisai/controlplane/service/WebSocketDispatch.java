@@ -77,7 +77,7 @@ public class WebSocketDispatch {
                     payload.getClass().getSimpleName());
             return;
         }
-        logger.debug(
+        logger.trace(
                 "Broadcasting {} to {} session(s) for team {}",
                 payload.getClass().getSimpleName(),
                 sessionIds.size(),

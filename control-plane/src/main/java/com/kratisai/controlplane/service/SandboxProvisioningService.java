@@ -14,6 +14,7 @@ import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
@@ -26,6 +27,13 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class SandboxProvisioningService {
 
     private static final Logger logger = LoggerFactory.getLogger(SandboxProvisioningService.class);
+
+    /** Fallback context window when the model metadata does not declare one. */
+    private static final long DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
+    /** Upper bound for the proactive history window handed to harnesses. */
+    private static final long MAX_HISTORY_WINDOW_TOKENS = 200_000;
+
+    private static final long MIN_HISTORY_WINDOW_TOKENS = 32_000;
 
     private final SandboxOrchestratorService sandboxOrchestratorService;
     private final ExecutionEnvironmentRepository executionEnvironmentRepository;
@@ -268,7 +276,25 @@ public class SandboxProvisioningService {
                 execution.getModelProvider(), execution.getModelName());
         variables.put("${LLM_MODEL}", litellmModelName);
 
+        long contextWindow = resolveContextWindow(execution);
+        variables.put("${LLM_CONTEXT_WINDOW}", Long.toString(contextWindow));
+        // Proactive history-window budget for harnesses that manage context
+        // explicitly: roughly 40% of the window, clamped to a sane range.
+        long historyWindow = Math.clamp(contextWindow * 2 / 5, MIN_HISTORY_WINDOW_TOKENS, MAX_HISTORY_WINDOW_TOKENS);
+        variables.put("${LLM_HISTORY_MAX_TOKENS}", Long.toString(historyWindow));
+
         return variables;
+    }
+
+    /** Context window in tokens for the execution's model, falling back to a default when metadata omits it. */
+    private long resolveContextWindow(SandboxExecution execution) {
+        return execution.getModelProvider().getModels().stream()
+                .filter(model -> model.getModelName().equals(execution.getModelName()))
+                .map(ProviderModel::getContextWindowTokens)
+                .filter(Objects::nonNull)
+                .filter(tokens -> tokens > 0)
+                .findFirst()
+                .orElse(DEFAULT_CONTEXT_WINDOW_TOKENS);
     }
 
     private List<String> resolveSetupCommands(List<String> commands, Map<String, String> variables) {

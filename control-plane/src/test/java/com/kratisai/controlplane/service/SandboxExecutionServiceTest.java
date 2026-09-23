@@ -109,9 +109,13 @@ class SandboxExecutionServiceTest {
     @Mock
     private SandboxProvider sandboxProvider;
 
+    @Mock
+    private SandboxExecutionActivityRepository activityRepository;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private SandboxProvisioningService sandboxProvisioningService;
     private SandboxExecutionService sandboxExecutionService;
+    private ExecutionActivityPersistenceService activityPersistenceService;
     private LiteLLMProperties litellmProperties;
 
     private static final UUID TEAM_ID = UUID.fromString("11111111-2222-3333-4444-555555555555");
@@ -138,6 +142,9 @@ class SandboxExecutionServiceTest {
                 environmentRpcClient,
                 createKratisProperties());
 
+        activityPersistenceService = new ExecutionActivityPersistenceService(
+                activityRepository, sandboxExecutionRepository, objectMapper, eventPublisher);
+
         sandboxExecutionService = new SandboxExecutionService(
                 transactionManager,
                 sandboxExecutionRepository,
@@ -154,7 +161,8 @@ class SandboxExecutionServiceTest {
                 virtualKeyService,
                 environmentRpcClient,
                 litellmProperties,
-                Runnable::run);
+                Runnable::run,
+                activityPersistenceService);
     }
 
     private void stubSuccessfulExec() throws Exception {
@@ -984,7 +992,8 @@ class SandboxExecutionServiceTest {
                 virtualKeyService,
                 environmentRpcClient,
                 litellmProperties,
-                capturingExecutor);
+                capturingExecutor,
+                activityPersistenceService);
 
         UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
         SandboxExecution execution = createTestExecution();
@@ -1347,6 +1356,77 @@ class SandboxExecutionServiceTest {
 
         await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> verify(environmentRpcClient)
                 .request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)));
+    }
+
+    @Test
+    void steerExecution_fromFailed_relaunchesOnFreshSessionWithRecoveryPrefix() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.setStatus(SandboxExecutionStatus.FAILED);
+        when(chatRepository.findById(CHAT_ID)).thenReturn(Optional.of(execution.getChat()));
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(environmentRpcClient.request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)))
+                .thenReturn(
+                        new EnvironmentConnectorResult.AcpPrompt(PromptStatus.COMPLETED, StopReason.END_TURN, null));
+
+        sandboxExecutionService.steerExecution(
+                USER_ID, CHAT_ID, execution.getId(), new SteerExecutionRequest("Fix tests", List.of()));
+
+        // Recovery: the execution is running again and the prompt is dispatched on a
+        // freshly relaunched agent session (relaunch=true, normal turn).
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.RUNNING);
+        verify(sandboxExecutionRepository).save(execution);
+
+        await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> {
+            ArgumentCaptor<EnvironmentRpcPayload.AcpPrompt> captor =
+                    ArgumentCaptor.forClass(EnvironmentRpcPayload.AcpPrompt.class);
+            verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), captor.capture());
+            EnvironmentRpcPayload.AcpPrompt prompt = captor.getValue();
+            assertThat(prompt.relaunch()).isEqualTo(Boolean.TRUE);
+            assertThat(prompt.isSteering()).isNull();
+            assertThat(prompt.taskPrompt()).startsWith(SandboxExecutionService.RECOVERY_PROMPT_PREFIX);
+            assertThat(prompt.taskPrompt()).endsWith("Fix tests");
+        });
+    }
+
+    @Test
+    void steerExecution_fromRunning_dispatchesOrdinarySteeringWithoutRelaunch() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.setStatus(SandboxExecutionStatus.RUNNING);
+        when(chatRepository.findById(CHAT_ID)).thenReturn(Optional.of(execution.getChat()));
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(environmentRpcClient.request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)))
+                .thenReturn(
+                        new EnvironmentConnectorResult.AcpPrompt(PromptStatus.COMPLETED, StopReason.END_TURN, null));
+
+        sandboxExecutionService.steerExecution(
+                USER_ID, CHAT_ID, execution.getId(), new SteerExecutionRequest("Also fix lint", List.of()));
+
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.RUNNING);
+        await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> {
+            ArgumentCaptor<EnvironmentRpcPayload.AcpPrompt> captor =
+                    ArgumentCaptor.forClass(EnvironmentRpcPayload.AcpPrompt.class);
+            verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), captor.capture());
+            EnvironmentRpcPayload.AcpPrompt prompt = captor.getValue();
+            assertThat(prompt.relaunch()).isNull();
+            assertThat(prompt.isSteering()).isEqualTo(Boolean.TRUE);
+            assertThat(prompt.taskPrompt()).isEqualTo("Also fix lint");
+        });
+    }
+
+    @Test
+    void steerExecution_fromCompleted_isRejected() {
+        SandboxExecution execution = createTestExecution();
+        execution.setStatus(SandboxExecutionStatus.COMPLETED);
+        when(chatRepository.findById(CHAT_ID)).thenReturn(Optional.of(execution.getChat()));
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        assertThatThrownBy(() -> sandboxExecutionService.steerExecution(
+                        USER_ID, CHAT_ID, execution.getId(), new SteerExecutionRequest("nope", List.of())))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Cannot steer execution in state COMPLETED");
     }
 
     @Test

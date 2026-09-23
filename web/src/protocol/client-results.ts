@@ -1,19 +1,10 @@
 import { z } from 'zod'
 
+import { ACTIVITY_KINDS } from '@/types/activity-kind'
+
 const uuid = z.string().uuid()
 
-const activityKind = z.enum([
-  'read',
-  'edit',
-  'delete',
-  'move',
-  'search',
-  'execute',
-  'think',
-  'fetch',
-  'switch_mode',
-  'other',
-])
+const activityKind = z.enum(ACTIVITY_KINDS)
 
 const approvalOptionKind = z.enum(['allow_always', 'allow_once', 'reject_always', 'reject_once'])
 
@@ -183,6 +174,7 @@ export const CLIENT_RESULTS = {
         'MESSAGE',
         'ELICITATION',
         'PLAN',
+        'ERROR',
       ]),
       description: z.string(),
       detail: activityDetailSchema.optional(),
@@ -195,6 +187,7 @@ export const CLIENT_RESULTS = {
     .object({
       executionId: uuid,
       exitCode: z.number().int(),
+      reason: z.string().optional(),
       status: z.enum(['RUNNING', 'IDLE', 'COMPLETED', 'FAILED']),
       type: z.literal('execution_complete'),
     })
