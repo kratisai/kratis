@@ -34,15 +34,15 @@ import { useStartChat } from '@/hooks/use-start-chat'
 import { formatRelativeTime, formatSpend } from '@/lib/format'
 
 export function RepositoryDrilldownView() {
-  const { id } = useParams({ from: '/repos/$id' })
+  const { repoId } = useParams({ from: '/repos/$repoId' })
   const navigate = useNavigate()
   const triggerIngestionMutation = useTriggerIngestion()
   const { startChat } = useStartChat()
 
   const { data: repositories } = useRepositories()
-  const repo = repositories?.find((r) => r.id === id)
+  const repo = repositories?.find((r) => r.id === repoId)
 
-  const { data: batchHistory, isLoading: isHistoryLoading } = useBatchHistory(id)
+  const { data: batchHistory, isLoading: isHistoryLoading } = useBatchHistory(repoId)
   const latestBatchId = repo?.latestBatchId ?? null
 
   const [selectedBatchId, setSelectedBatchId] = React.useState<null | string>(null)
@@ -53,8 +53,8 @@ export function RepositoryDrilldownView() {
     }
   }, [latestBatchId])
 
-  const { data: logs = [], isLoading: isLogsLoading } = useBatchLogs(id, selectedBatchId)
-  const { data: batchStats, isLoading: isStatsLoading } = useBatchStats(id, selectedBatchId)
+  const { data: logs = [], isLoading: isLogsLoading } = useBatchLogs(repoId, selectedBatchId)
+  const { data: batchStats, isLoading: isStatsLoading } = useBatchStats(repoId, selectedBatchId)
 
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 

@@ -169,6 +169,28 @@ describe('Repository Drilldown View', () => {
     expect(screen.getByText('Live Logs')).toBeInTheDocument()
     expect(screen.getByText('Ingestion Status:')).toBeInTheDocument()
   })
+
+  it('does not make chat executions API calls when viewing repository drilldown', async () => {
+    let chatExecutionsCalled = false
+    setupMocks()
+    setAuthenticated({ teamId: 'team-1' })
+
+    addFetchHandler((url) => {
+      if (url.includes('/chats/') && url.includes('/executions')) {
+        chatExecutionsCalled = true
+        return jsonResponse([])
+      }
+      return null
+    })
+
+    renderWithRouter(['/repos/repo-1'])
+
+    await waitFor(() => {
+      expect(screen.getByText('frontend-app')).toBeInTheDocument()
+    })
+
+    expect(chatExecutionsCalled).toBe(false)
+  })
 })
 
 describe('Repository Drilldown - Ingestion History', () => {

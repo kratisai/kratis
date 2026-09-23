@@ -43,7 +43,7 @@ const reposRoute = createRoute({
 const repoDrilldownRoute = createRoute({
   component: RepositoryDrilldownView,
   getParentRoute: () => rootRoute,
-  path: '/repos/$id',
+  path: '/repos/$repoId',
 })
 
 const chatRoute = createRoute({

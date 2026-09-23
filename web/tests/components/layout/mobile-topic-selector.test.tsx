@@ -7,12 +7,15 @@ import * as executionApi from '@/lib/execution-api'
 import { useCanvasStore } from '@/store/canvas-store'
 
 const mockNavigate = vi.fn()
+let mockPathname = '/chats/chat-1'
 let mockParams = { docId: undefined as string | undefined, executionId: undefined as string | undefined, id: 'chat-1' as string | undefined }
 let mockSearch = { tab: undefined as string | undefined }
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => mockNavigate,
   useParams: () => mockParams,
+  useRouterState: ({ select }: { select?: (state: { location: { pathname: string } }) => unknown } = {}) =>
+    select ? select({ location: { pathname: mockPathname } }) : { location: { pathname: mockPathname } },
   useSearch: () => mockSearch,
 }))
 
@@ -24,6 +27,7 @@ describe('MobileTopicSelector', () => {
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
+    mockPathname = '/chats/chat-1'
     mockParams = { docId: undefined, executionId: undefined, id: 'chat-1' }
     mockSearch = { tab: undefined }
     useCanvasStore.setState({
@@ -61,6 +65,20 @@ describe('MobileTopicSelector', () => {
     )
 
     expect(screen.queryByTestId('mobile-topic-selector')).not.toBeInTheDocument()
+  })
+
+  it('renders nothing and does not fetch executions when on repository route (/repos/repo-1)', () => {
+    mockPathname = '/repos/repo-1'
+    mockParams = { docId: undefined, executionId: undefined, id: 'repo-1' }
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MobileTopicSelector />
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByTestId('mobile-topic-selector')).not.toBeInTheDocument()
+    expect(executionApi.listChatExecutions).not.toHaveBeenCalled()
   })
 
   it('renders Design & Plan when on chat root route and opens dropdown', async () => {

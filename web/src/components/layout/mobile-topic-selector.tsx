@@ -1,4 +1,4 @@
-import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
+import { useNavigate, useParams, useRouterState, useSearch } from '@tanstack/react-router'
 import {
   Activity as ActivityIcon,
   Check,
@@ -30,19 +30,22 @@ const EMPTY_CANVASES: CanvasDocument[] = []
 
 export function MobileTopicSelector() {
   const navigate = useNavigate()
+  const isOnChatRoute = useRouterState({
+    select: (state) => state.location.pathname.startsWith('/chats/'),
+  })
   const params = useParams({ strict: false })
   const search: { tab?: string } = useSearch({ strict: false })
 
-  const chatId = params.id
-  const docId = params.docId
-  const executionId = params.executionId
+  const chatId = isOnChatRoute ? (params.id ?? null) : null
+  const docId = isOnChatRoute ? params.docId : undefined
+  const executionId = isOnChatRoute ? params.executionId : undefined
 
   const canvases = useCanvasStore((state) =>
     chatId ? (state.canvases[chatId] ?? EMPTY_CANVASES) : EMPTY_CANVASES,
   )
-  const { data: executions = [] } = useChatExecutions(chatId || '')
+  const { data: executions = [] } = useChatExecutions(chatId)
 
-  if (!chatId) {
+  if (!isOnChatRoute || !chatId) {
     return null
   }
 

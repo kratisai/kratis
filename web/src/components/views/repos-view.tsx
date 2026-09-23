@@ -86,7 +86,7 @@ export function ReposView() {
 
   const handleNavigate = useCallback(
     (repo: RepositoryDto) => {
-      void navigate({ params: { id: repo.id }, to: '/repos/$id' })
+      void navigate({ params: { repoId: repo.id }, to: '/repos/$repoId' })
     },
     [navigate],
   )

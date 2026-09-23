@@ -7,11 +7,13 @@ import { ReposView } from '@/components/views/repos-view'
 import * as repoApi from '@/lib/repo-api'
 import { useAuthStore } from '@/store/auth-store'
 
+const mockNavigate = vi.fn()
+
 vi.mock('@tanstack/react-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tanstack/react-router')>()
   return {
     ...actual,
-    useNavigate: vi.fn(() => vi.fn()),
+    useNavigate: vi.fn(() => mockNavigate),
     useParams: vi.fn(() => ({})),
     useRouter: vi.fn(() => ({
       navigate: vi.fn(),
@@ -212,6 +214,26 @@ describe('ReposView', () => {
     })
 
     expect(screen.queryByRole('textbox', { name: /search repositories/i })).not.toBeInTheDocument()
+  })
+
+  it('navigates to repository drilldown when a repository card is clicked', async () => {
+    vi.mocked(repoApi.listRepositories).mockResolvedValue(mockRepositories)
+    const user = userEvent.setup()
+
+    renderWithProviders(<ReposView />)
+
+    await waitFor(() => {
+      expect(screen.getByText('frontend-app')).toBeInTheDocument()
+    })
+
+    const cardTitle = screen.getByText('frontend-app')
+    const card = cardTitle.closest('[data-slot="card"]') ?? cardTitle
+    await user.click(card)
+
+    expect(mockNavigate).toHaveBeenCalledWith({
+      params: { repoId: 'repo-1' },
+      to: '/repos/$repoId',
+    })
   })
 
 })
