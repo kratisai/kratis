@@ -1,5 +1,6 @@
 package com.kratisai.controlplane;
 
+import com.kratisai.controlplane.config.TestAsyncExecutorConfig;
 import com.kratisai.controlplane.planningagent.TestAgentConfig;
 import com.kratisai.controlplane.service.ProcessExecutorTestConfig;
 import java.lang.annotation.*;
@@ -47,6 +48,7 @@ import org.springframework.test.context.TestExecutionListeners;
     FakeBitbucketApiClientConfig.class,
     FakeAzureDevOpsApiClientConfig.class,
     DatabaseCleaner.class,
+    TestAsyncExecutorConfig.class,
     TestAgentConfig.class,
     TestSecurityConfig.class
 })

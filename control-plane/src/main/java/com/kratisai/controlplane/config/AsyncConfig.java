@@ -1,14 +1,35 @@
 package com.kratisai.controlplane.config;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 @Configuration
 @EnableAsync
 public class AsyncConfig {
+
+    @Bean(name = "dispatchExecutor")
+    public ExecutorService dispatchExecutor() {
+        return Executors.newVirtualThreadPerTaskExecutor();
+    }
+
+    /** Dedicated to usage refreshes so periodic {@code @Scheduled} jobs cannot delay them. */
+    @Bean(name = "usageRefreshScheduler")
+    public ThreadPoolTaskScheduler usageRefreshScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("usage-refresh-");
+        scheduler.setRemoveOnCancelPolicy(true);
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(30);
+        scheduler.initialize();
+        return scheduler;
+    }
 
     @Bean(name = "repoIngestTaskExecutor")
     public ThreadPoolTaskExecutor taskExecutor(@Value("${kratis.ingestion.max-concurrent:2}") int maxConcurrent) {

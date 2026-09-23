@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.TaskScheduler;
@@ -58,7 +59,7 @@ public class SandboxExecutionUsageRefresher {
             SandboxExecutionRepository executionRepository,
             VirtualKeyService virtualKeyService,
             ApplicationEventPublisher eventPublisher,
-            TaskScheduler taskScheduler,
+            @Qualifier("usageRefreshScheduler") TaskScheduler taskScheduler,
             LiteLLMProperties litellmProperties) {
         this.executionRepository = executionRepository;
         this.virtualKeyService = virtualKeyService;

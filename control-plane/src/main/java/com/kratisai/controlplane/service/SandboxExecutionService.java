@@ -79,7 +79,7 @@ public class SandboxExecutionService {
     private final VirtualKeyService virtualKeyService;
     private final EnvironmentRpcClient environmentRpcClient;
     private final LiteLLMProperties litellmProperties;
-    private final Executor finalizeExecutor;
+    private final Executor dispatchExecutor;
     private final ExecutionActivityPersistenceService activityPersistenceService;
 
     public SandboxExecutionService(
@@ -98,7 +98,7 @@ public class SandboxExecutionService {
             VirtualKeyService virtualKeyService,
             EnvironmentRpcClient environmentRpcClient,
             LiteLLMProperties litellmProperties,
-            @Qualifier("agentTaskExecutor") Executor finalizeExecutor,
+            @Qualifier("dispatchExecutor") Executor dispatchExecutor,
             ExecutionActivityPersistenceService activityPersistenceService) {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.finalizeUsageTransactionTemplate = new TransactionTemplate(transactionManager);
@@ -116,7 +116,7 @@ public class SandboxExecutionService {
         this.virtualKeyService = virtualKeyService;
         this.environmentRpcClient = environmentRpcClient;
         this.litellmProperties = litellmProperties;
-        this.finalizeExecutor = finalizeExecutor;
+        this.dispatchExecutor = dispatchExecutor;
         this.activityPersistenceService = activityPersistenceService;
     }
 
@@ -295,10 +295,8 @@ public class SandboxExecutionService {
     public void dispatchExecution(SandboxExecution execution, WebSocketSession session) {
         Objects.requireNonNull(session, "session is required");
         UUID executionId = execution.getId();
-        // Run after the current transaction commits so the worker can reload a
-        // committed
-        // row. When no transaction is active, run immediately on a virtual thread.
-        Runnable work = () -> Thread.startVirtualThread(() -> runDispatch(executionId, false));
+        // Run after commit so the worker can reload a committed row.
+        Runnable work = () -> dispatchExecutor.execute(() -> runDispatch(executionId, false));
         if (isSynchronizationActive()) {
             registerSynchronization(new TransactionSynchronization() {
                 @Override
@@ -318,7 +316,7 @@ public class SandboxExecutionService {
         registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                Thread.startVirtualThread(() -> runDispatch(executionId, true));
+                dispatchExecutor.execute(() -> runDispatch(executionId, true));
             }
         });
     }
@@ -419,7 +417,7 @@ public class SandboxExecutionService {
             SandboxExecution execution, String promptText, boolean failOnError, boolean relaunch) {
         UUID executionId = execution.getId();
         UUID environmentId = execution.getEnvironment().getId();
-        Thread.startVirtualThread(() -> {
+        dispatchExecutor.execute(() -> {
             try {
                 EnvironmentConnectorResult.AcpPrompt result = environmentRpcClient.request(
                         environmentId,
@@ -851,7 +849,7 @@ public class SandboxExecutionService {
     public void onSandboxExecutionCompleteEvent(SandboxExecutionCompleteEvent event) {
         // FinalizeUsage blocks for 3+LiteLLM seconds. Don't block the sidecar-rpc
         // thread.
-        finalizeExecutor.execute(() -> finalizeUsageAndRevokeKey(event.executionId()));
+        dispatchExecutor.execute(() -> finalizeUsageAndRevokeKey(event.executionId()));
     }
 
     private void finalizeUsageAndRevokeKey(UUID executionId) {

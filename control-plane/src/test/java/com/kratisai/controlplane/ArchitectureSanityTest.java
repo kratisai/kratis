@@ -1,10 +1,14 @@
 package com.kratisai.controlplane;
 
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
+import com.kratisai.controlplane.config.AsyncConfig;
+import com.kratisai.controlplane.ingestion.research.DimensionResearchService;
 import com.kratisai.controlplane.service.ClientRealtimeEventListeners;
 import com.kratisai.controlplane.service.EnvironmentRpcClient;
+import com.kratisai.controlplane.service.VirtualKeyService;
 import com.kratisai.controlplane.service.WebSocketDispatch;
 import com.kratisai.controlplane.websocket.client.ClientRpcHandler;
 import com.kratisai.controlplane.websocket.client.ClientWebSocketHandler;
@@ -12,6 +16,7 @@ import com.kratisai.controlplane.websocket.environment.EnvironmentRpcHandler;
 import com.kratisai.controlplane.websocket.environment.EnvironmentWebSocketHandler;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaCodeUnit;
 import com.tngtech.archunit.core.domain.JavaConstructor;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
 import com.tngtech.archunit.core.domain.JavaMethod;
@@ -27,8 +32,13 @@ import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.tngtech.archunit.library.GeneralCodingRules;
 import com.tngtech.archunit.library.dependencies.SlicesRuleDefinition;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.socket.WebSocketMessage;
@@ -103,6 +113,74 @@ public class ArchitectureSanityTest {
             })
             .because("GraalVM native images cannot build the CGLIB lazy-resolution proxy that @Lazy triggers;"
                     + " break dependency cycles with ObjectProvider or restructure instead");
+
+    @ArchTest
+    public static final ArchRule NO_RAW_VIRTUAL_THREAD_START = noClasses()
+            .should()
+            .callMethod(Thread.class, "startVirtualThread", Runnable.class)
+            .because("Raw Thread.startVirtualThread is untracked; route work through a named executor"
+                    + " bean so tests can drain background work before truncating the schema");
+
+    @ArchTest
+    public static final ArchRule EXECUTOR_CREATION_ONLY_IN_ASYNC_CONFIG = classes()
+            .that()
+            .doNotHaveFullyQualifiedName(AsyncConfig.class.getName())
+            .should(new ArchCondition<JavaClass>("not create executors or schedulers directly") {
+                // Scoped try-with-resources executors, and WebSocket cleanup schedulers that only
+                // touch in-memory session registries.
+                private static final Set<String> ALLOWED_ORIGINS = Set.of(
+                        VirtualKeyService.class.getName() + "#fetchUsage",
+                        DimensionResearchService.class.getName() + "#researchDimensions",
+                        ClientWebSocketHandler.class.getName() + "#<init>",
+                        EnvironmentWebSocketHandler.class.getName() + "#<init>");
+
+                @Override
+                public void check(JavaClass javaClass, ConditionEvents events) {
+                    for (JavaConstructorCall call : javaClass.getConstructorCallsFromSelf()) {
+                        if (isExecutorOrScheduler(call.getTargetOwner()) && notAllowedOrigin(call.getOrigin())) {
+                            events.add(SimpleConditionEvent.violated(
+                                    call,
+                                    describe(call.getOrigin(), call.getTarget().getFullName())));
+                        }
+                    }
+                    for (JavaMethodCall call : javaClass.getMethodCallsFromSelf()) {
+                        if (isExecutorFactory(call) && notAllowedOrigin(call.getOrigin())) {
+                            events.add(SimpleConditionEvent.violated(
+                                    call,
+                                    describe(call.getOrigin(), call.getTarget().getFullName())));
+                        }
+                    }
+                }
+
+                private boolean isExecutorOrScheduler(JavaClass owner) {
+                    return owner.isAssignableTo(ExecutorService.class)
+                            || owner.isAssignableTo(ScheduledExecutorService.class)
+                            || owner.isAssignableTo(TaskExecutor.class)
+                            || owner.isAssignableTo(TaskScheduler.class);
+                }
+
+                private boolean isExecutorFactory(JavaMethodCall call) {
+                    JavaClass owner = call.getTargetOwner();
+                    if (owner.isEquivalentTo(Executors.class)) {
+                        return true;
+                    }
+                    return owner.isEquivalentTo(Thread.class)
+                            && (call.getTarget().getName().equals("ofVirtual")
+                                    || call.getTarget().getName().equals("startVirtualThread"));
+                }
+
+                private boolean notAllowedOrigin(JavaCodeUnit origin) {
+                    return !ALLOWED_ORIGINS.contains(origin.getOwner().getName() + "#" + origin.getName());
+                }
+
+                private String describe(JavaCodeUnit origin, String targetFullName) {
+                    return origin.getFullName() + " creates " + targetFullName
+                            + " outside AsyncConfig; add it to AsyncConfig and"
+                            + " DrainExecutorsTestExecutionListener";
+                }
+            })
+            .because("Executors and schedulers must be created in AsyncConfig so tests can drain them;"
+                    + " untracked background DB work races the schema truncation");
 
     @ArchTest
     public static final ArchRule NO_CIRCULAR_DEPENDENCIES = SlicesRuleDefinition.slices()

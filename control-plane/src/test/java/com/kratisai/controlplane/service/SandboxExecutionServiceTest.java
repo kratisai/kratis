@@ -145,7 +145,11 @@ class SandboxExecutionServiceTest {
         activityPersistenceService = new ExecutionActivityPersistenceService(
                 activityRepository, sandboxExecutionRepository, objectMapper, eventPublisher);
 
-        sandboxExecutionService = new SandboxExecutionService(
+        sandboxExecutionService = newSandboxExecutionService(Runnable::run);
+    }
+
+    private SandboxExecutionService newSandboxExecutionService(Executor dispatchExecutor) {
+        return new SandboxExecutionService(
                 transactionManager,
                 sandboxExecutionRepository,
                 chatRepository,
@@ -161,7 +165,7 @@ class SandboxExecutionServiceTest {
                 virtualKeyService,
                 environmentRpcClient,
                 litellmProperties,
-                Runnable::run,
+                dispatchExecutor,
                 activityPersistenceService);
     }
 
@@ -976,24 +980,7 @@ class SandboxExecutionServiceTest {
     void onSandboxExecutionCompleteEvent_runsFinalizeAsynchronouslyOnExecutor() {
         List<Runnable> submitted = new java.util.ArrayList<>();
         Executor capturingExecutor = submitted::add;
-        SandboxExecutionService asyncService = new SandboxExecutionService(
-                transactionManager,
-                sandboxExecutionRepository,
-                chatRepository,
-                executionEnvironmentRepository,
-                environmentProviderRepository,
-                teamMemberRepository,
-                eventPublisher,
-                sessionRegistry,
-                canvasService,
-                modelProviderRepository,
-                sandboxProvisioningService,
-                pendingHitlRegistry,
-                virtualKeyService,
-                environmentRpcClient,
-                litellmProperties,
-                capturingExecutor,
-                activityPersistenceService);
+        SandboxExecutionService asyncService = newSandboxExecutionService(capturingExecutor);
 
         UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
         SandboxExecution execution = createTestExecution();
@@ -1017,6 +1004,17 @@ class SandboxExecutionServiceTest {
         verify(virtualKeyService).fetchUsage("sk-final-key");
         verify(virtualKeyService).revokeKey("sk-final-key");
         assertThat(execution.getTotalTokens()).isEqualTo(2000L);
+    }
+
+    @Test
+    void dispatchExecution_submitsDispatchToInjectedExecutor() {
+        List<Runnable> submitted = new java.util.ArrayList<>();
+        SandboxExecutionService service = newSandboxExecutionService(submitted::add);
+        SandboxExecution execution = createTestExecution();
+
+        service.dispatchExecution(execution, webSocketSession);
+
+        assertThat(submitted).hasSize(1);
     }
 
     @Test
