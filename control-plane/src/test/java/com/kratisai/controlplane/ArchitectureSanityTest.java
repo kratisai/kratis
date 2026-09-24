@@ -3,7 +3,9 @@ package com.kratisai.controlplane;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
 
+import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.config.AsyncConfig;
 import com.kratisai.controlplane.ingestion.research.DimensionResearchService;
 import com.kratisai.controlplane.service.ClientRealtimeEventListeners;
@@ -22,6 +24,8 @@ import com.tngtech.archunit.core.domain.JavaConstructorCall;
 import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.domain.JavaParameter;
+import com.tngtech.archunit.core.domain.JavaParameterizedType;
+import com.tngtech.archunit.core.domain.JavaType;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
@@ -31,10 +35,12 @@ import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.tngtech.archunit.library.GeneralCodingRules;
 import com.tngtech.archunit.library.dependencies.SlicesRuleDefinition;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.core.task.TaskExecutor;
@@ -392,6 +398,48 @@ public class ArchitectureSanityTest {
             })
             .because("Database transactions must never hold connection locks across Thread.sleep();"
                     + " perform delays outside the transaction boundary.");
+
+    @ArchTest
+    public static final ArchRule TOOLS_USE_KRATIS_TOOL_ANNOTATION = noMethods()
+            .should()
+            .beAnnotatedWith(Tool.class)
+            .because("raw @Tool uses DefaultToolCallResultConverter, which passes a valid-JSON String"
+                    + " result through verbatim; schema $ref/$defs keys then reach Gemini as"
+                    + " function_response references and fail the request. Use @KratisTool instead.");
+
+    @ArchTest
+    public static final ArchRule KRATIS_TOOLS_RETURN_SAFE_TYPES = methods()
+            .that()
+            .areAnnotatedWith(KratisTool.class)
+            .should(new ArchCondition<JavaMethod>("return String, a record, or a List of records") {
+                @Override
+                public void check(JavaMethod method, ConditionEvents events) {
+                    if (!isAllowedReturnType(method.getReturnType())) {
+                        events.add(SimpleConditionEvent.violated(
+                                method,
+                                method.getFullName() + " returns "
+                                        + method.getReturnType().getName()
+                                        + "; @KratisTool methods must return String, a record, or a List"
+                                        + " of records so JSON-Schema reference keys cannot reach the model"));
+                    }
+                }
+
+                private boolean isAllowedReturnType(JavaType returnType) {
+                    JavaClass raw = returnType.toErasure();
+                    if (raw.isEquivalentTo(String.class) || raw.isRecord()) {
+                        return true;
+                    }
+                    if (raw.isEquivalentTo(List.class) && returnType instanceof JavaParameterizedType parameterized) {
+                        List<JavaType> arguments = parameterized.getActualTypeArguments();
+                        return arguments.size() == 1
+                                && arguments.get(0).toErasure().isRecord();
+                    }
+                    return false;
+                }
+            })
+            .because("Kratis tool results are serialized into function_response.response; arbitrary-key"
+                    + " containers (Map, JsonNode, Object) can reintroduce $ref/$defs keys that Gemini"
+                    + " resolves as part references");
 
     private static DescribedPredicate<JavaMethod> callsPublishEvent() {
         return new DescribedPredicate<JavaMethod>("call ApplicationEventPublisher.publishEvent") {

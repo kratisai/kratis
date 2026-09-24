@@ -171,8 +171,8 @@ public class ResearchDimensionWorker {
             } else {
                 ToolContext toolContext = new ToolContext(Map.of("batchId", batchId));
                 var result = readFileTool.readFile(node.getPath(), toolContext);
-                if (result.containsKey("content")) {
-                    String content = result.get("content");
+                String content = result.content();
+                if (content != null) {
                     String truncatedContent = content.length() > 2000 ? content.substring(0, 2000) + "..." : content;
                     fileSnippets
                             .append("File: ")
@@ -183,7 +183,7 @@ public class ResearchDimensionWorker {
                             .append("\n\n");
                     fileCount++;
                 } else {
-                    logger.warn("Failed to read file {}: {}", node.getPath(), result.get("error"));
+                    logger.warn("Failed to read file {}: {}", node.getPath(), result.error());
                 }
             }
         }

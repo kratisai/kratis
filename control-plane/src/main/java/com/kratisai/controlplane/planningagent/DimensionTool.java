@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.planningagent;
 
+import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.model.CtxArchitecturePattern;
 import com.kratisai.controlplane.model.CtxDimension;
 import com.kratisai.controlplane.model.CtxNode;
@@ -13,7 +14,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.ai.chat.model.ToolContext;
-import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,7 +37,7 @@ public class DimensionTool {
         this.batchResolutionService = batchResolutionService;
     }
 
-    @Tool(
+    @KratisTool(
             name = "list_dimensions",
             description =
                     "Get a structural overview of a repository's codebase. Returns all discovered code dimensions organized into three categories: business domains (what the system does), technical archetypes (structural layers like controllers, repositories), and cross-cutting concerns (logging, config, testing). Each dimension includes a synopsis. Use this first to understand the codebase layout, then use get_dimension if required for detail on a specific area.")
@@ -56,7 +56,7 @@ public class DimensionTool {
                 .toList();
     }
 
-    @Tool(
+    @KratisTool(
             name = "get_dimension",
             description =
                     "Get detailed information about a specific code dimension, including ALL files ranked by their importance within that dimension's subgraph (PageRank). Use this (if needed) after list_dimensions to drill into a specific domain or archetype and identify the most important files to read.")
@@ -88,7 +88,7 @@ public class DimensionTool {
         return new DimensionDetail(dimension.getName(), dimension.getCategory().name(), dimension.getSynopsis(), files);
     }
 
-    @Tool(
+    @KratisTool(
             name = "list_architecture_patterns",
             description =
                     "List the architecture patterns discovered in a repository. Patterns describe the coding conventions and structural designs used in the codebase (e.g., 'Hexagonal Architecture', 'CQRS for Event Processing'). Each pattern includes a description and example files that demonstrate the pattern. Use this to ensure proposed changes follow established conventions.")

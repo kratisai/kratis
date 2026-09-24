@@ -2,6 +2,7 @@ package com.kratisai.controlplane.ingestion;
 
 import static org.apache.commons.lang3.StringUtils.isEmpty;
 
+import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.Team;
@@ -13,7 +14,6 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
-import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,7 +36,7 @@ public class WriteWikiPageTool {
         this.mermaidDiagramValidator = mermaidDiagramValidator;
     }
 
-    @Tool(
+    @KratisTool(
             name = "write_wiki_page",
             description =
                     "Write or update a wiki page for the repository. If a page with the same pageSlug already exists for this batch, its content will be replaced.")

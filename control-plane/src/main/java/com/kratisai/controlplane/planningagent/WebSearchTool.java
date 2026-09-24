@@ -2,6 +2,7 @@ package com.kratisai.controlplane.planningagent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.service.TeamService;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -11,7 +12,6 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
-import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -43,7 +43,7 @@ public class WebSearchTool {
             @ToolParam(description = "Condensed markdown summary of search results")
             String markdownSummary) {}
 
-    @Tool(name = "web_search", description = "Search the web for information formatted as a condensed summary")
+    @KratisTool(name = "web_search", description = "Search the web for information formatted as a condensed summary")
     public WebSearchTool.WebSearchResponse webSearch(
             @ToolParam(description = "The search query string") String query, ToolContext toolContext) {
         UUID teamId = (UUID) toolContext.getContext().get("teamId");

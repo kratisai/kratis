@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.planningagent;
 
+import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.api.wsdto.CanvasEvent;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.model.CanvasEntity;
@@ -14,7 +15,6 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
-import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Sinks;
@@ -36,7 +36,7 @@ public class CanvasTool {
         this.mermaidDiagramValidator = mermaidDiagramValidator;
     }
 
-    @Tool(name = "list_canvas_documents", description = "List a summary of each document in the canvas")
+    @KratisTool(name = "list_canvas_documents", description = "List a summary of each document in the canvas")
     public String listCanvasDocuments(ToolContext toolContext) {
         UUID chatId = (UUID) toolContext.getContext().get("chatId");
         List<CanvasEntity> canvases = canvasService.getCanvasesForChat(chatId);
@@ -54,7 +54,7 @@ public class CanvasTool {
                 + canvasEntity.getCanvasType() + repo;
     }
 
-    @Tool(name = "retrieve_from_canvas", description = "Fetch the current content of a document in the canvas")
+    @KratisTool(name = "retrieve_from_canvas", description = "Fetch the current content of a document in the canvas")
     public String retrieveFromCanvas(
             @ToolParam(description = "The ID of the document to retrieve") String documentId, ToolContext toolContext) {
         UUID chatId = (UUID) toolContext.getContext().get("chatId");
@@ -67,7 +67,7 @@ public class CanvasTool {
         }
     }
 
-    @Tool(
+    @KratisTool(
             name = "write_canvas",
             description = "Create a new canvas document or fully overwrite an existing one. "
                     + "A SPEC is a hand-off artifact for a sandbox agent to implement — not a note of your own next conversational step. "
@@ -172,7 +172,7 @@ public class CanvasTool {
             @ToolParam(description = "The text to replace it with")
             String replacementText) {}
 
-    @Tool(
+    @KratisTool(
             name = "patch_canvas",
             description =
                     "Apply atomic search/replace edits to an existing document. Prefer this to overwriting the entire document. Validate edits before and after patching, resort to write_canvas if you get in a mess.")

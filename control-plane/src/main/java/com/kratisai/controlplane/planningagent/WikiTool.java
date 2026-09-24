@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.planningagent;
 
+import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.model.CtxEmbedding;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.IngestionBatch;
@@ -17,7 +18,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,7 +46,7 @@ public class WikiTool {
         this.embeddingModelFactory = embeddingModelFactory;
     }
 
-    @Tool(
+    @KratisTool(
             name = "list_wiki_pages",
             description =
                     "List the auto-generated wiki pages for a repository. The wiki contains architectural documentation, module descriptions, system diagrams, and coding guides generated from the actual codebase. Pages are shown in hierarchy order with their slugs (needed for read_wiki_page). Use this to discover available documentation.")
@@ -66,7 +66,7 @@ public class WikiTool {
         return result;
     }
 
-    @Tool(
+    @KratisTool(
             name = "read_wiki_page",
             description =
                     "Read the full content of a wiki page as markdown. Wiki pages contain architectural documentation, module descriptions, and system diagrams (as Mermaid). Use list_wiki_pages first to find available page slugs, then read the pages relevant to your task.")
@@ -86,7 +86,7 @@ public class WikiTool {
         return "# " + page.getTitle() + "\n\n" + page.getContent();
     }
 
-    @Tool(
+    @KratisTool(
             name = "search_wiki",
             description =
                     "Search the repository's documentation using natural language. Returns the most relevant text passages from wiki pages, along with the page they came from. Use this when you have a vague question about the codebase — for example, 'how does authentication work?' or 'what handles payment processing?'. After finding relevant passages, use read_wiki_page to read the full page for more context.")
@@ -97,7 +97,7 @@ public class WikiTool {
             ToolContext toolContext) {
         UUID teamId = (UUID) toolContext.getContext().get("teamId");
         IngestionBatch batch = batchResolutionService.resolveActiveBatch(teamId, repoName);
-        logger.debug("Searing Wiki: {}", query);
+        logger.debug("Searching Wiki: {}", query);
 
         Team team = teamRepository
                 .findById(teamId)

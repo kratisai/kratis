@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.model.CtxArchitecturePattern;
 import com.kratisai.controlplane.model.CtxDimension;
 import com.kratisai.controlplane.model.CtxNodeDimension;
@@ -14,7 +15,6 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
-import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -37,7 +37,7 @@ public class RepositoryIntelligenceTools {
         this.objectMapper = objectMapper;
     }
 
-    @Tool(
+    @KratisTool(
             name = "get_architectural_pattens",
             description = "Get the globally discovered architectural patterns for the repository")
     public String getArchitecturalPatterns(ToolContext toolContext) {
@@ -59,7 +59,7 @@ public class RepositoryIntelligenceTools {
         }
     }
 
-    @Tool(name = "get_dimensions", description = "Get the parallel code dimensions discovered in the repository")
+    @KratisTool(name = "get_dimensions", description = "Get the parallel code dimensions discovered in the repository")
     public String getDimensions(ToolContext toolContext) {
         try {
             UUID batchId = (UUID) toolContext.getContext().get("batchId");

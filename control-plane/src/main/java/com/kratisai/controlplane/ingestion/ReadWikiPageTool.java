@@ -1,10 +1,10 @@
 package com.kratisai.controlplane.ingestion;
 
+import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import java.util.UUID;
 import org.springframework.ai.chat.model.ToolContext;
-import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -16,7 +16,7 @@ public class ReadWikiPageTool {
         this.ctxWikiPageRepository = ctxWikiPageRepository;
     }
 
-    @Tool(
+    @KratisTool(
             name = "read_wiki_page",
             description = "Read the content of an existing wiki page for the repository by its pageSlug.")
     public String readWikiPage(String pageSlug, ToolContext toolContext) {

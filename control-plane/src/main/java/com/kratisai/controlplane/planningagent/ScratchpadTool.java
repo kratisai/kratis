@@ -1,11 +1,11 @@
 package com.kratisai.controlplane.planningagent;
 
+import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.service.ScratchpadService;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
-import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
@@ -27,7 +27,7 @@ public class ScratchpadTool {
             @ToolParam(description = "Operation status message")
             String status) {}
 
-    @Tool(name = "save_to_scratchpad", description = "Remember a fact on the scratchpad for this conversation")
+    @KratisTool(name = "save_to_scratchpad", description = "Remember a fact on the scratchpad for this conversation")
     public SaveToScratchpadResponse saveToScratchpad(
             @ToolParam(description = "The fact or note to save") String fact, ToolContext toolContext) {
         UUID chatId = (UUID) toolContext.getContext().get("chatId");
@@ -41,7 +41,7 @@ public class ScratchpadTool {
         }
     }
 
-    @Tool(name = "delete_from_scratchpad", description = "Delete a fact from the scratchpad")
+    @KratisTool(name = "delete_from_scratchpad", description = "Delete a fact from the scratchpad")
     public DeleteFromScratchpadResponse deleteFromScratchpad(
             @ToolParam(description = "The fact to delete") String fact, ToolContext toolContext) {
         UUID chatId = (UUID) toolContext.getContext().get("chatId");

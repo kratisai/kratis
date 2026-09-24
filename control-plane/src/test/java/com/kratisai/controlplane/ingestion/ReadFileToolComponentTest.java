@@ -51,8 +51,7 @@ class ReadFileToolComponentTest {
     @Test
     void readFileTool_pathTraversal_returnsError() {
         var result = readFileTool.readFile("../../etc/passwd", null);
-        assertThat(result).containsKey("error");
-        assertThat(result.get("error")).contains("Path traversal");
+        assertThat(result.error()).contains("Path traversal");
     }
 
     @Test
@@ -69,8 +68,7 @@ class ReadFileToolComponentTest {
         ToolContext ctx = new ToolContext(java.util.Map.of("batchId", batch.getId()));
 
         var result = tool.readFile("test.java", ctx);
-        assertThat(result).containsKey("content");
-        assertThat(result.get("content")).isEqualTo("public class Test {}");
+        assertThat(result.content()).isEqualTo("public class Test {}");
 
         // Cleanup
         Files.deleteIfExists(testFile);
@@ -82,7 +80,6 @@ class ReadFileToolComponentTest {
     void readFileTool_fileNotFound_returnsError() {
         ToolContext ctx = new ToolContext(java.util.Map.of("batchId", batch.getId()));
         var result = readFileTool.readFile("nonexistent/file.java", ctx);
-        assertThat(result).containsKey("error");
-        assertThat(result.get("error")).contains("File not found");
+        assertThat(result.error()).contains("File not found");
     }
 }

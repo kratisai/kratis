@@ -13,7 +13,7 @@ export const ASK_TEMPLATES: AskTemplate[] = [
     compilePrompt: (values) => {
       const repo = values.repo ? values.repo.trim() : '[Repository]'
       const description = values.description ? values.description.trim() : ''
-      return `Plan a feature in repository "${repo}" to implement: ${description}\n\nPlease challenge my architectural assumptions, identify potential edge cases, discuss boundary constraints, and outline a step-by-step implementation plan.  Ask questions to remove ambiguity, providing a choice of 2-4 options per question (a/b etc.) and your recommendation.`
+      return `Plan a feature in repository "${repo}" to implement: ${description}\n\nPlease challenge my architectural assumptions, identify potential edge cases, discuss boundary constraints, and outline a potential solution.  Ask questions to remove ambiguity, providing a choice of 2-4 options per question (a/b/c etc.) and your recommendation.`
     },
     description: 'Plan a feature and challenge assumptions',
     icon: 'Lightbulb',
