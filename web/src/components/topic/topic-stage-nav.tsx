@@ -25,7 +25,10 @@ import {
 import { useDiffSummary } from '@/hooks/use-diff'
 import { formatRelativeTime, formatSpend } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { useCanvasStore } from '@/store/canvas-store'
 import { useWebSocketStore } from '@/store/websocket-store'
+
+const EMPTY_UNREAD: string[] = []
 
 interface TopicStageNavProps {
   activeDocId?: null | string
@@ -49,9 +52,21 @@ export function TopicStageNav({
   const navigate = useNavigate()
   const search: { tab?: string } = useSearch({ strict: false })
   const isConnected = useWebSocketStore((state) => state.isConnected)
+  const unreadDocIds = useCanvasStore((state) =>
+    chatId ? (state.unreadCanvasDocIds[chatId] ?? EMPTY_UNREAD) : EMPTY_UNREAD,
+  )
+  const clearCanvasActivity = useCanvasStore((state) => state.clearCanvasActivity)
   const containerRef = useRef<HTMLDivElement>(null)
   const [visibleCount, setVisibleCount] = useState(executions.length)
   const [, setLiveTick] = useState(0)
+
+  const hasUnread = unreadDocIds.length > 0
+
+  useEffect(() => {
+    if (activeDocId && unreadDocIds.includes(activeDocId)) {
+      clearCanvasActivity(chatId, activeDocId)
+    }
+  }, [activeDocId, chatId, clearCanvasActivity, unreadDocIds])
 
   const { data: diffSummary } = useDiffSummary(
     currentStage === 'execution' ? chatId : null,
@@ -99,6 +114,7 @@ export function TopicStageNav({
   }
 
   const handleSelectCanvasDoc = (docId: string) => {
+    clearCanvasActivity(chatId, docId)
     void navigate({
       params: { docId, id: chatId },
       to: '/chats/$id/canvas/$docId',
@@ -173,10 +189,20 @@ export function TopicStageNav({
                       currentStage === 'design' && activeDocId
                         ? 'bg-background text-primary ring-border/80 shadow-xs ring-1'
                         : 'bg-muted/40 text-primary hover:bg-background hover:border-primary hover:shadow-sm',
+                      hasUnread && 'animate-pulse border-emerald-500/50',
                     )}
                     onClick={(e) => e.stopPropagation()}
                     type="button"
                   >
+                    {hasUnread && (
+                      <span
+                        className="relative flex h-2 w-2 shrink-0"
+                        data-testid="canvas-pulse-indicator"
+                      >
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                      </span>
+                    )}
                     <span>
                       {canvasCount} {canvasCount === 1 ? 'doc' : 'docs'}
                     </span>
@@ -188,19 +214,30 @@ export function TopicStageNav({
                   className="w-56"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {canvasDocuments.map((doc) => (
-                    <DropdownMenuItem
-                      key={doc.documentId}
-                      onClick={() => handleSelectCanvasDoc(doc.documentId)}
-                    >
-                      <span className="flex-1 truncate">{doc.title}</span>
-                      {activeDocId === doc.documentId && (
-                        <span className="bg-primary/15 text-primary ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-semibold">
-                          active
-                        </span>
-                      )}
-                    </DropdownMenuItem>
-                  ))}
+                  {canvasDocuments.map((doc) => {
+                    const isUnread = unreadDocIds.includes(doc.documentId)
+                    return (
+                      <DropdownMenuItem
+                        key={doc.documentId}
+                        onClick={() => handleSelectCanvasDoc(doc.documentId)}
+                      >
+                        <span className="flex-1 truncate">{doc.title}</span>
+                        {isUnread && (
+                          <span
+                            className="ml-2 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"
+                            data-testid={`canvas-unread-badge-${doc.documentId}`}
+                          >
+                            updated
+                          </span>
+                        )}
+                        {activeDocId === doc.documentId && (
+                          <span className="bg-primary/15 text-primary ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-semibold">
+                            active
+                          </span>
+                        )}
+                      </DropdownMenuItem>
+                    )
+                  })}
                 </DropdownMenuContent>
               </DropdownMenu>
             </>

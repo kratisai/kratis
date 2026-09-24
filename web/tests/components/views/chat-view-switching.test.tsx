@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Mutable store state that tests can modify between renders
 let mockCurrentChatId: null | string = null
-let mockMessages: Record<string, Array<{ content: string; id: string; role: 'assistant' | 'user'; timestamp: Date }>> = {}
+let mockMessages: Record<
+  string,
+  Array<{ content: string; id: string; role: 'assistant' | 'user'; timestamp: Date }>
+> = {}
 let mockIsConnected = true
 
 const mockSubscribeChat = vi.fn()
@@ -46,7 +49,9 @@ vi.mock('@/store/canvas-store', () => ({
   useCanvasStore: vi.fn((selector) => {
     const state = {
       canvases: {},
+      clearCanvasActivity: vi.fn(),
       selectChat: vi.fn(),
+      unreadCanvasDocIds: {},
     }
     return selector ? selector(state) : state
   }),
@@ -61,7 +66,7 @@ vi.mock('@/store/auth-store', () => ({
       getState: vi.fn(() => ({
         currentTeamId: null,
       })),
-    }
+    },
   ),
 }))
 
@@ -72,9 +77,7 @@ vi.mock('@tanstack/react-router', async () => {
     Outlet: () => null,
     useNavigate: vi.fn(() => vi.fn()),
     useParams: vi.fn(() => ({ id: mockCurrentChatId })),
-    useRouterState: vi.fn((opts) =>
-      opts.select({ location: { pathname: '/chats/session-1' } }),
-    ),
+    useRouterState: vi.fn((opts) => opts.select({ location: { pathname: '/chats/session-1' } })),
     useSearch: vi.fn(() => ({ tab: undefined })),
   }
 })

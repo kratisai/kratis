@@ -37,7 +37,7 @@ vi.mock('@/hooks/use-executions', () => ({
 
 describe('CanvasView', () => {
   beforeEach(() => {
-    useCanvasStore.setState({ canvases: {} })
+    useCanvasStore.setState({ canvases: {}, unreadCanvasDocIds: {} })
   })
 
   it('renders the canvas document addressed by the URL docId', () => {
@@ -65,5 +65,29 @@ describe('CanvasView', () => {
   it('shows the empty state when the chat has no canvas documents', () => {
     render(<CanvasView />)
     expect(screen.getByText(/no canvas documents yet/i)).toBeInTheDocument()
+  })
+
+  it('clears canvas activity for the viewed document on mount', () => {
+    useCanvasStore.setState({
+      canvases: {
+        'session-1': [
+          {
+            canvasType: 'SPEC',
+            chatId: 'session-1',
+            content: '# Plan',
+            documentId: 'doc-1',
+            isNewRepo: false,
+            title: 'Plan Canvas',
+            version: 1,
+          },
+        ],
+      },
+      unreadCanvasDocIds: {
+        'session-1': ['doc-1'],
+      },
+    })
+
+    render(<CanvasView />)
+    expect(useCanvasStore.getState().unreadCanvasDocIds['session-1']).toEqual([])
   })
 })

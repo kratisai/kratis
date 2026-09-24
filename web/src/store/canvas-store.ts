@@ -13,11 +13,13 @@ import type { CanvasResult } from '@/types/websocket-types'
 
 interface CanvasState {
   canvases: Record<string, CanvasDocument[]> // chatId -> documents
+  clearCanvasActivity: (chatId: string, documentId?: string) => void
 
   clearCanvases: () => void
   clearChatCanvases: (chatId: string) => void
   handleCanvasEvent: (canvasResult: CanvasResult) => void
   removeCanvasDocument: (chatId: string, documentId: string) => void
+  unreadCanvasDocIds: Record<string, string[] | undefined> // chatId -> unread document IDs
 }
 
 export function isCanvasCommitEvent(event: CanvasEvent): event is CanvasCommitEvent {
@@ -52,16 +54,33 @@ export function isCanvasUpdateEvent(event: CanvasEvent): event is CanvasUpdateEv
 
 export const useCanvasStore = create<CanvasState>((set) => ({
   canvases: {},
+  clearCanvasActivity: (chatId: string, documentId?: string) => {
+    set((state) => {
+      const currentUnread = state.unreadCanvasDocIds[chatId] ?? []
+      if (currentUnread.length === 0 && !documentId) return state
+
+      const nextList = documentId ? currentUnread.filter((id) => id !== documentId) : []
+
+      return {
+        unreadCanvasDocIds: {
+          ...state.unreadCanvasDocIds,
+          [chatId]: nextList,
+        },
+      }
+    })
+  },
 
   clearCanvases: () => {
-    set({ canvases: {} })
+    set({ canvases: {}, unreadCanvasDocIds: {} })
   },
 
   clearChatCanvases: (chatId: string) => {
     set((state) => {
       const newCanvases = { ...state.canvases }
       delete newCanvases[chatId]
-      return { canvases: newCanvases }
+      const newUnread = { ...state.unreadCanvasDocIds }
+      delete newUnread[chatId]
+      return { canvases: newCanvases, unreadCanvasDocIds: newUnread }
     })
   },
 
@@ -93,10 +112,19 @@ export const useCanvasStore = create<CanvasState>((set) => ({
           newDocs = [...chatDocs, newDoc]
         }
 
+        const currentUnread = state.unreadCanvasDocIds[chatId] ?? []
+        const nextUnread = currentUnread.includes(event.documentId)
+          ? currentUnread
+          : [...currentUnread, event.documentId]
+
         return {
           canvases: {
             ...state.canvases,
             [chatId]: newDocs,
+          },
+          unreadCanvasDocIds: {
+            ...state.unreadCanvasDocIds,
+            [chatId]: nextUnread,
           },
         }
       })
@@ -131,10 +159,20 @@ export const useCanvasStore = create<CanvasState>((set) => ({
             version: event.version,
           })
         }
+
+        const currentUnread = state.unreadCanvasDocIds[chatId] ?? []
+        const nextUnread = currentUnread.includes(event.documentId)
+          ? currentUnread
+          : [...currentUnread, event.documentId]
+
         return {
           canvases: {
             ...state.canvases,
             [chatId]: newDocs,
+          },
+          unreadCanvasDocIds: {
+            ...state.unreadCanvasDocIds,
+            [chatId]: nextUnread,
           },
         }
       })
@@ -166,15 +204,28 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       set((state) => {
         const chatId = event.chatId
         const chatDocs = state.canvases[chatId] ?? []
-        if (!chatDocs.some((doc) => doc.documentId === event.documentId)) return state
+        const currentUnread = state.unreadCanvasDocIds[chatId] ?? []
+        const hasDoc = chatDocs.some((doc) => doc.documentId === event.documentId)
+        const hasUnread = currentUnread.includes(event.documentId)
+        if (!hasDoc && !hasUnread) return state
+
         const newDocs = chatDocs.filter((doc) => doc.documentId !== event.documentId)
+        const nextUnread = currentUnread.filter((id) => id !== event.documentId)
+
         const newCanvases = { ...state.canvases }
+        const newUnreadCanvasDocIds = { ...state.unreadCanvasDocIds }
         if (newDocs.length === 0) {
           delete newCanvases[chatId]
+          delete newUnreadCanvasDocIds[chatId]
         } else {
           newCanvases[chatId] = newDocs
+          newUnreadCanvasDocIds[chatId] = nextUnread
         }
-        return { canvases: newCanvases }
+
+        return {
+          canvases: newCanvases,
+          unreadCanvasDocIds: newUnreadCanvasDocIds,
+        }
       })
     }
   },
@@ -182,15 +233,30 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   removeCanvasDocument: (chatId: string, documentId: string) => {
     set((state) => {
       const chatDocs = state.canvases[chatId] ?? []
+      const currentUnread = state.unreadCanvasDocIds[chatId] ?? []
       const newDocs = chatDocs.filter((doc) => doc.documentId !== documentId)
-      if (newDocs.length === chatDocs.length) return state
+      const nextUnread = currentUnread.filter((id) => id !== documentId)
+
+      if (newDocs.length === chatDocs.length && nextUnread.length === currentUnread.length) {
+        return state
+      }
+
       const newCanvases = { ...state.canvases }
+      const newUnreadCanvasDocIds = { ...state.unreadCanvasDocIds }
       if (newDocs.length === 0) {
         delete newCanvases[chatId]
+        delete newUnreadCanvasDocIds[chatId]
       } else {
         newCanvases[chatId] = newDocs
+        newUnreadCanvasDocIds[chatId] = nextUnread
       }
-      return { canvases: newCanvases }
+
+      return {
+        canvases: newCanvases,
+        unreadCanvasDocIds: newUnreadCanvasDocIds,
+      }
     })
   },
+
+  unreadCanvasDocIds: {},
 }))

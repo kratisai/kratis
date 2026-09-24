@@ -7,6 +7,7 @@ import {
   GitCompare,
   MessageSquare,
 } from 'lucide-react'
+import { useEffect } from 'react'
 
 import type { ExecutionStatus } from '@/lib/execution-api'
 import type { CanvasDocument } from '@/types/canvas-types'
@@ -27,6 +28,7 @@ import { cn } from '@/lib/utils'
 import { useCanvasStore } from '@/store/canvas-store'
 
 const EMPTY_CANVASES: CanvasDocument[] = []
+const EMPTY_UNREAD: string[] = []
 
 export function MobileTopicSelector() {
   const navigate = useNavigate()
@@ -43,6 +45,17 @@ export function MobileTopicSelector() {
   const canvases = useCanvasStore((state) =>
     chatId ? (state.canvases[chatId] ?? EMPTY_CANVASES) : EMPTY_CANVASES,
   )
+  const unreadDocIds = useCanvasStore((state) =>
+    chatId ? (state.unreadCanvasDocIds[chatId] ?? EMPTY_UNREAD) : EMPTY_UNREAD,
+  )
+  const clearCanvasActivity = useCanvasStore((state) => state.clearCanvasActivity)
+
+  useEffect(() => {
+    if (chatId && docId && unreadDocIds.includes(docId)) {
+      clearCanvasActivity(chatId, docId)
+    }
+  }, [chatId, clearCanvasActivity, docId, unreadDocIds])
+
   const { data: executions = [] } = useChatExecutions(chatId)
 
   if (!isOnChatRoute || !chatId) {
@@ -51,6 +64,7 @@ export function MobileTopicSelector() {
 
   const activeDoc = canvases.find((d) => d.documentId === docId)
   const activeExecutionIndex = executions.findIndex((e) => e.id === executionId)
+  const hasUnread = docId ? unreadDocIds.some((id) => id !== docId) : unreadDocIds.length > 0
 
   // Derive active label for mobile trigger
   let activeLabel = 'Design & Plan'
@@ -82,6 +96,9 @@ export function MobileTopicSelector() {
   }
 
   const navigateToDoc = (targetDocId: string) => {
+    if (chatId) {
+      clearCanvasActivity(chatId, targetDocId)
+    }
     void navigate({
       params: { docId: targetDocId, id: chatId },
       to: '/chats/$id/canvas/$docId',
@@ -108,6 +125,15 @@ export function MobileTopicSelector() {
           >
             <ActiveIcon className="text-primary h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{activeLabel}</span>
+            {hasUnread && (
+              <span
+                className="relative flex h-2 w-2 shrink-0"
+                data-testid="mobile-canvas-pulse-indicator"
+              >
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              </span>
+            )}
             <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
           </Button>
         </DropdownMenuTrigger>
@@ -122,15 +148,26 @@ export function MobileTopicSelector() {
             {!executionId && !docId && <Check className="text-primary ml-1 h-3.5 w-3.5 shrink-0" />}
           </DropdownMenuItem>
 
-          {canvases.map((doc) => (
-            <DropdownMenuItem key={doc.documentId} onClick={() => navigateToDoc(doc.documentId)}>
-              <FileText className="text-primary mr-2 h-3.5 w-3.5" />
-              <span className="flex-1 truncate">{doc.title}</span>
-              {docId === doc.documentId && (
-                <Check className="text-primary ml-1 h-3.5 w-3.5 shrink-0" />
-              )}
-            </DropdownMenuItem>
-          ))}
+          {canvases.map((doc) => {
+            const isUnread = unreadDocIds.includes(doc.documentId)
+            return (
+              <DropdownMenuItem key={doc.documentId} onClick={() => navigateToDoc(doc.documentId)}>
+                <FileText className="text-primary mr-2 h-3.5 w-3.5" />
+                <span className="flex-1 truncate">{doc.title}</span>
+                {isUnread && (
+                  <span
+                    className="ml-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"
+                    data-testid={`mobile-canvas-unread-badge-${doc.documentId}`}
+                  >
+                    updated
+                  </span>
+                )}
+                {docId === doc.documentId && (
+                  <Check className="text-primary ml-1 h-3.5 w-3.5 shrink-0" />
+                )}
+              </DropdownMenuItem>
+            )
+          })}
 
           {/* Executions Group (ordered backwards: most recent first) */}
           {orderedExecutions.length > 0 && (

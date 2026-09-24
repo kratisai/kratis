@@ -5,6 +5,7 @@ import type { SandboxExecutionDto } from '@/lib/execution-api'
 import type { CanvasDocument } from '@/types/canvas-types'
 
 import { TopicStageNav } from '@/components/topic/topic-stage-nav'
+import { useCanvasStore } from '@/store/canvas-store'
 
 const mockNavigate = vi.fn()
 let mockSearch: { tab?: string } = { tab: undefined }
@@ -57,6 +58,10 @@ describe('TopicStageNav', () => {
     vi.clearAllMocks()
     mockSearch = { tab: undefined }
     mockUseDiffSummary.mockReturnValue({ data: undefined })
+    useCanvasStore.setState({
+      canvases: {},
+      unreadCanvasDocIds: {},
+    })
   })
 
   it('renders Design & Plan card with canvas count and runs', () => {
@@ -285,6 +290,108 @@ describe('TopicStageNav', () => {
         params: { id: 'chat-1' },
         to: '/chats/$id',
       })
+    })
+
+    it('shows activity pulse indicator and animate-pulse when unread documents exist', () => {
+      useCanvasStore.setState({
+        unreadCanvasDocIds: {
+          'chat-1': ['doc-1'],
+        },
+      })
+
+      render(
+        <TopicStageNav
+          canvasCount={1}
+          canvasDocuments={[canvasDoc()]}
+          chatId="chat-1"
+          currentStage="design"
+          executions={mockExecutions}
+        />,
+      )
+
+      expect(screen.getByTestId('canvas-pulse-indicator')).toBeInTheDocument()
+      const docsButton = screen.getByRole('button', { name: /canvas documents/i })
+      expect(docsButton.className).toContain('animate-pulse')
+    })
+
+    it('does not show activity pulse indicator when no unread documents exist', () => {
+      useCanvasStore.setState({
+        unreadCanvasDocIds: {
+          'chat-1': [],
+        },
+      })
+
+      render(
+        <TopicStageNav
+          canvasCount={1}
+          canvasDocuments={[canvasDoc()]}
+          chatId="chat-1"
+          currentStage="design"
+          executions={mockExecutions}
+        />,
+      )
+
+      expect(screen.queryByTestId('canvas-pulse-indicator')).not.toBeInTheDocument()
+      const docsButton = screen.getByRole('button', { name: /canvas documents/i })
+      expect(docsButton.className).not.toContain('animate-pulse')
+    })
+
+    it('displays updated badge in dropdown for unread document and clears activity when clicked', async () => {
+      useCanvasStore.setState({
+        unreadCanvasDocIds: {
+          'chat-1': ['doc-2'],
+        },
+      })
+
+      render(
+        <TopicStageNav
+          canvasCount={2}
+          canvasDocuments={[
+            canvasDoc({ documentId: 'doc-1', title: 'Plan.md' }),
+            canvasDoc({ documentId: 'doc-2', title: 'Spec.md' }),
+          ]}
+          chatId="chat-1"
+          currentStage="design"
+          executions={mockExecutions}
+        />,
+      )
+
+      const docsButton = screen.getByRole('button', { name: /canvas documents/i })
+      fireEvent.pointerDown(docsButton, { pointerType: 'mouse' })
+
+      expect(await screen.findByTestId('canvas-unread-badge-doc-2')).toBeInTheDocument()
+      expect(screen.queryByTestId('canvas-unread-badge-doc-1')).not.toBeInTheDocument()
+
+      const specItem = screen.getByRole('menuitem', { name: /spec\.md/i })
+      fireEvent.click(specItem)
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['chat-1']).toEqual([])
+      expect(mockNavigate).toHaveBeenCalledWith({
+        params: { docId: 'doc-2', id: 'chat-1' },
+        to: '/chats/$id/canvas/$docId',
+      })
+    })
+
+    it('clears unread activity when activeDocId is already viewing the unread document', () => {
+      useCanvasStore.setState({
+        unreadCanvasDocIds: {
+          'chat-1': ['doc-1'],
+        },
+      })
+
+      render(
+        <TopicStageNav
+          activeDocId="doc-1"
+          canvasCount={1}
+          canvasDocuments={[canvasDoc()]}
+          chatId="chat-1"
+          currentStage="design"
+          executions={mockExecutions}
+        />,
+      )
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['chat-1']).toEqual([])
+      expect(screen.queryByTestId('canvas-pulse-indicator')).not.toBeInTheDocument()
     })
   })
 })

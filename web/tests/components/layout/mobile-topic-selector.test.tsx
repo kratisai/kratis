@@ -8,14 +8,22 @@ import { useCanvasStore } from '@/store/canvas-store'
 
 const mockNavigate = vi.fn()
 let mockPathname = '/chats/chat-1'
-let mockParams = { docId: undefined as string | undefined, executionId: undefined as string | undefined, id: 'chat-1' as string | undefined }
+let mockParams = {
+  docId: undefined as string | undefined,
+  executionId: undefined as string | undefined,
+  id: 'chat-1' as string | undefined,
+}
 let mockSearch = { tab: undefined as string | undefined }
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => mockNavigate,
   useParams: () => mockParams,
-  useRouterState: ({ select }: { select?: (state: { location: { pathname: string } }) => unknown } = {}) =>
-    select ? select({ location: { pathname: mockPathname } }) : { location: { pathname: mockPathname } },
+  useRouterState: ({
+    select,
+  }: { select?: (state: { location: { pathname: string } }) => unknown } = {}) =>
+    select
+      ? select({ location: { pathname: mockPathname } })
+      : { location: { pathname: mockPathname } },
   useSearch: () => mockSearch,
 }))
 
@@ -44,6 +52,7 @@ describe('MobileTopicSelector', () => {
           },
         ],
       },
+      unreadCanvasDocIds: {},
     })
     vi.spyOn(executionApi, 'listChatExecutions').mockResolvedValue([
       {
@@ -162,5 +171,76 @@ describe('MobileTopicSelector', () => {
       search: {},
       to: '/chats/$id/executions/$executionId',
     })
+  })
+
+  it('shows activity pulse indicator on mobile trigger when unread documents exist', () => {
+    useCanvasStore.setState({
+      unreadCanvasDocIds: {
+        'chat-1': ['doc-1'],
+      },
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MobileTopicSelector />
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByTestId('mobile-canvas-pulse-indicator')).toBeInTheDocument()
+  })
+
+  it('does not show activity pulse indicator when no unread documents exist', () => {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MobileTopicSelector />
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByTestId('mobile-canvas-pulse-indicator')).not.toBeInTheDocument()
+  })
+
+  it('displays updated badge for unread document in dropdown and clears on selection', async () => {
+    useCanvasStore.setState({
+      unreadCanvasDocIds: {
+        'chat-1': ['doc-1'],
+      },
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MobileTopicSelector />
+      </QueryClientProvider>,
+    )
+
+    const trigger = screen.getByRole('button', { name: /topic navigation menu/i })
+    fireEvent.pointerDown(trigger, { pointerType: 'mouse' })
+
+    expect(await screen.findByTestId('mobile-canvas-unread-badge-doc-1')).toBeInTheDocument()
+
+    const docItem = screen.getByText('Plan.md')
+    fireEvent.click(docItem)
+
+    expect(useCanvasStore.getState().unreadCanvasDocIds['chat-1']).toEqual([])
+    expect(mockNavigate).toHaveBeenCalledWith({
+      params: { docId: 'doc-1', id: 'chat-1' },
+      to: '/chats/$id/canvas/$docId',
+    })
+  })
+
+  it('does not show pulse indicator on trigger when user is viewing that unread canvas document', () => {
+    mockParams = { docId: 'doc-1', executionId: undefined, id: 'chat-1' }
+    useCanvasStore.setState({
+      unreadCanvasDocIds: {
+        'chat-1': ['doc-1'],
+      },
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MobileTopicSelector />
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByTestId('mobile-canvas-pulse-indicator')).not.toBeInTheDocument()
   })
 })

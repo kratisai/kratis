@@ -31,11 +31,14 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
   const isConnected = useWebSocketStore((state) => state.isConnected)
   const messages = useChatStore((state) => state.messages)
   const canvases = useCanvasStore((state) => state.canvases)
+  const unreadCanvasDocIds = useCanvasStore((state) => state.unreadCanvasDocIds)
+  const clearCanvasActivity = useCanvasStore((state) => state.clearCanvasActivity)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesScrollRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
   const isMobile = useIsMobile()
+  const isWidescreen = !useIsMobile(1280)
   const [copiedMessageId, setCopiedMessageId] = useState<null | string>(null)
 
   const handleCopyMessage = (messageId: string, content: string) => {
@@ -86,6 +89,23 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
     if (!isNearBottomRef.current) return
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
   }, [chatMessages])
+
+  useEffect(() => {
+    if (!chatId) return
+    const unread = unreadCanvasDocIds[chatId] ?? []
+    if (unread.length === 0) return
+
+    if (docId) {
+      if (unread.includes(docId)) {
+        clearCanvasActivity(chatId, docId)
+      }
+    } else if (isWidescreen && chatCanvases.length > 0) {
+      const firstDocId = chatCanvases[0].documentId
+      if (unread.includes(firstDocId)) {
+        clearCanvasActivity(chatId, firstDocId)
+      }
+    }
+  }, [chatId, docId, isWidescreen, chatCanvases, unreadCanvasDocIds, clearCanvasActivity])
 
   const handleSendMessage = (message: string) => {
     if (!chatId) return

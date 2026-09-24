@@ -1,9 +1,18 @@
 import { useParams } from '@tanstack/react-router'
+import { useEffect } from 'react'
 
 import { CanvasPanel } from '@/components/canvas/canvas-panel'
+import { useCanvasStore } from '@/store/canvas-store'
 
 export function CanvasView() {
   const { docId, id } = useParams({ strict: false })
+  const clearCanvasActivity = useCanvasStore((state) => state.clearCanvasActivity)
+
+  useEffect(() => {
+    if (id && docId) {
+      clearCanvasActivity(id, docId)
+    }
+  }, [clearCanvasActivity, docId, id])
 
   if (!id) {
     return (

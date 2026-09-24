@@ -12,10 +12,12 @@ import { useCanvasStore } from '@/store/canvas-store'
 import { useChatStore } from '@/store/chat-store'
 import { useWebSocketStore } from '@/store/websocket-store'
 
+let mockParams = { docId: null as null | string, id: 'chat-1' }
+
 vi.mock('@tanstack/react-router', () => ({
   Outlet: () => <div data-testid="outlet-mock">Canvas Outlet</div>,
   useNavigate: () => vi.fn(),
-  useParams: () => ({ docId: null, id: 'chat-1' }),
+  useParams: () => mockParams,
 }))
 
 vi.mock('sonner', () => ({
@@ -46,11 +48,12 @@ describe('DesignStageView', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockParams = { docId: null, id: 'chat-1' }
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
     useWebSocketStore.setState({ isConnected: true })
-    useCanvasStore.setState({ canvases: {} })
+    useCanvasStore.setState({ canvases: {}, unreadCanvasDocIds: {} })
     useChatStore.setState({
       messages: {
         'chat-1': [
@@ -265,9 +268,13 @@ describe('DesignStageView', () => {
         </QueryClientProvider>,
       )
 
-      const userBubble = screen.getByText('Let us build auth refresh flow').closest('[data-slot="card"]')
+      const userBubble = screen
+        .getByText('Let us build auth refresh flow')
+        .closest('[data-slot="card"]')
       expect(
-        userBubble ? within(userBubble as HTMLElement).queryByRole('button', { name: /copy message/i }) : null,
+        userBubble
+          ? within(userBubble as HTMLElement).queryByRole('button', { name: /copy message/i })
+          : null,
       ).not.toBeInTheDocument()
     })
 
@@ -314,6 +321,72 @@ describe('DesignStageView', () => {
       await waitFor(() => {
         expect(copyButton.querySelector('.lucide-check')).toBeInTheDocument()
       })
+    })
+  })
+
+  describe('canvas activity synchronization', () => {
+    it('clears canvas activity for active docId', () => {
+      mockParams = { docId: 'doc-1', id: 'chat-1' }
+      useCanvasStore.setState({
+        canvases: {
+          'chat-1': [canvasDoc()],
+        },
+        unreadCanvasDocIds: {
+          'chat-1': ['doc-1'],
+        },
+      })
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['chat-1']).toEqual([])
+    })
+
+    it('clears canvas activity for first document on widescreen dual-pane when docId is not set', () => {
+      setViewportWidth(1440)
+      window.dispatchEvent(new Event('resize'))
+      mockParams = { docId: null, id: 'chat-1' }
+      useCanvasStore.setState({
+        canvases: {
+          'chat-1': [canvasDoc({ documentId: 'doc-first' })],
+        },
+        unreadCanvasDocIds: {
+          'chat-1': ['doc-first'],
+        },
+      })
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['chat-1']).toEqual([])
+    })
+
+    it('does not clear canvas activity when not on widescreen and docId is not set', () => {
+      setViewportWidth(768)
+      window.dispatchEvent(new Event('resize'))
+      mockParams = { docId: null, id: 'chat-1' }
+      useCanvasStore.setState({
+        canvases: {
+          'chat-1': [canvasDoc({ documentId: 'doc-first' })],
+        },
+        unreadCanvasDocIds: {
+          'chat-1': ['doc-first'],
+        },
+      })
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['chat-1']).toEqual(['doc-first'])
     })
   })
 })

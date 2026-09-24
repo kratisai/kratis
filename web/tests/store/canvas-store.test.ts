@@ -143,6 +143,7 @@ describe('useCanvasStore', () => {
   beforeEach(() => {
     useCanvasStore.setState({
       canvases: {},
+      unreadCanvasDocIds: {},
     })
   })
 
@@ -153,6 +154,7 @@ describe('useCanvasStore', () => {
   it('should have initial state', () => {
     const state = useCanvasStore.getState()
     expect(state.canvases).toEqual({})
+    expect(state.unreadCanvasDocIds).toEqual({})
   })
 
   it('clearCanvases should reset state', () => {
@@ -292,7 +294,7 @@ describe('useCanvasStore', () => {
   })
 
   it('handleCanvasEvent should handle error event', () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { })
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const errorResult = createCanvasResult({
       chatId: 'session-1',
@@ -535,5 +537,204 @@ describe('useCanvasStore', () => {
     useCanvasStore.getState().removeCanvasDocument('session-1', 'doc-1')
 
     expect(useCanvasStore.getState().canvases['session-1']).toBeUndefined()
+  })
+
+  describe('unread activity tracking', () => {
+    it('handleCanvasEvent should add document ID to unreadCanvasDocIds on create event', () => {
+      const createResult = createCanvasResult({
+        canvasType: 'DOCUMENT',
+        chatId: 'session-1',
+        content: '# New Doc',
+        documentId: 'doc-1',
+        isNewRepo: false,
+        title: 'New Document',
+      })
+      useCanvasStore.getState().handleCanvasEvent(createResult)
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['session-1']).toEqual(['doc-1'])
+    })
+
+    it('handleCanvasEvent should add document ID to unreadCanvasDocIds on update event', () => {
+      // Create first without unread or existing
+      useCanvasStore.setState({
+        canvases: {
+          'session-1': [
+            {
+              canvasType: 'DOCUMENT',
+              chatId: 'session-1',
+              content: '# Initial',
+              documentId: 'doc-1',
+              isNewRepo: false,
+              title: 'Doc 1',
+              version: 1,
+            },
+          ],
+        },
+        unreadCanvasDocIds: {},
+      })
+
+      const updateResult = createCanvasResult({
+        canvasType: 'DOCUMENT',
+        chatId: 'session-1',
+        content: '# Updated content',
+        documentId: 'doc-1',
+        isNewRepo: false,
+        title: 'Doc 1',
+        version: 2,
+      })
+      useCanvasStore.getState().handleCanvasEvent(updateResult)
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['session-1']).toEqual(['doc-1'])
+    })
+
+    it('does not duplicate documentId in unreadCanvasDocIds on multiple events', () => {
+      const createResult = createCanvasResult({
+        canvasType: 'DOCUMENT',
+        chatId: 'session-1',
+        content: '# Content 1',
+        documentId: 'doc-1',
+        isNewRepo: false,
+        title: 'Doc 1',
+      })
+      const updateResult = createCanvasResult({
+        canvasType: 'DOCUMENT',
+        chatId: 'session-1',
+        content: '# Content 2',
+        documentId: 'doc-1',
+        isNewRepo: false,
+        title: 'Doc 1',
+        version: 2,
+      })
+      useCanvasStore.getState().handleCanvasEvent(createResult)
+      useCanvasStore.getState().handleCanvasEvent(updateResult)
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['session-1']).toEqual(['doc-1'])
+    })
+
+    it('clearCanvasActivity removes a specific document ID from unreadCanvasDocIds', () => {
+      useCanvasStore.setState({
+        unreadCanvasDocIds: {
+          'session-1': ['doc-1', 'doc-2'],
+        },
+      })
+
+      useCanvasStore.getState().clearCanvasActivity('session-1', 'doc-1')
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['session-1']).toEqual(['doc-2'])
+    })
+
+    it('clearCanvasActivity clears all document IDs for chat when documentId is omitted', () => {
+      useCanvasStore.setState({
+        unreadCanvasDocIds: {
+          'session-1': ['doc-1', 'doc-2'],
+        },
+      })
+
+      useCanvasStore.getState().clearCanvasActivity('session-1')
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['session-1']).toEqual([])
+    })
+
+    it('removeCanvasDocument removes the document ID from unreadCanvasDocIds', () => {
+      useCanvasStore.setState({
+        canvases: {
+          'session-1': [
+            {
+              canvasType: 'DOCUMENT',
+              chatId: 'session-1',
+              content: '# 1',
+              documentId: 'doc-1',
+              isNewRepo: false,
+              title: 'Doc 1',
+              version: 1,
+            },
+            {
+              canvasType: 'DOCUMENT',
+              chatId: 'session-1',
+              content: '# 2',
+              documentId: 'doc-2',
+              isNewRepo: false,
+              title: 'Doc 2',
+              version: 1,
+            },
+          ],
+        },
+        unreadCanvasDocIds: {
+          'session-1': ['doc-1', 'doc-2'],
+        },
+      })
+
+      useCanvasStore.getState().removeCanvasDocument('session-1', 'doc-1')
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['session-1']).toEqual(['doc-2'])
+    })
+
+    it('clearChatCanvases removes unreadCanvasDocIds for the chat', () => {
+      useCanvasStore.setState({
+        canvases: {
+          'session-1': [
+            {
+              canvasType: 'DOCUMENT',
+              chatId: 'session-1',
+              content: '# 1',
+              documentId: 'doc-1',
+              isNewRepo: false,
+              title: 'Doc 1',
+              version: 1,
+            },
+          ],
+        },
+        unreadCanvasDocIds: {
+          'session-1': ['doc-1'],
+        },
+      })
+
+      useCanvasStore.getState().clearChatCanvases('session-1')
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['session-1']).toBeUndefined()
+    })
+
+    it('clearCanvases resets unreadCanvasDocIds to empty object', () => {
+      useCanvasStore.setState({
+        unreadCanvasDocIds: {
+          'session-1': ['doc-1'],
+        },
+      })
+
+      useCanvasStore.getState().clearCanvases()
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds).toEqual({})
+    })
+
+    it('delete event removes document ID from unreadCanvasDocIds', () => {
+      const create1 = createCanvasResult({
+        canvasType: 'DOCUMENT',
+        chatId: 'session-1',
+        content: '# Doc 1',
+        documentId: 'doc-1',
+        isNewRepo: false,
+        title: 'Document 1',
+      })
+      const create2 = createCanvasResult({
+        canvasType: 'DOCUMENT',
+        chatId: 'session-1',
+        content: '# Doc 2',
+        documentId: 'doc-2',
+        isNewRepo: false,
+        title: 'Document 2',
+      })
+      useCanvasStore.getState().handleCanvasEvent(create1)
+      useCanvasStore.getState().handleCanvasEvent(create2)
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['session-1']).toEqual(['doc-1', 'doc-2'])
+
+      const deleteResult = createCanvasResult({
+        chatId: 'session-1',
+        documentId: 'doc-1',
+      })
+      useCanvasStore.getState().handleCanvasEvent(deleteResult)
+
+      expect(useCanvasStore.getState().unreadCanvasDocIds['session-1']).toEqual(['doc-2'])
+    })
   })
 })
