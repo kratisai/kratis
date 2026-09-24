@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["status"],
   "properties": {
-    "status": { "type": "string", "enum": ["completed", "failed"] },
+    "status": { "type": "string", "enum": ["accepted", "completed", "failed"] },
     "stopReason": { "type": ["string", "null"], "enum": ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled", null] },
     "error": { "type": ["string", "null"] }
   },

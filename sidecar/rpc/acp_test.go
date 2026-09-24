@@ -312,15 +312,22 @@ sleep 30
 	// Now send prompt
 	promptParams := AcpPromptParams{
 		TaskPrompt: "Implement code",
+		PromptID:   "prompt-1",
 	}
 
 	go c.ExecuteAcpPrompt(promptParams, uint64(102))
 
-	// Wait for prompt response
+	// Wait for the acknowledgement response
 	select {
 	case <-promptDone:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Timeout waiting for prompt response")
+	}
+
+	// Wait for the asynchronous completion notification.
+	deadline := time.Now().Add(5 * time.Second)
+	for !gotPromptComplete.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Give time for stderr to be captured
@@ -365,8 +372,11 @@ sleep 30
 	if promptComplete.StopReason != "end_turn" {
 		t.Errorf("expected stopReason 'end_turn', got '%s'", promptComplete.StopReason)
 	}
+	if promptComplete.PromptID != "prompt-1" {
+		t.Errorf("expected promptId 'prompt-1', got '%s'", promptComplete.PromptID)
+	}
 
-	// Parse response message
+	// The acknowledgement carries no stop reason; the outcome arrives via the notification.
 	var resp JsonRpcResponse
 	if err := json.Unmarshal(respBytes, &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
@@ -377,11 +387,11 @@ sleep 30
 		t.Fatalf("failed to parse result: %v", err)
 	}
 
-	if result.Status != PromptCompleted {
-		t.Errorf("expected status 'completed', got '%s'", result.Status)
+	if result.Status != PromptAccepted {
+		t.Errorf("expected status 'accepted', got '%s'", result.Status)
 	}
-	if result.StopReason != "end_turn" {
-		t.Errorf("expected stopReason 'end_turn', got '%s'", result.StopReason)
+	if result.StopReason != "" {
+		t.Errorf("expected empty stopReason on the acknowledgement, got '%s'", result.StopReason)
 	}
 
 	c.Close()
@@ -1233,22 +1243,26 @@ sleep 30
 		t.Fatalf("failed to parse result: %v", err)
 	}
 
-	if result.Status != PromptFailed {
-		t.Errorf("expected status 'failed', got '%s'", result.Status)
-	}
-	if result.Error == "" {
-		t.Error("expected non-empty error message")
+	if result.Status != PromptAccepted {
+		t.Errorf("expected status 'accepted', got '%s'", result.Status)
 	}
 
 	// Verify env.complete notification WAS sent with non-zero exit code on failure.
 	// This ensures the control-plane is notified that the execution failed
 	// so it doesn't hang forever waiting for a completion signal.
+	deadline := time.Now().Add(5 * time.Second)
+	for !gotComplete.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	mu.Lock()
+	complete := completeMsg
+	mu.Unlock()
 	switch {
 	case !gotComplete.Load():
 		t.Error("expected env.complete notification on failure")
-	case completeMsg.ExitCode == 0:
+	case complete.ExitCode == 0:
 		t.Error("expected non-zero exit code in env.complete notification")
-	case completeMsg.Reason == "":
+	case complete.Reason == "":
 		t.Error("expected the agent's error message as the terminal reason")
 	}
 
@@ -1950,12 +1964,18 @@ sleep 30
 	select {
 	case <-promptDone:
 	case <-time.After(5 * time.Second):
-		t.Fatal("Timeout waiting for prompt completion")
+		t.Fatal("Timeout waiting for prompt acknowledgement")
+	}
+
+	// The acknowledgement precedes the turn; wait for the turn's activity and
+	// permission traffic to be observed before asserting.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) &&
+		(!gotActivityMessage.Load() || !gotActivityResearch.Load() || !gotPermissionReq.Load()) {
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Wait for in-flight notification handlers to complete.
-	// With async notification dispatch, the permission handler goroutine may
-	// still be processing when the prompt response arrives.
 	c.mu.Lock()
 	sup := c.supervisor
 	c.mu.Unlock()
@@ -2647,19 +2667,19 @@ exit 1
 		t.Fatalf("failed to parse result: %v", err)
 	}
 
-	if result.Status != PromptFailed {
-		t.Errorf("expected status 'failed', got '%s'", result.Status)
-	}
-	if result.Error == "" {
-		t.Error("expected non-empty error message about the agent terminating")
-	}
-	if !strings.Contains(result.Error, "terminated") {
-		t.Errorf("expected error about agent process terminating, got: %s", result.Error)
+	// The dispatch is acknowledged before the turn runs; the crash is reported
+	// asynchronously as env.complete.
+	if result.Status != PromptAccepted {
+		t.Errorf("expected status 'accepted', got '%s'", result.Status)
 	}
 
 	// Verify env.complete notification WAS sent with non-zero exit code on failure.
 	// This ensures the control-plane is notified that the execution failed
 	// so it doesn't hang forever waiting for a completion signal.
+	deadline := time.Now().Add(5 * time.Second)
+	for !gotComplete.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if !gotComplete.Load() {
 		t.Error("expected env.complete notification on timeout")
 	} else {
@@ -3408,7 +3428,14 @@ sleep 30
 	select {
 	case <-promptDone:
 	case <-time.After(5 * time.Second):
-		t.Fatal("Timeout waiting for prompt completion")
+		t.Fatal("Timeout waiting for prompt acknowledgement")
+	}
+
+	// The acknowledgement is sent before the turn runs; wait for the terminal
+	// completion notification before asserting on the turn outcome.
+	deadline := time.Now().Add(5 * time.Second)
+	for !gotPromptComplete.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	if !gotPromptComplete.Load() {
@@ -3542,7 +3569,20 @@ sleep 10
 	select {
 	case <-promptDone:
 	case <-time.After(5 * time.Second):
-		t.Fatal("Timeout waiting for steering prompt completion")
+		t.Fatal("Timeout waiting for steering prompt acknowledgement")
+	}
+
+	// The acknowledgement precedes the turn; the steering activity is emitted
+	// when the turn actually starts, so wait for it.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		count := len(activities)
+		mu.Unlock()
+		if count > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	mu.Lock()
@@ -3595,12 +3635,13 @@ done
 	}
 
 	var (
-		mu           sync.Mutex
-		sessionIds   []string
-		responseMsgs [][]byte
-		launchDone   = make(chan struct{})
-		firstDone    = make(chan struct{})
-		relaunchDone = make(chan struct{})
+		mu            sync.Mutex
+		sessionIds    []string
+		relaunchFlags []bool
+		responseMsgs  [][]byte
+		launchDone    = make(chan struct{})
+		firstDone     = make(chan struct{})
+		relaunchDone  = make(chan struct{})
 	)
 
 	srv := newTestServer(t, func(conn *websocket.Conn) {
@@ -3621,6 +3662,7 @@ done
 				_ = json.Unmarshal(b, &p)
 				mu.Lock()
 				sessionIds = append(sessionIds, p.SessionID)
+				relaunchFlags = append(relaunchFlags, p.Relaunch)
 				mu.Unlock()
 				continue
 			}
@@ -3691,6 +3733,12 @@ done
 	if sessionIds[0] == sessionIds[1] {
 		t.Errorf("expected a fresh session after relaunch, got same sessionId %q twice", sessionIds[0])
 	}
+	if relaunchFlags[0] {
+		t.Error("expected the initial acp_initialized to have relaunch=false")
+	}
+	if !relaunchFlags[1] {
+		t.Error("expected the post-relaunch acp_initialized to have relaunch=true")
+	}
 
 	pidsRaw, err := os.ReadFile(pidsFile)
 	if err != nil {
@@ -3701,7 +3749,8 @@ done
 		t.Errorf("expected two distinct agent processes, got pids: %v", pidLines)
 	}
 
-	// Both prompts must have completed successfully.
+	// Both prompts must have been acknowledged (the terminal outcome arrives
+	// asynchronously via env.acp_prompt_complete).
 	for i, respBytes := range responseMsgs {
 		var resp JsonRpcResponse
 		if err := json.Unmarshal(respBytes, &resp); err != nil {
@@ -3711,8 +3760,8 @@ done
 		if err := json.Unmarshal(resp.Result, &result); err != nil {
 			t.Fatalf("failed to parse result %d: %v", i, err)
 		}
-		if result.Status != PromptCompleted {
-			t.Errorf("expected prompt %d to complete, got status %q error %q", i, result.Status, result.Error)
+		if result.Status != PromptAccepted {
+			t.Errorf("expected prompt %d to be accepted, got status %q error %q", i, result.Status, result.Error)
 		}
 	}
 
@@ -3777,4 +3826,48 @@ func TestExecuteAcpPrompt_RelaunchWithoutRecordedCommand(t *testing.T) {
 	}
 
 	c.Close()
+}
+
+func TestWaitForQuiet_ReturnsAfterFullQuietWindow(t *testing.T) {
+	c := &Client{}
+	c.markActivity()
+	period := 120 * time.Millisecond
+
+	start := time.Now()
+	c.waitForQuiet(period)
+	elapsed := time.Since(start)
+
+	if elapsed < period {
+		t.Errorf("expected waitForQuiet to block for at least %v, blocked %v", period, elapsed)
+	}
+}
+
+func TestWaitForQuiet_RestartsOnActivity(t *testing.T) {
+	c := &Client{}
+	c.markActivity()
+	period := 150 * time.Millisecond
+
+	// Emit activity partway through the first window; the guard must wait a
+	// further full period after it.
+	go func() {
+		time.Sleep(70 * time.Millisecond)
+		c.markActivity()
+	}()
+
+	start := time.Now()
+	c.waitForQuiet(period)
+	elapsed := time.Since(start)
+
+	if elapsed < 70*time.Millisecond+period {
+		t.Errorf("expected activity to restart the quiet window (>= %v), blocked %v", 70*time.Millisecond+period, elapsed)
+	}
+}
+
+func TestWaitForQuiet_ZeroPeriodReturnsImmediately(t *testing.T) {
+	c := &Client{}
+	start := time.Now()
+	c.waitForQuiet(0)
+	if elapsed := time.Since(start); elapsed > 20*time.Millisecond {
+		t.Errorf("expected zero quiet period to return immediately, took %v", elapsed)
+	}
 }

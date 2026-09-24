@@ -670,7 +670,7 @@ sleep 30
 	promptDone.Add(1)
 	go func() {
 		defer promptDone.Done()
-		_, _ = sup.Prompt("test task")
+		_, _ = sup.Prompt("test task", "")
 	}()
 
 	time.Sleep(50 * time.Millisecond)

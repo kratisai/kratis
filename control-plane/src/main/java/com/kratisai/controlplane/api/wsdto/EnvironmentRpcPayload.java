@@ -306,7 +306,8 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
             @JsonProperty("sessionId") String sessionId,
             @JsonProperty("agentName") String agentName,
             @JsonProperty("agentVersion") String agentVersion,
-            @JsonProperty("executionId") String executionId)
+            @JsonProperty("executionId") String executionId,
+            @JsonProperty("relaunch") Boolean relaunch)
             implements InboundNotificationPayload {
         public static final String METHOD = "env.acp_initialized";
 
@@ -315,11 +316,15 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
             return METHOD;
         }
 
+        public AcpInitialized {
+            Objects.requireNonNull(sessionId, "sessionId is required");
+            Objects.requireNonNull(agentName, "agentName is required");
+            Objects.requireNonNull(agentVersion, "agentVersion is required");
+            Objects.requireNonNull(executionId, "executionId is required");
+        }
+
         public AcpInitialized(String sessionId, String agentName, String agentVersion, String executionId) {
-            this.sessionId = Objects.requireNonNull(sessionId, "sessionId is required");
-            this.agentName = Objects.requireNonNull(agentName, "agentName is required");
-            this.agentVersion = Objects.requireNonNull(agentVersion, "agentVersion is required");
-            this.executionId = Objects.requireNonNull(executionId, "executionId is required");
+            this(sessionId, agentName, agentVersion, executionId, null);
         }
     }
 
@@ -327,7 +332,8 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
     record AcpPromptComplete(
             @JsonProperty("sessionId") String sessionId,
             @JsonProperty("stopReason") StopReason stopReason,
-            @JsonProperty("executionId") String executionId)
+            @JsonProperty("executionId") String executionId,
+            @JsonProperty("promptId") String promptId)
             implements InboundNotificationPayload {
         public static final String METHOD = "env.acp_prompt_complete";
 
@@ -336,10 +342,14 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
             return METHOD;
         }
 
+        public AcpPromptComplete {
+            Objects.requireNonNull(sessionId, "sessionId is required");
+            Objects.requireNonNull(stopReason, "stopReason is required");
+            Objects.requireNonNull(executionId, "executionId is required");
+        }
+
         public AcpPromptComplete(String sessionId, StopReason stopReason, String executionId) {
-            this.sessionId = Objects.requireNonNull(sessionId, "sessionId is required");
-            this.stopReason = Objects.requireNonNull(stopReason, "stopReason is required");
-            this.executionId = Objects.requireNonNull(executionId, "executionId is required");
+            this(sessionId, stopReason, executionId, null);
         }
     }
 
@@ -436,6 +446,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
     record AcpPrompt(
             @JsonProperty("taskPrompt") String taskPrompt,
             @JsonProperty("executionId") String executionId,
+            @JsonProperty("promptId") String promptId,
             @JsonProperty("isSteering") Boolean isSteering,
             @JsonProperty("relaunch") Boolean relaunch)
             implements OutboundRequestPayload<EnvironmentConnectorResult.AcpPrompt> {
@@ -447,14 +458,12 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         }
 
         public AcpPrompt(String taskPrompt, String executionId) {
-            this(taskPrompt, executionId, null, null);
+            this(taskPrompt, executionId, null, null, null);
         }
 
-        public AcpPrompt(String taskPrompt, String executionId, Boolean isSteering, Boolean relaunch) {
-            this.taskPrompt = Objects.requireNonNull(taskPrompt, "taskPrompt is required");
-            this.executionId = Objects.requireNonNull(executionId, "executionId is required");
-            this.isSteering = isSteering;
-            this.relaunch = relaunch;
+        public AcpPrompt {
+            Objects.requireNonNull(taskPrompt, "taskPrompt is required");
+            Objects.requireNonNull(executionId, "executionId is required");
         }
     }
 

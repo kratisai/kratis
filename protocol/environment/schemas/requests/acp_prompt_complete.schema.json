@@ -9,7 +9,11 @@
       "type": "string",
       "enum": ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"]
     },
-    "executionId": { "type": "string" }
+    "executionId": { "type": "string" },
+    "promptId": {
+      "type": "string",
+      "description": "Echoes the env.acp_prompt promptId whose turn produced this completion. Empty for a completion that superseded a queued steering prompt."
+    }
   },
   "additionalProperties": false
 }

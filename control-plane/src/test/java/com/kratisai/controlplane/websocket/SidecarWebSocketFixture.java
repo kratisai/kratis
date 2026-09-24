@@ -1,7 +1,5 @@
 package com.kratisai.controlplane.websocket;
 
-import com.kratisai.controlplane.api.wsdto.ActivityStatus;
-import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.CheckoutStatus;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.ExecStatus;
@@ -17,6 +15,7 @@ import org.springframework.web.socket.WebSocketSession;
 public class SidecarWebSocketFixture extends WebSocketFixture<SidecarWebSocketFixture> {
 
     private volatile String currentExecutionId;
+    private volatile String currentPromptId;
 
     /** Default permission options mirroring the sidecar's synthesized set when the agent sends none. */
     public static List<Map<String, String>> defaultPermissionOptions() {
@@ -187,35 +186,11 @@ public class SidecarWebSocketFixture extends WebSocketFixture<SidecarWebSocketFi
                             "stopReason",
                             StopReason.END_TURN.getValue(),
                             "executionId",
-                            getExecutionId())),
+                            getExecutionId(),
+                            "promptId",
+                            currentPromptId != null ? currentPromptId : "")),
                     null);
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(promptComplete)));
-        });
-    }
-
-    /** Configure activity emission during prompt (for activity stream tests). */
-    public SidecarWebSocketFixture withActivity(ActivityType type, String description) {
-        return withActivity(type, description, ActivityStatus.COMPLETED);
-    }
-
-    /** Configure activity emission with an explicit lifecycle status. */
-    public SidecarWebSocketFixture withActivity(ActivityType type, String description, ActivityStatus status) {
-        return whenMethod("env.acp_prompt", (session, payload) -> {
-            updateExecutionId(payload);
-            sendAcpPromptResult(session, payload);
-            JsonRpcInboundRequest activity = new JsonRpcInboundRequest(
-                    EnvironmentRpcPayload.Activity.METHOD,
-                    objectMapper.valueToTree(Map.of(
-                            "activityType",
-                            type.getValue(),
-                            "description",
-                            description,
-                            "status",
-                            status.getValue(),
-                            "executionId",
-                            getExecutionId())),
-                    null);
-            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(activity)));
         });
     }
 
@@ -227,7 +202,20 @@ public class SidecarWebSocketFixture extends WebSocketFixture<SidecarWebSocketFi
     }
 
     private void sendAcpPromptResult(WebSocketSession session, String payload) throws Exception {
-        sendResult(session, payload, Map.of("status", "completed", "stopReason", StopReason.END_TURN.getValue()));
+        currentPromptId = extractPromptId(payload);
+        sendResult(session, payload, Map.of("status", "accepted"));
+    }
+
+    private String extractPromptId(String payload) {
+        try {
+            var tree = objectMapper.readTree(payload);
+            var params = tree.get("params");
+            if (params != null && params.hasNonNull("promptId")) {
+                return params.get("promptId").asText();
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     private void sendAcpPromptNotifications(WebSocketSession session) throws Exception {
@@ -243,16 +231,15 @@ public class SidecarWebSocketFixture extends WebSocketFixture<SidecarWebSocketFi
                 null);
         session.sendMessage(new TextMessage(objectMapper.writeValueAsString(outputLine)));
 
+        java.util.Map<String, Object> completion = new java.util.HashMap<>();
+        completion.put("sessionId", "test-session-123");
+        completion.put("stopReason", StopReason.END_TURN.getValue());
+        completion.put("executionId", getExecutionId());
+        if (currentPromptId != null) {
+            completion.put("promptId", currentPromptId);
+        }
         JsonRpcInboundRequest promptComplete = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.AcpPromptComplete.METHOD,
-                objectMapper.valueToTree(Map.of(
-                        "sessionId",
-                        "test-session-123",
-                        "stopReason",
-                        StopReason.END_TURN.getValue(),
-                        "executionId",
-                        getExecutionId())),
-                null);
+                EnvironmentRpcPayload.AcpPromptComplete.METHOD, objectMapper.valueToTree(completion), null);
         session.sendMessage(new TextMessage(objectMapper.writeValueAsString(promptComplete)));
     }
 

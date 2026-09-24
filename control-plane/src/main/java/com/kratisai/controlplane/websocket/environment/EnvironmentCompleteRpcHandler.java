@@ -74,6 +74,7 @@ public class EnvironmentCompleteRpcHandler
         // (natural completion or the terminal ack of a terminate). Cancel it so the UI activity
         // log and persisted activity rows are resolved for the whole team.
         sandboxExecutionService.cancelPendingPermissions(execution, "execution completed");
+        sandboxExecutionService.forgetActivePrompt(execution.getId());
 
         UUID teamId = execution.getChat().getTeam().getId();
 

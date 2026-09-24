@@ -6,6 +6,10 @@
   "properties": {
     "taskPrompt": { "type": "string" },
     "executionId": { "type": "string" },
+    "promptId": {
+      "type": "string",
+      "description": "Correlation id echoed in env.acp_prompt_complete. The sidecar acknowledges the dispatch immediately; the terminal outcome arrives as a notification with this id, letting the control plane ignore a completion from a superseded turn."
+    },
     "isSteering": { "type": "boolean" },
     "relaunch": {
       "type": "boolean",

@@ -3,6 +3,7 @@ package com.kratisai.controlplane.api.wsdto;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 public enum PromptStatus {
+    ACCEPTED("accepted"),
     COMPLETED("completed"),
     FAILED("failed");
 

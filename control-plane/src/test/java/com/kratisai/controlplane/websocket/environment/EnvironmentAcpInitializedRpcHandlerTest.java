@@ -2,7 +2,9 @@ package com.kratisai.controlplane.websocket.environment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -95,6 +97,25 @@ class EnvironmentAcpInitializedRpcHandlerTest {
         assertThat(event.sessionId()).isEqualTo("acp-sess-1");
         assertThat(event.agentName()).isEqualTo("claude");
         assertThat(event.agentVersion()).isEqualTo("1.0");
+    }
+
+    @Test
+    void handle_withRelaunch_skipsTaskPromptDispatch() {
+        when(sessionRegistry.getEnvironmentId(sessionId)).thenReturn(Optional.of(envId));
+        SandboxExecution execution = createExecution();
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.AcpInitialized params = new EnvironmentRpcPayload.AcpInitialized(
+                "acp-sess-2", "claude", "1.0", executionId.toString(), Boolean.TRUE);
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.AcpInitialized.METHOD, objectMapper.valueToTree(params), null);
+
+        handler.handle(sessionId, request, params);
+
+        // The caller that requested the relaunch delivers its own prompt; the
+        // handler must not re-dispatch the task prompt (which would run it twice).
+        verify(sandboxExecutionService, never()).dispatchAcpPrompt(eq(execution));
+        verify(eventPublisher).publishEvent(any(SandboxExecutionAcpInitializedEvent.class));
     }
 
     @Test

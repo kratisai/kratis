@@ -4,6 +4,7 @@
   "params": {
     "taskPrompt": "Continue the task in a fresh agent session",
     "executionId": "123e4567-e89b-12d3-a456-426614174000",
+    "promptId": "b3f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e",
     "relaunch": true
   },
   "id": 14

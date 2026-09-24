@@ -26,6 +26,7 @@ import com.kratisai.controlplane.repository.*;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -81,6 +82,8 @@ public class SandboxExecutionService {
     private final LiteLLMProperties litellmProperties;
     private final Executor dispatchExecutor;
     private final ExecutionActivityPersistenceService activityPersistenceService;
+
+    final Map<UUID, String> activePromptIds = new ConcurrentHashMap<>();
 
     public SandboxExecutionService(
             PlatformTransactionManager transactionManager,
@@ -389,11 +392,6 @@ public class SandboxExecutionService {
         execution.getUsage();
     }
 
-    /**
-     * Dispatches the prompt on a virtual thread: the ACP prompt response arrives on
-     * the environment
-     * WebSocket handler thread, so blocking it would deadlock the connection.
-     */
     public void dispatchAcpPrompt(SandboxExecution execution) {
         dispatchAcpPrompt(execution, execution.getTaskPrompt() != null ? execution.getTaskPrompt() : "", true, false);
     }
@@ -417,6 +415,8 @@ public class SandboxExecutionService {
             SandboxExecution execution, String promptText, boolean failOnError, boolean relaunch) {
         UUID executionId = execution.getId();
         UUID environmentId = execution.getEnvironment().getId();
+        String promptId = UUID.randomUUID().toString();
+        activePromptIds.put(executionId, promptId);
         dispatchExecutor.execute(() -> {
             try {
                 EnvironmentConnectorResult.AcpPrompt result = environmentRpcClient.request(
@@ -424,41 +424,44 @@ public class SandboxExecutionService {
                         new EnvironmentRpcPayload.AcpPrompt(
                                 promptText != null ? promptText : "",
                                 executionId.toString(),
+                                promptId,
                                 failOnError ? null : Boolean.TRUE,
                                 relaunch ? Boolean.TRUE : null));
                 if (result == null || result.status() == PromptStatus.FAILED) {
                     handlePromptDispatchFailure(
                             executionId,
-                            "ACP prompt failed for execution " + executionId
+                            "ACP prompt dispatch rejected for execution " + executionId
                                     + (result != null ? ": " + result.error() : " (no result)"),
                             failOnError);
                 } else {
                     logger.info(
-                            "Sent ACP prompt to execution environment {} for execution {}{}",
+                            "Dispatched ACP prompt to execution environment {} for execution {} (promptId={}){}",
                             environmentId,
                             executionId,
+                            promptId,
                             relaunch ? " (relaunched agent session)" : "");
                 }
             } catch (EnvironmentRpcClient.EnvironmentRpcException e) {
-                handlePromptDispatchFailure(
+                logger.warn(
+                        "ACP prompt dispatch for execution {} did not receive an ack ({}); the"
+                                + " agent may still report completion via env.acp_prompt_complete",
                         executionId,
-                        "ACP prompt dispatch failed for execution " + executionId + ": " + e.getMessage(),
-                        failOnError);
+                        e.getMessage());
             } catch (TimeoutException e) {
                 logger.warn(
-                        "ACP prompt dispatch for execution {} did not complete in time; the agent may still"
-                                + " report completion via env.acp_prompt_complete",
+                        "ACP prompt dispatch for execution {} timed out awaiting ack; the agent may"
+                                + " still report completion via env.acp_prompt_complete",
                         executionId);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                handlePromptDispatchFailure(
-                        executionId, "ACP prompt dispatch interrupted for execution " + executionId, failOnError);
+                logger.warn("ACP prompt dispatch interrupted for execution {}", executionId);
             } catch (Exception e) {
-                handlePromptDispatchFailure(
+                logger.warn(
+                        "ACP prompt dispatch for execution {} raised {}: {}; the agent may still"
+                                + " report completion via env.acp_prompt_complete",
                         executionId,
-                        "ACP prompt dispatch for execution " + executionId + " raised "
-                                + e.getClass().getSimpleName() + ": " + e.getMessage(),
-                        failOnError);
+                        e.getClass().getSimpleName(),
+                        e.getMessage());
             }
         });
     }
@@ -722,8 +725,13 @@ public class SandboxExecutionService {
                 execution.getUsage().getUsageLastUpdatedAt());
     }
 
+    /** Drops prompt-id correlation once an execution is terminal so the map stays bounded. */
+    public void forgetActivePrompt(UUID executionId) {
+        activePromptIds.remove(executionId);
+    }
+
     @Transactional
-    public void completeAcpPrompt(UUID executionId, StopReason stopReason) {
+    public void completeAcpPrompt(UUID executionId, String promptId, StopReason stopReason) {
         SandboxExecution execution = sandboxExecutionRepository
                 .findById(executionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Execution not found"));
@@ -737,9 +745,21 @@ public class SandboxExecutionService {
             return;
         }
 
+        String latestPromptId = activePromptIds.get(executionId);
+        if (latestPromptId != null && promptId != null && !latestPromptId.equals(promptId)) {
+            logger.info(
+                    "Ignoring stale ACP prompt completion for execution {} (completion promptId={},"
+                            + " latest promptId={}); a newer turn is in flight",
+                    executionId,
+                    promptId,
+                    latestPromptId);
+            return;
+        }
+
         UUID teamId = execution.getChat().getTeam().getId();
 
         if (stopReason == StopReason.REFUSAL) {
+            activePromptIds.remove(executionId);
             execution.setStatus(SandboxExecutionStatus.FAILED);
             execution.setCompletedAt(Instant.now());
             sandboxExecutionRepository.save(execution);
@@ -758,6 +778,8 @@ public class SandboxExecutionService {
 
             eventPublisher.publishEvent(
                     new ExecutionStatusChangedEvent(teamId, execution.getChat().getId(), execution.getId()));
+
+            activityPersistenceService.recordTurnComplete(executionId, stopReason);
 
             logger.info(
                     "ACP prompt turn complete for execution {} with stopReason='{}' → status=IDLE",
@@ -831,6 +853,7 @@ public class SandboxExecutionService {
     }
 
     private void markFailedAndPublish(SandboxExecution execution, String reason) {
+        activePromptIds.remove(execution.getId());
         execution.setStatus(SandboxExecutionStatus.FAILED);
         execution.setCompletedAt(Instant.now());
         sandboxExecutionRepository.save(execution);

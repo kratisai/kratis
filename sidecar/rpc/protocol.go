@@ -106,9 +106,11 @@ const (
 )
 
 // PromptStatus is the closed set of env.acp_prompt result status values.
+// PromptAccepted acknowledges that the sidecar has taken ownership of the turn.
 type PromptStatus string
 
 const (
+	PromptAccepted  PromptStatus = "accepted"
 	PromptCompleted PromptStatus = "completed"
 	PromptFailed    PromptStatus = "failed"
 )
@@ -348,6 +350,7 @@ type LaunchAcpAgentResult struct {
 type AcpPromptParams struct {
 	TaskPrompt  string `json:"taskPrompt"`
 	ExecutionID string `json:"executionId"`
+	PromptID    string `json:"promptId,omitempty"`
 	IsSteering  bool   `json:"isSteering,omitempty"`
 	Relaunch    bool   `json:"relaunch,omitempty"`
 }
@@ -486,6 +489,7 @@ type AcpInitializedParams struct {
 	AgentName    string `json:"agentName"`
 	AgentVersion string `json:"agentVersion"`
 	ExecutionID  string `json:"executionId"`
+	Relaunch     bool   `json:"relaunch,omitempty"`
 }
 
 // AcpPromptCompleteParams is sent by the sidecar when session/prompt completes.
@@ -493,6 +497,7 @@ type AcpPromptCompleteParams struct {
 	SessionID   string     `json:"sessionId"`
 	StopReason  StopReason `json:"stopReason"`
 	ExecutionID string     `json:"executionId"`
+	PromptID    string     `json:"promptId,omitempty"`
 }
 
 // ActivityParams is sent by the sidecar to stream execution activity events.

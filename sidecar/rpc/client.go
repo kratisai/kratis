@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -24,9 +25,8 @@ const (
 	DefaultHeartbeatInterval = 10 * time.Second
 	DefaultPermissionTimeout = 15 * time.Minute
 
-	// defaultEnvFile stores persisted environment exports outside the git
-	// workspace so they never appear as untracked files or get committed.
-	defaultEnvFile = "/kratis/.kratis-env"
+	DefaultPromptQuietPeriod = 10 * time.Second
+	defaultEnvFile           = "/kratis/.kratis-env"
 )
 
 // maxOutboundFrameBytes bounds every JSON-RPC frame sent to the control plane.
@@ -67,6 +67,7 @@ type ClientTimeouts struct {
 	ReconnectDelay    time.Duration
 	HeartbeatInterval time.Duration
 	PermissionTimeout time.Duration
+	PromptQuietPeriod time.Duration
 }
 
 func DefaultClientTimeouts() ClientTimeouts {
@@ -74,6 +75,7 @@ func DefaultClientTimeouts() ClientTimeouts {
 		ReconnectDelay:    DefaultReconnectDelay,
 		HeartbeatInterval: DefaultHeartbeatInterval,
 		PermissionTimeout: DefaultPermissionTimeout,
+		PromptQuietPeriod: DefaultPromptQuietPeriod,
 	}
 }
 
@@ -134,6 +136,8 @@ type Client struct {
 	// Current active execution ID
 	currentExecutionID string
 
+	lastActivityNanos atomic.Int64
+
 	// Timeouts for client operations
 	Timeouts ClientTimeouts
 
@@ -162,6 +166,7 @@ func NewClient(serverURL, token, containerID, workspace string) *Client {
 		supervisorTimeouts: runner.DefaultSupervisorTimeouts(),
 	}
 	c.permCtx, c.permCancel = context.WithCancel(context.Background())
+	c.lastActivityNanos.Store(time.Now().UnixNano())
 	// Start local process-verifying git credentials server. Tokens are resolved
 	// on-demand from the control plane (never cached statically) so short-lived
 	// credentials (e.g. GitHub App installation tokens) stay fresh for the whole
@@ -381,6 +386,7 @@ func (c *Client) Close() {
 }
 
 func (c *Client) SendOutput(line string, stream string) {
+	c.markActivity()
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	c.mu.Unlock()
@@ -436,6 +442,7 @@ func runeFloorBoundary(s string, n int) int {
 }
 
 func (c *Client) SendActivity(activity acp.Activity) {
+	c.markActivity()
 	detail := ActivityDetail{
 		Kind:      ActivityKind(activity.Detail.Kind),
 		Title:     activity.Detail.Title,
@@ -471,6 +478,29 @@ func (c *Client) SendActivity(activity acp.Activity) {
 		Status:       ActivityStatus(activity.Status),
 		Detail:       detail,
 	})
+}
+
+func (c *Client) markActivity() {
+	c.lastActivityNanos.Store(time.Now().UnixNano())
+}
+
+func (c *Client) lastActivityTime() time.Time {
+	return time.Unix(0, c.lastActivityNanos.Load())
+}
+
+// waitForQuiet blocks until no activity has been observed for the full period; activity during the
+// wait restarts the window.
+func (c *Client) waitForQuiet(period time.Duration) {
+	if period <= 0 {
+		return
+	}
+	for {
+		idle := time.Since(c.lastActivityTime())
+		if idle >= period {
+			return
+		}
+		time.Sleep(period - idle)
+	}
 }
 
 func convertDiff(diff *acp.ActivityDiff) *ActivityDiff {

@@ -5,6 +5,7 @@
     "sessionId": "acp-session-1",
     "agentName": "claude-code",
     "agentVersion": "1.0.0",
-    "executionId": "123e4567-e89b-12d3-a456-426614174000"
+    "executionId": "123e4567-e89b-12d3-a456-426614174000",
+    "relaunch": true
   }
 }

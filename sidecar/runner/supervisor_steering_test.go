@@ -65,7 +65,7 @@ sleep 30
 	mainDone := make(chan *PromptResult, 1)
 	mainErr := make(chan error, 1)
 	go func() {
-		result, err := sup.Prompt("main task")
+		result, err := sup.Prompt("main task", "")
 		mainDone <- result
 		mainErr <- err
 	}()
@@ -81,7 +81,7 @@ sleep 30
 
 	// A steering prompt must interrupt the in-flight turn, not reject or queue
 	// behind a long-running turn.
-	steerResult, steerErr := sup.Steer("steering guidance")
+	steerResult, steerErr := sup.Steer("steering guidance", "")
 	if steerErr != nil {
 		t.Fatalf("steering prompt returned error: %v", steerErr)
 	}

@@ -12,6 +12,7 @@ import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredRe
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
+import com.kratisai.controlplane.api.wsdto.StopReason;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
@@ -243,6 +244,17 @@ public class ExecutionActivityPersistenceService {
     @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
     public void onExecutionComplete(SandboxExecutionCompleteEvent event) {
         closeOpenStreams(event.executionId());
+    }
+
+    @Transactional
+    public void recordTurnComplete(UUID executionId, StopReason stopReason) {
+        String description = "Agent turn complete (" + (stopReason != null ? stopReason.getValue() : "unknown") + ")";
+        recordActivity(executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null);
+        executionRepository
+                .findById(executionId)
+                .map(execution -> execution.getChat().getTeam().getId())
+                .ifPresent(teamId -> eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
+                        teamId, executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null)));
     }
 
     @Transactional

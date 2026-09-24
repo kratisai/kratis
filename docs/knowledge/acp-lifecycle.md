@@ -315,7 +315,8 @@ sequenceDiagram
     participant AG as ACP Agent
 
     Note over SC: State: SessionActive
-    CP->>SC: env.acp_prompt (WebSocket)
+    CP->>SC: env.acp_prompt (WebSocket, promptId)
+    SC-->>CP: env.acp_prompt result (accepted) — fire-and-ack
     SC->>AG: session/prompt (stdin)
     Note over SC: State: Prompting
 
@@ -353,8 +354,19 @@ sequenceDiagram
     AG->>SC: session/prompt response (stdout)
     Note over SC: stopReason received
     Note over SC: State: SessionActive
-    SC->>CP: env.acp_prompt_complete (WebSocket)
+    Note over SC: Wait for a quiet window (10s default; activity resets)<br/>then report the turn boundary
+    SC->>CP: env.acp_prompt_complete (WebSocket, promptId, stopReason)
 ```
+
+The dispatch is fire-and-ack: the `env.acp_prompt` result only acknowledges
+ownership of the turn. The terminal outcome always arrives as
+`env.acp_prompt_complete`. Before emitting the completion the sidecar waits 
+for the agent to go quiet.  This absorbs harnesses that keep working after
+signalling `end_turn`
+
+A relaunch handshake (`env.acp_initialized` with `relaunch: true`) replaces a
+terminated session. The control plane must not re-dispatch the task prompt in
+that case; the caller that requested the relaunch delivers its own prompt.
 
 ### 5.1 Stop Reasons
 
@@ -445,10 +457,11 @@ The sidecar translates ACP events into Kratis-native WebSocket messages:
 |-----------|----------------------|
 | Agent stdout line (non-JSON protocol violation) | `env.output` with `stream: "stdout"` |
 | Agent stderr line | `env.output` with `stream: "stderr"` |
-| `initialize` + `session/new` complete | `env.acp_initialized` with `sessionId`, `agentName`, `agentVersion` |
+| `initialize` + `session/new` complete | `env.acp_initialized` with `sessionId`, `agentName`, `agentVersion` (`relaunch: true` when replacing a terminated session) |
 | `session/update` (all variants) | `env.output` or structured `env.activity` events |
 | `session/request_permission` | Permission request via WebSocket, await response |
-| `session/prompt` response with stopReason | `env.acp_prompt_complete` with `stopReason` |
+| `env.acp_prompt` accepted | `env.acp_prompt` result with `status: "accepted"` (dispatch acknowledgement) |
+| `session/prompt` response with stopReason, after quiet window | `env.acp_prompt_complete` with `stopReason` and `promptId` |
 | Agent process exit | `env.complete` with `exitCode` |
 | Launch failure | `env.complete` with `exitCode: -1` |
 

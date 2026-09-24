@@ -44,15 +44,17 @@ Test             Control Plane       Sandbox/Connector       ACP Agent        Li
  │                    │                      │<────────── result ─│                │
  │                    │<─ env.acp_initialized│                    │                │
  │                    │ env.acp_prompt       │                    │                │
+ │                    │ (promptId)           │                    │                │
  │                    │─────────────────────>│ session/prompt     │                │
- │                    │                      │───────────────────>│                │
+ │                    │<── prompt accepted ──│───────────────────>│                │
  │                    │                      │                    │ LLM request    │
  │                    │                      │                    │───────────────>│
  │                    │                      │                    │<──── response ─│
  │                    │                      │<── session/update ─│                │
  │                    │<────── env.output ───│                    │                │
  │                    │                      │<── prompt result ──│                │
- │                    │<─ env.acp_prompt_complete                 │                │
+ │                    │                      │ quiet 10s (activity resets)          │
+ │                    │<─ env.acp_prompt_complete (promptId)      │                │
  │ verify output      │                      │                    │                │
  │                    │ env.terminate        │                    │                │
  │                    │─────────────────────>│ cancel/close/exit  │                │
@@ -89,7 +91,7 @@ Test             Control Plane       Sandbox/Connector       ACP Agent        Li
 9. **Initialize result** — Connector validates the returned version and stores agent capabilities.
 10. **`session/new`** — Connector sends `/kratis/workspace` as `cwd` and the configured MCP servers.
 11. **`env.acp_initialized`** — Connector reports the established session and agent information.
-12. **`env.acp_prompt`** — Control Plane supplies the task prompt; connector sends `session/prompt`.
+12. **`env.acp_prompt`** — Control Plane supplies the task prompt and a `promptId`; connector acknowledges with `status: accepted` and then sends `session/prompt`.
 
 Failure of `initialize` or `session/new` fails Kratis agent initialization.
 
@@ -99,7 +101,7 @@ Failure of `initialize` or `session/new` fails Kratis agent initialization.
 14. Agent executes tools, calls advertised client operations when needed, and reports `session/update` events.
 15. Connector translates updates into `env.output` or structured activity events. Terminal tool updates with `status: completed` are streamed as `stdout`; updates with `status: failed` are streamed as `stderr`. The extractor supports both the generic `rawOutput.output` field and Codex's `rawOutput.formatted_output` field.
 16. Agent returns the prompt response.
-17. Connector sends `env.acp_prompt_complete` with the ACP `stopReason`.
+17. Connector waits for a 10s quiet window, then sends `env.acp_prompt_complete` with the ACP `stopReason` and the echoed `promptId`. The completion is also recorded as an activity on the control plane so each turn boundary is visible in the activity log.
 
 Normal successful fixtures expect `end_turn`. Other valid reasons are `max_tokens`, `max_turn_requests`, `refusal`, and `cancelled`.
 
@@ -190,8 +192,10 @@ rerun) were logical races in the control-plane fan-out path, fixed as follows:
    `envMessageExecutor`; fan-out is per web-client session over `clientBroadcastExecutor`.
 2. **`env.acp_initialized` was all-or-nothing.** A throw in prompt dispatch rolled back the ACP-init
    broadcast and left the execution `RUNNING`. **Fix:** `dispatchAcpPrompt` never throws synchronously.
-3. **Failed prompt dispatch silently stalled.** **Fix:** the execution is marked `FAILED` (unless
-   already terminal); only the 600s request timeout is non-fatal.
+3. **Failed prompt dispatch silently stalled.** **Fix:** a `status: failed` acknowledgement marks the
+   execution `FAILED` (unless already terminal). Dispatch is now fire-and-ack, so a dropped
+   connection, request timeout, or control-plane restart is non-fatal: the turn runs in the sidecar
+   and its terminal outcome arrives as `env.acp_prompt_complete` (or `env.complete`).
 4. **Diagnostic:** waits also accept a persisted `stopReason` and log execution state on timeout.
    `stopReason` set with `acpInitialized` null ⇒ broadcast lost; all null ⇒ triage `sidecar.log`.
 

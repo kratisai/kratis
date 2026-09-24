@@ -110,15 +110,21 @@ func (c *Client) currentSupervisor() *runner.AgentSupervisor {
 	return c.supervisor
 }
 
-// ExecuteAcpPrompt sends a session/prompt to an existing ACP session and streams output.
-// It does NOT close stdin or wait for process exit.
+// ExecuteAcpPrompt acknowledges the request immediately and runs the turn on the
+// request goroutine. The terminal outcome always arrives as env.acp_prompt_complete
+// (or env.complete), so a turn survives a dropped request or control-plane restart.
 func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 	promptReceivedTime := time.Now()
 	log.Printf("[ACP][TIMING] ExecuteAcpPrompt called at %v", promptReceivedTime)
 
-	if params.ExecutionID != "" {
+	executionID := params.ExecutionID
+	if executionID != "" {
 		c.mu.Lock()
-		c.currentExecutionID = params.ExecutionID
+		c.currentExecutionID = executionID
+		c.mu.Unlock()
+	} else {
+		c.mu.Lock()
+		executionID = c.currentExecutionID
 		c.mu.Unlock()
 	}
 
@@ -162,6 +168,9 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 	}
 	log.Printf("[ACP][PROMPT] Sending prompt: %s", promptPreview)
 
+	// Ack before running the turn so a dropped connection cannot strand it.
+	c.sendSuccessResponse(reqID, AcpPromptResult{Status: PromptAccepted})
+
 	promptSentTime := time.Now()
 	log.Printf("[ACP][TIMING] Sending session/prompt at %v (delay since prompt received: %v)", promptSentTime, promptSentTime.Sub(promptReceivedTime))
 
@@ -170,29 +179,32 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 	var err error
 	if params.IsSteering {
 		taskPrompt = "[User provided additional information. Please consider this alongside all previous prompts]\n\n" + taskPrompt
-		result, err = sup.Steer(taskPrompt)
+		result, err = sup.Steer(taskPrompt, params.PromptID)
 	} else {
-		result, err = sup.Prompt(taskPrompt)
+		result, err = sup.Prompt(taskPrompt, params.PromptID)
 	}
 	promptResponseTime := time.Now()
 	log.Printf("[ACP][TIMING] Received session/prompt response at %v (duration: %v)", promptResponseTime, promptResponseTime.Sub(promptSentTime))
 
 	if err != nil {
-		c.sendSuccessResponse(reqID, AcpPromptResult{
-			Status: PromptFailed,
-			Error:  err.Error(),
-		})
+		c.reportPromptFailure(session.SessionID, err, "", "")
 		return
 	}
 
 	stopReason := StopReason(result.StopReason)
 	promptErr := result.Error
+	// A queued steering prompt returns immediately with no id and no completion; fall back to the
+	// request's id. A queued chain returns the final turn's id.
+	effectivePromptID := result.PromptID
+	if effectivePromptID == "" {
+		effectivePromptID = params.PromptID
+	}
 
 	// If normal prompt turn completed with end_turn, prompt the agent for quality verification and final commit.
 	if !params.IsSteering && promptErr == nil && stopReason == StopReasonEndTurn {
 		c.SendOutput("[ACP] Turn complete — prompting agent for quality verification and final commit", "stdout")
 		wrapUpPrompt := "If you have completed the user's task, please: 1) check what quality and verification steps are required for this project (e.g. test suites, type checking, linting, builds) and run any that have not been run, 2) tidy any temporary or transient files, 3) generate a sensible commit message and commit all relevant changes if there are modifications."
-		autoResult, autoErr := sup.Prompt(wrapUpPrompt)
+		autoResult, autoErr := sup.Prompt(wrapUpPrompt, effectivePromptID)
 		if autoErr == nil && autoResult != nil {
 			if autoStop := StopReason(autoResult.StopReason); autoStop != "" && ValidStopReasons[autoStop] {
 				stopReason = autoStop
@@ -201,16 +213,15 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 	}
 
 	if promptErr == nil && stopReason != "" && ValidStopReasons[stopReason] {
-		c.mu.Lock()
-		execID := c.currentExecutionID
-		c.mu.Unlock()
+		// Some harnesses keep working after signalling end_turn; wait for quiet.
+		c.waitForQuiet(c.Timeouts.PromptQuietPeriod)
 		completionParams := AcpPromptCompleteParams{
 			SessionID:   session.SessionID,
 			StopReason:  stopReason,
-			ExecutionID: execID,
+			ExecutionID: executionID,
+			PromptID:    effectivePromptID,
 		}
-		err := c.sendNotification("env.acp_prompt_complete", completionParams)
-		if err != nil {
+		if err := c.sendNotification("env.acp_prompt_complete", completionParams); err != nil {
 			// WebSocket is down — store for re-send after reconnection
 			log.Printf("[ACP] Failed to send env.acp_prompt_complete (connection down), storing for re-send after reconnection")
 			c.mu.Lock()
@@ -218,36 +229,33 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 			c.mu.Unlock()
 		}
 	} else if promptErr != nil || (stopReason != "" && !ValidStopReasons[stopReason]) {
-		reason := "unknown error"
-		if promptErr != nil {
-			reason = truncateReason(result.ErrMessage)
-		} else if stopReason != "" {
-			reason = truncateReason(fmt.Sprintf("invalid stop reason: %s", stopReason))
+		errMessage := ""
+		if result != nil {
+			errMessage = result.ErrMessage
 		}
-		log.Printf("[ACP] Fatal prompt error for session %s: %s", session.SessionID, reason)
-		// Echo the abort into the output stream so the UI activity log shows the
-		// agent's own error text without requiring control-plane logs.
-		c.SendOutput(fmt.Sprintf("[ACP] Fatal prompt error: %s", reason), "stderr")
-		c.SendComplete(runner.CompletionInfo{
-			ExitCode: 1,
-			Reason:   reason,
-		})
+		c.reportPromptFailure(session.SessionID, promptErr, errMessage, stopReason)
 	}
+}
 
-	var errStr string
-	if promptErr != nil {
-		errStr = promptErr.Error()
+// reportPromptFailure reports a fatal turn failure as env.complete because the request was already
+// acknowledged.
+func (c *Client) reportPromptFailure(sessionID string, promptErr error, errMessage string, stopReason StopReason) {
+	reason := "unknown error"
+	switch {
+	case errMessage != "":
+		reason = truncateReason(errMessage)
+	case promptErr != nil:
+		reason = truncateReason(promptErr.Error())
+	case stopReason != "":
+		reason = truncateReason(fmt.Sprintf("invalid stop reason: %s", stopReason))
 	}
-
-	status := PromptCompleted
-	if promptErr != nil {
-		status = PromptFailed
-	}
-
-	c.sendSuccessResponse(reqID, AcpPromptResult{
-		Status:     status,
-		StopReason: stopReason,
-		Error:      errStr,
+	log.Printf("[ACP] Fatal prompt error for session %s: %s", sessionID, reason)
+	// Echo the abort into the output stream so the UI activity log shows the
+	// agent's own error text without requiring control-plane logs.
+	c.SendOutput(fmt.Sprintf("[ACP] Fatal prompt error: %s", reason), "stderr")
+	c.SendComplete(runner.CompletionInfo{
+		ExitCode: 1,
+		Reason:   reason,
 	})
 }
 
@@ -290,6 +298,7 @@ func (c *Client) relaunchAgent() error {
 		AgentName:    result.AgentName,
 		AgentVersion: result.AgentVersion,
 		ExecutionID:  execID,
+		Relaunch:     true,
 	})
 	return nil
 }

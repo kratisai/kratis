@@ -13,6 +13,8 @@ import com.kratisai.controlplane.ResourcelessTransactionManager;
 import com.kratisai.controlplane.api.restdto.CreateSandboxExecutionRequest;
 import com.kratisai.controlplane.api.restdto.SandboxExecutionDto;
 import com.kratisai.controlplane.api.restdto.SteerExecutionRequest;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
+import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
@@ -29,6 +31,7 @@ import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
+import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.repository.*;
@@ -507,7 +510,7 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
 
-        sandboxExecutionService.completeAcpPrompt(execution.getId(), StopReason.END_TURN);
+        sandboxExecutionService.completeAcpPrompt(execution.getId(), null, StopReason.END_TURN);
 
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(execution.getCompletedAt()).isNull();
@@ -520,7 +523,7 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
 
-        sandboxExecutionService.completeAcpPrompt(execution.getId(), StopReason.REFUSAL);
+        sandboxExecutionService.completeAcpPrompt(execution.getId(), null, StopReason.REFUSAL);
 
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
         assertThat(execution.getCompletedAt()).isNotNull();
@@ -533,7 +536,7 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
 
-        sandboxExecutionService.completeAcpPrompt(execution.getId(), StopReason.MAX_TOKENS);
+        sandboxExecutionService.completeAcpPrompt(execution.getId(), null, StopReason.MAX_TOKENS);
 
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(execution.getCompletedAt()).isNull();
@@ -545,7 +548,7 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
 
-        sandboxExecutionService.completeAcpPrompt(execution.getId(), StopReason.MAX_TURN_REQUESTS);
+        sandboxExecutionService.completeAcpPrompt(execution.getId(), null, StopReason.MAX_TURN_REQUESTS);
 
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(execution.getCompletedAt()).isNull();
@@ -557,7 +560,7 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
 
-        sandboxExecutionService.completeAcpPrompt(execution.getId(), StopReason.CANCELLED);
+        sandboxExecutionService.completeAcpPrompt(execution.getId(), null, StopReason.CANCELLED);
 
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(execution.getCompletedAt()).isNull();
@@ -569,7 +572,7 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
 
-        sandboxExecutionService.completeAcpPrompt(execution.getId(), null);
+        sandboxExecutionService.completeAcpPrompt(execution.getId(), null, null);
 
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(execution.getCompletedAt()).isNull();
@@ -581,7 +584,7 @@ class SandboxExecutionServiceTest {
         execution.setStatus(SandboxExecutionStatus.COMPLETED);
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
-        sandboxExecutionService.completeAcpPrompt(execution.getId(), StopReason.END_TURN);
+        sandboxExecutionService.completeAcpPrompt(execution.getId(), null, StopReason.END_TURN);
 
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
         verify(sandboxExecutionRepository, never()).save(execution);
@@ -594,18 +597,68 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
 
-        sandboxExecutionService.completeAcpPrompt(execution.getId(), StopReason.END_TURN);
+        sandboxExecutionService.completeAcpPrompt(execution.getId(), null, StopReason.END_TURN);
 
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(execution.getCompletedAt()).isNull();
         verify(sandboxExecutionRepository).save(execution);
 
         ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher).publishEvent(eventCaptor.capture());
-        ExecutionStatusChangedEvent statusEvent = (ExecutionStatusChangedEvent) eventCaptor.getValue();
+        verify(eventPublisher, atLeast(1)).publishEvent(eventCaptor.capture());
+        ExecutionStatusChangedEvent statusEvent = eventCaptor.getAllValues().stream()
+                .filter(ExecutionStatusChangedEvent.class::isInstance)
+                .map(ExecutionStatusChangedEvent.class::cast)
+                .findFirst()
+                .orElseThrow();
         assertThat(statusEvent.teamId()).isEqualTo(TEAM_ID);
         assertThat(statusEvent.chatId()).isEqualTo(CHAT_ID);
         assertThat(statusEvent.executionId()).isEqualTo(execution.getId());
+    }
+
+    @Test
+    void completeAcpPrompt_withEndTurn_recordsTurnCompleteActivity() {
+        SandboxExecution execution = createTestExecution();
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
+
+        sandboxExecutionService.completeAcpPrompt(execution.getId(), "prompt-1", StopReason.END_TURN);
+
+        ArgumentCaptor<SandboxExecutionActivity> activityCaptor =
+                ArgumentCaptor.forClass(SandboxExecutionActivity.class);
+        verify(activityRepository, atLeastOnce()).save(activityCaptor.capture());
+        assertThat(activityCaptor.getAllValues())
+                .filteredOn(a -> a.getActivityType() == ActivityType.MESSAGE)
+                .singleElement()
+                .satisfies(activity -> {
+                    assertThat(activity.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+                    assertThat(activity.getDescription()).isEqualTo("Agent turn complete (end_turn)");
+                });
+
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, atLeast(1)).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getAllValues())
+                .filteredOn(SandboxExecutionActivityEvent.class::isInstance)
+                .singleElement()
+                .satisfies(event -> {
+                    SandboxExecutionActivityEvent activity = (SandboxExecutionActivityEvent) event;
+                    assertThat(activity.executionId()).isEqualTo(execution.getId());
+                    assertThat(activity.activityType()).isEqualTo(ActivityType.MESSAGE);
+                    assertThat(activity.description()).isEqualTo("Agent turn complete (end_turn)");
+                    assertThat(activity.status()).isEqualTo(ActivityStatus.COMPLETED);
+                });
+    }
+
+    @Test
+    void completeAcpPrompt_withStalePromptId_isIgnored() {
+        SandboxExecution execution = createTestExecution();
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        sandboxExecutionService.activePromptIds.put(execution.getId(), "prompt-2");
+
+        sandboxExecutionService.completeAcpPrompt(execution.getId(), "prompt-1", StopReason.END_TURN);
+
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.RUNNING);
+        verify(sandboxExecutionRepository, never()).save(execution);
+        verify(eventPublisher, never()).publishEvent(any(SandboxExecutionActivityEvent.class));
     }
 
     @Test
@@ -614,7 +667,7 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
 
-        sandboxExecutionService.completeAcpPrompt(execution.getId(), StopReason.REFUSAL);
+        sandboxExecutionService.completeAcpPrompt(execution.getId(), null, StopReason.REFUSAL);
 
         ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
         verify(eventPublisher, atLeast(2)).publishEvent(eventCaptor.capture());
@@ -681,6 +734,7 @@ class SandboxExecutionServiceTest {
             verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), captor.capture());
             assertThat(captor.getValue().taskPrompt()).isEqualTo("do the thing");
             assertThat(captor.getValue().executionId()).isEqualTo(EXECUTION_ID.toString());
+            assertThat(captor.getValue().promptId()).isNotBlank();
             assertThat(captor.getValue().isSteering()).isNull();
         });
         verify(eventPublisher, never()).publishEvent(any(SandboxExecutionCompleteEvent.class));
@@ -741,32 +795,25 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
-    void dispatchAcpPrompt_rpcFailure_marksExecutionFailed() throws Exception {
+    void dispatchAcpPrompt_rpcFailure_doesNotFailExecution() throws Exception {
         SandboxExecution execution = createTestExecution();
-        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
-        when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
         when(environmentRpcClient.request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)))
                 .thenThrow(new EnvironmentRpcClient.EnvironmentRpcException(-32000, "session not connected"));
 
         sandboxExecutionService.dispatchAcpPrompt(execution);
 
-        await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> {
-            ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
-            verify(eventPublisher, atLeastOnce()).publishEvent(eventCaptor.capture());
-            assertThat(eventCaptor.getAllValues().stream()
-                            .filter(SandboxExecutionCompleteEvent.class::isInstance)
-                            .map(SandboxExecutionCompleteEvent.class::cast)
-                            .anyMatch(e -> e.status() == SandboxExecutionStatus.FAILED))
-                    .isTrue();
-        });
-        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+        await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> verify(environmentRpcClient)
+                .request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)));
+        // The turn runs in the sidecar independently of the request; a dropped ack
+        // must not fail the execution. The completion notification is authoritative.
+        verify(eventPublisher, never()).publishEvent(any(SandboxExecutionCompleteEvent.class));
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.RUNNING);
     }
 
     @Test
     void dispatchAcpPrompt_doesNotFailAlreadyCompletedExecution() throws Exception {
         SandboxExecution execution = createTestExecution();
         execution.setStatus(SandboxExecutionStatus.COMPLETED);
-        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
         when(environmentRpcClient.request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)))
                 .thenThrow(new EnvironmentRpcClient.EnvironmentRpcException(-32000, "session not connected"));
 
@@ -781,7 +828,6 @@ class SandboxExecutionServiceTest {
     @Test
     void dispatchAcpPrompt_missingExecution_doesNotPublish() throws Exception {
         SandboxExecution execution = createTestExecution();
-        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.empty());
         when(environmentRpcClient.request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)))
                 .thenThrow(new EnvironmentRpcClient.EnvironmentRpcException(-32000, "session not connected"));
 
@@ -807,25 +853,17 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
-    void dispatchAcpPrompt_unexpectedException_marksExecutionFailed() throws Exception {
+    void dispatchAcpPrompt_unexpectedException_doesNotFailExecution() throws Exception {
         SandboxExecution execution = createTestExecution();
-        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
-        when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
         when(environmentRpcClient.request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)))
                 .thenThrow(new IllegalStateException("unexpected"));
 
         sandboxExecutionService.dispatchAcpPrompt(execution);
 
-        await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> {
-            ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
-            verify(eventPublisher, atLeastOnce()).publishEvent(eventCaptor.capture());
-            assertThat(eventCaptor.getAllValues().stream()
-                            .filter(SandboxExecutionCompleteEvent.class::isInstance)
-                            .map(SandboxExecutionCompleteEvent.class::cast)
-                            .anyMatch(e -> e.status() == SandboxExecutionStatus.FAILED))
-                    .isTrue();
-        });
-        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+        await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> verify(environmentRpcClient)
+                .request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)));
+        verify(eventPublisher, never()).publishEvent(any(SandboxExecutionCompleteEvent.class));
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.RUNNING);
     }
 
     @Test

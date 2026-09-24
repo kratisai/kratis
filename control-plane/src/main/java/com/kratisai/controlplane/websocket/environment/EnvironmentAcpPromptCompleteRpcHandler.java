@@ -52,12 +52,14 @@ public class EnvironmentAcpPromptCompleteRpcHandler
         String acpSessionId = params.sessionId();
 
         logger.info(
-                "ACP prompt complete for execution {} (sessionId={}, stopReason={}). Completing execution.",
+                "ACP prompt complete for execution {} (sessionId={}, stopReason={}, promptId={})."
+                        + " Completing turn.",
                 execution.getId(),
                 acpSessionId,
-                stopReason);
+                stopReason,
+                params.promptId());
 
-        sandboxExecutionService.completeAcpPrompt(execution.getId(), stopReason);
+        sandboxExecutionService.completeAcpPrompt(execution.getId(), params.promptId(), stopReason);
 
         return Flux.empty();
     }

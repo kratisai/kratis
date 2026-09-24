@@ -7,7 +7,11 @@
     "sessionId": { "type": "string" },
     "agentName": { "type": "string" },
     "agentVersion": { "type": "string" },
-    "executionId": { "type": "string" }
+    "executionId": { "type": "string" },
+    "relaunch": {
+      "type": "boolean",
+      "description": "True when this handshake replaces a terminated session. The control plane must not re-dispatch the task prompt; the caller that requested the relaunch delivers its own prompt."
+    }
   },
   "additionalProperties": false
 }

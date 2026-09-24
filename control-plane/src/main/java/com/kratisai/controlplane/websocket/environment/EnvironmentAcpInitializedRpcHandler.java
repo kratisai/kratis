@@ -67,7 +67,14 @@ public class EnvironmentAcpInitializedRpcHandler
         eventPublisher.publishEvent(new SandboxExecutionAcpInitializedEvent(
                 execution.getChat().getTeam().getId(), execution.getId(), acpSessionId, agentName, agentVersion));
 
-        sandboxExecutionService.dispatchAcpPrompt(execution);
+        if (Boolean.TRUE.equals(params.relaunch())) {
+            logger.info(
+                    "ACP session relaunched for execution {} (sessionId={}); skipping task prompt dispatch",
+                    execution.getId(),
+                    acpSessionId);
+        } else {
+            sandboxExecutionService.dispatchAcpPrompt(execution);
+        }
 
         return Flux.empty();
     }

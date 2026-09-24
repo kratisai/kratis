@@ -679,32 +679,32 @@ func (s *AgentSupervisor) cleanupFailedLaunch(errMsg string) {
 
 type queuedPrompt struct {
 	prompt     string
+	promptID   string
 	isSteering bool
 }
 
 type PromptResult struct {
 	StopReason string
+	PromptID   string
 	Error      error
-	// ErrMessage is the ACP session/prompt error message as reported by the
-	// agent, preserved so a fatal abort can be surfaced verbatim.
 	ErrMessage string
 }
 
 // Prompt sends a session/prompt turn. A prompt arriving while another turn is
 // already in flight is queued and delivered as a follow-up turn once the current
 // turn completes.
-func (s *AgentSupervisor) Prompt(taskPrompt string) (*PromptResult, error) {
-	return s.submitPrompt(taskPrompt, false)
+func (s *AgentSupervisor) Prompt(taskPrompt string, promptID string) (*PromptResult, error) {
+	return s.submitPrompt(taskPrompt, promptID, false)
 }
 
 // Steer interrupts the in-flight turn (via session/cancel) and queues the
 // steering prompt to be delivered as a follow-up session/prompt turn. If no
 // turn is in flight, the steering prompt is sent directly.
-func (s *AgentSupervisor) Steer(taskPrompt string) (*PromptResult, error) {
-	return s.submitPrompt(taskPrompt, true)
+func (s *AgentSupervisor) Steer(taskPrompt string, promptID string) (*PromptResult, error) {
+	return s.submitPrompt(taskPrompt, promptID, true)
 }
 
-func (s *AgentSupervisor) submitPrompt(taskPrompt string, isSteering bool) (*PromptResult, error) {
+func (s *AgentSupervisor) submitPrompt(taskPrompt string, promptID string, isSteering bool) (*PromptResult, error) {
 	session := s.Session()
 	if session == nil {
 		return nil, fmt.Errorf("no active session")
@@ -714,6 +714,7 @@ func (s *AgentSupervisor) submitPrompt(taskPrompt string, isSteering bool) (*Pro
 	if s.promptInFlight {
 		s.queuedPrompts = append(s.queuedPrompts, queuedPrompt{
 			prompt:     taskPrompt,
+			promptID:   promptID,
 			isSteering: isSteering,
 		})
 		s.promptMu.Unlock()
@@ -729,7 +730,7 @@ func (s *AgentSupervisor) submitPrompt(taskPrompt string, isSteering bool) (*Pro
 	s.promptInFlight = true
 	s.promptMu.Unlock()
 
-	result, err := s.runPromptTurn(session, taskPrompt, isSteering)
+	result, err := s.runPromptTurn(session, taskPrompt, promptID, isSteering)
 
 	for {
 		s.promptMu.Lock()
@@ -742,7 +743,7 @@ func (s *AgentSupervisor) submitPrompt(taskPrompt string, isSteering bool) (*Pro
 		s.queuedPrompts = s.queuedPrompts[1:]
 		s.promptMu.Unlock()
 
-		turnResult, turnErr := s.runPromptTurn(session, next.prompt, next.isSteering)
+		turnResult, turnErr := s.runPromptTurn(session, next.prompt, next.promptID, next.isSteering)
 		switch {
 		case turnErr != nil:
 			log.Printf("[Supervisor] Warning: queued steering prompt failed: %v", turnErr)
@@ -782,7 +783,8 @@ func (s *AgentSupervisor) cancelSession(session *acp.AcpSession, reason string) 
 	return transport.WriteResponse(cancelNotif)
 }
 
-func (s *AgentSupervisor) runPromptTurn(session *acp.AcpSession, taskPrompt string, isSteering bool) (*PromptResult, error) {
+func (s *AgentSupervisor) runPromptTurn(
+	session *acp.AcpSession, taskPrompt string, promptID string, isSteering bool) (*PromptResult, error) {
 	if err := s.SetStatePrompting(); err != nil {
 		return nil, err
 	}
@@ -834,11 +836,11 @@ func (s *AgentSupervisor) runPromptTurn(session *acp.AcpSession, taskPrompt stri
 	}
 
 	if err != nil {
-		return &PromptResult{Error: fmt.Errorf("ACP session/prompt failed: %w", err)}, nil
+		return &PromptResult{PromptID: promptID, Error: fmt.Errorf("ACP session/prompt failed: %w", err)}, nil
 	}
 
 	if errObj, ok := resp["error"].(map[string]interface{}); ok {
-		result := &PromptResult{Error: fmt.Errorf("ACP session/prompt error: %v", errObj)}
+		result := &PromptResult{PromptID: promptID, Error: fmt.Errorf("ACP session/prompt error: %v", errObj)}
 		if msg, ok := errObj["message"].(string); ok {
 			result.ErrMessage = msg
 			result.Error = fmt.Errorf("ACP session/prompt error: %s", msg)
@@ -853,5 +855,5 @@ func (s *AgentSupervisor) runPromptTurn(session *acp.AcpSession, taskPrompt stri
 		}
 	}
 
-	return &PromptResult{StopReason: stopReason}, nil
+	return &PromptResult{StopReason: stopReason, PromptID: promptID}, nil
 }

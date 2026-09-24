@@ -72,13 +72,13 @@ class EnvironmentAcpPromptCompleteRpcHandlerTest {
         SandboxExecution execution = createExecution();
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
 
-        EnvironmentRpcPayload.AcpPromptComplete params =
-                new EnvironmentRpcPayload.AcpPromptComplete("acp-sess-1", StopReason.END_TURN, executionId.toString());
+        EnvironmentRpcPayload.AcpPromptComplete params = new EnvironmentRpcPayload.AcpPromptComplete(
+                "acp-sess-1", StopReason.END_TURN, executionId.toString(), "prompt-1");
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
                 EnvironmentRpcPayload.AcpPromptComplete.METHOD, objectMapper.valueToTree(params), null);
 
         handler.handle(sessionId, request, params);
-        verify(sandboxExecutionService).completeAcpPrompt(executionId, StopReason.END_TURN);
+        verify(sandboxExecutionService).completeAcpPrompt(executionId, "prompt-1", StopReason.END_TURN);
     }
 
     @Test
