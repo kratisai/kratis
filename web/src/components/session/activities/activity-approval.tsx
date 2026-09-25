@@ -210,56 +210,56 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
             {rememberOpen && (
               <div className="bg-background/60 space-y-3 rounded-md border p-2">
                 <p className="text-muted-foreground text-xs">
-                  Tick to always allow a command root for this team, cross to always block it. A
-                  root matches commands starting with the same whole words, e.g.{' '}
-                  <code className="font-mono">npm run test</code> also covers{' '}
-                  <code className="font-mono">npm run test file.spec.ts</code>.
+                  Set rules for command roots. Allowed or blocked roots apply to all future commands
+                  for this team.
                 </p>
                 {segments.map((segment, index) => (
-                  <div className="min-w-0 space-y-1" key={`${hitlId}-segment-${index}`}>
-                    <code className="text-muted-foreground block truncate font-mono text-xs">
-                      {segment.text}
-                    </code>
-                    <div className="flex items-center gap-1">
-                      <Input
-                        aria-label={`Command root for ${segment.text}`}
-                        className="h-7 min-w-0 flex-1 font-mono text-xs"
-                        onChange={(event) =>
-                          setRoots((prev) => ({ ...prev, [index]: event.target.value }))
-                        }
-                        value={roots[index] ?? segment.suggestedRoot}
-                      />
-                      <Button
-                        aria-label={`Always allow ${segment.text}`}
-                        aria-pressed={marks[index] === 'allow'}
-                        className={cn(
-                          'h-7 w-7 shrink-0 p-0',
-                          marks[index] === 'allow' && 'bg-green-600 text-white hover:bg-green-700',
-                        )}
-                        disabled={isSubmitting}
-                        onClick={() => toggleMark(index, 'allow')}
-                        size="sm"
-                        type="button"
-                        variant={marks[index] === 'allow' ? 'default' : 'outline'}
-                      >
-                        <Check className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        aria-label={`Always block ${segment.text}`}
-                        aria-pressed={marks[index] === 'deny'}
-                        className={cn(
-                          'h-7 w-7 shrink-0 p-0',
-                          marks[index] === 'deny' && 'bg-red-600 text-white hover:bg-red-700',
-                        )}
-                        disabled={isSubmitting}
-                        onClick={() => toggleMark(index, 'deny')}
-                        size="sm"
-                        type="button"
-                        variant={marks[index] === 'deny' ? 'destructive' : 'outline'}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
+                  <div
+                    className="flex items-center gap-1.5 py-0.5"
+                    key={`${hitlId}-segment-${index}`}
+                  >
+                    <Input
+                      aria-label={`Command root: ${segment.suggestedRoot}`}
+                      className="h-7 min-w-0 flex-1 py-0.5 font-mono text-xs leading-tight"
+                      onChange={(event) =>
+                        setRoots((prev) => ({ ...prev, [index]: event.target.value }))
+                      }
+                      value={roots[index] ?? segment.suggestedRoot}
+                    />
+                    <Button
+                      aria-label={`Always allow ${segment.suggestedRoot}`}
+                      aria-pressed={marks[index] === 'allow'}
+                      className={cn(
+                        'h-7 w-7 shrink-0 p-0',
+                        marks[index] === 'allow'
+                          ? 'border-green-600 bg-green-50 text-green-600 dark:bg-green-950/30'
+                          : 'text-muted-foreground hover:text-foreground',
+                      )}
+                      disabled={isSubmitting}
+                      onClick={() => toggleMark(index, 'allow')}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      <Check className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      aria-label={`Always block ${segment.suggestedRoot}`}
+                      aria-pressed={marks[index] === 'deny'}
+                      className={cn(
+                        'h-7 w-7 shrink-0 p-0',
+                        marks[index] === 'deny'
+                          ? 'border-red-600 bg-red-50 text-red-600 dark:bg-red-950/30'
+                          : 'text-muted-foreground hover:text-foreground',
+                      )}
+                      disabled={isSubmitting}
+                      onClick={() => toggleMark(index, 'deny')}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
                   </div>
                 ))}
               </div>
@@ -275,7 +275,7 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
           value={feedback}
         />
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex gap-2">
           {allowOption && (
             <Button
               className="flex-1"
@@ -304,19 +304,18 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
               {anyMark ? 'Reject and remember' : optionLabel(rejectOption)}
             </Button>
           )}
+          <Button
+            className="flex-1"
+            disabled={isSubmitting}
+            onClick={() => {
+              void handleCancel()
+            }}
+            size="sm"
+            variant="outline"
+          >
+            Cancel
+          </Button>
         </div>
-
-        <Button
-          className="w-full"
-          disabled={isSubmitting}
-          onClick={() => {
-            void handleCancel()
-          }}
-          size="sm"
-          variant="outline"
-        >
-          Cancel
-        </Button>
       </CardContent>
     </Card>
   )

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -9,7 +9,9 @@ import { useActivityStore } from '@/store/activity-store'
 
 const resolveHitl = vi.fn()
 
-function pendingActivity(overrides: Partial<CommandExecutionActivity> = {}): CommandExecutionActivity {
+function pendingActivity(
+  overrides: Partial<CommandExecutionActivity> = {},
+): CommandExecutionActivity {
   return {
     actionId: 'tc-1',
     approvalRequired: true,
@@ -223,18 +225,21 @@ describe('ActivityApproval', () => {
       { suggestedRoot: 'git push', text: 'git push' },
     ]
     const segmentedActivity = () =>
-      pendingActivity({ permissionOptions: [ALLOW_ONCE, REJECT_ONCE], permissionSegments: segments })
+      pendingActivity({
+        permissionOptions: [ALLOW_ONCE, REJECT_ONCE],
+        permissionSegments: segments,
+      })
 
     it('does not show segments until the panel is expanded', async () => {
       const user = userEvent.setup()
       render(<ActivityApproval activity={segmentedActivity()} executionId="exec-1" />)
 
-      expect(screen.queryByLabelText('Command root for npm run test src/foo.test.ts')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('Command root: npm run test')).not.toBeInTheDocument()
 
       await user.click(screen.getByRole('button', { name: /Remember choices/ }))
 
-      expect(screen.getByLabelText('Command root for npm run test src/foo.test.ts')).toBeInTheDocument()
-      expect(screen.getByLabelText('Command root for git push')).toBeInTheDocument()
+      expect(screen.getByLabelText('Command root: npm run test')).toBeInTheDocument()
+      expect(screen.getByLabelText('Command root: git push')).toBeInTheDocument()
     })
 
     it('scrolls the card into view when the remember panel opens', async () => {
@@ -250,29 +255,66 @@ describe('ActivityApproval', () => {
       scrollSpy.mockRestore()
     })
 
-    it('prefills each root input with the suggested root', async () => {
+    it('prefills each root input with the suggested root and compact styling', async () => {
       const user = userEvent.setup()
       render(<ActivityApproval activity={segmentedActivity()} executionId="exec-1" />)
       await user.click(screen.getByRole('button', { name: /Remember choices/ }))
 
-      expect(screen.getByLabelText('Command root for npm run test src/foo.test.ts')).toHaveValue(
-        'npm run test',
-      )
-      expect(screen.getByLabelText('Command root for git push')).toHaveValue('git push')
+      const input = screen.getByLabelText('Command root: npm run test')
+      expect(input).toHaveValue('npm run test')
+      expect(input).toHaveClass('h-7', 'py-0.5', 'leading-tight', 'text-xs', 'font-mono')
+      expect(screen.getByLabelText('Command root: git push')).toHaveValue('git push')
+    })
+
+    it('renders concise explanatory text and no duplicate segment text', async () => {
+      const user = userEvent.setup()
+      render(<ActivityApproval activity={segmentedActivity()} executionId="exec-1" />)
+      await user.click(screen.getByRole('button', { name: /Remember choices/ }))
+
+      expect(
+        screen.getByText(
+          'Set rules for command roots. Allowed or blocked roots apply to all future commands for this team.',
+        ),
+      ).toBeInTheDocument()
+      expect(screen.queryByText('npm run test src/foo.test.ts')).not.toBeInTheDocument()
+    })
+
+    it('applies outline toggle styling for allow and block buttons', async () => {
+      const user = userEvent.setup()
+      render(<ActivityApproval activity={segmentedActivity()} executionId="exec-1" />)
+      await user.click(screen.getByRole('button', { name: /Remember choices/ }))
+
+      const allowBtn = screen.getByRole('button', { name: 'Always allow npm run test' })
+      const blockBtn = screen.getByRole('button', { name: 'Always block npm run test' })
+
+      expect(allowBtn).toHaveClass('text-muted-foreground')
+      expect(blockBtn).toHaveClass('text-muted-foreground')
+
+      await user.click(allowBtn)
+      expect(allowBtn).toHaveClass('border-green-600', 'text-green-600')
+
+      await user.click(blockBtn)
+      expect(blockBtn).toHaveClass('border-red-600', 'text-red-600')
     })
 
     it('ticked segment turns Allow into Allow and remember and submits the rule', async () => {
       const user = userEvent.setup()
       render(<ActivityApproval activity={segmentedActivity()} executionId="exec-1" />)
       await user.click(screen.getByRole('button', { name: /Remember choices/ }))
-      await user.click(screen.getByRole('button', { name: 'Always allow npm run test src/foo.test.ts' }))
+      await user.click(screen.getByRole('button', { name: 'Always allow npm run test' }))
 
       const allowButton = screen.getByRole('button', { name: /Allow and remember/ })
       await user.click(allowButton)
 
-      expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'tc-1', 'approved', 'allow-once', undefined, [
-        { action: 'ALLOW', commandRoot: 'npm run test' },
-      ], '')
+      expect(resolveHitl).toHaveBeenCalledWith(
+        'exec-1',
+        'tc-1',
+        'approved',
+        'allow-once',
+        undefined,
+        [{ action: 'ALLOW', commandRoot: 'npm run test' }],
+        '',
+      )
     })
 
     it('pre-ticks segments already covered by a team allow rule', async () => {
@@ -295,16 +337,22 @@ describe('ActivityApproval', () => {
         'aria-pressed',
         'true',
       )
-      expect(screen.getByRole('button', { name: 'Always allow git push origin main' })).toHaveAttribute(
+      expect(screen.getByRole('button', { name: 'Always allow git push' })).toHaveAttribute(
         'aria-pressed',
         'false',
       )
 
       await user.click(screen.getByRole('button', { name: /Allow and remember/ }))
 
-      expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'tc-1', 'approved', 'allow-once', undefined, [
-        { action: 'ALLOW', commandRoot: 'git status' },
-      ], '')
+      expect(resolveHitl).toHaveBeenCalledWith(
+        'exec-1',
+        'tc-1',
+        'approved',
+        'allow-once',
+        undefined,
+        [{ action: 'ALLOW', commandRoot: 'git status' }],
+        '',
+      )
     })
 
     it('edited root text is submitted instead of the suggestion', async () => {
@@ -312,15 +360,21 @@ describe('ActivityApproval', () => {
       render(<ActivityApproval activity={segmentedActivity()} executionId="exec-1" />)
       await user.click(screen.getByRole('button', { name: /Remember choices/ }))
 
-      const input = screen.getByLabelText('Command root for npm run test src/foo.test.ts')
+      const input = screen.getByLabelText('Command root: npm run test')
       await user.clear(input)
       await user.type(input, 'npm')
-      await user.click(screen.getByRole('button', { name: 'Always allow npm run test src/foo.test.ts' }))
+      await user.click(screen.getByRole('button', { name: 'Always allow npm run test' }))
       await user.click(screen.getByRole('button', { name: /Allow and remember/ }))
 
-      expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'tc-1', 'approved', 'allow-once', undefined, [
-        { action: 'ALLOW', commandRoot: 'npm' },
-      ], '')
+      expect(resolveHitl).toHaveBeenCalledWith(
+        'exec-1',
+        'tc-1',
+        'approved',
+        'allow-once',
+        undefined,
+        [{ action: 'ALLOW', commandRoot: 'npm' }],
+        '',
+      )
     })
 
     it('a crossed segment disables Allow and turns Reject into Reject and remember', async () => {
@@ -333,24 +387,38 @@ describe('ActivityApproval', () => {
 
       await user.click(screen.getByRole('button', { name: /Reject and remember/ }))
 
-      expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'tc-1', 'declined', 'reject-once', undefined, [
-        { action: 'DENY', commandRoot: 'git push' },
-      ], '')
+      expect(resolveHitl).toHaveBeenCalledWith(
+        'exec-1',
+        'tc-1',
+        'declined',
+        'reject-once',
+        undefined,
+        [{ action: 'DENY', commandRoot: 'git push' }],
+        '',
+      )
     })
 
     it('mixed marks submit allow and deny rules together as a rejection', async () => {
       const user = userEvent.setup()
       render(<ActivityApproval activity={segmentedActivity()} executionId="exec-1" />)
       await user.click(screen.getByRole('button', { name: /Remember choices/ }))
-      await user.click(screen.getByRole('button', { name: 'Always allow npm run test src/foo.test.ts' }))
+      await user.click(screen.getByRole('button', { name: 'Always allow npm run test' }))
       await user.click(screen.getByRole('button', { name: 'Always block git push' }))
 
       await user.click(screen.getByRole('button', { name: /Reject and remember/ }))
 
-      expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'tc-1', 'declined', 'reject-once', undefined, [
-        { action: 'ALLOW', commandRoot: 'npm run test' },
-        { action: 'DENY', commandRoot: 'git push' },
-      ], '')
+      expect(resolveHitl).toHaveBeenCalledWith(
+        'exec-1',
+        'tc-1',
+        'declined',
+        'reject-once',
+        undefined,
+        [
+          { action: 'ALLOW', commandRoot: 'npm run test' },
+          { action: 'DENY', commandRoot: 'git push' },
+        ],
+        '',
+      )
     })
 
     it('toggling a mark off restores the plain allow flow', async () => {
@@ -358,7 +426,7 @@ describe('ActivityApproval', () => {
       render(<ActivityApproval activity={segmentedActivity()} executionId="exec-1" />)
       await user.click(screen.getByRole('button', { name: /Remember choices/ }))
 
-      const tick = screen.getByRole('button', { name: 'Always allow npm run test src/foo.test.ts' })
+      const tick = screen.getByRole('button', { name: 'Always allow npm run test' })
       await user.click(tick)
       expect(screen.getByRole('button', { name: /Allow and remember/ })).toBeInTheDocument()
 
@@ -389,7 +457,7 @@ describe('ActivityApproval', () => {
         />,
       )
       await user.click(screen.getByRole('button', { name: /Remember choices/ }))
-      await user.click(screen.getByRole('button', { name: 'Always allow > out.txt' }))
+      await user.click(screen.getByRole('button', { name: 'Always allow' }))
       await user.click(screen.getByRole('button', { name: /Allow and remember/ }))
 
       expect(resolveHitl).toHaveBeenCalledWith(
@@ -419,9 +487,15 @@ describe('ActivityApproval', () => {
       await user.click(screen.getByRole('button', { name: 'Always allow edit' }))
       await user.click(screen.getByRole('button', { name: /Allow and remember/ }))
 
-      expect(resolveHitl).toHaveBeenCalledWith('exec-1', 'tc-1', 'approved', 'allow-once', undefined, [
-        { action: 'ALLOW', commandRoot: 'edit', ruleType: 'TOOL_KIND' },
-      ], '')
+      expect(resolveHitl).toHaveBeenCalledWith(
+        'exec-1',
+        'tc-1',
+        'approved',
+        'allow-once',
+        undefined,
+        [{ action: 'ALLOW', commandRoot: 'edit', ruleType: 'TOOL_KIND' }],
+        '',
+      )
     })
 
     it('falls back to segments from the persisted hitl detail', async () => {
@@ -445,8 +519,8 @@ describe('ActivityApproval', () => {
       )
 
       await user.click(screen.getByRole('button', { name: /Remember choices/ }))
-      const panel = screen.getByLabelText('Command root for make lint')
-      expect(within(panel.parentElement!.parentElement!).getByText('make lint')).toBeInTheDocument()
+      const input = screen.getByLabelText('Command root: make lint')
+      expect(input).toHaveValue('make lint')
     })
   })
 
