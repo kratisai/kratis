@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CheckoutCompleteParams",
+  "type": "object",
+  "required": ["status", "executionId"],
+  "properties": {
+    "status": { "type": "string", "enum": ["success", "failed"] },
+    "error": { "type": "string" },
+    "commitHash": { "type": "string" },
+    "executionId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

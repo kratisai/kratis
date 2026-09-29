@@ -1,0 +1,7 @@
+id: java_file_import
+valid:
+  - "import java.util.List;"
+  - "import static org.assertj.core.api.Assertions.assertThat;"
+invalid:
+  - "package com.kratisai;"
+  - "public class Main {}"

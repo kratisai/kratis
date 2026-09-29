@@ -1,0 +1,8 @@
+id: java_file_export
+valid:
+  - "public class Main { public static void main(String[] args) {} }"
+  - "public interface Repository {}"
+  - "public enum Status { ACTIVE, INACTIVE }"
+invalid:
+  - "class PackagePrivateClass {}"
+  - "import java.util.List;"

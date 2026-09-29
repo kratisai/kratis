@@ -1,0 +1,12 @@
+{
+  "name": "OpenCode",
+  "setupCommands": [
+    "export PATH=$HOME/.opencode/bin:$PATH",
+    "export OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS=3600000",
+    "curl --retry 5 --retry-delay 2 -fsSL -o /tmp/install.sh https://opencode.ai/install && bash /tmp/install.sh",
+    "mkdir -p $HOME/.config/opencode",
+    "echo '{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"litellm/${LLM_MODEL}\",\"permission\":{\"edit\":\"ask\",\"bash\":\"ask\"},\"provider\":{\"litellm\":{\"npm\":\"@ai-sdk/openai-compatible\",\"name\":\"LiteLLM\",\"options\":{\"baseURL\":\"${LLM_BASE_URL}/v1\", \"apiKey\": \"{env:LLM_API_KEY}\"},\"models\":{\"${LLM_MODEL}\":{\"name\":\"${LLM_MODEL}\"}}}}}' > $HOME/.config/opencode/opencode.json",
+    "export LLM_API_KEY=${VIRTUAL_KEY}"
+  ],
+  "agentCommand": "opencode acp"
+}

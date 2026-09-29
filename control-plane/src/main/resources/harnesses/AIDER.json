@@ -1,0 +1,23 @@
+{
+  "name": "Aider",
+  "enabled": false,
+  "setupCommands": [
+    "export PATH=$HOME/.local/bin:$HOME/.cargo/bin:$PATH",
+    "export OPENAI_API_KEY=${VIRTUAL_KEY}",
+    "export OPENAI_API_BASE=${LLM_BASE_URL}/v1",
+    "export OPENAI_BASE_URL=${LLM_BASE_URL}/v1",
+    "export AIDER_MODEL=openai/${LLM_MODEL}",
+    "export LITELLM_LOCAL_MODEL_COST_MAP=True",
+    "mkdir -p $HOME && echo 'show-release-notes: false' > $HOME/.aider.conf.yml && echo 'check-update: false' >> $HOME/.aider.conf.yml",
+    "git clone --depth 1 https://github.com/jorgejhms/aider-acp.git $HOME/aider-acp",
+    "npm install --prefix $HOME/aider-acp",
+    "npm run build --prefix $HOME/aider-acp",
+    "curl -LsSf https://astral.sh/uv/install.sh | sh",
+    "uv tool install --python 3.12 aider-chat",
+    "mkdir -p $HOME/aider-wrapper",
+    "echo '#!/bin/bash' > $HOME/aider-wrapper/aider && echo 'args=(\"$@\")' >> $HOME/aider-wrapper/aider && echo 'for i in \"${!args[@]}\"; do' >> $HOME/aider-wrapper/aider && echo '  if [[ \"${args[$i]}\" == \"--model\" ]]; then' >> $HOME/aider-wrapper/aider && echo '    args[$((i+1))]=\"__MODEL__\"' >> $HOME/aider-wrapper/aider && echo '  fi' >> $HOME/aider-wrapper/aider && echo 'done' >> $HOME/aider-wrapper/aider && echo 'exec \"__AIDER__\" --yes \"${args[@]}\"' >> $HOME/aider-wrapper/aider",
+    "sed -i \"s|__MODEL__|${AIDER_MODEL}|\" $HOME/aider-wrapper/aider && sed -i \"s|__AIDER__|$(which aider)|\" $HOME/aider-wrapper/aider",
+    "chmod +x $HOME/aider-wrapper/aider"
+  ],
+  "agentCommand": "PATH=$HOME/aider-wrapper:$PATH node $HOME/aider-acp/dist/index.js"
+}

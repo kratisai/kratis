@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitSetRemoteResult",
+  "type": "object",
+  "required": [
+    "status",
+    "defaultBranch"
+  ],
+  "properties": {
+    "status": { "type": "string" },
+    "defaultBranch": { "type": "string" },
+    "seedCommit": { "type": "string" }
+  },
+  "additionalProperties": false
+}

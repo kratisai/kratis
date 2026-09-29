@@ -1,0 +1,7 @@
+{
+  "path": "src/main/java/com/kratis/auth/JwtFilter.java",
+  "patch": "@@ -40,6 +40,8 @@ ...",
+  "additions": 42,
+  "deletions": 5,
+  "totalLines": 120
+}

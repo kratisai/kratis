@@ -1,0 +1,7 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.complete",
+  "params": {
+    "exitCode": "not_an_integer"
+  }
+}

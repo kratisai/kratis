@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitDiffSummaryResult",
+  "type": "object",
+  "required": [
+    "baseCommit",
+    "headCommit",
+    "totalAdditions",
+    "totalDeletions",
+    "files"
+  ],
+  "properties": {
+    "baseCommit": { "type": "string" },
+    "headCommit": { "type": "string" },
+    "totalAdditions": { "type": "integer" },
+    "totalDeletions": { "type": "integer" },
+    "commitsAhead": { "type": "integer" },
+    "stagedFiles": { "type": "integer" },
+    "unstagedFiles": { "type": "integer" },
+    "hasChanges": { "type": "boolean" },
+    "commitMessages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sha", "subject", "body"],
+        "properties": {
+          "sha": { "type": "string" },
+          "subject": { "type": "string" },
+          "body": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "status",
+          "additions",
+          "deletions",
+          "isCollapsedByDefault"
+        ],
+        "properties": {
+          "path": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": [
+              "MODIFIED",
+              "ADDED",
+              "DELETED",
+              "RENAMED"
+            ]
+          },
+          "additions": { "type": "integer" },
+          "deletions": { "type": "integer" },
+          "isCollapsedByDefault": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

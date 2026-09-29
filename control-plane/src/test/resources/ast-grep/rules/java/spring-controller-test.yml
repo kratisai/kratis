@@ -1,0 +1,14 @@
+id: java_rest_endpoint
+valid:
+  - |
+    @GetMapping("/api/v1/payments")
+    public void pay() {}
+  - |
+    @PostMapping("/api/v1/charge")
+    public void charge() {}
+  - |
+    @RequestMapping("/api/v1/users")
+    public void getUsers() {}
+invalid:
+  - |
+    public void normalMethod() {}

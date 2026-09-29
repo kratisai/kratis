@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AcpPromptParams",
+  "type": "object",
+  "required": ["taskPrompt", "executionId"],
+  "properties": {
+    "taskPrompt": { "type": "string" },
+    "executionId": { "type": "string" },
+    "promptId": {
+      "type": "string",
+      "description": "Correlation id echoed in env.acp_prompt_complete. The sidecar acknowledges the dispatch immediately; the terminal outcome arrives as a notification with this id, letting the control plane ignore a completion from a superseded turn."
+    },
+    "isSteering": { "type": "boolean" },
+    "relaunch": {
+      "type": "boolean",
+      "description": "When true, the sidecar terminates any existing agent process and launches a fresh ACP session before sending the prompt. Used to recover a failed execution with a clean session in the same workspace."
+    }
+  },
+  "additionalProperties": false
+}

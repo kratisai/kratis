@@ -1,0 +1,8 @@
+id: java_rest_client
+valid:
+  - |
+    @FeignClient(name = "payment-service", url = "http://payment-service")
+    public interface PaymentClient {}
+invalid:
+  - |
+    public interface NormalInterface {}

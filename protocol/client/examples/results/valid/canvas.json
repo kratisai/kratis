@@ -1,0 +1,12 @@
+{
+  "type": "canvas",
+  "event": {
+    "documentId": "d1",
+    "chatId": "00000000-0000-0000-0000-000000000002",
+    "title": "Plan",
+    "content": "# Plan",
+    "canvasType": "SPEC",
+    "repoLabel": "acme/backend",
+    "isNewRepo": false
+  }
+}

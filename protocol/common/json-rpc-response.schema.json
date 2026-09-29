@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "JsonRpcResponse",
+  "type": "object",
+  "required": ["jsonrpc"],
+  "properties": {
+    "jsonrpc": {
+      "type": "string",
+      "const": "2.0"
+    },
+    "result": {},
+    "error": {
+      "$ref": "json-rpc-error.schema.json"
+    },
+    "id": {
+      "type": ["string", "number", "null"]
+    }
+  },
+  "additionalProperties": false
+}

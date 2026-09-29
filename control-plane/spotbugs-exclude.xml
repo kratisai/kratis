@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    SpotBugs exclusion filter.
+
+    Excluded patterns (and why):
+    - EI_EXPOSE_REP* / MS_EXPOSE_REP: returning/storing internal representation.
+      Test fakes and Spring factories legitimately return the same object
+    - THROWS_METHOD_THROWS_RUNTIMEEXCEPTION /
+      THROWS_METHOD_THROWS_CLAUSE_BASIC_EXCEPTION: throws declarations on test
+      helpers.
+    - REC_CATCH_EXCEPTION: test response builders catch Exception broadly on
+      purpose;
+    - DM_CONVERT_CASE: toUpperCase/toLowerCase without a Locale.
+    - DE_MIGHT_IGNORE: intentionally empty catch blocks (documented with a
+      comment).
+    - IAOM_DO_NOT_INCREASE_METHOD_ACCESSIBILITY, SS_SHOULD_BE_STATIC,
+      CT_CONSTRUCTOR_THROW, VA_FORMAT_STRING_USES_NEWLINE,
+      NM_METHOD_NAMING_CONVENTION, SE_NO_SERIALVERSIONID,
+      DMI_RANDOM_USED_ONLY_ONCE, PZLA_PREFER_ZERO_LENGTH_ARRAYS: style-level
+      patterns
+    - DMI_HARDCODED_ABSOLUTE_FILENAME: absolute paths in test fixtures.
+-->
+<FindBugsFilter>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_STATIC_REP2"/>
+    </Match>
+    <Match>
+        <Bug pattern="MS_EXPOSE_REP"/>
+    </Match>
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION"/>
+    </Match>
+    <Match>
+        <Bug pattern="THROWS_METHOD_THROWS_CLAUSE_BASIC_EXCEPTION"/>
+    </Match>
+    <Match>
+        <Bug pattern="REC_CATCH_EXCEPTION"/>
+    </Match>
+    <Match>
+        <Bug pattern="DM_CONVERT_CASE"/>
+    </Match>
+    <Match>
+        <Bug pattern="DE_MIGHT_IGNORE"/>
+    </Match>
+    <Match>
+        <Bug pattern="IAOM_DO_NOT_INCREASE_METHOD_ACCESSIBILITY"/>
+    </Match>
+    <Match>
+        <Bug pattern="SS_SHOULD_BE_STATIC"/>
+    </Match>
+    <Match>
+        <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    </Match>
+    <Match>
+        <Bug pattern="VA_FORMAT_STRING_USES_NEWLINE"/>
+    </Match>
+    <Match>
+        <Bug pattern="NM_METHOD_NAMING_CONVENTION"/>
+    </Match>
+    <Match>
+        <Bug pattern="SE_NO_SERIALVERSIONID"/>
+    </Match>
+    <Match>
+        <Bug pattern="DMI_RANDOM_USED_ONLY_ONCE"/>
+    </Match>
+    <Match>
+        <Bug pattern="PZLA_PREFER_ZERO_LENGTH_ARRAYS"/>
+    </Match>
+    <Match>
+        <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
+    </Match>
+    <!-- US_USELESS_*: meta-warnings about suppressions that did not match a report in
+         the annotated scope (SpotBugs reports lambda-site bugs on synthetic methods,
+         so enclosing-method suppressions appear unused). Not IDE-class defects. -->
+    <Match>
+        <Bug pattern="US_USELESS_SUPPRESSION_ON_METHOD"/>
+    </Match>
+    <Match>
+        <Bug pattern="US_USELESS_SUPPRESSION_ON_FIELD"/>
+    </Match>
+    <Match>
+        <Bug pattern="US_USELESS_SUPPRESSION_ON_CLASS"/>
+    </Match>
+    <Match>
+        <Bug pattern="US_USELESS_SUPPRESSION_ON_LOCAL_VARIABLE"/>
+    </Match>
+</FindBugsFilter>

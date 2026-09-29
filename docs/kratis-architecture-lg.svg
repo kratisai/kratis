@@ -1,0 +1,176 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 980" width="100%" height="100%" style="background-color: #0d1117; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+    <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#58a6ff" />
+        </marker>
+        <marker id="arrow-emerald" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#3fb950" />
+        </marker>
+        <marker id="arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#bc8cff" />
+        </marker>
+        <marker id="arrow-amber" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#d29922" />
+        </marker>
+
+        <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+            <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.5"/>
+        </filter>
+    </defs>
+
+    <!-- Title -->
+    <text x="40" y="45" fill="#f0f6fc" font-size="22" font-weight="700">Kratis AI: Engine Coordination &amp; Execution Architecture</text>
+    <text x="40" y="70" fill="#8b949e" font-size="13">Coordination of ACP Agents, Sandboxes, Ingestion Pipelines, and External Providers</text>
+
+    <!-- 1. CLIENT TIER -->
+    <g filter="url(#shadow)">
+        <rect x="40" y="100" width="1160" height="110" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+        <rect x="40" y="100" width="1160" height="28" rx="8" fill="#1f242c"/>
+        <text x="55" y="119" fill="#58a6ff" font-size="12" font-weight="700" letter-spacing="1">CLIENT TIER (REACT 19 SPA / MOBILE CLIENT)</text>
+
+        <!-- Client modules -->
+        <rect x="60" y="140" width="250" height="54" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text x="75" y="162" fill="#c9d1d9" font-size="13" font-weight="600">Chat &amp; Living Canvas</text>
+        <text x="75" y="180" fill="#8b949e" font-size="11">Spec drafting &amp; interactive tasks</text>
+
+        <rect x="330" y="140" width="250" height="54" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text x="345" y="162" fill="#c9d1d9" font-size="13" font-weight="600">HITL Approval Interface</text>
+        <text x="345" y="180" fill="#8b949e" font-size="11">Permission requests &amp; user input</text>
+
+        <rect x="600" y="140" width="250" height="54" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text x="615" y="162" fill="#c9d1d9" font-size="13" font-weight="600">Execution Activity Log</text>
+        <text x="615" y="180" fill="#8b949e" font-size="11">ANSI terminal &amp; streaming diffs</text>
+
+        <rect x="870" y="140" width="310" height="54" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text x="885" y="162" fill="#c9d1d9" font-size="13" font-weight="600">Repository &amp; Deep Wiki UI</text>
+        <text x="885" y="180" fill="#8b949e" font-size="11">Knowledge graph navigation</text>
+    </g>
+
+    <!-- 2. CONTROL PLANE TIER -->
+    <g filter="url(#shadow)">
+        <rect x="40" y="270" width="700" height="350" rx="8" fill="#161b22" stroke="#8957e5" stroke-width="1.5"/>
+        <rect x="40" y="270" width="700" height="28" rx="8" fill="#21183c"/>
+        <text x="55" y="289" fill="#d2a8ff" font-size="12" font-weight="700" letter-spacing="1">CONTROL PLANE (SPRING BOOT 4 + JAVA 21 VIRTUAL THREADS)</text>
+
+        <!-- Sub-boxes inside control plane -->
+        <!-- Planning Agent Engine -->
+        <rect x="60" y="315" width="310" height="135" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text x="75" y="338" fill="#f0f6fc" font-size="13" font-weight="600">Planning Agent Engine</text>
+        <text x="75" y="358" fill="#8b949e" font-size="11">• Spring AI ReAct iterative loop</text>
+        <text x="75" y="376" fill="#8b949e" font-size="11">• Change-May-Impact blast analysis</text>
+        <text x="75" y="394" fill="#8b949e" font-size="11">• Code graph &amp; dependency tool calls</text>
+        <text x="75" y="412" fill="#8b949e" font-size="11">• Canvas technical spec authoring</text>
+
+        <!-- Ingestion Pipeline -->
+        <rect x="390" y="315" width="330" height="135" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text x="405" y="338" fill="#f0f6fc" font-size="13" font-weight="600">Repository Ingestion Pipeline</text>
+        <text x="405" y="358" fill="#8b949e" font-size="11">• Tree-sitter AST extraction (60+ langs)</text>
+        <text x="405" y="376" fill="#8b949e" font-size="11">• Dependency &amp; call link resolution</text>
+        <text x="405" y="394" fill="#8b949e" font-size="11">• Dimension discovery &amp; PageRank</text>
+        <text x="405" y="412" fill="#8b949e" font-size="11">• Deep Wiki ReAct loop &amp; embeddings</text>
+
+        <!-- Sandbox Orchestrator & HITL -->
+        <rect x="60" y="465" width="660" height="135" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text x="75" y="488" fill="#f0f6fc" font-size="13" font-weight="600">Sandbox Orchestration &amp; Security Controller</text>
+        <text x="75" y="508" fill="#8b949e" font-size="11">• LocalDockerSandboxProvider: Triad network &amp; container lifecycle</text>
+        <text x="75" y="526" fill="#8b949e" font-size="11">• WebSocket Ingress (/ws/client for SPA, /ws/env for Go Sidecar)</text>
+        <text x="75" y="544" fill="#8b949e" font-size="11">• Human-In-The-Loop (HITL) approval evaluator (EXACT &amp; PREFIX_WILD)</text>
+        <text x="75" y="562" fill="#8b949e" font-size="11">• In-flight zombie container reaper and lease watchdog</text>
+    </g>
+
+    <!-- 3. PERSISTENCE TIER -->
+    <g filter="url(#shadow)">
+        <rect x="40" y="660" width="700" height="280" rx="8" fill="#161b22" stroke="#d29922" stroke-width="1.5"/>
+        <rect x="40" y="660" width="700" height="28" rx="8" fill="#2d2210"/>
+        <text x="55" y="679" fill="#e3b341" font-size="12" font-weight="700" letter-spacing="1">PERSISTENCE TIER (POSTGRESQL 16 + PGVECTOR)</text>
+
+        <rect x="60" y="705" width="310" height="105" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text x="75" y="728" fill="#f0f6fc" font-size="13" font-weight="600">Deterministic Code Graph</text>
+        <text x="75" y="748" fill="#8b949e" font-size="11">• ctx_nodes (files, classes, methods)</text>
+        <text x="75" y="766" fill="#8b949e" font-size="11">• ctx_edges (calls, imports, extends)</text>
+        <text x="75" y="784" fill="#8b949e" font-size="11">• ctx_node_dimensions (PageRank)</text>
+
+        <rect x="390" y="705" width="330" height="105" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text x="405" y="728" fill="#f0f6fc" font-size="13" font-weight="600">Deep Wiki &amp; Semantic Store</text>
+        <text x="405" y="748" fill="#8b949e" font-size="11">• ctx_wiki_pages (hierarchical docs)</text>
+        <text x="405" y="766" fill="#8b949e" font-size="11">• ctx_embeddings (HNSW pgvector)</text>
+        <text x="405" y="784" fill="#8b949e" font-size="11">• ctx_architecture_patterns</text>
+
+        <rect x="60" y="825" width="660" height="95" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text x="75" y="848" fill="#f0f6fc" font-size="13" font-weight="600">Operational &amp; Execution Relational State</text>
+        <text x="75" y="868" fill="#8b949e" font-size="11">• Canvas specs &amp; tasks (canvas_documents) • Ingestion batches &amp; status logs</text>
+        <text x="75" y="886" fill="#8b949e" font-size="11">• Multi-tenant accounts, teams &amp; tokens   • Sandbox execution metadata</text>
+    </g>
+
+    <!-- 4. ISOLATED SANDBOX TIER -->
+    <g filter="url(#shadow)">
+        <rect x="780" y="270" width="420" height="490" rx="8" fill="#161b22" stroke="#2ea043" stroke-width="1.5"/>
+        <rect x="780" y="270" width="420" height="28" rx="8" fill="#132a1c"/>
+        <text x="795" y="289" fill="#56d364" font-size="12" font-weight="700" letter-spacing="1">ISOLATED SANDBOX NETWORK (kratis-net-&lt;id&gt;)</text>
+
+        <!-- Runner Container -->
+        <rect x="800" y="315" width="380" height="295" rx="6" fill="#0d1117" stroke="#238636" stroke-dasharray="4 2"/>
+        <text x="815" y="336" fill="#3fb950" font-size="12" font-weight="700">Runner Container (kratis-sandbox-&lt;id&gt;, UID 1000)</text>
+
+        <!-- kratis-connector Go sidecar -->
+        <rect x="815" y="350" width="350" height="100" rx="5" fill="#161b22" stroke="#30363d"/>
+        <text x="830" y="372" fill="#f0f6fc" font-size="13" font-weight="600">kratis-connector (Go Sidecar)</text>
+        <text x="830" y="392" fill="#8b949e" font-size="11">• Gorilla WS client to /ws/env</text>
+        <text x="830" y="410" fill="#8b949e" font-size="11">• 64 KB rune-safe frame chunking</text>
+        <text x="830" y="428" fill="#8b949e" font-size="11">• In-memory git-credential helper</text>
+
+        <!-- ACP Agent Subprocess -->
+        <rect x="815" y="485" width="350" height="110" rx="5" fill="#161b22" stroke="#30363d"/>
+        <text x="830" y="507" fill="#f0f6fc" font-size="13" font-weight="600">Pluggable ACP Agent Process</text>
+        <text x="830" y="525" fill="#8b949e" font-size="11">• Claude Code / OpenHands / Aider / Pi</text>
+        <text x="830" y="543" fill="#8b949e" font-size="11">• Non-root workspace: /kratis/workspace</text>
+        <text x="830" y="561" fill="#8b949e" font-size="11">• Tool calls, bash execution, code diffs</text>
+        <text x="830" y="579" fill="#8b949e" font-size="11">• Suspends execution on HITL triggers</text>
+
+        <!-- DinD Sibling Container -->
+        <rect x="800" y="630" width="380" height="110" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text x="815" y="655" fill="#f0f6fc" font-size="13" font-weight="600">DinD Sibling (kratis-dind-&lt;id&gt;)</text>
+        <text x="815" y="675" fill="#8b949e" font-size="11">• Rootless Docker daemon (docker:dind-rootless)</text>
+        <text x="815" y="693" fill="#8b949e" font-size="11">• Listens on TCP 2375 inside isolated bridge</text>
+        <text x="815" y="711" fill="#8b949e" font-size="11">• Zero mount access to host /var/run/docker.sock</text>
+    </g>
+
+    <!-- 5. EXTERNAL LLM GATEWAY TIER -->
+    <g filter="url(#shadow)">
+        <rect x="780" y="790" width="420" height="150" rx="8" fill="#161b22" stroke="#f85149" stroke-width="1.5"/>
+        <rect x="780" y="790" width="420" height="28" rx="8" fill="#321617"/>
+        <text x="795" y="809" fill="#ff7b72" font-size="12" font-weight="700" letter-spacing="1">EXTERNAL INFERENCE &amp; GATEWAY</text>
+
+        <rect x="800" y="830" width="380" height="95" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text x="815" y="853" fill="#f0f6fc" font-size="13" font-weight="600">LiteLLM Proxy &amp; Virtual Key Provider</text>
+        <text x="815" y="873" fill="#8b949e" font-size="11">• Tenant-scoped budget limits &amp; usage metering</text>
+        <text x="815" y="891" fill="#8b949e" font-size="11">• Unified OpenAI-compatible interface</text>
+        <text x="815" y="909" fill="#8b949e" font-size="11">• Anthropic, OpenAI, DeepSeek, Codestral, Local vLLM</text>
+    </g>
+
+    <!-- CONNECTING ARROWS & LABELS -->
+    <!-- Client <-> Control Plane -->
+    <path d="M 230 210 L 230 270" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+    <text x="240" y="245" fill="#58a6ff" font-size="11" font-weight="600">HTTP REST / WebSocket (/ws/client)</text>
+
+    <!-- Control Plane <-> Persistence -->
+    <path d="M 390 620 L 390 660" stroke="#d29922" stroke-width="2" marker-end="url(#arrow-amber)" marker-start="url(#arrow-amber)"/>
+    <text x="400" y="645" fill="#d29922" font-size="11" font-weight="600">Spring Data JPA / HikariCP Pool / pgvector</text>
+
+    <!-- Control Plane <-> Sandbox (WebSocket /ws/env) -->
+    <path d="M 720 500 L 815 390" stroke="#3fb950" stroke-width="2" marker-end="url(#arrow-emerald)" marker-start="url(#arrow-emerald)"/>
+    <text x="715" y="440" fill="#3fb950" font-size="11" font-weight="600">/ws/env JSON-RPC 2.0</text>
+
+    <!-- Sidecar <-> ACP Agent (stdio) -->
+    <path d="M 990 450 L 990 485" stroke="#bc8cff" stroke-width="2" marker-end="url(#arrow-purple)" marker-start="url(#arrow-purple)"/>
+    <text x="1000" y="472" fill="#bc8cff" font-size="10" font-weight="600">stdio ACP Protocol</text>
+
+    <!-- ACP Agent <-> Rootless DinD -->
+    <path d="M 990 595 L 990 630" stroke="#30363d" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="1000" y="618" fill="#8b949e" font-size="10">DOCKER_HOST: tcp://2375</text>
+
+    <!-- Sandbox / Control Plane -> LiteLLM -->
+    <path d="M 740 370 Q 765 370 765 850 L 800 850" fill="none" stroke="#f85149" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arrow)"/>
+    <path d="M 1165 540 Q 1205 540 1205 850 L 1180 850" fill="none" stroke="#f85149" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arrow)"/>
+    <text x="770" y="780" fill="#ff7b72" font-size="10">Model Requests via LiteLLM</text>
+</svg>

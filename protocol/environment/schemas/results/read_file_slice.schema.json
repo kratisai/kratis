@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReadFileSliceResult",
+  "type": "object",
+  "required": [
+    "path",
+    "startLine",
+    "lines"
+  ],
+  "properties": {
+    "path": { "type": "string" },
+    "startLine": { "type": "integer" },
+    "lines": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

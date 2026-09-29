@@ -1,0 +1,12 @@
+{
+  "type": "execution_activity",
+  "executionId": "00000000-0000-0000-0000-000000000006",
+  "activityType": "THINKING",
+  "description": "planning the refactor\nchecking call sites",
+  "actionId": "msg-1#2",
+  "status": "completed",
+  "detail": {
+    "messageId": "msg-1",
+    "role": "agent"
+  }
+}

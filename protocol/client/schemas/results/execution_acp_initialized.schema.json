@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionAcpInitializedResult",
+  "type": "object",
+  "required": [
+    "type",
+    "executionId",
+    "sessionId",
+    "agentName",
+    "agentVersion"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "execution_acp_initialized",
+      "enum": [
+        "execution_acp_initialized"
+      ]
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sessionId": {
+      "type": "string",
+      "description": "ACP session ID established by the agent handshake (initialize + session/new)."
+    },
+    "agentName": {
+      "type": "string",
+      "description": "Agent name reported by the harness in the ACP initialize response (agentInfo.name)."
+    },
+    "agentVersion": {
+      "type": "string",
+      "description": "Agent version reported by the harness in the ACP initialize response (agentInfo.version)."
+    }
+  },
+  "additionalProperties": true
+}

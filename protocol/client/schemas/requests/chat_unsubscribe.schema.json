@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ChatUnsubscribeParams",
+  "type": "object",
+  "required": ["chatId"],
+  "properties": {
+    "chatId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

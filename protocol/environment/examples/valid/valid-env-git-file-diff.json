@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.git_file_diff",
+  "params": {
+    "path": "src/main/java/com/kratis/auth/JwtFilter.java",
+    "baseBranch": "main",
+    "executionId": "123e4567-e89b-12d3-a456-426614174000"
+  },
+  "id": 12
+}

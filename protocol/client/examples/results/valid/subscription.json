@@ -1,0 +1,5 @@
+{
+  "type": "subscription",
+  "channel": "team",
+  "message": "Subscribed to team 1"
+}

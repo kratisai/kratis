@@ -1,0 +1,7 @@
+{
+  "type": "execution_acp_initialized",
+  "executionId": "00000000-0000-0000-0000-000000000007",
+  "sessionId": "ses_e2e_test_123",
+  "agentName": "OpenCode",
+  "agentVersion": "1.18.18"
+}

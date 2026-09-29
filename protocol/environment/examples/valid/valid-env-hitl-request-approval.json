@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.hitl_request",
+  "params": {
+    "hitlId": "tool-call-1",
+    "message": "Remove build directory",
+    "kind": "approval",
+    "executionId": "123e4567-e89b-12d3-a456-426614174000",
+    "command": "rm -rf /tmp/build",
+    "title": "Remove build directory",
+    "toolKind": "execute",
+    "options": [
+      { "optionId": "allow-once", "name": "Allow once", "kind": "allow_once" },
+      { "optionId": "allow-always", "name": "Always allow", "kind": "allow_always" },
+      { "optionId": "reject-once", "name": "Reject", "kind": "reject_once" }
+    ]
+  },
+  "id": 42
+}

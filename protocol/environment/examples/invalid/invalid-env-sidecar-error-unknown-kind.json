@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.sidecar_error",
+  "params": {
+    "kind": "not_a_real_kind",
+    "message": "boom"
+  }
+}

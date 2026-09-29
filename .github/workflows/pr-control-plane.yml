@@ -1,0 +1,124 @@
+name: Control Plane CI (PR)
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'control-plane/**'
+      - 'build/**'
+      - '.github/workflows/pr-control-plane.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate-control-plane:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: control-plane
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Compile and Run PMD (Spotless + Checkstyle + PMD)
+        run: ./mvnw process-test-classes -Dspotless.skip=false -Dcheckstyle.skip=false
+
+      - name: OpenRewrite Code Hygiene Check
+        run: ./mvnw rewrite:dryRun -Drewrite.failOnDryRunResults=true
+
+      - name: Verify Production AOT Configuration (Fail-Fast)
+        # Generates the AOT-stripped ApplicationContext for production code only.
+        # Catches missing @RuntimeHints / reflection registrations at generation time.
+        run: ./mvnw clean process-classes spring-boot:process-aot
+
+      - name: Verify Test AOT Configuration (Fail-Fast)
+        # Generates the AOT-stripped ApplicationContext for test code only.
+        # Catches missing @RuntimeHints / reflection registrations in tests.
+        run: ./mvnw process-test-classes spring-boot:process-test-aot
+
+  test-control-plane:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: control-plane
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Download codebase-memory-mcp binary
+        run: |
+          mkdir -p ../build/bin
+          # GitHub release downloads occasionally return 503; retry with backoff.
+          wget --tries=8 --waitretry=5 --retry-connrefused \
+            https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.8.1/codebase-memory-mcp-linux-amd64.tar.gz \
+            -O codebase-memory-mcp.tar.gz
+          tar xzf codebase-memory-mcp.tar.gz -C ../build/bin/
+          chmod +x ../build/bin/codebase-memory-mcp
+          rm codebase-memory-mcp.tar.gz
+
+      - name: Install scc
+        run: |
+          mkdir -p ../build/bin
+          wget --tries=8 --waitretry=5 --retry-connrefused -qO scc.tar.gz \
+            https://github.com/boyter/scc/releases/latest/download/scc_Linux_x86_64.tar.gz
+          tar xf scc.tar.gz -C ../build/bin scc
+          chmod +x ../build/bin/scc
+          rm scc.tar.gz
+
+      - name: Setup Go 1.22
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: sidecar/go.sum
+
+      - name: Build Go Sidecar Binary
+        run: |
+          cd ../sidecar
+          CGO_ENABLED=0 go build -v -o kratis-connector main.go
+
+      - name: Setup Docker Sandbox Image
+        run: |
+          OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_NAME="ghcr.io/${OWNER_LOWER}/kratis-runner-base:latest"
+          echo "Attempting to pull pre-built runner image: $IMAGE_NAME"
+          if docker pull "$IMAGE_NAME"; then
+            echo "Pre-built image found. Tagging locally..."
+            docker tag "$IMAGE_NAME" kratis-runner-base:latest
+          else
+            echo "Pre-built image not found. Building locally..."
+            docker build -t kratis-runner-base:latest -f ../build/Dockerfile.runner-base ..
+          fi
+
+      - name: Run Tests with Coverage (JaCoCo)
+        # Skip spotless, checkstyle, and PMD since they are validated in parallel validate job
+        run: ./mvnw clean test -Dspotless.skip=true -Dcheckstyle.skip=true -Dpmd.skip=true
+
+      - name: Add JaCoCo Report to PR
+        uses: madrapps/jacoco-report@v1.7.1
+        # Fork PRs get a read-only GITHUB_TOKEN and cannot comment; gate to same-repo PRs.
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        with:
+          paths: ${{ github.workspace }}/control-plane/target/site/jacoco/jacoco.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          min-coverage-overall: 67
+          min-coverage-changed-files: 67
+          title: "Control Plane Code Coverage"
+          update-comment: true

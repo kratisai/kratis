@@ -1,0 +1,7 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.checkout_complete",
+  "params": {
+    "status": "in_progress"
+  }
+}

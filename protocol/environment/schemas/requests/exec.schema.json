@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecParams",
+  "type": "object",
+  "required": ["command", "executionId"],
+  "properties": {
+    "command": { "type": "string" },
+    "persistEnv": { "type": "boolean" },
+    "executionId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

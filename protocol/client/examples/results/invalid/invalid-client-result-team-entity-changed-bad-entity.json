@@ -1,0 +1,5 @@
+{
+  "type": "team_entity_changed",
+  "teamId": "00000000-0000-0000-0000-000000000005",
+  "entity": "bogus"
+}

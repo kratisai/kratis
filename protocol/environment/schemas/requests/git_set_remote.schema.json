@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitSetRemoteParams",
+  "type": "object",
+  "required": [
+    "remoteUrl",
+    "defaultBranch"
+  ],
+  "properties": {
+    "remoteUrl": { "type": "string" },
+    "defaultBranch": { "type": "string" },
+    "executionId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

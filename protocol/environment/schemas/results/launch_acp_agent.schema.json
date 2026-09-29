@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LaunchAcpAgentResult",
+  "type": "object",
+  "required": ["status"],
+  "properties": {
+    "status": { "type": "string", "enum": ["launched", "failed"] },
+    "sessionId": { "type": ["string", "null"] },
+    "agentName": { "type": ["string", "null"] },
+    "agentVersion": { "type": ["string", "null"] },
+    "error": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

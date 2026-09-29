@@ -1,0 +1,10 @@
+{
+  "type": "execution_hitl_resolved",
+  "executionId": "00000000-0000-0000-0000-000000000006",
+  "hitlId": "tool-call-1",
+  "kind": "approval",
+  "response": "approved",
+  "optionId": "allow-once",
+  "resolvedByUserId": "00000000-0000-0000-0000-000000000001",
+  "resolvedByDisplayName": "Dave"
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ChatSubscribeParams",
+  "type": "object",
+  "required": ["chatId"],
+  "properties": {
+    "chatId": { "type": "string" },
+    "teamId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

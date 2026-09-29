@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SidecarErrorParams",
+  "type": "object",
+  "required": ["kind", "message"],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": ["connection_closed", "frame_dropped"]
+    },
+    "message": { "type": "string" },
+    "executionId": { "type": "string" },
+    "closeCode": { "type": "integer" },
+    "closeReason": { "type": "string" }
+  },
+  "additionalProperties": false
+}

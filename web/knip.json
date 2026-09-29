@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["src/main.tsx"],
+  "project": ["src/**/*.{ts,tsx}"],
+  "ignore": [
+    "src/components/ui/**",
+    "src/protocol/**",
+    "src/types/canvas-types.ts",
+    "src/types/execution-activity-types.ts",
+    "src/types/telemetry-types.ts",
+    "src/types/websocket-types.ts"
+  ],
+  "ignoreDependencies": ["msw", "vite"],
+  "vitest": false,
+  "includeEntryExports": true
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitFileDiffParams",
+  "type": "object",
+  "required": [
+    "path"
+  ],
+  "properties": {
+    "path": { "type": "string" },
+    "baseBranch": { "type": "string" },
+    "executionId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

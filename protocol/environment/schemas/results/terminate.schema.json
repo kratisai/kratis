@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerminateResult",
+  "type": "object",
+  "required": ["status", "exitCode"],
+  "properties": {
+    "status": { "type": "string", "enum": ["completed", "terminated"] },
+    "exitCode": { "type": "integer" },
+    "error": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

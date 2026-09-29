@@ -1,0 +1,13 @@
+{
+  "name": "Claude Code",
+  "setupCommands": [
+    "export PATH=$HOME/claude/node_modules/.bin:$PATH",
+    "export ANTHROPIC_API_KEY=${VIRTUAL_KEY}",
+    "export ANTHROPIC_BASE_URL=${LLM_BASE_URL}",
+    "export DISABLE_AUTOUPDATER=1",
+    "mkdir -p ~/.claude",
+    "echo '{\"model\": \"${LLM_MODEL}\"}' > ~/.claude/settings.json",
+    "npm install --prefix $HOME/claude @agentclientprotocol/claude-agent-acp@v0.54.1"
+  ],
+  "agentCommand": "claude-agent-acp"
+}

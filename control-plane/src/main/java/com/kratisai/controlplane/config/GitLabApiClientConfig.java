@@ -1,0 +1,26 @@
+package com.kratisai.controlplane.config;
+
+import com.kratisai.controlplane.client.GitLabApiClient;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.support.RestClientAdapter;
+import org.springframework.web.service.invoker.HttpServiceProxyFactory;
+
+@Configuration
+public class GitLabApiClientConfig {
+
+    @Bean
+    public GitLabApiClient gitLabApiClient() {
+        RestClient restClient = RestClient.builder()
+                .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                .build();
+        RestClientAdapter adapter = RestClientAdapter.create(restClient);
+        HttpServiceProxyFactory factory =
+                HttpServiceProxyFactory.builderFor(adapter).build();
+
+        return factory.createClient(GitLabApiClient.class);
+    }
+}

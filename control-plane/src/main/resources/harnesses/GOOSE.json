@@ -1,0 +1,19 @@
+{
+  "name": "Goose",
+  "setupCommands": [
+    "export PATH=$HOME/.local/bin:$PATH",
+    "mkdir -p ~/.local/bin /tmp/goose-extract",
+    "curl -fsSL -o /tmp/goose.tar.bz2 \"https://github.com/aaif-goose/goose/releases/download/stable/goose-$(uname -m)-unknown-linux-gnu.tar.bz2\"",
+    "tar -xjf /tmp/goose.tar.bz2 -C /tmp/goose-extract",
+    "mv /tmp/goose-extract/goose ~/.local/bin/goose",
+    "chmod +x ~/.local/bin/goose",
+    "mkdir -p ~/.config/goose",
+    "printf 'provider: openai\\nmodel: %s\\nproviders:\\n  openai:\\n    type: openai\\n    api_key: %s\\n    base_url: %s/v1\\n' \"${LLM_MODEL}\" \"${VIRTUAL_KEY}\" \"${LLM_BASE_URL}\" > ~/.config/goose/config.yaml",
+    "export GOOSE_PROVIDER=openai",
+    "export GOOSE_MODEL=${LLM_MODEL}",
+    "export GOOSE_MODE=auto",
+    "export OPENAI_API_KEY=${VIRTUAL_KEY}",
+    "export OPENAI_BASE_URL=${LLM_BASE_URL}/v1"
+  ],
+  "agentCommand": "goose acp --with-builtin developer"
+}

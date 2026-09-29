@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.git_push",
+  "params": {
+    "branchName": "kratis/task-123",
+    "commitMessage": "Implement JWT filter",
+    "force": false,
+    "targetBranch": "main",
+    "executionId": "123e4567-e89b-12d3-a456-426614174000"
+  },
+  "id": 15
+}

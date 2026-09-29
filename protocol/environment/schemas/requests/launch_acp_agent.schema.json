@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LaunchAcpAgentParams",
+  "type": "object",
+  "required": ["agentCommand", "executionId"],
+  "properties": {
+    "agentCommand": { "type": "string" },
+    "modelName": { "type": "string" },
+    "agentLogFiles": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Absolute diagnostic log file paths written by the agent inside the sandbox. The connector tails each file for the agent session's lifetime and forwards complete lines on the env.output 'agent' stream, without identifying the source file."
+    },
+    "executionId": { "type": "string" }
+  },
+  "additionalProperties": false
+}

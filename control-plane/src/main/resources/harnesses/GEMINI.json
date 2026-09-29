@@ -1,0 +1,24 @@
+{
+  "name": "Gemini",
+  "setupCommands": [
+    "export PATH=$HOME/gemini/node_modules/.bin:$PATH",
+    "export GEMINI_API_KEY=${VIRTUAL_KEY}",
+    "export GOOGLE_GEMINI_BASE_URL=${LLM_BASE_URL}",
+    "export GEMINI_MODEL=${LLM_MODEL}",
+    "export GEMINI_CLI_TRUST_WORKSPACE=true",
+    "mkdir -p /kratis/workspace/.kratis",
+    "export GEMINI_DEBUG_LOG_FILE=/kratis/workspace/.kratis/gemini-debug.log",
+    "mkdir -p $HOME/.gemini",
+    "echo '{\"security\":{\"auth\":{\"selectedType\":\"gemini-api-key\"}}, \"privacy\":{\"usageStatisticsEnabled\":false}, \"baseUrl\":\"${LLM_BASE_URL}\", \"model\":{\"compressionThreshold\":0.4}, \"tools\":{\"shell\":{\"enableInteractiveShell\":false}}, \"telemetry\":{\"enabled\":true,\"outfile\":\"/kratis/workspace/.kratis/gemini-telemetry.jsonl\",\"logPrompts\":false}}' > $HOME/.gemini/settings.json",
+    "npm install --prefix $HOME/gemini @google/gemini-cli@0.61.0",
+    "node /tmp/kratis-gemini-acp-truncation.mjs $HOME/gemini/node_modules/@google/gemini-cli"
+  ],
+  "resources": [
+    {
+      "source": "/gemini/kratis-gemini-acp-truncation.mjs",
+      "target": "/tmp/kratis-gemini-acp-truncation.mjs"
+    }
+  ],
+  "agentCommand": "gemini --acp",
+  "agentLogFiles": ["/kratis/workspace/.kratis/gemini-debug.log"]
+}

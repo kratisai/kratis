@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.activity",
+  "params": {
+    "activityType": "COMMAND",
+    "description": "Running go build main.go",
+    "executionId": "123e4567-e89b-12d3-a456-426614174000",
+    "actionId": "tool-call-1",
+    "status": "in_progress",
+    "detail": {
+      "kind": "execute",
+      "title": "Running go build main.go",
+      "input": {
+        "command": "go build main.go"
+      }
+    }
+  }
+}

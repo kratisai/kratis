@@ -1,0 +1,21 @@
+{
+  "name": "PI",
+  "setupCommands": [
+    "export PATH=$HOME/pi/bin:$HOME/pi/node_modules/.bin:$HOME/pi:$PATH",
+    "export OPENAI_API_KEY=${VIRTUAL_KEY}",
+    "export OPENAI_BASE_URL=${LLM_BASE_URL}/v1",
+    "npm install --prefix $HOME/pi @earendil-works/pi-coding-agent",
+    "npm install --prefix $HOME/pi pi-acp",
+    "mkdir -p $HOME/.pi $HOME/.pi/agent",
+    "echo '{\"openai\": {\"type\": \"api_key\", \"key\": \"${VIRTUAL_KEY}\"}}' > $HOME/.pi/auth.json",
+    "cp $HOME/.pi/auth.json $HOME/.pi/agent/auth.json",
+    "echo '{\"providers\": {\"openai\": {\"baseUrl\": \"${LLM_BASE_URL}/v1\", \"api\": \"openai-completions\", \"models\": [{\"id\": \"${LLM_MODEL}\", \"name\": \"${LLM_MODEL}\", \"provider\": \"openai\", \"api\": \"openai-completions\", \"baseUrl\": \"${LLM_BASE_URL}/v1\", \"contextWindow\": ${LLM_CONTEXT_WINDOW}, \"maxTokens\": 4096}]}}}' > $HOME/.pi/models.json",
+    "cp $HOME/.pi/models.json $HOME/.pi/agent/models.json",
+    "echo '{\"defaultModel\": \"${LLM_MODEL}\", \"defaultProvider\": \"openai\"}' > $HOME/.pi/settings.json",
+    "cp $HOME/.pi/settings.json $HOME/.pi/agent/settings.json",
+    "mkdir -p $HOME/pi/bin",
+    "printf '#!/bin/bash\\nexec %s/pi/node_modules/.bin/pi \"$@\"\\n' \"$HOME\" > $HOME/pi/bin/pi",
+    "chmod +x $HOME/pi/bin/pi"
+  ],
+  "agentCommand": "node $HOME/pi/node_modules/pi-acp/dist/index.js \"$@\""
+}

@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.exec",
+  "params": {
+    "command": "npm install",
+    "persistEnv": true,
+    "executionId": "123e4567-e89b-12d3-a456-426614174000"
+  },
+  "id": 10
+}

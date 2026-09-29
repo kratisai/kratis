@@ -1,0 +1,11 @@
+{
+  "name": "Qwen",
+  "setupCommands": [
+    "export PATH=$HOME/.local/bin:$PATH",
+    "export OPENAI_API_KEY=${VIRTUAL_KEY}",
+    "mkdir -p $HOME/.qwen",
+    "echo '{\"security\": {\"auth\": {\"selectedType\": \"openai\"}}, \"model\": {\"name\": \"${LLM_MODEL}\"}, \"modelProviders\": {\"openai\": [{\"id\": \"${LLM_MODEL}\", \"name\": \"${LLM_MODEL}\", \"baseUrl\": \"${LLM_BASE_URL}/v1\", \"envKey\": \"OPENAI_API_KEY\"}]}, \"tools\": {\"approvalMode\": \"default\"}, \"$version\": 3}' > $HOME/.qwen/settings.json",
+    "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"
+  ],
+  "agentCommand": "qwen --acp"
+}

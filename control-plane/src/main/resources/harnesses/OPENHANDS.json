@@ -1,0 +1,15 @@
+{
+  "name": "OpenHands",
+  "enabled": false,
+  "setupCommands": [
+    "export PATH=$HOME/.local/bin:$PATH",
+    "export OPENHANDS_SUPPRESS_BANNER=1",
+    "mkdir -p $HOME/.openhands",
+    "echo \"{\\\"llm\\\": {\\\"api_key\\\": \\\"${VIRTUAL_KEY}\\\", \\\"base_url\\\": \\\"${LLM_BASE_URL}/v1\\\", \\\"model\\\": \\\"openai/${LLM_MODEL}\\\"}, \\\"sandbox\\\": {\\\"runtime\\\": \\\"process\\\"}, \\\"runtime\\\": \\\"process\\\", \\\"conversation_settings\\\": {\\\"confirmation_mode\\\": \\\"always-ask\\\"}}\" > $HOME/.openhands/agent_settings.json",
+    "curl -fsSL https://install.openhands.dev/install.sh -o /tmp/openhands-install.sh",
+    "sed -i 's/^VERSION=\"1.14.0\"/VERSION=\"1.16.0\"/' /tmp/openhands-install.sh",
+    "grep -q '^VERSION=\"1.16.0\"$' /tmp/openhands-install.sh",
+    "sh /tmp/openhands-install.sh"
+  ],
+  "agentCommand": "openhands acp"
+}

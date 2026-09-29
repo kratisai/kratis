@@ -1,0 +1,5 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.heartbeat",
+  "id": 2
+}

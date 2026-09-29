@@ -1,0 +1,22 @@
+{
+  "name": "Codex",
+  "setupCommands": [
+    "export NO_BROWSER=1",
+    "export PATH=$HOME/codex/node_modules/.bin:$PATH",
+    "export OPENAI_API_KEY=${VIRTUAL_KEY}",
+    "export CODEX_API_KEY=${VIRTUAL_KEY}",
+    "export OPENAI_BASE_URL=${LLM_BASE_URL}/v1",
+    "export INITIAL_AGENT_MODE=agent-full-access",
+    "mkdir -p $HOME/.codex",
+    "echo 'preferred_auth_method = \"apikey\"' > $HOME/.codex/config.toml",
+    "echo 'model = \"${LLM_MODEL}\"' >> $HOME/.codex/config.toml",
+    "echo 'model_provider = \"proxy\"' >> $HOME/.codex/config.toml",
+    "echo '[model_providers.proxy]' >> $HOME/.codex/config.toml",
+    "echo 'name = \"OpenAI using LLM proxy\"' >> $HOME/.codex/config.toml",
+    "echo 'base_url = \"${LLM_BASE_URL}/v1\"' >> $HOME/.codex/config.toml",
+    "echo 'wire_api = \"responses\"' >> $HOME/.codex/config.toml",
+    "echo 'env_key = \"CODEX_API_KEY\"' >> $HOME/.codex/config.toml",
+    "npm install --prefix $HOME/codex @agentclientprotocol/codex-acp"
+  ],
+  "agentCommand": "codex-acp"
+}

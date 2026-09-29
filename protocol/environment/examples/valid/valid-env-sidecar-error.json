@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.sidecar_error",
+  "params": {
+    "kind": "connection_closed",
+    "message": "control plane closed the connection unexpectedly (code=1009, reason=\"message too big\"); reconnected",
+    "executionId": "123e4567-e89b-12d3-a456-426614174000",
+    "closeCode": 1009,
+    "closeReason": "message too big"
+  }
+}
