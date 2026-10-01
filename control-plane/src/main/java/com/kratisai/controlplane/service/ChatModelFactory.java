@@ -23,6 +23,13 @@ public class ChatModelFactory {
 
     private static final Logger logger = LoggerFactory.getLogger(ChatModelFactory.class);
 
+    private static final int THINKING_BUDGET_TOKENS = 8192;
+
+    // Providers count thinking/reasoning tokens against the output cap. Reserve headroom beyond the
+    // budget so a long reasoning turn cannot exhaust the cap and return no text or tool call.
+    private static final int OUTPUT_TOKEN_BUDGET = 4096;
+    private static final int MAX_OUTPUT_TOKENS = OUTPUT_TOKEN_BUDGET + THINKING_BUDGET_TOKENS;
+
     private final LiteLLMProperties liteLLMProperties;
 
     public record ChatModelSpec(
@@ -79,7 +86,7 @@ public class ChatModelFactory {
                 .apiKey(spec.apiKey())
                 .baseUrl(spec.baseUrl());
         if (spec.enableThinking()) {
-            optionsBuilder.reasoningEffort("high");
+            optionsBuilder.reasoningEffort("high").maxCompletionTokens(MAX_OUTPUT_TOKENS);
         }
         return OpenAiChatModel.builder().options(optionsBuilder.build()).build();
     }
@@ -90,7 +97,7 @@ public class ChatModelFactory {
                 .apiKey(spec.apiKey())
                 .baseUrl(spec.baseUrl());
         if (spec.enableThinking()) {
-            optionsBuilder.thinkingEnabled(8192);
+            optionsBuilder.thinkingEnabled(THINKING_BUDGET_TOKENS).maxTokens(MAX_OUTPUT_TOKENS);
         }
         return AnthropicChatModel.builder().options(optionsBuilder.build()).build();
     }
@@ -108,7 +115,10 @@ public class ChatModelFactory {
         GoogleGenAiChatOptions.Builder optionsBuilder =
                 GoogleGenAiChatOptions.builder().model(spec.modelName());
         if (spec.enableThinking()) {
-            optionsBuilder.includeThoughts(true).thinkingBudget(8192);
+            optionsBuilder
+                    .includeThoughts(true)
+                    .thinkingBudget(THINKING_BUDGET_TOKENS)
+                    .maxOutputTokens(MAX_OUTPUT_TOKENS);
         }
         return GoogleGenAiChatModel.builder()
                 .genAiClient(client)
