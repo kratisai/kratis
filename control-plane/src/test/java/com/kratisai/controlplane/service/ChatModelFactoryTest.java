@@ -21,9 +21,12 @@ import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.anthropic.AnthropicChatModel;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatModel;
+import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.transaction.annotation.Transactional;
@@ -346,6 +349,47 @@ class ChatModelFactoryTest {
         ChatModel chatModel = chatModelFactory.createChatModel(provider, "claude-3-7-sonnet", true);
 
         assertThat(chatModel).isInstanceOf(AnthropicChatModel.class);
+    }
+
+    @Test
+    void anthropicThinkingEnabled_reservesOutputTokensAboveThinkingBudget() {
+        ModelProvider provider = new ModelProvider("Anthropic", ProviderType.ANTHROPIC, "sk-ant-fake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        AnthropicChatModel chatModel =
+                (AnthropicChatModel) chatModelFactory.createChatModel(provider, "claude-3-7-sonnet", true);
+
+        AnthropicChatOptions options = chatModel.getOptions();
+        assertThat(options.getThinking()).isNotNull();
+        assertThat(options.getMaxTokens()).isEqualTo(12288);
+    }
+
+    @Test
+    void openAiThinkingEnabled_reservesOutputTokensAboveThinkingBudget() {
+        ModelProvider provider = new ModelProvider("OpenAI Account", ProviderType.OPENAI, "sk-fake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        OpenAiChatModel chatModel = (OpenAiChatModel) chatModelFactory.createChatModel(provider, "o3", true);
+
+        OpenAiChatOptions options = chatModel.getOptions();
+        assertThat(options.getReasoningEffort()).isNotNull();
+        assertThat(options.getMaxCompletionTokens()).isEqualTo(12288);
+    }
+
+    @Test
+    void googleThinkingEnabled_reservesOutputTokensAboveThinkingBudget() {
+        ModelProvider provider = new ModelProvider("Google Cloud", ProviderType.GOOGLE, "AIzaSyFake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        GoogleGenAiChatModel chatModel =
+                (GoogleGenAiChatModel) chatModelFactory.createChatModel(provider, "gemini-2.5-pro", true);
+
+        GoogleGenAiChatOptions options = (GoogleGenAiChatOptions) chatModel.getDefaultOptions();
+        assertThat(options.getThinkingBudget()).isEqualTo(8192);
+        assertThat(options.getMaxOutputTokens()).isEqualTo(12288);
     }
 
     @Test

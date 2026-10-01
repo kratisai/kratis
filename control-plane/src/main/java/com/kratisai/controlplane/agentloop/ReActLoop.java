@@ -20,6 +20,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.model.ToolContext;
@@ -44,6 +45,8 @@ public final class ReActLoop<T> {
     public interface ToolEventListener {
         void onToolEvent(String taskId, String toolName, ToolPhase phase, String detail);
     }
+
+    record LlmTurn(AssistantMessage message, String finishReason) {}
 
     private final ChatClient chatClient;
     private final ToolCallback[] tools;
@@ -141,16 +144,17 @@ public final class ReActLoop<T> {
                         finalTurn ? " (final turn; tools disabled)" : "");
 
                 ToolCallback[] turnTools = finalTurn ? new ToolCallback[0] : tools;
-                AssistantMessage assistantMessage = invokeLlm(history, toolContext, turnTools);
-                if (assistantMessage == null) {
+                LlmTurn llmTurn = invokeLlm(history, toolContext, turnTools);
+                if (llmTurn == null) {
                     log.debug(
                             "ReAct loop turn {}/{} produced no assistant message; aborting.", turn + 1, maxIterations);
                     return null;
                 }
+                AssistantMessage assistantMessage = llmTurn.message();
                 history.add(assistantMessage);
 
                 if (!assistantMessage.hasToolCalls()) {
-                    log.debug("ReAct loop turn {}/{} returned a final response.", turn + 1, maxIterations);
+                    logFinalResponse(turn, llmTurn);
                     return parseFinal(assistantMessage);
                 }
 
@@ -201,8 +205,7 @@ public final class ReActLoop<T> {
                 + " and prefer parallel calls so you can synthesize a final answer before your turns run out.";
     }
 
-    private @Nullable AssistantMessage invokeLlm(
-            List<Message> history, ToolContext toolContext, ToolCallback[] turnTools) {
+    private @Nullable LlmTurn invokeLlm(List<Message> history, ToolContext toolContext, ToolCallback[] turnTools) {
         AtomicBoolean emitted = new AtomicBoolean();
         int attempt = 0;
         while (true) {
@@ -272,6 +275,21 @@ public final class ReActLoop<T> {
         }
     }
 
+    private void logFinalResponse(int turn, LlmTurn llmTurn) {
+        AssistantMessage message = llmTurn.message();
+        String text = message.getText();
+        if (text != null && !text.isBlank()) {
+            log.debug("ReAct loop turn {}/{} returned a final response.", turn + 1, maxIterations);
+            return;
+        }
+        log.warn(
+                "ReAct loop turn {}/{} returned a blank final response (finishReason={}, no tool calls, metadata={})",
+                turn + 1,
+                maxIterations,
+                llmTurn.finishReason(),
+                message.getMetadata().keySet());
+    }
+
     @SuppressWarnings("unchecked")
     private T parseFinal(AssistantMessage message) {
         if (converter == null) {
@@ -291,7 +309,7 @@ public final class ReActLoop<T> {
         }
     }
 
-    static @Nullable AssistantMessage mergeChunks(List<ChatResponse> chunks) {
+    static @Nullable LlmTurn mergeChunks(List<ChatResponse> chunks) {
         if (chunks == null || chunks.isEmpty()) {
             return null;
         }
@@ -300,6 +318,7 @@ public final class ReActLoop<T> {
         List<AssistantMessage.ToolCall> toolCalls = new ArrayList<>();
         Set<String> seenToolCallIds = new HashSet<>();
         Map<String, Object> mergedMetadata = new HashMap<>();
+        String finishReason = "";
 
         for (ChatResponse chunk : chunks) {
             Generation gen = chunk.getResult();
@@ -320,13 +339,19 @@ public final class ReActLoop<T> {
                 toolCalls.add(tc);
             }
             mergedMetadata.putAll(msg.getMetadata());
+            ChatGenerationMetadata genMetadata = gen.getMetadata();
+            String reason = genMetadata.getFinishReason();
+            if (reason != null && !reason.isBlank()) {
+                finishReason = reason;
+            }
         }
 
-        return AssistantMessage.builder()
+        AssistantMessage message = AssistantMessage.builder()
                 .content(text.toString())
                 .toolCalls(toolCalls)
                 .properties(mergedMetadata)
                 .build();
+        return new LlmTurn(message, finishReason);
     }
 
     static boolean isThoughtChunk(AssistantMessage output) {

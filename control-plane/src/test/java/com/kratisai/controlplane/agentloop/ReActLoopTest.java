@@ -419,9 +419,10 @@ class ReActLoopTest {
         AssistantMessage chunk2 =
                 AssistantMessage.builder().content(" more thinking").build();
 
-        AssistantMessage result = ReActLoop.mergeChunks(List.of(chatResponse(chunk1), chatResponse(chunk2)));
+        var merged = ReActLoop.mergeChunks(List.of(chatResponse(chunk1), chatResponse(chunk2)));
 
-        assertThat(result).isNotNull();
+        assertThat(merged).isNotNull();
+        AssistantMessage result = merged.message();
         assertThat(result.getText()).isEqualTo("Thinking... more thinking");
         assertThat(result.getToolCalls()).hasSize(1);
         assertThat(result.getMetadata()).containsKey("thoughtSignatures");
@@ -448,12 +449,29 @@ class ReActLoopTest {
                 .toolCalls(List.of(toolCall("call_2", "tool_two", "{\"b\": 2}")))
                 .build();
 
-        AssistantMessage result = ReActLoop.mergeChunks(List.of(chatResponse(chunk1), chatResponse(chunk2)));
+        var merged = ReActLoop.mergeChunks(List.of(chatResponse(chunk1), chatResponse(chunk2)));
 
-        assertThat(result).isNotNull();
+        assertThat(merged).isNotNull();
+        AssistantMessage result = merged.message();
         assertThat(result.getToolCalls()).hasSize(2);
         assertThat(result.getToolCalls().get(0).id()).isEqualTo("call_1");
         assertThat(result.getToolCalls().get(1).id()).isEqualTo("call_2");
+    }
+
+    @Test
+    void mergeChunksShouldCaptureLastFinishReason() {
+        ChatResponse first = new ChatResponse(List.of(new Generation(
+                new AssistantMessage("partial"),
+                ChatGenerationMetadata.builder().finishReason("end_turn").build())));
+        ChatResponse last = new ChatResponse(List.of(new Generation(
+                AssistantMessage.builder().content("").build(),
+                ChatGenerationMetadata.builder().finishReason("max_tokens").build())));
+
+        var merged = ReActLoop.mergeChunks(List.of(first, last));
+
+        assertThat(merged).isNotNull();
+        assertThat(merged.message().getText()).isEqualTo("partial");
+        assertThat(merged.finishReason()).isEqualTo("max_tokens");
     }
 
     @Test
@@ -470,9 +488,10 @@ class ReActLoopTest {
                         toolCall("", "read_file", "{\"relativePath\": \"c.java\"}")))
                 .build();
 
-        AssistantMessage result = ReActLoop.mergeChunks(List.of(chatResponse(chunk)));
+        var merged = ReActLoop.mergeChunks(List.of(chatResponse(chunk)));
 
-        assertThat(result).isNotNull();
+        assertThat(merged).isNotNull();
+        AssistantMessage result = merged.message();
         assertThat(result.getToolCalls()).hasSize(3);
         assertThat(result.getToolCalls())
                 .extracting(AssistantMessage.ToolCall::arguments)

@@ -241,20 +241,205 @@ class ShellCommandSplitterTest {
     }
 
     @Test
+    void parse_commandSubstitutionWithSpaces_staysOneToken() {
+        ParseResult env = ShellCommandSplitter.parse("CP=target/classes:$(cat /tmp/cp.txt)");
+        assertThat(env.segments()).hasSize(1);
+        assertThat(env.segments().getFirst().text()).isEqualTo("CP=target/classes:$(cat /tmp/cp.txt)");
+        assertThat(env.segments().getFirst().suggestedRoot()).isEqualTo("CP=*");
+
+        assertThat(texts("X=$(a b); echo hi")).containsExactly("X=$(a b)", "echo hi");
+        assertThat(roots("echo $(whoami) && git status")).containsExactly("echo", "git status");
+    }
+
+    @Test
+    void parse_backticksSuppressTopLevelOperators() {
+        assertThat(texts("echo `ls /proc | grep x` && done")).containsExactly("echo `ls /proc | grep x`", "done");
+        assertThat(roots("echo `ls /proc | grep x`")).containsExactly("echo");
+    }
+
+    @Test
+    void parse_bareSubshell_splitsInnerOperatorsAndDropsGroupingParens() {
+        ParseResult result = ShellCommandSplitter.parse("(cd app && npm test)");
+        assertThat(result.fullyParsed()).isFalse();
+        assertThat(texts("(cd app && npm test)")).containsExactly("cd app", "npm test");
+        assertThat(roots("(cd app && npm test)")).containsExactly("cd app", "npm test");
+    }
+
+    @Test
+    void parse_processSubstitution_isNotARedirection() {
+        ParseResult result = ShellCommandSplitter.parse("diff <(sort a | uniq) <(sort b)");
+        assertThat(result.fullyParsed()).isFalse();
+        assertThat(result.segments()).hasSize(1);
+        assertThat(result.segments().getFirst().text()).isEqualTo("diff <(sort a | uniq) <(sort b)");
+        assertThat(result.segments().getFirst().suggestedRoot()).isEqualTo("diff");
+    }
+
+    @Test
+    void parse_complexSubshellPipeline_decomposesEveryCommandAndRedirection() {
+        String command = "cat .kratis/ACTIVE_TASK.md | sed -n '/AGENT/,$p' | head -30; cd src; "
+                + "cat main/java/dev/flounder/debugtimeout/grpc/GrpcQuoteClient.java "
+                + "test/java/dev/flounder/debugtimeout/grpc/*.java; "
+                + "grep -n -A3 -i \"release\\|<java\\|source\\|maven.compiler\" ../pom.xml | head -30; "
+                + "(sudo apt update >/tmp/apt.log 2>&1; "
+                + "sudo apt install -y openjdk-21-jdk-headless maven >>/tmp/apt.log 2>&1; "
+                + "tail -3 /tmp/apt.log)";
+        ParseResult result = ShellCommandSplitter.parse(command);
+        assertThat(result.fullyParsed()).isFalse();
+        assertThat(texts(command))
+                .containsExactly(
+                        "cat .kratis/ACTIVE_TASK.md",
+                        "sed -n '/AGENT/,$p'",
+                        "head -30",
+                        "cd src",
+                        "cat main/java/dev/flounder/debugtimeout/grpc/GrpcQuoteClient.java "
+                                + "test/java/dev/flounder/debugtimeout/grpc/*.java",
+                        "grep -n -A3 -i \"release\\|<java\\|source\\|maven.compiler\" ../pom.xml",
+                        "head -30",
+                        "sudo apt update",
+                        "> /tmp/apt.log 2>&1",
+                        "sudo apt install -y openjdk-21-jdk-headless maven",
+                        ">> /tmp/apt.log 2>&1",
+                        "tail -3 /tmp/apt.log");
+        assertThat(roots(command))
+                .containsExactly(
+                        "cat",
+                        "sed -n",
+                        "head -30",
+                        "cd src",
+                        "cat",
+                        "grep -n -A3 -i",
+                        "head -30",
+                        "sudo apt update",
+                        "> /tmp/* 2>&1",
+                        "sudo apt install -y",
+                        ">> /tmp/* 2>&1",
+                        "tail -3");
+    }
+
+    @Test
+    void parse_controlFlowWithCommandSubstitutionsAndRedirects() {
+        String command = """
+                for p in $(ls /proc | grep -E '^[0-9]+$'); do if tr '\\0' ' ' \
+                < /proc/$p/cmdline 2>/dev/null | grep -q "debugtimeout.grpc.GrpcQuoteServer"; \
+                then kill $p; fi; done; sleep 2
+                        CP=target/classes:$(cat /tmp/cp.txt)
+                        java -cp $CP dev.flounder.debugtimeout.grpc.GrpcQuoteClient 2>&1 | tail -3
+                        git status --short --ignored | grep -v target""";
+        ParseResult result = ShellCommandSplitter.parse(command);
+        assertThat(result.fullyParsed()).isFalse();
+        assertThat(texts(command))
+                .containsExactly(
+                        "for p in $(ls /proc | grep -E '^[0-9]+$')",
+                        "do if tr '\\0' ' '",
+                        "< /proc/$p/cmdline 2> /dev/null",
+                        "grep -q \"debugtimeout.grpc.GrpcQuoteServer\"",
+                        "then kill $p",
+                        "fi",
+                        "done",
+                        "sleep 2",
+                        "CP=target/classes:$(cat /tmp/cp.txt)",
+                        "java -cp $CP dev.flounder.debugtimeout.grpc.GrpcQuoteClient",
+                        "2>&1",
+                        "tail -3",
+                        "git status --short --ignored",
+                        "grep -v target");
+        assertThat(roots(command))
+                .containsExactly(
+                        "for p in",
+                        "do if tr",
+                        "< /proc/$p/* 2> /dev/*",
+                        "grep -q",
+                        "then kill",
+                        "fi",
+                        "done",
+                        "sleep 2",
+                        "CP=*",
+                        "java -cp",
+                        "2>&1",
+                        "tail -3",
+                        "git status --short --ignored",
+                        "grep -v");
+    }
+
+    @Test
+    void parse_multipleHeredocs_allBodiesRemovedAndCommandsSplit() {
+        String command = """
+                cd src && cat > a.java <<'EOF'
+                package x;
+                EOF
+                cat > b.java <<'EOF'
+                class B { int shift = 1 << 2; }
+                EOF
+                python3 - <<'EOF'
+                print('hi')
+                EOF
+                cd ..; mvn -q test > /tmp/test.log 2>&1; tail -n 40 /tmp/test.log; \
+                ls target/surefire-reports/*.txt | xargs tail -n 5""";
+        ParseResult result = ShellCommandSplitter.parse(command);
+        assertThat(result.fullyParsed()).isFalse();
+        assertThat(texts(command))
+                .containsExactly(
+                        "cd src",
+                        "cat <<",
+                        "> a.java",
+                        "cat <<",
+                        "> b.java",
+                        "python3 - <<",
+                        "cd ..",
+                        "mvn -q test",
+                        "> /tmp/test.log 2>&1",
+                        "tail -n 40 /tmp/test.log",
+                        "ls target/surefire-reports/*.txt",
+                        "xargs tail -n 5");
+        assertThat(roots(command))
+                .containsExactly(
+                        "cd src",
+                        "cat <<",
+                        "> *",
+                        "cat <<",
+                        "> *",
+                        "python3 - <<",
+                        "cd",
+                        "mvn -q",
+                        "> /tmp/* 2>&1",
+                        "tail -n",
+                        "ls",
+                        "xargs tail -n");
+    }
+
+    @Test
+    void parse_heredocWithDashAndTrailingRedirect() {
+        String command = "cat <<-'EOF' > out.txt\n\tbody line\n\tEOF\n";
+        ParseResult result = ShellCommandSplitter.parse(command);
+        assertThat(result.fullyParsed()).isFalse();
+        assertThat(texts(command)).containsExactly("cat <<", "> out.txt");
+        assertThat(roots(command)).containsExactly("cat <<", "> *");
+    }
+
+    @Test
+    void parse_heredocOperatorInsideQuotes_isNotAHeredoc() {
+        String command = "echo \"a << b\" && echo done";
+        ParseResult result = ShellCommandSplitter.parse(command);
+        assertThat(result.fullyParsed()).isTrue();
+        assertThat(texts(command)).containsExactly("echo \"a << b\"", "echo done");
+    }
+
+    @Test
     void parse_repeatedSegments_allRetained_uniqueRootsDedupedForRemember() {
-        String command = "mkdir -p /kratis/workspace/build/bin && \\\n"
-                + "cd /kratis/workspace/sidecar && CGO_ENABLED=0 go build -v -o kratis-connector main.go && \\\n"
-                + "cp /kratis/workspace/sidecar/kratis-connector /kratis/workspace/build/bin/kratis-connector && \\\n"
-                + "cd /kratis/workspace/build/bin && \\\n"
-                + "wget https://example.com/a.tar.gz && \\\n"
-                + "tar xzf a.tar.gz && \\\n"
-                + "chmod +x a && \\\n"
-                + "rm a.tar.gz && \\\n"
-                + "wget https://example.com/b.tar.gz && \\\n"
-                + "tar xf b.tar.gz b && \\\n"
-                + "chmod +x b && \\\n"
-                + "rm b.tar.gz && \\\n"
-                + "ls -la /kratis/workspace/build/bin";
+        String command = """
+                mkdir -p /kratis/workspace/build/bin && \\
+                cd /kratis/workspace/sidecar && CGO_ENABLED=0 go build -v -o kratis-connector main.go && \\
+                cp /kratis/workspace/sidecar/kratis-connector /kratis/workspace/build/bin/kratis-connector && \\
+                cd /kratis/workspace/build/bin && \\
+                wget https://example.com/a.tar.gz && \\
+                tar xzf a.tar.gz && \\
+                chmod +x a && \\
+                rm a.tar.gz && \\
+                wget https://example.com/b.tar.gz && \\
+                tar xf b.tar.gz b && \\
+                chmod +x b && \\
+                rm b.tar.gz && \\
+                ls -la /kratis/workspace/build/bin""";
         ParseResult result = ShellCommandSplitter.parse(command);
         assertThat(result.fullyParsed()).isTrue();
         assertThat(result.segments()).hasSize(15);
