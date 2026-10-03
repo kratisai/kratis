@@ -7,7 +7,7 @@ Connect Git repositories, get a living wiki and code graph, plan with an archite
 - SDLC process around coding-agents
 - Four pillars: Ingest, Plan, Implement, Refine
 - Provide agent-steering feedback direct from a diff
-- Shipping with 10 ACP agents _(Aider, Claude Code, Codex, Gemini CLI, Goose, Mistral Vibe, OpenCode, OpenHands, Pi, Qwen)_, more to come
+- Shipping with 9 ACP agents _(Claude Code, Codex, Gemini CLI, Goose, Kilo, Mistral Vibe, OpenCode, Pi, Qwen)_, more to come
 - Seamlessly move work across web and mobile - switching where and when makes sense for you. Unblock your agent on-the-go.
 
 

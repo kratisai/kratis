@@ -100,6 +100,7 @@ class TeamControllerHarnessTest {
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$[0].value").exists())
                 .andExpect(jsonPath("$[0].name").exists())
+                .andExpect(jsonPath("$[?(@.value == 'KILO')]").exists())
                 .andExpect(jsonPath("$[?(@.value == 'OPENCODE')]").exists());
     }
 

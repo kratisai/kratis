@@ -9,7 +9,7 @@ This document describes the production orchestration flow and the end-to-end tes
 | **Control Plane** | Java/Spring Boot API managing executions, environments, model providers, and HITL decisions. |
 | **Sandbox Connector (`kratis-connector`)** | Go binary injected into the sandbox. Bridges `/ws/env` to ACP over agent stdio. |
 | **Sandbox Container** | Isolated execution environment with `/kratis/workspace` and `/kratis/logs`. |
-| **ACP Agent Interface** | Aider, Claude Code, Codex, Gemini, Goose, Mistral, OpenCode, OpenHands, Pi, or Qwen through its ACP interface. |
+| **ACP Agent Interface** | Claude Code, Codex, Gemini, Goose, Kilo, Mistral, OpenCode, Pi, or Qwen through its ACP interface. |
 | **LiteLLM** | Model proxy that exchanges the transient execution key for protected provider access. |
 | **WireMock** | Test-only mock model server returning matcher-defined responses. |
 | **UI WebSocket Client** | Test fixture subscribing to execution output, activity, HITL, and completion events. |
@@ -251,7 +251,7 @@ ss -tlnp | grep 8080   # if a dev server is listening, it is inert unless runnin
 Confirm with a single harness before the full suite:
 
 ```bash
-cd control-plane && ./mvnw test -Dtest=AiderExecutionRealTest
+cd control-plane && ./mvnw test -Dtest=OpenCodeExecutionRealTest
 cd control-plane && ./mvnw test   # full suite including all *ExecutionRealTest
 ```
 

@@ -1,0 +1,11 @@
+{
+  "name": "Kilo",
+  "setupCommands": [
+    "export PATH=$HOME/kilo/node_modules/.bin:$PATH",
+    "npm install --prefix $HOME/kilo @kilocode/cli",
+    "mkdir -p $HOME/.config/kilo",
+    "echo '{\"$schema\":\"https://app.kilo.ai/config.json\",\"model\":\"litellm/${LLM_MODEL}\",\"permission\":{\"edit\":\"ask\",\"bash\":\"ask\"},\"provider\":{\"litellm\":{\"npm\":\"@ai-sdk/openai-compatible\",\"name\":\"LiteLLM\",\"options\":{\"baseURL\":\"${LLM_BASE_URL}/v1\", \"apiKey\": \"{env:LLM_API_KEY}\"},\"models\":{\"${LLM_MODEL}\":{\"name\":\"${LLM_MODEL}\"}}}}}' > $HOME/.config/kilo/kilo.json",
+    "export LLM_API_KEY=${VIRTUAL_KEY}"
+  ],
+  "agentCommand": "kilo acp"
+}
