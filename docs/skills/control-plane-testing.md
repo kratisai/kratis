@@ -325,7 +325,7 @@ docker restart <litellm-container>   # required — LiteLLM caches its model lis
 
 `*ExecutionRealTest` classes (`@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER")`) spawn real sandbox containers on the host Docker daemon. They are not flaky. Timeouts after a killed suite are almost always leftover containers or volumes.
 
-Do not label these tests flaky. Diagnose and reset per [`docs/knowledge/e2e-agent-orchestration.md`](../knowledge/e2e-agent-orchestration.md) (Host Docker Hygiene). Then re-run one harness (`./mvnw test -Dtest=AiderExecutionRealTest`) before the full suite.
+Do not label these tests flaky. Diagnose and reset per [`docs/knowledge/e2e-agent-orchestration.md`](../knowledge/e2e-agent-orchestration.md) (Host Docker Hygiene). Then re-run one harness (`./mvnw test -Dtest=OpenCodeExecutionRealTest`) before the full suite.
 ## Planning Agent Tests
 
 Test the planning agent through `PlanningAgentLoop` using `@SpringIntegrationTest`

@@ -2,6 +2,7 @@ import { Blocks, Bot, Feather, FlaskConical, Hammer, Wind, Zap } from 'lucide-re
 import { RiOpenaiFill } from 'react-icons/ri'
 import { SiAnthropic, SiGithub, SiGoogle } from 'react-icons/si'
 
+import { KiloLogo } from '@/components/settings/model-provider-logos'
 import { cn } from '@/lib/utils'
 
 interface AgentBrandIconProps {
@@ -46,6 +47,9 @@ export function AgentBrandIcon({ className, harness }: AgentBrandIconProps) {
   }
   if (normalized.includes('QWEN')) {
     return <FlaskConical aria-label="Qwen" className={cn('text-indigo-500', className)} />
+  }
+  if (normalized.includes('KILO')) {
+    return <KiloLogo aria-label="Kilo" className={cn('text-[#84cc16]', className)} />
   }
 
   return <Bot aria-label="Agent" className={cn('text-muted-foreground', className)} />

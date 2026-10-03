@@ -52,6 +52,35 @@ class AgentHarnessTest {
     }
 
     @Test
+    void kiloSetupCommands_askPermissionForEditAndBash() throws Exception {
+        JsonNode config = kiloConfig();
+
+        // Without ask, Kilo auto-applies edits and shell and never raises HITL.
+        assertThat(config.at("/permission/edit").asText()).isEqualTo("ask");
+        assertThat(config.at("/permission/bash").asText()).isEqualTo("ask");
+    }
+
+    @Test
+    void kiloSetupCommands_keepKeyOutOfConfigAndRouteThroughLiteLlm() {
+        // Kilo resolves {env:VAR} only in trusted config; the sandbox global config dir is trusted,
+        // so the virtual key must come from the environment, not from the written file.
+        List<String> commands = AgentHarness.valueOf("KILO").getSetupCommands();
+
+        assertThat(kiloConfigCommand())
+                .contains("\"model\":\"litellm/${LLM_MODEL}\"")
+                .contains("\"baseURL\":\"${LLM_BASE_URL}/v1\"")
+                .contains("\"apiKey\": \"{env:LLM_API_KEY}\"")
+                .doesNotContain("${VIRTUAL_KEY}");
+        commands.forEach(command -> assertThat(command).doesNotContain("opencode"));
+    }
+
+    @Test
+    void kiloAgentCommand_startsAcpServer() {
+        // Kilo CLI exposes its ACP interface via kilo acp.
+        assertThat(AgentHarness.valueOf("KILO").getAgentCommand()).isEqualTo("kilo acp");
+    }
+
+    @Test
     void aiderSetupCommands_setOpenAiApiBaseForCustomEndpoints() {
         // Aider reads OPENAI_API_BASE, not OPENAI_BASE_URL, for OpenAI-compatible proxies.
         assertThat(AgentHarness.valueOf("AIDER").getSetupCommands())
@@ -326,6 +355,19 @@ class AgentHarnessTest {
 
     private static JsonNode openCodeConfig() throws Exception {
         String configCommand = commandContaining(AgentHarness.valueOf("OPENCODE"), "opencode.json");
+        String json = configCommand
+                .substring(configCommand.indexOf('\'') + 1, configCommand.lastIndexOf('\''))
+                .replace("${LLM_MODEL}", "gpt-4o")
+                .replace("${LLM_BASE_URL}", "http://llm.local");
+        return MAPPER.readTree(json);
+    }
+
+    private static String kiloConfigCommand() {
+        return commandContaining(AgentHarness.valueOf("KILO"), "kilo.json");
+    }
+
+    private static JsonNode kiloConfig() throws Exception {
+        String configCommand = kiloConfigCommand();
         String json = configCommand
                 .substring(configCommand.indexOf('\'') + 1, configCommand.lastIndexOf('\''))
                 .replace("${LLM_MODEL}", "gpt-4o")

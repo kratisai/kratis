@@ -40,7 +40,7 @@ Runs execute in short-lived Docker sandboxes on the host (`ExecutionProviderType
 
 ### Pluggable ACP harnesses
 
-Multiple ACP harnesses: Aider, Claude Code, Codex, Gemini CLI, Goose, Mistral Vibe, OpenCode, OpenHands, Pi, Qwen. The user selects harness and model per launch. Activity and Terminal-output are streamed from the harness to any device and continue in the background.
+Multiple ACP harnesses: Claude Code, Codex, Gemini CLI, Goose, Kilo, Mistral Vibe, OpenCode, Pi, Qwen. The user selects harness and model per launch. Activity and Terminal-output are streamed from the harness to any device and continue in the background.
 
 ### Human in the loop
 

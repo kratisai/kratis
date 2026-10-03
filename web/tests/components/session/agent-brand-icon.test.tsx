@@ -47,6 +47,11 @@ describe('AgentBrandIcon', () => {
     expect(screen.getByLabelText('Qwen')).toBeInTheDocument()
   })
 
+  it('renders the Kilo logo for KILO', () => {
+    render(<AgentBrandIcon harness="KILO" />)
+    expect(screen.getByLabelText('Kilo')).toBeInTheDocument()
+  })
+
   it('renders fallback agent icon when harness is undefined or unknown', () => {
     const { rerender } = render(<AgentBrandIcon />)
     expect(screen.getByLabelText('Agent')).toBeInTheDocument()

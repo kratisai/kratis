@@ -88,7 +88,7 @@ On a SPEC tab, press **Run** and complete **Launch Execution**:
 | Field | Options |
 |-------|---------|
 | Where should this task run? | `Docker (Default Docker Provider)` — a fresh sandbox per run |
-| Which agent harness? | Aider, Claude Code, Codex, Gemini, Goose, Mistral, OpenCode, OpenHands, PI, Qwen |
+| Which agent harness? | Claude Code, Codex, Gemini, Goose, Kilo, Mistral, OpenCode, PI, Qwen |
 | Which model? | Any chat model selected in step 2 |
 
 Harnesses are installed inside the sandbox when the run starts. Sandboxes need outbound internet for packages and Git.
