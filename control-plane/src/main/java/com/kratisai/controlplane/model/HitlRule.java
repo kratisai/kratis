@@ -104,39 +104,46 @@ public class HitlRule {
         if (command == null) {
             return false;
         }
+        String root = commandRoot == null ? "" : commandRoot.trim();
+        String trimmed = command.trim();
         if (ruleType == HitlRuleType.EXACT) {
-            return command.trim().equals(commandRoot.trim());
-        } else if (ruleType == HitlRuleType.PREFIX_WILD) {
-            String prefix = commandRoot.trim();
-            if (prefix.endsWith("*")) {
-                prefix = prefix.substring(0, prefix.length() - 1).trim();
-            }
-            String trimmed = command.trim();
-            if (trimmed.equals(prefix)) {
-                return true;
-            }
-            if (prefix.contains("*")) {
-                String patternRegex = Pattern.quote(prefix).replace("*", "\\E.*\\Q");
-                if (trimmed.matches(patternRegex) || trimmed.startsWith(prefix.substring(0, prefix.indexOf('*')))) {
-                    return true;
-                }
-            }
-            // Require a token boundary so a root like "npm run test" cannot match
-            // "npm run tests-backdoor". Boundaries include whitespace, equals, colon, or comma.
-            if (!trimmed.startsWith(prefix)) {
-                return false;
-            }
-            if (trimmed.length() == prefix.length()) {
-                return true;
-            }
-            // A rule for a plain command (e.g. "cat") must not match a heredoc invocation ("cat <<")
-            if (!prefix.contains("<<")
-                    && trimmed.substring(prefix.length()).trim().startsWith("<<")) {
-                return false;
-            }
-            char next = trimmed.charAt(prefix.length());
-            return Character.isWhitespace(next) || next == '=' || next == ':' || next == ',';
+            return trimmed.equals(root);
         }
-        return false;
+        if (ruleType != HitlRuleType.PREFIX_WILD) {
+            return false;
+        }
+        // An explicit '*' is a wildcard, not a literal prefix. The splitter derives such roots for
+        // env assignments (VAR=*), generalized redirections (> ~/*), and timeouts (timeout *).
+        if (root.contains("*")) {
+            return matchesWildcard(root, trimmed);
+        }
+        if (trimmed.equals(root)) {
+            return true;
+        }
+        if (!trimmed.startsWith(root)) {
+            return false;
+        }
+        // A rule for a plain command (e.g. "cat") must not match a heredoc invocation ("cat <<")
+        if (!root.contains("<<") && trimmed.substring(root.length()).trim().startsWith("<<")) {
+            return false;
+        }
+        // Require a token boundary so a root like "npm run test" cannot match
+        // "npm run tests-backdoor". Boundaries include whitespace, equals, colon, or comma.
+        char next = trimmed.charAt(root.length());
+        return Character.isWhitespace(next) || next == '=' || next == ':' || next == ',';
+    }
+
+    /** Wildcard roots match the whole text, with each {@code *} standing for any run of characters. */
+    private static boolean matchesWildcard(String root, String command) {
+        StringBuilder regex = new StringBuilder();
+        int start = 0;
+        for (int i = 0; i < root.length(); i++) {
+            if (root.charAt(i) == '*') {
+                regex.append(Pattern.quote(root.substring(start, i))).append(".*");
+                start = i + 1;
+            }
+        }
+        regex.append(Pattern.quote(root.substring(start)));
+        return command.matches(regex.toString());
     }
 }
