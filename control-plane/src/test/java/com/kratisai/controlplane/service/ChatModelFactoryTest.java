@@ -459,6 +459,18 @@ class ChatModelFactoryTest {
     }
 
     @Test
+    void shouldCreateKiloModelDirectly() {
+        ModelProvider provider =
+                new ModelProvider("Kilo Gateway", ProviderType.KILO, "kilo-key", "https://api.kilo.ai/api/gateway");
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        ChatModel chatModel = chatModelFactory.createChatModel(provider, "anthropic/claude-sonnet-4.5");
+
+        assertThat(chatModel).isInstanceOf(OpenAiChatModel.class);
+    }
+
+    @Test
     void shouldCreateOllamaModelViaLiteLLM() {
         ModelProvider provider =
                 new ModelProvider("Local Ollama", ProviderType.OLLAMA, "ollama", "http://localhost:11434/v1");
@@ -503,6 +515,19 @@ class ChatModelFactoryTest {
 
         ChatModel chatModel =
                 chatModelFactory.createChatModelViaLiteLLM(provider, "other-model", "sk-virtual-key", false);
+
+        assertThat(chatModel).isInstanceOf(OpenAiChatModel.class);
+    }
+
+    @Test
+    void shouldCreateKiloModelViaLiteLLM() {
+        ModelProvider provider =
+                new ModelProvider("Kilo Gateway", ProviderType.KILO, "kilo-key", "https://api.kilo.ai/api/gateway");
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        ChatModel chatModel =
+                chatModelFactory.createChatModelViaLiteLLM(provider, "kilo-model", "sk-virtual-key", false);
 
         assertThat(chatModel).isInstanceOf(OpenAiChatModel.class);
     }

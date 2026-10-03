@@ -58,6 +58,15 @@ public class ModelProviderService {
                         true,
                         "Groq Cloud API (OpenAI-compatible)"));
         map.put(
+                ProviderType.KILO,
+                new SupportedProviderTypeDto(
+                        "KILO",
+                        "Kilo Gateway",
+                        ModelProviderUrlResolver.DEFAULT_KILO_URL,
+                        true,
+                        true,
+                        "Kilo AI Gateway - hundreds of models from one OpenAI-compatible API key"));
+        map.put(
                 ProviderType.OLLAMA,
                 new SupportedProviderTypeDto(
                         "OLLAMA", "Ollama", "http://localhost:11434", true, false, "Local Ollama instance"));

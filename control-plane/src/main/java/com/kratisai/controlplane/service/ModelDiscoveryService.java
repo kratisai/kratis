@@ -23,6 +23,7 @@ public class ModelDiscoveryService {
     private static final String DEFAULT_DEEPSEEK_URL = "https://api.deepseek.com";
     private static final String DEFAULT_GOOGLE_URL = "https://generativelanguage.googleapis.com";
     private static final String DEFAULT_OLLAMA_URL = "http://localhost:11434";
+    private static final String DEFAULT_KILO_URL = "https://api.kilo.ai/api/gateway";
 
     private static final String ANTHROPIC_VERSION = "2023-06-01";
     private static final String AZURE_OPENAI_API_VERSION = "2023-03-15-preview";
@@ -47,6 +48,7 @@ public class ModelDiscoveryService {
             case OPENAI -> discoverOpenAiModels(apiKey, baseUrl);
             case AZURE_OPENAI -> discoverAzureOpenAiModels(apiKey, baseUrl);
             case GROQ -> discoverGroqModels(apiKey, baseUrl);
+            case KILO -> discoverKiloModels(apiKey, baseUrl);
             case ANTHROPIC -> discoverAnthropicModels(apiKey, baseUrl);
             case OLLAMA -> discoverOllamaModels(baseUrl);
             case MISTRAL -> discoverMistralModels(apiKey, baseUrl);
@@ -80,6 +82,21 @@ public class ModelDiscoveryService {
             throw new RuntimeException("Failed to discover Groq models: " + e.getMessage(), e);
         } catch (Exception e) {
             throw new RuntimeException("Failed to parse Groq models response: " + e.getMessage(), e);
+        }
+    }
+
+    // The Kilo Gateway serves /models with no auth, but a Bearer key is accepted and keeps the
+    // discovery flow uniform with the other OpenAI-compatible providers
+    private List<ModelEntryDto> discoverKiloModels(String apiKey, String baseUrl) {
+        String modelsUrl = (baseUrl != null ? baseUrl : DEFAULT_KILO_URL) + "/models";
+        try {
+            URI uri = URI.create(modelsUrl);
+            String response = modelDiscoveryClient.getModels(uri, "Bearer " + apiKey);
+            return parseDataArrayModels(response);
+        } catch (RestClientException e) {
+            throw new RuntimeException("Failed to discover Kilo models: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse Kilo models response: " + e.getMessage(), e);
         }
     }
 

@@ -135,6 +135,55 @@ class ModelDiscoveryServiceTest {
     }
 
     @Test
+    void discoverModels_kilo_shouldReturnModelIdsWithGatewayContextLength() {
+        String response = """
+                {"data":[{"id":"anthropic/claude-sonnet-4.5","context_length":200000},{"id":"mistralai/codestral-2508"}]}
+                """;
+        when(modelDiscoveryClient.getModels(any(), any())).thenReturn(response);
+
+        List<ModelEntryDto> models =
+                service.discoverModels(ProviderType.KILO, "test-key", "https://api.kilo.ai/api/gateway");
+
+        assertThat(models)
+                .extracting(ModelEntryDto::modelName)
+                .containsExactly("anthropic/claude-sonnet-4.5", "mistralai/codestral-2508");
+        assertThat(models).extracting(ModelEntryDto::contextWindowTokens).containsExactly(200000L, null);
+        ArgumentCaptor<URI> uriCaptor = ArgumentCaptor.forClass(URI.class);
+        verify(modelDiscoveryClient).getModels(uriCaptor.capture(), eq("Bearer test-key"));
+        assertThat(uriCaptor.getValue().toString()).isEqualTo("https://api.kilo.ai/api/gateway/models");
+    }
+
+    @Test
+    void discoverModels_kiloWithoutBaseUrl_shouldUseGatewayDefault() {
+        when(modelDiscoveryClient.getModels(any(), any())).thenReturn("{\"data\":[]}");
+
+        List<ModelEntryDto> models = service.discoverModels(ProviderType.KILO, "test-key", null);
+
+        assertThat(models).isEmpty();
+        ArgumentCaptor<URI> uriCaptor = ArgumentCaptor.forClass(URI.class);
+        verify(modelDiscoveryClient).getModels(uriCaptor.capture(), eq("Bearer test-key"));
+        assertThat(uriCaptor.getValue().toString()).isEqualTo("https://api.kilo.ai/api/gateway/models");
+    }
+
+    @Test
+    void discoverModels_kiloRestClientException_shouldThrowRuntimeException() {
+        when(modelDiscoveryClient.getModels(any(), any())).thenThrow(new RestClientException("Connection refused"));
+
+        assertThatThrownBy(() -> service.discoverModels(ProviderType.KILO, "test-key", null))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to discover Kilo models");
+    }
+
+    @Test
+    void discoverModels_kiloInvalidJson_shouldThrowParseError() {
+        when(modelDiscoveryClient.getModels(any(), any())).thenReturn("not-json");
+
+        assertThatThrownBy(() -> service.discoverModels(ProviderType.KILO, "test-key", null))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to parse Kilo models response");
+    }
+
+    @Test
     void discoverModels_anthropic_shouldReturnModelIds() {
         String response = """
                 {"data":[{"id":"claude-3-5-sonnet-20241022"},{"id":"claude-3-haiku-20240307"}]}

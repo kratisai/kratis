@@ -181,6 +181,25 @@ class LiteLLMProvisioningServiceTest {
     }
 
     @Test
+    void provisionModel_kilo_shouldRegisterGatewayApiBaseWithoutVersionSuffix() {
+        ModelProvider provider =
+                new ModelProvider("Kilo Gateway", ProviderType.KILO, "kilo-api-key", "https://api.kilo.ai/api/gateway");
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("anthropic/claude-sonnet-4.5", ModelKind.CHAT)));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        LiteLLMParams params = requestCaptor.getValue().litellmParams();
+        assertThat(params.customLlmProvider()).isEqualTo("openai");
+        assertThat(params.apiKey()).isEqualTo("kilo-api-key");
+        // The gateway serves /chat/completions directly off /api/gateway; appending /v1 would 404.
+        assertThat(params.apiBase()).isEqualTo("https://api.kilo.ai/api/gateway");
+        assertThat(params.model()).isEqualTo("anthropic/claude-sonnet-4.5");
+    }
+
+    @Test
     void provisionModel_bedrock_shouldAttachRegionalPricingFromLiteLLMCostMap() {
         ModelProvider provider = new ModelProvider(
                 "Bedrock MiniMax",
