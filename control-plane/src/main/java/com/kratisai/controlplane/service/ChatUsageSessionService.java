@@ -161,26 +161,7 @@ public class ChatUsageSessionService {
     }
 
     private boolean isVirtualKeyValid(String virtualKey) {
-        if (virtualKey == null || virtualKey.isBlank()) {
-            return false;
-        }
-        try {
-            virtualKeyService.fetchUsage(virtualKey);
-            return true;
-        } catch (Exception e) {
-            String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
-            if (msg.contains("not found")
-                    || msg.contains("no key")
-                    || msg.contains("404")
-                    || msg.contains("401")
-                    || msg.contains("expired")
-                    || msg.contains("invalid")) {
-                logger.warn("Virtual key appears invalid or expired, will roll over session", e);
-                return false;
-            }
-            logger.warn("Failed to validate virtual key, treating as invalid for rollover", e);
-            return false;
-        }
+        return virtualKeyService.keyExists(virtualKey);
     }
 
     @Transactional

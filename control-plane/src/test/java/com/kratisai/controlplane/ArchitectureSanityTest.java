@@ -10,7 +10,6 @@ import com.kratisai.controlplane.config.AsyncConfig;
 import com.kratisai.controlplane.ingestion.research.DimensionResearchService;
 import com.kratisai.controlplane.service.ClientRealtimeEventListeners;
 import com.kratisai.controlplane.service.EnvironmentRpcClient;
-import com.kratisai.controlplane.service.VirtualKeyService;
 import com.kratisai.controlplane.service.WebSocketDispatch;
 import com.kratisai.controlplane.websocket.client.ClientRpcHandler;
 import com.kratisai.controlplane.websocket.client.ClientWebSocketHandler;
@@ -135,7 +134,6 @@ public class ArchitectureSanityTest {
                 // Scoped try-with-resources executors, and WebSocket cleanup schedulers that only
                 // touch in-memory session registries.
                 private static final Set<String> ALLOWED_ORIGINS = Set.of(
-                        VirtualKeyService.class.getName() + "#fetchUsage",
                         DimensionResearchService.class.getName() + "#researchDimensions",
                         ClientWebSocketHandler.class.getName() + "#<init>",
                         EnvironmentWebSocketHandler.class.getName() + "#<init>");

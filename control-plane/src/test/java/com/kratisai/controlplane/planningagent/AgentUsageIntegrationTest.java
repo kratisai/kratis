@@ -71,7 +71,8 @@ class AgentUsageIntegrationTest extends AgentTestHarness {
         when(liteLLMClient.keyInfo(any()))
                 .thenReturn(new KeyInfoResponse(
                         "sk-test-virtual-key", new KeyInfoData("kratis-chat-" + chat.getId(), 1.5)));
-        when(liteLLMClient.spendLogs(any())).thenReturn(List.of(new SpendLogEntry(100L, 80L, 20L)));
+        when(liteLLMClient.spendLogs(any()))
+                .thenReturn(List.of(new SpendLogEntry(100L, 80L, 20L, 1.5, "raw", "gpt-4o")));
 
         mockModel.addMatcher(
                 PromptMatcher.builder().response("Hello from planning agent").build());

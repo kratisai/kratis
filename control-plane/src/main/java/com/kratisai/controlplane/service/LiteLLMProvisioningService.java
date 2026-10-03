@@ -306,7 +306,6 @@ public class LiteLLMProvisioningService {
         }
 
         ModelCostEntry cost = resolveModelCost(provider, modelName, costLookup);
-        // LiteLLM ignores model_info costs for known models; litellm_params wins.
         LiteLLMParams params = new LiteLLMParams(
                 modelName,
                 provider.getApiKey(),
@@ -315,7 +314,7 @@ public class LiteLLMProvisioningService {
                 providerModel.getBaseModel(),
                 cost == null ? null : cost.inputCostPerToken(),
                 cost == null ? null : cost.outputCostPerToken());
-        ModelInfo modelInfo = buildModelInfo(kind, cost);
+        ModelInfo modelInfo = buildModelInfo(kind, cost, provider.getProviderType());
         AddModelRequest request = new AddModelRequest(litellmName, params, modelInfo);
 
         deleteAllDeployments(litellmName);
@@ -396,9 +395,14 @@ public class LiteLLMProvisioningService {
         return "kratis-" + scope.name().toLowerCase() + "-" + ownerId;
     }
 
-    private ModelInfo buildModelInfo(ModelKind kind, @Nullable ModelCostEntry entry) {
+    private ModelInfo buildModelInfo(ModelKind kind, @Nullable ModelCostEntry entry, ProviderType providerType) {
         String mode = kind == ModelKind.EMBEDDING ? "embedding" : "chat";
-        if (entry == null || (entry.inputCostPerToken() == null && entry.outputCostPerToken() == null)) {
+        // LiteLLM reads pinned costs from model_info for openai-compatible deployments (bedrock-mantis)
+        // but from litellm_params for anthropic: an anthropic deployment that also carries model_info
+        // costs resolves to $0 spend, so its cost entry goes to litellm_params alone.
+        if (providerType == ProviderType.ANTHROPIC
+                || entry == null
+                || (entry.inputCostPerToken() == null && entry.outputCostPerToken() == null)) {
             return new ModelInfo(mode);
         }
         return new ModelInfo(mode, entry.inputCostPerToken(), entry.outputCostPerToken());
@@ -408,14 +412,33 @@ public class LiteLLMProvisioningService {
         return resolveModelCost(provider, modelName, costLookup) != null;
     }
 
-    // Kratis uses bedrock-mantis openai-api, auth via API key. LiteLLM doesn't price bedrock-mantis calls.
     private @Nullable ModelCostEntry resolveModelCost(
             ModelProvider provider, String modelName, ModelCostLookup costLookup) {
-        if (provider.getProviderType() != ProviderType.BEDROCK) {
+        // Only providers that need a pinned override fault the cost map in; others must not pay the round trip.
+        return switch (provider.getProviderType()) {
+            case BEDROCK -> firstCostEntry(costLookup.entries(), bedrockPricingCandidates(provider, modelName));
+            case ANTHROPIC -> anthropicCostEntry(costLookup.entries(), modelName);
+            default -> null;
+        };
+    }
+
+    private static @Nullable ModelCostEntry anthropicCostEntry(Map<String, ModelCostEntry> entries, String modelName) {
+        // A native entry means LiteLLM prices the model itself. Returning null here keeps
+        // needsPricingOverride() false, so reconciliation does not re-provision on every startup.
+        if (entries.containsKey(modelName) || entries.containsKey("anthropic/" + modelName)) {
             return null;
         }
-        Map<String, ModelCostEntry> entries = costLookup.entries();
-        for (String candidate : bedrockPricingCandidates(provider, modelName)) {
+        return firstCostEntry(
+                entries,
+                List.of(
+                        "anthropic." + modelName + "-v1:0",
+                        "anthropic." + modelName + "-v2:0",
+                        "anthropic." + modelName));
+    }
+
+    private static @Nullable ModelCostEntry firstCostEntry(
+            Map<String, ModelCostEntry> entries, List<String> candidates) {
+        for (String candidate : candidates) {
             ModelCostEntry entry = entries.get(candidate);
             if (entry != null) {
                 return entry;

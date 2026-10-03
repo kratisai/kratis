@@ -8,10 +8,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -66,45 +62,43 @@ public class VirtualKeyService {
         }
     }
 
+    /**
+     * Usage for a key that must still exist. Throws when LiteLLM no longer knows the key, so callers
+     * never persist a zero snapshot over previously recorded usage. Use {@link #keyExists(String)}
+     * when only existence is needed.
+     */
+    @SuppressFBWarnings("RV_RETURN_VALUE_IGNORED_NO_SIDE_EFFECT") // keyInfo's throw is the point
     public LlmUsageSnapshot fetchUsage(String virtualKeyToken) {
         logger.debug("Fetching usage for virtual key token");
-        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            Future<KeyInfoResponse> keyInfo = executor.submit(() -> liteLLMClient.keyInfo(virtualKeyToken));
-            Future<List<SpendLogEntry>> spendLogs = executor.submit(() -> liteLLMClient.spendLogs(virtualKeyToken));
-            LlmUsageSnapshot result = buildSnapshot(keyInfo.get(), spendLogs.get());
-            logger.debug("Fetched usage: tokens={}, spend={}", result.totalTokens(), result.spend());
-            return result;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while fetching LLM usage", e);
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            }
-            throw new IllegalStateException("Failed to fetch LLM usage", cause);
-        }
+        // /spend/logs returns an empty list for a revoked key; call /key/info to abort on a revoked key
+        liteLLMClient.keyInfo(virtualKeyToken);
+        LlmUsageSnapshot result = sum(fetchUsageByModel(virtualKeyToken));
+        logger.debug("Fetched usage: tokens={}, spend={}", result.totalTokens(), result.spend());
+        return result;
     }
 
-    private static LlmUsageSnapshot buildSnapshot(KeyInfoResponse keyInfo, List<SpendLogEntry> spendLogs) {
-        KeyInfoData info = keyInfo.info();
-        double spend = info != null && info.spend() != null ? info.spend() : 0.0;
-        long totalTokens = spendLogs.stream()
-                .mapToLong(entry -> orZero(entry.totalTokens()))
-                .sum();
-        long promptTokens = spendLogs.stream()
-                .mapToLong(entry -> orZero(entry.promptTokens()))
-                .sum();
-        long completionTokens = spendLogs.stream()
-                .mapToLong(entry -> orZero(entry.completionTokens()))
-                .sum();
-        return new LlmUsageSnapshot(spend, totalTokens, promptTokens, completionTokens);
+    public boolean keyExists(String virtualKeyToken) {
+        if (virtualKeyToken == null || virtualKeyToken.isBlank()) {
+            return false;
+        }
+        try {
+            return liteLLMClient.keyInfo(virtualKeyToken) != null;
+        } catch (Exception e) {
+            logger.debug("Virtual key is unknown or expired: {}", e.getMessage());
+            return false;
+        }
     }
 
     public Map<String, LlmUsageSnapshot> fetchUsageByModel(String virtualKeyToken) {
         logger.debug("Fetching usage by model for virtual key token");
+        Map<String, LlmUsageSnapshot> usageByAlias = usageByModel(liteLLMClient.spendLogs(virtualKeyToken));
+        logger.debug("Fetched usage by model for {} model group(s)", usageByAlias.size());
+        return usageByAlias;
+    }
+
+    private static Map<String, LlmUsageSnapshot> usageByModel(List<SpendLogEntry> spendLogs) {
         Map<String, List<SpendLogEntry>> rowsByAlias = new LinkedHashMap<>();
-        for (SpendLogEntry entry : liteLLMClient.spendLogs(virtualKeyToken)) {
+        for (SpendLogEntry entry : spendLogs) {
             String alias =
                     entry.modelGroup() != null && !entry.modelGroup().isBlank() ? entry.modelGroup() : entry.model();
             if (alias == null || alias.isBlank()) {
@@ -131,8 +125,21 @@ public class VirtualKeyService {
                                     .mapToLong(row -> orZero(row.completionTokens()))
                                     .sum()));
         }
-        logger.debug("Fetched usage by model for {} model group(s)", usageByAlias.size());
         return usageByAlias;
+    }
+
+    private static LlmUsageSnapshot sum(Map<String, LlmUsageSnapshot> usageByModel) {
+        double spend = 0.0;
+        long totalTokens = 0L;
+        long promptTokens = 0L;
+        long completionTokens = 0L;
+        for (LlmUsageSnapshot snapshot : usageByModel.values()) {
+            spend += orZero(snapshot.spend());
+            totalTokens += orZero(snapshot.totalTokens());
+            promptTokens += orZero(snapshot.promptTokens());
+            completionTokens += orZero(snapshot.completionTokens());
+        }
+        return new LlmUsageSnapshot(spend, totalTokens, promptTokens, completionTokens);
     }
 
     private static long orZero(Long value) {

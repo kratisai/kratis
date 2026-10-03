@@ -30,7 +30,8 @@ class ChatUsageSessionE2EMockTest {
         when(liteLLMClient.generateKey(any())).thenReturn(new GenerateKeyResponse("sk-test-virtual-key", "Test Key"));
         when(liteLLMClient.keyInfo(any()))
                 .thenReturn(new KeyInfoResponse("sk-test-virtual-key", new KeyInfoData("Test Key", 2.0)));
-        when(liteLLMClient.spendLogs(any())).thenReturn(List.of(new SpendLogEntry(300L, 200L, 100L)));
+        when(liteLLMClient.spendLogs(any()))
+                .thenReturn(List.of(new SpendLogEntry(300L, 200L, 100L, 2.0, "raw", "gpt-4o")));
 
         VirtualKeyService virtualKeyService = new VirtualKeyService(liteLLMClient);
         chatUsageSessionService = new ChatUsageSessionService(chatUsageSessionRepository, virtualKeyService);
