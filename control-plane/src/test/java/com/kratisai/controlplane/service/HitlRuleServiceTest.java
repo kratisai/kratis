@@ -189,6 +189,32 @@ class HitlRuleServiceTest {
     }
 
     @Test
+    void autoResolve_wildcardEnvRule_coversAssignmentSegment() {
+        HitlRule env = prefixAllow("NODE_ENV=*");
+        HitlRule npmTest = prefixAllow("npm run test");
+
+        assertThat(HitlRuleService.autoResolve(List.of(env, npmTest), "NODE_ENV=test npm run test"))
+                .isEqualTo(Optional.of(HitlResponse.APPROVED));
+    }
+
+    @Test
+    void autoResolve_wildcardRedirectRule_coversRedirectSegment() {
+        HitlRule curl = prefixAllow("curl");
+        HitlRule homeRedirect = prefixAllow("> ~/*");
+
+        assertThat(HitlRuleService.autoResolve(List.of(curl, homeRedirect), "curl https://example.com > ~/.bashrc"))
+                .isEqualTo(Optional.of(HitlResponse.APPROVED));
+    }
+
+    @Test
+    void autoResolve_wildcardEnvRule_doesNotMatchOtherVariable() {
+        HitlRule env = prefixAllow("NODE_ENV=*");
+
+        assertThat(HitlRuleService.autoResolve(List.of(env), "PATH=/usr/bin echo hi"))
+                .isEqualTo(Optional.empty());
+    }
+
+    @Test
     void autoResolve_unparseableCommandWithEmbeddedDenyText_fallsThroughToHitl() {
         HitlRule denyRm = new HitlRule();
         denyRm.setCommandRoot("rm -rf");

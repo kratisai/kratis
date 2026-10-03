@@ -663,6 +663,19 @@ class ModelEntityCoverageTest {
         assertThat(rule.matches("npm install")).isTrue();
         assertThat(rule.matches("npx test")).isFalse();
 
+        rule.setCommandRoot("NODE_ENV=*");
+        assertThat(rule.matches("NODE_ENV=production")).isTrue();
+        assertThat(rule.matches("NODE_ENV=")).isTrue();
+        assertThat(rule.matches("PATH=/usr/bin")).isFalse();
+
+        rule.setCommandRoot("> ~/*");
+        assertThat(rule.matches("> ~/.bashrc")).isTrue();
+        assertThat(rule.matches("> /tmp/x")).isFalse();
+
+        rule.setCommandRoot("> /tmp/* 2>&1");
+        assertThat(rule.matches("> /tmp/out.log 2>&1")).isTrue();
+        assertThat(rule.matches("> /tmp/out.log")).isFalse();
+
         rule.onCreate();
         assertThat(rule.getCreatedAt()).isNotNull();
 

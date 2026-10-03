@@ -682,6 +682,42 @@ class EnvironmentHitlRequestRpcHandlerTest {
         assertThat(segments.get(1).preApproved()).isNull();
     }
 
+    @Test
+    void handle_approvalWildcardRoots_setPreApprovedOnMatchingSegments() {
+        stubSessionAndEnvironment();
+
+        when(ruleRepository.findByTeamId(teamId))
+                .thenReturn(List.of(prefixAllow("NODE_ENV=*"), prefixAllow("npm run build"), prefixAllow("> ~/*")));
+
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.HitlRequest params = approvalParams(
+                "NODE_ENV=production npm run build > ~/build.log && git push", "tool-call-2", execution.getId());
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+
+        handler.handle(sessionId, request, params).blockLast();
+
+        ArgumentCaptor<ExecutionHitlRequiredResult> payloadCaptor =
+                ArgumentCaptor.forClass(ExecutionHitlRequiredResult.class);
+        verify(pendingHitlRegistry).register(eq(execution.getId()), payloadCaptor.capture(), any(), any(), any());
+
+        List<CommandSegment> segments = payloadCaptor.getValue().commandSegments();
+        assertThat(segments)
+                .extracting(CommandSegment::text)
+                .containsExactly("NODE_ENV=production", "npm run build", "> ~/build.log", "git push");
+        assertThat(segments).extracting(CommandSegment::preApproved).containsExactly(true, true, true, null);
+    }
+
+    private static HitlRule prefixAllow(String root) {
+        HitlRule rule = new HitlRule();
+        rule.setCommandRoot(root);
+        rule.setRuleType(HitlRuleType.PREFIX_WILD);
+        rule.setAction(HitlRuleAction.ALLOW);
+        return rule;
+    }
+
     private static HitlRule toolKindRule(String kind, HitlRuleAction action) {
         HitlRule rule = new HitlRule();
         rule.setCommandRoot(kind);
