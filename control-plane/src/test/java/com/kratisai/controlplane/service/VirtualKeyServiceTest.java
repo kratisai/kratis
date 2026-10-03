@@ -82,12 +82,14 @@ class VirtualKeyServiceTest {
     }
 
     @Test
-    void fetchUsage_shouldReturnSpendFromKeyInfoAndAggregatedTokensFromSpendLogs() {
+    void fetchUsage_shouldAggregateSpendAndTokensFromSpendLogs() {
         String token = "sk-test-token";
-        KeyInfoResponse info = new KeyInfoResponse(token, new KeyInfoData("kratis-ingest-123", 0.10));
-        when(liteLLMClient.keyInfo(token)).thenReturn(info);
+        when(liteLLMClient.keyInfo(token))
+                .thenReturn(new KeyInfoResponse(token, new KeyInfoData("kratis-ingest-123", 99.0)));
         when(liteLLMClient.spendLogs(token))
-                .thenReturn(List.of(new SpendLogEntry(100L, 60L, 40L), new SpendLogEntry(200L, 120L, 80L)));
+                .thenReturn(List.of(
+                        new SpendLogEntry(100L, 60L, 40L, 0.04, "raw-chat", "group-chat"),
+                        new SpendLogEntry(200L, 120L, 80L, 0.06, "raw-chat", "group-chat")));
 
         LlmUsageSnapshot snapshot = virtualKeyService.fetchUsage(token);
 
@@ -115,25 +117,26 @@ class VirtualKeyServiceTest {
     }
 
     @Test
-    void fetchUsage_shouldReturnZeroTokensWhenNoSpendLogs() {
+    void fetchUsage_shouldReturnZeroSpendWhenNoSpendLogs() {
         String token = "sk-test-token";
-        KeyInfoResponse info = new KeyInfoResponse(token, new KeyInfoData("kratis-ingest-123", 0.25));
-        when(liteLLMClient.keyInfo(token)).thenReturn(info);
+        when(liteLLMClient.keyInfo(token))
+                .thenReturn(new KeyInfoResponse(token, new KeyInfoData("kratis-ingest-123", 0.25)));
         when(liteLLMClient.spendLogs(token)).thenReturn(List.of());
 
         LlmUsageSnapshot snapshot = virtualKeyService.fetchUsage(token);
 
-        assertThat(snapshot.spend()).isEqualTo(0.25);
-        assertThat(snapshot.totalTokens()).isEqualTo(0L);
-        assertThat(snapshot.promptTokens()).isEqualTo(0L);
-        assertThat(snapshot.completionTokens()).isEqualTo(0L);
+        assertThat(snapshot.spend()).isZero();
+        assertThat(snapshot.totalTokens()).isZero();
+        assertThat(snapshot.promptTokens()).isZero();
+        assertThat(snapshot.completionTokens()).isZero();
     }
 
     @Test
     void fetchUsage_shouldHandleNullKeyInfo() {
         String token = "sk-test-token";
         when(liteLLMClient.keyInfo(token)).thenReturn(new KeyInfoResponse(token, null));
-        when(liteLLMClient.spendLogs(token)).thenReturn(List.of(new SpendLogEntry(10L, null, 4L)));
+        when(liteLLMClient.spendLogs(token))
+                .thenReturn(List.of(new SpendLogEntry(10L, null, 4L, null, "raw", "group")));
 
         LlmUsageSnapshot snapshot = virtualKeyService.fetchUsage(token);
 
@@ -157,6 +160,28 @@ class VirtualKeyServiceTest {
         when(liteLLMClient.spendLogs("sk-test")).thenThrow(new RestClientException("LiteLLM unavailable"));
 
         assertThatThrownBy(() -> virtualKeyService.fetchUsage("sk-test")).isInstanceOf(RestClientException.class);
+    }
+
+    @Test
+    void keyExists_shouldReturnTrueWhenKeyInfoSucceeds() {
+        when(liteLLMClient.keyInfo("sk-test"))
+                .thenReturn(new KeyInfoResponse("sk-test", new KeyInfoData("alias", 0.0)));
+
+        assertThat(virtualKeyService.keyExists("sk-test")).isTrue();
+    }
+
+    @Test
+    void keyExists_shouldReturnFalseWhenKeyInfoFails() {
+        when(liteLLMClient.keyInfo("sk-test")).thenThrow(new RestClientException("404 Not Found"));
+
+        assertThat(virtualKeyService.keyExists("sk-test")).isFalse();
+    }
+
+    @Test
+    void keyExists_shouldReturnFalseWithoutCallingLiteLLMForBlankToken() {
+        assertThat(virtualKeyService.keyExists(null)).isFalse();
+        assertThat(virtualKeyService.keyExists("  ")).isFalse();
+        verifyNoInteractions(liteLLMClient);
     }
 
     @Test

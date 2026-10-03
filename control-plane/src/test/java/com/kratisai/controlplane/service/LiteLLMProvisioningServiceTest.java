@@ -268,6 +268,73 @@ class LiteLLMProvisioningServiceTest {
     }
 
     @Test
+    void provisionModel_anthropic_shouldAttachFallbackPricing_whenLiteLlmHasNoNativeEntry() {
+        ModelProvider provider = new ModelProvider("Anthropic", ProviderType.ANTHROPIC, "sk-ant", null);
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("claude-sonnet-4-20250514", ModelKind.CHAT)));
+        when(liteLLMClient.modelCostMap())
+                .thenReturn(Map.of("anthropic.claude-sonnet-4-20250514-v1:0", new ModelCostEntry(3.0e-06, 1.5e-05)));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        // Anthropic honours litellm_params costs; model_info costs make LiteLLM resolve $0 spend.
+        assertThat(requestCaptor.getValue().modelInfo().inputCostPerToken()).isNull();
+        assertThat(requestCaptor.getValue().modelInfo().outputCostPerToken()).isNull();
+        assertThat(requestCaptor.getValue().litellmParams().inputCostPerToken()).isEqualTo(3.0e-06);
+        assertThat(requestCaptor.getValue().litellmParams().outputCostPerToken())
+                .isEqualTo(1.5e-05);
+    }
+
+    @Test
+    void provisionModel_anthropic_shouldUseVersionedFallbackSuffix_forClaude35Sonnet() {
+        ModelProvider provider = new ModelProvider("Anthropic", ProviderType.ANTHROPIC, "sk-ant", null);
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("claude-3-5-sonnet-20241022", ModelKind.CHAT)));
+        when(liteLLMClient.modelCostMap())
+                .thenReturn(Map.of("anthropic.claude-3-5-sonnet-20241022-v2:0", new ModelCostEntry(3.0e-06, 1.5e-05)));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().modelInfo().inputCostPerToken()).isNull();
+        assertThat(requestCaptor.getValue().litellmParams().inputCostPerToken()).isEqualTo(3.0e-06);
+    }
+
+    @Test
+    void provisionModel_anthropic_shouldNotAttachPricing_whenLiteLlmPricesModelNatively() {
+        ModelProvider provider = new ModelProvider("Anthropic", ProviderType.ANTHROPIC, "sk-ant", null);
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("claude-sonnet-4-5-20250929", ModelKind.CHAT)));
+        when(liteLLMClient.modelCostMap())
+                .thenReturn(Map.of("claude-sonnet-4-5-20250929", new ModelCostEntry(3.0e-06, 1.5e-05)));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().modelInfo().inputCostPerToken()).isNull();
+        assertThat(requestCaptor.getValue().litellmParams().inputCostPerToken()).isNull();
+    }
+
+    @Test
+    void provisionModel_anthropic_shouldNotAttachPricing_whenNoCostEntryAvailable() {
+        ModelProvider provider = new ModelProvider("Anthropic", ProviderType.ANTHROPIC, "sk-ant", null);
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("claude-unknown-model", ModelKind.CHAT)));
+        when(liteLLMClient.modelCostMap()).thenReturn(Map.of());
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().modelInfo().inputCostPerToken()).isNull();
+        assertThat(requestCaptor.getValue().litellmParams().inputCostPerToken()).isNull();
+    }
+
+    @Test
     void provisionModel_shouldFetchCostMapOncePerProvisioningPass() {
         ModelProvider provider = new ModelProvider(
                 "Bedrock",
@@ -691,6 +758,49 @@ class LiteLLMProvisioningServiceTest {
         verify(liteLLMClient).addModel(captor.capture());
         assertThat(captor.getValue().modelInfo().inputCostPerToken()).isEqualTo(4.7e-07);
         assertThat(captor.getValue().modelInfo().outputCostPerToken()).isEqualTo(1.86e-06);
+    }
+
+    @Test
+    void reconcileOnStartup_reprovisionsAnthropicModel_whenFallbackPricingIsAvailable() {
+        ModelProvider anthropicProvider = new ModelProvider("Anthropic", ProviderType.ANTHROPIC, "sk-ant", null);
+        anthropicProvider.setTeam(testTeam);
+        anthropicProvider.setModels(List.of(new ProviderModel("claude-sonnet-4-20250514", ModelKind.CHAT)));
+        String litellmName = provisioningService.buildLiteLLMModelName(anthropicProvider, "claude-sonnet-4-20250514");
+
+        when(liteLLMClient.listModels())
+                .thenReturn(new ListModelsResponse(List.of(new ModelConfig(
+                        litellmName, new LiteLLMParams("claude-sonnet-4-20250514", "sk-ant", "anthropic", null)))));
+        when(liteLLMClient.modelCostMap())
+                .thenReturn(Map.of("anthropic.claude-sonnet-4-20250514-v1:0", new ModelCostEntry(3.0e-06, 1.5e-05)));
+        when(modelProviderRepository.findAll()).thenReturn(List.of(anthropicProvider));
+        when(teamRepository.findAllWithIngestionAndEmbeddingProviders()).thenReturn(List.of());
+
+        provisioningService.reconcileOnStartup();
+
+        ArgumentCaptor<AddModelRequest> captor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(captor.capture());
+        assertThat(captor.getValue().litellmParams().inputCostPerToken()).isEqualTo(3.0e-06);
+        assertThat(captor.getValue().litellmParams().outputCostPerToken()).isEqualTo(1.5e-05);
+    }
+
+    @Test
+    void reconcileOnStartup_doesNotReprovisionAnthropicModel_whenLiteLlmPricesItNatively() {
+        ModelProvider anthropicProvider = new ModelProvider("Anthropic", ProviderType.ANTHROPIC, "sk-ant", null);
+        anthropicProvider.setTeam(testTeam);
+        anthropicProvider.setModels(List.of(new ProviderModel("claude-sonnet-4-5-20250929", ModelKind.CHAT)));
+        String litellmName = provisioningService.buildLiteLLMModelName(anthropicProvider, "claude-sonnet-4-5-20250929");
+
+        when(liteLLMClient.listModels())
+                .thenReturn(new ListModelsResponse(List.of(new ModelConfig(
+                        litellmName, new LiteLLMParams("claude-sonnet-4-5-20250929", "sk-ant", "anthropic", null)))));
+        when(liteLLMClient.modelCostMap())
+                .thenReturn(Map.of("claude-sonnet-4-5-20250929", new ModelCostEntry(3.0e-06, 1.5e-05)));
+        when(modelProviderRepository.findAll()).thenReturn(List.of(anthropicProvider));
+        when(teamRepository.findAllWithIngestionAndEmbeddingProviders()).thenReturn(List.of());
+
+        provisioningService.reconcileOnStartup();
+
+        verify(liteLLMClient, times(0)).addModel(org.mockito.ArgumentMatchers.any());
     }
 
     @Test

@@ -33,7 +33,8 @@ class ChatUsageSessionServiceTest {
         when(liteLLMClient.generateKey(any())).thenReturn(new GenerateKeyResponse("sk-test-virtual-key", "Test Key"));
         when(liteLLMClient.keyInfo(any()))
                 .thenReturn(new KeyInfoResponse("sk-test-virtual-key", new KeyInfoData("Test Key", 1.5)));
-        when(liteLLMClient.spendLogs(any())).thenReturn(List.of(new SpendLogEntry(100L, 80L, 20L)));
+        when(liteLLMClient.spendLogs(any()))
+                .thenReturn(List.of(new SpendLogEntry(100L, 80L, 20L, 1.5, "raw-chat", "group-chat")));
 
         VirtualKeyService virtualKeyService = new VirtualKeyService(liteLLMClient);
         chatUsageSessionService =
