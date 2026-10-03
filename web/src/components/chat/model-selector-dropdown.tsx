@@ -1,5 +1,5 @@
 import { Check, ChevronDown } from 'lucide-react'
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -65,38 +65,6 @@ export function ModelSelectorDropdown({
     }
     return false
   }, [chatModelsByProvider])
-
-  useEffect(() => {
-    if (!providers || providers.length === 0) return
-    if (isControlled) {
-      if (activeProviderId && activeModelName) return
-      for (const provider of providers) {
-        const names = chatModelsByProvider.get(provider.id) ?? []
-        if (names.length > 0) {
-          onSelectModel?.(provider.id, names[0])
-          return
-        }
-      }
-    } else {
-      if (storeSelectedProviderId) return
-      for (const provider of providers) {
-        const names = chatModelsByProvider.get(provider.id) ?? []
-        if (names.length > 0) {
-          setSelectedModel(provider.id, names[0])
-          return
-        }
-      }
-    }
-  }, [
-    providers,
-    isControlled,
-    activeProviderId,
-    activeModelName,
-    storeSelectedProviderId,
-    chatModelsByProvider,
-    onSelectModel,
-    setSelectedModel,
-  ])
 
   if (!currentTeamId || !providers || providers.length === 0 || !hasAnyModels) {
     if (triggerVariant === 'form') {

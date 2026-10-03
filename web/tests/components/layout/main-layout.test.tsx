@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   createMemoryHistory,
   createRootRoute,
@@ -9,6 +10,9 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { MainLayout } from '@/components/layout/main-layout'
+import * as useModelProvidersModule from '@/hooks/use-model-providers'
+
+vi.mock('@/hooks/use-model-providers')
 
 vi.mock('@/components/layout/header', () => ({ Header: () => <div data-testid="header" /> }))
 vi.mock('@/components/layout/sidebar', () => ({ Sidebar: () => <div data-testid="sidebar" /> }))
@@ -29,11 +33,21 @@ const indexRoute = createRoute({
 const routeTree = rootRoute.addChildren([indexRoute])
 
 function renderLayout() {
+  vi.mocked(useModelProvidersModule.useModelProviders).mockReturnValue({
+    data: [],
+    isError: false,
+    isLoading: false,
+  } as never)
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const router = createRouter({
     history: createMemoryHistory({ initialEntries: ['/'] }),
     routeTree,
   })
-  render(<RouterProvider router={router} />)
+  render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
 }
 
 describe('MainLayout', () => {

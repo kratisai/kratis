@@ -30,7 +30,7 @@ function renderWithProviders(ui: React.ReactElement) {
 describe('ModelSelectorDropdown', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useUIStore.setState({ selectedModelName: null })
+    useUIStore.setState({ selectedModelName: null, selectedProviderId: null })
     useAuthStore.setState({ currentTeamId: 'team-1', isAuthenticated: true })
   })
 
@@ -80,7 +80,7 @@ describe('ModelSelectorDropdown', () => {
     } as never)
 
     renderWithProviders(<ModelSelectorDropdown />)
-    expect(screen.getByText('gpt-4')).toBeInTheDocument()
+    expect(screen.getByText('Select model')).toBeInTheDocument()
   })
 
   it('shows selected model name', () => {
@@ -346,39 +346,5 @@ describe('ModelSelectorDropdown', () => {
 
     const button = screen.getByRole('button')
     expect(button).toHaveClass('h-9', 'w-full', 'border-input')
-  })
-
-  it('auto-selects first available model in controlled mode when none is selected', async () => {
-    const mockProviders = [
-      {
-        baseUrl: 'https://api.openai.com/v1',
-        createdAt: '2024-01-01T00:00:00Z',
-        displayName: 'OpenAI',
-        id: 'provider-1',
-        isActive: true,
-        models: [{ kind: 'CHAT' as const, modelName: 'gpt-4' }],
-        providerType: 'OPENAI' as const,
-        teamId: 'team-1',
-        updatedAt: '2024-01-01T00:00:00Z',
-      },
-    ]
-    vi.mocked(useModelProvidersModule.useModelProviders).mockReturnValue({
-      data: mockProviders,
-      isError: false,
-      isLoading: false,
-    } as never)
-
-    const onSelectModel = vi.fn()
-    renderWithProviders(
-      <ModelSelectorDropdown
-        modelName={null}
-        onSelectModel={onSelectModel}
-        providerId={null}
-      />,
-    )
-
-    await waitFor(() => {
-      expect(onSelectModel).toHaveBeenCalledWith('provider-1', 'gpt-4')
-    })
   })
 })
