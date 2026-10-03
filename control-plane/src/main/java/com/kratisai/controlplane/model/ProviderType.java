@@ -10,10 +10,11 @@ public enum ProviderType {
     DEEPSEEK("DEEPSEEK"),
     GOOGLE("GOOGLE"),
     GROQ("GROQ"),
+    // Open-ai compatible providers
+    KILO("KILO"),
     MISTRAL("MISTRAL"),
     OLLAMA("OLLAMA"),
     OPENAI("OPENAI"),
-    // Open-ai compatible providers
     OTHER("OTHER");
 
     private final String value;

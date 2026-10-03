@@ -11,6 +11,7 @@ public final class ModelProviderUrlResolver {
     public static final String DEFAULT_GROQ_URL = "https://api.groq.com/openai/v1";
     public static final String DEFAULT_MISTRAL_URL = "https://api.mistral.ai/v1";
     public static final String DEFAULT_DEEPSEEK_URL = "https://api.deepseek.com";
+    public static final String DEFAULT_KILO_URL = "https://api.kilo.ai/api/gateway";
 
     private ModelProviderUrlResolver() {}
 
@@ -21,6 +22,7 @@ public final class ModelProviderUrlResolver {
             case GROQ -> getBaseUrl(provider, DEFAULT_GROQ_URL);
             case MISTRAL -> getBaseUrl(provider, DEFAULT_MISTRAL_URL);
             case DEEPSEEK -> getBaseUrl(provider, DEFAULT_DEEPSEEK_URL);
+            case KILO -> getBaseUrl(provider, DEFAULT_KILO_URL);
             case AZURE_OPENAI -> requireBaseUrl(provider, "Azure OpenAI");
             case BEDROCK -> requireBaseUrl(provider, "AWS Bedrock");
             case OLLAMA -> requireBaseUrl(provider, "Ollama");
@@ -31,7 +33,7 @@ public final class ModelProviderUrlResolver {
 
     public static String resolveLiteLLMBaseUrl(ProviderType providerType, String liteLLMBaseUrl) {
         return switch (providerType) {
-            case OPENAI, AZURE_OPENAI, GROQ, OLLAMA, MISTRAL, DEEPSEEK, BEDROCK, OTHER -> liteLLMBaseUrl + "/v1";
+            case OPENAI, AZURE_OPENAI, GROQ, OLLAMA, MISTRAL, DEEPSEEK, BEDROCK, OTHER, KILO -> liteLLMBaseUrl + "/v1";
             case ANTHROPIC, GOOGLE -> liteLLMBaseUrl;
         };
     }

@@ -30,6 +30,10 @@ class ModelProviderUrlResolverTest {
         ModelProvider deepseek = new ModelProvider("DeepSeek", ProviderType.DEEPSEEK, "key", null);
         assertThat(ModelProviderUrlResolver.resolveDirectBaseUrl(deepseek))
                 .isEqualTo(ModelProviderUrlResolver.DEFAULT_DEEPSEEK_URL);
+
+        ModelProvider kilo = new ModelProvider("Kilo", ProviderType.KILO, "key", null);
+        assertThat(ModelProviderUrlResolver.resolveDirectBaseUrl(kilo))
+                .isEqualTo(ModelProviderUrlResolver.DEFAULT_KILO_URL);
     }
 
     @Test
@@ -86,6 +90,8 @@ class ModelProviderUrlResolverTest {
         assertThat(ModelProviderUrlResolver.resolveLiteLLMBaseUrl(ProviderType.DEEPSEEK, liteLLM))
                 .isEqualTo("http://litellm:4000/v1");
         assertThat(ModelProviderUrlResolver.resolveLiteLLMBaseUrl(ProviderType.OTHER, liteLLM))
+                .isEqualTo("http://litellm:4000/v1");
+        assertThat(ModelProviderUrlResolver.resolveLiteLLMBaseUrl(ProviderType.KILO, liteLLM))
                 .isEqualTo("http://litellm:4000/v1");
 
         assertThat(ModelProviderUrlResolver.resolveLiteLLMBaseUrl(ProviderType.ANTHROPIC, liteLLM))

@@ -12,6 +12,7 @@ export const PROVIDER_BRAND: Record<ProviderType, { bgClass: string; iconClass: 
   DEEPSEEK: { bgClass: 'bg-[#4d6bfe]/10', iconClass: 'text-[#4d6bfe]' },
   GOOGLE: { bgClass: 'bg-[#4285f4]/10', iconClass: 'text-[#4285f4]' },
   GROQ: { bgClass: 'bg-[#f55036]/10', iconClass: 'text-[#f55036]' },
+  KILO: { bgClass: 'bg-[#84cc16]/10', iconClass: 'text-[#84cc16]' },
   MISTRAL: { bgClass: 'bg-[#fa5200]/10', iconClass: 'text-[#fa5200]' },
   OLLAMA: { bgClass: 'bg-zinc-500/10', iconClass: 'text-zinc-700 dark:text-zinc-300' },
   OPENAI: { bgClass: 'bg-[#10a37f]/10', iconClass: 'text-[#10a37f]' },
@@ -44,6 +45,8 @@ export function ModelProviderIcon({
       return <SiGooglegemini className={className} size={size} />
     case 'GROQ':
       return <GroqLogo className={className} size={size} />
+    case 'KILO':
+      return <KiloLogo className={className} size={size} />
     case 'MISTRAL':
       return <SiMistralai className={className} size={size} />
     case 'OLLAMA':
@@ -98,6 +101,21 @@ function GroqLogo({ className, size = 24, ...props }: LogoProps) {
       {...props}
     >
       <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />
+    </svg>
+  )
+}
+
+function KiloLogo({ className, size = 24, ...props }: LogoProps) {
+  return (
+    <svg
+      className={className}
+      fill="currentColor"
+      height={size}
+      viewBox="0 0 100 100"
+      width={size}
+      {...props}
+    >
+      <path d="M0,0v100h100V0H0ZM92.5925926,92.5925926H7.4074074V7.4074074h85.1851852v85.1851852ZM61.1111044,71.9096084h9.2592593v7.4074074h-11.6402116l-5.026455-5.026455v-11.6402116h7.4074074v9.2592593ZM77.7777711,71.9096084h-7.4074074v-9.2592593h-9.2592593v-7.4074074h11.6402116l5.026455,5.026455v11.6402116ZM46.2962963,61.1114207h-7.4074074v-7.4074074h7.4074074v7.4074074ZM22.2222222,53.7040133h7.4074074v16.6666667h16.6666667v7.4074074h-19.047619l-5.026455-5.026455v-19.047619ZM77.7777711,38.8888889v7.4074074h-24.0740741v-7.4074074h8.2781918v-9.2592593h-8.2781918v-7.4074074h10.6591442l5.026455,5.026455v11.6402116h8.3884749ZM29.6296296,30.5555556h9.2592593l7.4074074,7.4074074v8.3333333h-7.4074074v-8.3333333h-9.2592593v8.3333333h-7.4074074v-24.0740741h7.4074074v8.3333333ZM46.2962963,30.5555556h-7.4074074v-8.3333333h7.4074074v8.3333333Z" />
     </svg>
   )
 }

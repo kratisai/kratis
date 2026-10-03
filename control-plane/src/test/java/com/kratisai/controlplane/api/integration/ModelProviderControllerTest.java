@@ -520,7 +520,7 @@ class ModelProviderControllerTest {
                         get("/api/v1/model-providers/supported-types").header("Authorization", "Bearer " + authToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$", hasSize(10)))
+                .andExpect(jsonPath("$", hasSize(11)))
                 .andExpect(jsonPath("$[0].supportsModelDiscovery").doesNotExist())
                 .andReturn();
 
@@ -537,6 +537,7 @@ class ModelProviderControllerTest {
                         "DEEPSEEK",
                         "GOOGLE",
                         "GROQ",
+                        "KILO",
                         "MISTRAL",
                         "OLLAMA",
                         "OPENAI",
@@ -563,6 +564,13 @@ class ModelProviderControllerTest {
                 .orElseThrow();
         assertThat(bedrock.requiresApiKey()).isTrue();
         assertThat(bedrock.requiresBaseUrl()).isTrue();
+
+        // Same contract for Kilo: bearer key plus its gateway base URL with a pre-filled default
+        SupportedProviderTypeDto kilo =
+                types.stream().filter(t -> t.type().equals("KILO")).findFirst().orElseThrow();
+        assertThat(kilo.requiresApiKey()).isTrue();
+        assertThat(kilo.requiresBaseUrl()).isTrue();
+        assertThat(kilo.defaultBaseUrl()).isEqualTo("https://api.kilo.ai/api/gateway");
     }
 
     @Test

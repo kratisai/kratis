@@ -56,6 +56,14 @@ const mockSupportedTypes = [
     type: 'BEDROCK',
   },
   {
+    defaultBaseUrl: 'https://api.kilo.ai/api/gateway',
+    description: 'Kilo AI Gateway - hundreds of models from one OpenAI-compatible API key',
+    displayName: 'Kilo Gateway',
+    requiresApiKey: true,
+    requiresBaseUrl: true,
+    type: 'KILO',
+  },
+  {
     defaultBaseUrl: null,
     description: 'Custom OpenAI-compatible API endpoint',
     displayName: 'Other (OpenAI-compatible)',
@@ -365,6 +373,44 @@ describe('Model Provider Flow', () => {
       ingestionModel: 'gpt-3.5-turbo',
       ingestionProvider: 'provider-new',
     })
+  })
+
+  it('creates the Kilo Gateway provider with the prefilled gateway URL', async () => {
+    mockListModelProviders([])
+    const createCalls = mockCreateModelProvider()
+    const teamCalls = mockUpdateTeam()
+    mockTestConnection({ models: [chat('zai-org/glm-4.6')], success: true })
+
+    setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
+    const { user } = renderList()
+    await openWizard(user)
+
+    await selectProvider(user, /^Kilo Gateway/)
+    expect(dialog().getByLabelText('Name')).toHaveValue('Kilo Gateway')
+    expect(dialog().getByLabelText(/base url/i)).toHaveValue('https://api.kilo.ai/api/gateway')
+
+    await connectFromConfigure(user, undefined, 'kilo-test-key')
+    await waitFor(() => {
+      expect(dialog().getByRole('checkbox', { name: 'zai-org/glm-4.6' })).toBeInTheDocument()
+    })
+    await user.click(dialog().getByRole('checkbox', { name: 'zai-org/glm-4.6' }))
+    await user.click(dialog().getByRole('button', { name: /^next$/i }))
+    await waitFor(() => {
+      expect(dialog().getAllByLabelText(/^Use Kilo Gateway/)).toHaveLength(2)
+    })
+    await user.click(dialog().getByRole('button', { name: /add provider/i }))
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Add Model Provider' })).not.toBeInTheDocument()
+    })
+
+    expect(createCalls[0]).toMatchObject({
+      apiKey: 'kilo-test-key',
+      baseUrl: 'https://api.kilo.ai/api/gateway',
+      displayName: 'Kilo Gateway',
+      models: [{ kind: 'CHAT', modelName: 'zai-org/glm-4.6' }],
+      providerType: 'KILO',
+    })
+    expect(teamCalls).toHaveLength(1)
   })
 
   it('keeps current team defaults when they already exist', async () => {

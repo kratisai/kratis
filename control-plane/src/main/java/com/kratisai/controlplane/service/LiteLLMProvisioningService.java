@@ -49,6 +49,7 @@ public class LiteLLMProvisioningService {
             Map.entry(ProviderType.ANTHROPIC, "anthropic"),
             Map.entry(ProviderType.GOOGLE, "gemini"),
             Map.entry(ProviderType.GROQ, "groq"),
+            Map.entry(ProviderType.KILO, "openai"),
             Map.entry(ProviderType.MISTRAL, "mistral"),
             Map.entry(ProviderType.DEEPSEEK, "deepseek"),
             Map.entry(ProviderType.OLLAMA, "ollama"),
@@ -299,9 +300,15 @@ public class LiteLLMProvisioningService {
                 provider.getBaseUrl() != null && !provider.getBaseUrl().isBlank() ? provider.getBaseUrl() : null;
 
         // LiteLLM expects api_base to include the /v1 suffix for OpenAI-compatible APIs.
-        // However, for Gemini API format (ProviderType.GOOGLE), the base URL should NOT have /v1 appended
+        // However, for Gemini API format (ProviderType.GOOGLE), the base URL should NOT have /v1 appended.
+        // The Kilo Gateway serves /chat/completions directly off /api/gateway with no /v1 segment.
         boolean isGeminiProvider = provider.getProviderType() == ProviderType.GOOGLE;
-        if (apiBase != null && !isGeminiProvider && !apiBase.endsWith("/v1") && !apiBase.endsWith("/v1/")) {
+        boolean isKiloProvider = provider.getProviderType() == ProviderType.KILO;
+        if (apiBase != null
+                && !isGeminiProvider
+                && !isKiloProvider
+                && !apiBase.endsWith("/v1")
+                && !apiBase.endsWith("/v1/")) {
             apiBase = apiBase + "/v1";
         }
 

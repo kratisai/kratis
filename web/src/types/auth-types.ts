@@ -107,6 +107,7 @@ export type ProviderType =
   | 'DEEPSEEK'
   | 'GOOGLE'
   | 'GROQ'
+  | 'KILO'
   | 'MISTRAL'
   | 'OLLAMA'
   | 'OPENAI'
