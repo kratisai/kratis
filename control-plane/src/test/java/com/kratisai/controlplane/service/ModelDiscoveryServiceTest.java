@@ -415,6 +415,136 @@ class ModelDiscoveryServiceTest {
     }
 
     @Test
+    void discoverModels_google_shouldDropAgentFamiliesEvenWhenListModelsAdvertisesGenerateContent() {
+        // Entries recorded verbatim from the real ListModels payload (Oct 2026): Google
+        // advertises generateContent for agent-typed models that only serve the Interactions API.
+        String response = """
+                {"models":[
+                  {"name":"models/antigravity-preview-05-2026","version":"0.1","displayName":"Antigravity Agent Preview","inputTokenLimit":1048576,"outputTokenLimit":65536,"supportedGenerationMethods":["generateContent","countTokens"]},
+                  {"name":"models/deep-research-preview-04-2026","version":"deepthink-exp-05-20","displayName":"Deep Research Preview (Apr-21-2026)","inputTokenLimit":131072,"outputTokenLimit":65536,"supportedGenerationMethods":["generateContent","countTokens"]},
+                  {"name":"models/gemini-2.5-flash","supportedGenerationMethods":["generateContent","countTokens"]}
+                ]}
+                """;
+        when(modelDiscoveryClient.getModels(any())).thenReturn(response);
+
+        List<ModelEntryDto> models = service.discoverModels(ProviderType.GOOGLE, "test-key", null);
+
+        assertThat(models).extracting(ModelEntryDto::modelName).containsExactly("gemini-2.5-flash");
+    }
+
+    @Test
+    void discoverModels_google_shouldDropModelsThatDoNotSupportGenerateContent() {
+        String response = """
+                {"models":[
+                  {"name":"models/antigravity-preview-05-2026","supportedGenerationMethods":["countTokens"]},
+                  {"name":"models/deep-research-preview-04-2026","supportedGenerationMethods":[]},
+                  {"name":"models/gemini-2.5-flash","supportedGenerationMethods":["generateContent","countTokens"]}
+                ]}
+                """;
+        when(modelDiscoveryClient.getModels(any())).thenReturn(response);
+
+        List<ModelEntryDto> models = service.discoverModels(ProviderType.GOOGLE, "test-key", null);
+
+        assertThat(models).extracting(ModelEntryDto::modelName).containsExactly("gemini-2.5-flash");
+    }
+
+    @Test
+    void discoverModels_google_shouldKeepEmbeddingModelsWithoutGenerateContent() {
+        String response = """
+                {"models":[{"name":"models/gemini-embedding-001","supportedGenerationMethods":["embedContent"]}]}
+                """;
+        when(modelDiscoveryClient.getModels(any())).thenReturn(response);
+
+        List<ModelEntryDto> models = service.discoverModels(ProviderType.GOOGLE, "test-key", null);
+
+        assertThat(models).extracting(ModelEntryDto::modelName).containsExactly("gemini-embedding-001");
+        assertThat(models).extracting(ModelEntryDto::kind).containsExactly(ModelKind.EMBEDDING);
+    }
+
+    @Test
+    void discoverModels_ollama_shouldDropModelsWithoutCompletionCapability() {
+        String response = """
+                {"models":[
+                  {"name":"llama3","capabilities":["completion","tools"]},
+                  {"name":"all-minilm","capabilities":["embedding"]},
+                  {"name":"qwen3-reranker","capabilities":["reranking"]}
+                ]}
+                """;
+        when(modelDiscoveryClient.getModels(any())).thenReturn(response);
+
+        List<ModelEntryDto> models = service.discoverModels(ProviderType.OLLAMA, null, null);
+
+        assertThat(models).extracting(ModelEntryDto::modelName).containsExactly("llama3", "all-minilm");
+        assertThat(models).extracting(ModelEntryDto::kind).containsExactly(ModelKind.CHAT, ModelKind.EMBEDDING);
+    }
+
+    @Test
+    void discoverModels_mistral_shouldDropModelsWithoutChatCompletion() {
+        String response = """
+                {"data":[
+                  {"id":"mistral-large-latest","capabilities":{"completion_chat":true,"completion_fim":true}},
+                  {"id":"mistral-moderation-latest","capabilities":{"completion_chat":false,"classification":true}}
+                ]}
+                """;
+        when(modelDiscoveryClient.getModels(any(), any())).thenReturn(response);
+
+        List<ModelEntryDto> models = service.discoverModels(ProviderType.MISTRAL, "test-key", null);
+
+        assertThat(models).extracting(ModelEntryDto::modelName).containsExactly("mistral-large-latest");
+        assertThat(models).extracting(ModelEntryDto::kind).containsExactly(ModelKind.CHAT);
+    }
+
+    @Test
+    void discoverModels_kilo_shouldDropModelsThatDoNotOutputText() {
+        String response = """
+                {"data":[
+                  {"id":"anthropic/claude-sonnet-4.5","architecture":{"output_modalities":["text"]}},
+                  {"id":"black-forest-labs/flux-schnell","architecture":{"output_modalities":["image"]}}
+                ]}
+                """;
+        when(modelDiscoveryClient.getModels(any(), any())).thenReturn(response);
+
+        List<ModelEntryDto> models =
+                service.discoverModels(ProviderType.KILO, "test-key", "https://api.kilo.ai/api/gateway");
+
+        assertThat(models).extracting(ModelEntryDto::modelName).containsExactly("anthropic/claude-sonnet-4.5");
+        assertThat(models).extracting(ModelEntryDto::kind).containsExactly(ModelKind.CHAT);
+    }
+
+    @Test
+    void discoverModels_openAiCompatible_shouldKeepModelsThatPublishNoCapabilities() {
+        String response = """
+                {"data":[{"id":"gpt-4o"},{"id":"text-embedding-3-small"}]}
+                """;
+        when(modelDiscoveryClient.getModels(any(), any())).thenReturn(response);
+
+        List<ModelEntryDto> models = service.discoverModels(ProviderType.OPENAI, "test-key", null);
+
+        assertThat(models).extracting(ModelEntryDto::modelName).containsExactly("gpt-4o", "text-embedding-3-small");
+        assertThat(models).extracting(ModelEntryDto::kind).containsExactly(ModelKind.CHAT, ModelKind.EMBEDDING);
+    }
+
+    @Test
+    void discoverModels_azureOpenAi_shouldDropDeploymentsWithoutChatCompletion() {
+        String response = """
+                {"data":[
+                  {"id":"gpt-4o-deployment","model":"gpt-4o","capabilities":{"chat_completion":true,"embeddings":false}},
+                  {"id":"dall-e-deployment","model":"dall-e-3","capabilities":{"chat_completion":false,"embeddings":false}},
+                  {"id":"embedding-deployment","model":"text-embedding-3-small","capabilities":{"chat_completion":false,"embeddings":true}}
+                ]}
+                """;
+        when(modelDiscoveryClient.getModelsWithApiKeyHeader(any(), any())).thenReturn(response);
+
+        List<ModelEntryDto> models = service.discoverModels(
+                ProviderType.AZURE_OPENAI, "test-key", "https://my-resource.openai.azure.com/openai");
+
+        assertThat(models)
+                .extracting(ModelEntryDto::modelName)
+                .containsExactly("gpt-4o-deployment", "embedding-deployment");
+        assertThat(models).extracting(ModelEntryDto::kind).containsExactly(ModelKind.CHAT, ModelKind.EMBEDDING);
+    }
+
+    @Test
     void discoverModels_azureOpenAi_shouldReturnDeploymentsWithBaseModels() {
         String response = """
                 {"data":[{"id":"gpt-4o-deployment","model":"gpt-4o"},{"id":"text-embedding-3-small-deployment","model":"text-embedding-3-small"}]}

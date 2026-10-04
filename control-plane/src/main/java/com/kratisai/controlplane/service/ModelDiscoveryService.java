@@ -10,11 +10,16 @@ import com.kratisai.controlplane.model.ProviderType;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
 
 @Service
 public class ModelDiscoveryService {
+
+    private static final Logger logger = LoggerFactory.getLogger(ModelDiscoveryService.class);
 
     private static final String DEFAULT_OPENAI_URL = "https://api.openai.com/v1";
     private static final String DEFAULT_GROQ_URL = "https://api.groq.com/openai/v1";
@@ -35,6 +40,20 @@ public class ModelDiscoveryService {
             "max_model_len", // vLLM and other OpenAI-compatible servers
             "max_input_tokens", // LiteLLM-style gateways
             "context_length");
+
+    /** Capability object keys that publish chat support: Mistral, then Azure deployments. */
+    private static final List<String> CHAT_CAPABILITY_KEYS = List.of("completion_chat", "chat_completion");
+
+    /** Capability object keys that publish embedding support: Azure deployments, then Mistral. */
+    private static final List<String> EMBEDDING_CAPABILITY_KEYS = List.of("embeddings", "completion_embedding");
+
+    /**
+     * Agent-typed Google model families that only serve the Interactions API. Google's ListModels
+     * still advertises generateContent for them (verified against the live API, Oct 2026), so the
+     * capability metadata is unusable here and calls fail with "This model only supports
+     * Interactions API."
+     */
+    private static final List<String> GOOGLE_AGENT_FAMILY_PREFIXES = List.of("antigravity", "deep-research");
 
     private final ModelDiscoveryClient modelDiscoveryClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -208,12 +227,9 @@ public class ModelDiscoveryService {
 
         List<?> list = objectMapper.convertValue(data, List.class);
         return list.stream()
-                .map(m -> {
-                    Map<?, ?> entry = (Map<?, ?>) m;
-                    String modelName = entry.get("id").toString();
-                    ModelKind kind = looksLikeEmbeddingModel(modelName) ? ModelKind.EMBEDDING : ModelKind.CHAT;
-                    return new ModelEntryDto(modelName, kind, null, extractContextWindow(entry));
-                })
+                .map(m -> (Map<?, ?>) m)
+                .map(entry -> classifyModel(entry.get("id").toString(), null, entry))
+                .flatMap(Optional::stream)
                 .toList();
     }
 
@@ -226,16 +242,9 @@ public class ModelDiscoveryService {
 
         List<?> list = objectMapper.convertValue(data, List.class);
         return list.stream()
-                .map(m -> {
-                    Map<?, ?> entry = (Map<?, ?>) m;
-                    String deploymentName = entry.get("id").toString();
-                    String baseModel =
-                            entry.get("model") != null ? entry.get("model").toString() : null;
-                    ModelKind kind = looksLikeEmbeddingModel(baseModel != null ? baseModel : deploymentName)
-                            ? ModelKind.EMBEDDING
-                            : ModelKind.CHAT;
-                    return new ModelEntryDto(deploymentName, kind, baseModel, extractContextWindow(entry));
-                })
+                .map(m -> (Map<?, ?>) m)
+                .map(entry -> classifyModel(entry.get("id").toString(), entry.get("model"), entry))
+                .flatMap(Optional::stream)
                 .toList();
     }
 
@@ -248,12 +257,9 @@ public class ModelDiscoveryService {
 
         List<?> list = objectMapper.convertValue(models, List.class);
         return list.stream()
-                .map(m -> {
-                    Map<?, ?> entry = (Map<?, ?>) m;
-                    String modelName = entry.get("name").toString();
-                    ModelKind kind = looksLikeEmbeddingModel(modelName) ? ModelKind.EMBEDDING : ModelKind.CHAT;
-                    return new ModelEntryDto(modelName, kind, null, extractContextWindow(entry));
-                })
+                .map(m -> (Map<?, ?>) m)
+                .map(entry -> classifyModel(entry.get("name").toString(), null, entry))
+                .flatMap(Optional::stream)
                 .toList();
     }
 
@@ -268,15 +274,104 @@ public class ModelDiscoveryService {
         // We need to extract just the model ID part after "models/"
         List<?> list = objectMapper.convertValue(models, List.class);
         return list.stream()
-                .map(m -> {
-                    Map<?, ?> entry = (Map<?, ?>) m;
+                .map(m -> (Map<?, ?>) m)
+                .map(entry -> {
                     String fullName = entry.get("name").toString();
                     // Extract the model ID from "models/gemini-2.0-flash" format
                     String modelName = fullName.contains("/") ? fullName.split("/")[1] : fullName;
-                    ModelKind kind = looksLikeEmbeddingModel(modelName) ? ModelKind.EMBEDDING : ModelKind.CHAT;
-                    return new ModelEntryDto(modelName, kind, null, extractContextWindow(entry));
+                    if (isInteractionsOnlyAgentModel(modelName)) {
+                        logger.debug("Dropping Interactions-only agent model '{}' from discovery", modelName);
+                        return Optional.<ModelEntryDto>empty();
+                    }
+                    return classifyModel(modelName, null, entry);
                 })
+                .flatMap(Optional::stream)
                 .toList();
+    }
+
+    private static boolean isInteractionsOnlyAgentModel(String modelName) {
+        String lower = modelName.toLowerCase();
+        return GOOGLE_AGENT_FAMILY_PREFIXES.stream().anyMatch(lower::startsWith);
+    }
+
+    private Optional<ModelEntryDto> classifyModel(String modelName, Object baseModelObject, Map<?, ?> entry) {
+        String baseModel = baseModelObject != null ? baseModelObject.toString() : null;
+        String classifyName = baseModel != null ? baseModel : modelName;
+        boolean embedding = advertisesEmbeddingSupport(entry) || looksLikeEmbeddingModel(classifyName);
+        Optional<Boolean> chatSupport = advertisedChatSupport(entry);
+        if (!embedding && chatSupport.isPresent() && !chatSupport.get()) {
+            logger.debug("Dropping model '{}' from discovery: published capabilities exclude chat", modelName);
+            return Optional.empty();
+        }
+        ModelKind kind = embedding ? ModelKind.EMBEDDING : ModelKind.CHAT;
+        return Optional.of(new ModelEntryDto(modelName, kind, baseModel, extractContextWindow(entry)));
+    }
+
+    private static boolean advertisesEmbeddingSupport(Map<?, ?> entry) {
+        Object capabilities = entry.get("capabilities");
+        if (capabilities instanceof List<?> flags) {
+            return flags.contains("embedding");
+        }
+        if (capabilities instanceof Map<?, ?> flags) {
+            return EMBEDDING_CAPABILITY_KEYS.stream().anyMatch(key -> Boolean.TRUE.equals(flags.get(key)));
+        }
+        return false;
+    }
+
+    /**
+     * Reads the capability metadata each provider publishes, so discovery never offers models that
+     * would fail at call time (Google Interactions-only agents such as Antigravity omit
+     * generateContent; Ollama, Mistral, Azure, and OpenRouter-style gateways publish their own
+     * equivalents). Empty means the provider advertised nothing about chat support, which is the
+     * case for sparse listings (OpenAI, Groq, DeepSeek) — those models are kept.
+     */
+    private static Optional<Boolean> advertisedChatSupport(Map<?, ?> entry) {
+        Optional<Boolean> generationMethods = googleGenerationSupport(entry);
+        if (generationMethods.isPresent()) {
+            return generationMethods;
+        }
+        Optional<Boolean> capabilities = capabilityFlagsSupport(entry);
+        if (capabilities.isPresent()) {
+            return capabilities;
+        }
+        return outputModalitySupport(entry);
+    }
+
+    private static Optional<Boolean> googleGenerationSupport(Map<?, ?> entry) {
+        if (!(entry.get("supportedGenerationMethods") instanceof List<?> methods)) {
+            return Optional.empty();
+        }
+        return Optional.of(methods.contains("generateContent") || methods.contains("streamGenerateContent"));
+    }
+
+    private static Optional<Boolean> capabilityFlagsSupport(Map<?, ?> entry) {
+        Object capabilities = entry.get("capabilities");
+        if (capabilities instanceof List<?> flags) {
+            // Ollama publishes an array; only models with "completion" serve chat.
+            return Optional.of(flags.contains("completion"));
+        }
+        if (capabilities instanceof Map<?, ?> flags) {
+            for (String key : CHAT_CAPABILITY_KEYS) {
+                if (flags.get(key) instanceof Boolean chatSupported) {
+                    return Optional.of(chatSupported);
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<Boolean> outputModalitySupport(Map<?, ?> entry) {
+        List<?> modalities = null;
+        if (entry.get("architecture") instanceof Map<?, ?> architecture) {
+            // Kilo and other OpenRouter-style gateways nest modalities under "architecture".
+            if (architecture.get("output_modalities") instanceof List<?> nested) {
+                modalities = nested;
+            }
+        }
+        if (modalities == null && entry.get("output_modalities") instanceof List<?> topLevel) {
+            modalities = topLevel;
+        }
+        return modalities != null ? Optional.of(modalities.contains("text")) : Optional.empty();
     }
 
     private Long extractContextWindow(Map<?, ?> entry) {
