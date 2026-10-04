@@ -2,6 +2,8 @@ package com.kratisai.controlplane;
 
 import java.util.List;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.prompt.Prompt;
 
 /**
  * Reusable matchers for testing using the fake chat model.
@@ -9,6 +11,9 @@ import org.springframework.ai.chat.messages.AssistantMessage;
  * Add / Modify matchers here where they are shared by at least 2 tests.
  */
 public class FakeChatModelMatchers {
+
+    private static final String WIKI_SYSTEM_PROMPT_MARKER =
+            "synthesize the human-readable high-level and architectural Markdown documentation for this codebase";
 
     public static List<PromptMatcher> ingestionPipelineMatchers() {
         // Match a full ingestion pipeline - shared by many tests.
@@ -71,20 +76,27 @@ public class FakeChatModelMatchers {
         AssistantMessage assistantMessage =
                 AssistantMessage.builder().toolCalls(List.of(toolCall)).build();
         return PromptMatcher.builder()
-                .contains(
-                        "synthesize the human-readable high-level and architectural Markdown documentation for this codebase")
+                // Write one page per batch, not one page per test, so concurrent ingestions
+                // each produce a wiki rather than an empty one. Once a tool response is present
+                // the batch has already written its page and falls through to wikiCompleteMatcher.
+                .condition(prompt -> hasWikiSystemPrompt(prompt) && !hasToolResponse(prompt))
                 .response(assistantMessage)
-                // If a single-test runs the ingestion pipeline multiple times, we won't create a wiki-page for every
-                // run, which might cause a problem later but is acceptable for now.
-                .maxMatches(1)
                 .build();
     }
 
     public static PromptMatcher wikiCompleteMatcher() {
         return PromptMatcher.builder()
-                .contains(
-                        "synthesize the human-readable high-level and architectural Markdown documentation for this codebase")
+                .contains(WIKI_SYSTEM_PROMPT_MARKER)
                 .response("Wiki generation complete.")
                 .build();
+    }
+
+    private static boolean hasWikiSystemPrompt(Prompt prompt) {
+        String contents = prompt.getContents();
+        return contents.contains(WIKI_SYSTEM_PROMPT_MARKER);
+    }
+
+    private static boolean hasToolResponse(Prompt prompt) {
+        return prompt.getInstructions().stream().anyMatch(ToolResponseMessage.class::isInstance);
     }
 }

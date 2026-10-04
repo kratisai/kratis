@@ -2,9 +2,12 @@ package com.kratisai.controlplane.ingestion;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.kratisai.controlplane.agentloop.KratisToolException;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.Repository;
@@ -12,6 +15,7 @@ import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -121,28 +125,28 @@ class WriteWikiPageToolTest {
     }
 
     @Test
-    void writeWikiPage_withBlankPageSlug_returnsError() {
-        String result = writeWikiPageTool.writeWikiPage("  ", "Title", "Content", null, toolContext);
-
-        assertThat(result).isEqualTo("ERROR: pageSlug must not be blank.");
+    void writeWikiPage_withBlankPageSlug_throwsToolException() {
+        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("  ", "Title", "Content", null, toolContext))
+                .isInstanceOf(KratisToolException.class)
+                .hasMessageContaining("pageSlug must not be blank");
     }
 
     @Test
-    void writeWikiPage_withBlankTitle_returnsError() {
-        String result = writeWikiPageTool.writeWikiPage("slug", "  ", "Content", null, toolContext);
-
-        assertThat(result).isEqualTo("ERROR: title must not be blank.");
+    void writeWikiPage_withBlankTitle_throwsToolException() {
+        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("slug", "  ", "Content", null, toolContext))
+                .isInstanceOf(KratisToolException.class)
+                .hasMessageContaining("title must not be blank");
     }
 
     @Test
-    void writeWikiPage_withBlankContent_returnsError() {
-        String result = writeWikiPageTool.writeWikiPage("slug", "Title", "  ", null, toolContext);
-
-        assertThat(result).isEqualTo("ERROR: content must not be blank.");
+    void writeWikiPage_withBlankContent_throwsToolException() {
+        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("slug", "Title", "  ", null, toolContext))
+                .isInstanceOf(KratisToolException.class)
+                .hasMessageContaining("content must not be blank");
     }
 
     @Test
-    void writeWikiPage_withUnquotedSubgraphTitleContainingParens_returnsError() {
+    void writeWikiPage_withUnquotedSubgraphTitleContainingParens_throwsToolException() {
         String content = """
                 ```mermaid
                 graph TD
@@ -152,10 +156,10 @@ class WriteWikiPageToolTest {
                 ```
                 """;
 
-        String result = writeWikiPageTool.writeWikiPage("overview", "Title", content, null, toolContext);
-
-        assertThat(result).startsWith("ERROR: Invalid Mermaid diagram syntax in content.");
-        assertThat(result).contains("subgraph title");
+        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("overview", "Title", content, null, toolContext))
+                .isInstanceOf(KratisToolException.class)
+                .hasMessageContaining("Invalid Mermaid diagram syntax in content")
+                .hasMessageContaining("subgraph title");
     }
 
     @Test
@@ -196,24 +200,46 @@ class WriteWikiPageToolTest {
     }
 
     @Test
-    void writeWikiPage_withMissingBatch_throwsException() {
+    void writeWikiPage_withMissingBatch_throwsToolException() {
         when(ingestionBatchRepository.findById(batchId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("slug", "Title", "Content", null, toolContext))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("Batch not found");
     }
 
     @Test
-    void writeWikiPage_withMissingParent_throwsException() {
-        when(ingestionBatchRepository.findById(batchId)).thenReturn(Optional.of(batch));
-        when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "slug")).thenReturn(Optional.empty());
-        when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "missing-parent"))
-                .thenReturn(Optional.empty());
+    void writeWikiPage_withMissingParent_throwsActionableToolExceptionWithAvailableSlugs() {
+        CtxWikiPage existing = new CtxWikiPage();
+        existing.setBatch(batch);
+        existing.setPageSlug("overview");
+        existing.setTitle("Overview");
+        existing.setContent("content");
 
-        assertThatThrownBy(() ->
-                        writeWikiPageTool.writeWikiPage("slug", "Title", "Content", "missing-parent", toolContext))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("No wiki page exists matching parent slug");
+        when(ingestionBatchRepository.findById(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "child")).thenReturn(Optional.empty());
+        when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "home")).thenReturn(Optional.empty());
+        when(ctxWikiPageRepository.findByBatchId(batchId)).thenReturn(List.of(existing));
+
+        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("child", "Child", "Content", "home", toolContext))
+                .isInstanceOf(KratisToolException.class)
+                .hasMessageContaining("'home'")
+                .hasMessageContaining("overview")
+                .hasMessageContaining("Fix and retry");
+        verify(ctxWikiPageRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void writeWikiPage_withMissingParentAndNoPages_tellsModelToWriteRootFirst() {
+        when(ingestionBatchRepository.findById(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "child")).thenReturn(Optional.empty());
+        when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "home")).thenReturn(Optional.empty());
+        when(ctxWikiPageRepository.findByBatchId(batchId)).thenReturn(List.of());
+
+        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("child", "Child", "Content", "home", toolContext))
+                .isInstanceOf(KratisToolException.class)
+                .hasMessageContaining("No wiki pages have been written yet")
+                .hasMessageContaining("Fix and retry");
+        verify(ctxWikiPageRepository, never()).saveAndFlush(any());
     }
 }

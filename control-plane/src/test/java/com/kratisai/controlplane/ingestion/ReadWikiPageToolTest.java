@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
+import com.kratisai.controlplane.agentloop.KratisToolException;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
@@ -54,17 +55,17 @@ class ReadWikiPageToolTest {
     }
 
     @Test
-    void readWikiPage_withBlankSlug_returnsError() {
-        String result = readWikiPageTool.readWikiPage("  ", toolContext);
-
-        assertThat(result).isEqualTo("ERROR: pageSlug must not be blank.");
+    void readWikiPage_withBlankSlug_throwsToolException() {
+        assertThatThrownBy(() -> readWikiPageTool.readWikiPage("  ", toolContext))
+                .isInstanceOf(KratisToolException.class)
+                .hasMessageContaining("pageSlug must not be blank");
     }
 
     @Test
-    void readWikiPage_withNullSlug_returnsError() {
-        String result = readWikiPageTool.readWikiPage(null, toolContext);
-
-        assertThat(result).isEqualTo("ERROR: pageSlug must not be blank.");
+    void readWikiPage_withNullSlug_throwsToolException() {
+        assertThatThrownBy(() -> readWikiPageTool.readWikiPage(null, toolContext))
+                .isInstanceOf(KratisToolException.class)
+                .hasMessageContaining("pageSlug must not be blank");
     }
 
     @Test
@@ -112,11 +113,11 @@ class ReadWikiPageToolTest {
     }
 
     @Test
-    void readWikiPage_withNonExistentPage_returnsError() {
+    void readWikiPage_withNonExistentPage_throwsToolException() {
         when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "missing")).thenReturn(Optional.empty());
 
-        String result = readWikiPageTool.readWikiPage("missing", toolContext);
-
-        assertThat(result).isEqualTo("ERROR: Wiki page not found: missing");
+        assertThatThrownBy(() -> readWikiPageTool.readWikiPage("missing", toolContext))
+                .isInstanceOf(KratisToolException.class)
+                .hasMessageContaining("Wiki page not found: missing");
     }
 }

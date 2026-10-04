@@ -100,9 +100,10 @@ It is provided with pre-fetched high-level context (Architectural Patterns and C
 
 - [`ReadFileTool`](control-plane/src/main/java/com/kratisai/controlplane/ingestion/ReadFileTool.java:25): Reads source code.
 - [`ReadWikiPageTool`](control-plane/src/main/java/com/kratisai/controlplane/ingestion/ReadWikiPageTool.java:22): Reads existing wiki pages for context.
-- [`WriteWikiPageTool`](control-plane/src/main/java/com/kratisai/controlplane/ingestion/WriteWikiPageTool.java:38): Creates or updates wiki pages with a unique `pageSlug`, title, and markdown content.
+- [`ListWikiPagesTool`](control-plane/src/main/java/com/kratisai/controlplane/ingestion/ListWikiPagesTool.java:13): Lists the wiki pages already written in the batch, in hierarchy order, so the model can discover valid `parentPageSlug` values.
+- [`WriteWikiPageTool`](control-plane/src/main/java/com/kratisai/controlplane/ingestion/WriteWikiPageTool.java:39): Creates or updates wiki pages with a unique `pageSlug`, title, and markdown content. Recoverable failures (blank fields, invalid Mermaid, unknown `parentPageSlug`) raise [`KratisToolException`](control-plane/src/main/java/com/kratisai/controlplane/agentloop/KratisToolException.java:1); the ReAct loop catches it, logs it, returns the error (including the available page slugs) to the model, and continues so the agent can fix and retry.
 
-The LLM iteratively builds a hierarchical wiki, constrained by a maximum turn limit (circuit breaker) to prevent infinite loops.
+The LLM iteratively builds a hierarchical wiki, constrained by a maximum turn limit (circuit breaker) to prevent infinite loops. It must write the single top-level page (no parent) before any child page; child pages reference an already-written parent slug. After the loop, generation fails if no pages were produced, and warns if the wiki has more than one top-level page.
 
 ### 7.2 Semantic Indexing
 [`SemanticIndexingService`](control-plane/src/main/java/com/kratisai/controlplane/ingestion/write/SemanticIndexingService.java:44) chunks the generated wiki pages using `TokenTextSplitter` (default ~800 tokens per chunk). It then generates vector embeddings using the team's configured embedding model and saves them to the [`CtxEmbedding`](control-plane/src/main/java/com/kratisai/controlplane/model/CtxEmbedding.java:1) table, enabling HNSW similarity search for vague intent resolution.

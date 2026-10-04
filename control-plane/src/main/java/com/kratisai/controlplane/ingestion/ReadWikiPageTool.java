@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.ingestion;
 
 import com.kratisai.controlplane.agentloop.KratisTool;
+import com.kratisai.controlplane.agentloop.KratisToolException;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import java.util.UUID;
@@ -21,27 +22,15 @@ public class ReadWikiPageTool {
             description = "Read the content of an existing wiki page for the repository by its pageSlug.")
     public String readWikiPage(String pageSlug, ToolContext toolContext) {
         if (pageSlug == null || pageSlug.isBlank()) {
-            return "ERROR: pageSlug must not be blank.";
+            throw new KratisToolException("pageSlug must not be blank.");
         }
 
-        Object batchIdObj = toolContext != null ? toolContext.getContext().get("batchId") : null;
-        if (batchIdObj == null) {
-            throw new IllegalStateException("ReadWikiPageTool ERROR: batchId not found in tool context.");
-        }
-
-        UUID batchId;
-        try {
-            batchId = batchIdObj instanceof UUID ? (UUID) batchIdObj : UUID.fromString(batchIdObj.toString());
-        } catch (IllegalArgumentException e) {
-            throw new IllegalStateException("ReadWikiPageTool ERROR: Invalid batchId format.");
-        }
+        UUID batchId = BatchContext.requireBatchId(toolContext, "ReadWikiPageTool");
 
         CtxWikiPage page = ctxWikiPageRepository
                 .findByBatchIdAndPageSlug(batchId, pageSlug)
-                .orElse(null);
-        if (page == null) {
-            return "ERROR: Wiki page not found: " + pageSlug;
-        }
+                .orElseThrow(() -> new KratisToolException(
+                        "Wiki page not found: " + pageSlug + ". Use list_wiki_pages to find valid slugs."));
 
         return "Title: " + page.getTitle() + "\n\nContent:\n" + page.getContent();
     }
