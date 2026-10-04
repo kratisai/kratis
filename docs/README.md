@@ -19,6 +19,7 @@ Skills are agent how-tos. Each file has YAML frontmatter (`name`, `description`)
 |-------|------|
 | [control-plane.md](skills/control-plane.md) | Java conventions, AOT, Liquibase |
 | [control-plane-testing.md](skills/control-plane-testing.md) | Control-plane tests |
+| [native-image.md](skills/native-image.md) | Native image build & smoke test |
 | [websocket-method.md](skills/websocket-method.md) | New JSON-RPC method |
 | [rest-api-endpoint.md](skills/rest-api-endpoint.md) | New REST endpoint |
 | [new-entity.md](skills/new-entity.md) | New JPA entity |

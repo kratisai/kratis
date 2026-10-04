@@ -74,6 +74,7 @@ The build is the formatter: Spotless (Palantir Java Format), Checkstyle, PMD, ES
 | When | Skill |
 |------|-------|
 | Control-plane tests | [`docs/skills/control-plane-testing.md`](docs/skills/control-plane-testing.md) |
+| Native image build & smoke | [`docs/skills/native-image.md`](docs/skills/native-image.md) |
 | Control-plane conventions | [`docs/skills/control-plane.md`](docs/skills/control-plane.md) |
 | New WebSocket method | [`docs/skills/websocket-method.md`](docs/skills/websocket-method.md) |
 | REST endpoint | [`docs/skills/rest-api-endpoint.md`](docs/skills/rest-api-endpoint.md) |

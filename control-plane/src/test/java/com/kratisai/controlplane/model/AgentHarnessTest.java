@@ -1,20 +1,38 @@
 package com.kratisai.controlplane.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.HarnessCatalogFixture;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+@SuppressFBWarnings(
+        value = "NP_NULL_PARAM_DEREF_NONVIRTUAL",
+        justification = "Null inputs are passed deliberately to exercise harness definition validation")
 class AgentHarnessTest {
 
     private static final String OPENCODE_BASH_TIMEOUT_ENV = "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS";
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final List<String> DISABLED_HARNESS_IDS = List.of("AIDER", "OPENHANDS");
+
+    @BeforeAll
+    static void loadHarnessCatalog() {
+        HarnessCatalogFixture.load();
+    }
 
     @Test
     void setupCommands_doNotDumpGeneratedFilesToStdout() {
@@ -233,7 +251,7 @@ class AgentHarnessTest {
     void geminiHarness_copiesAcpPatchResourceIntoTheSandbox() {
         assertThat(AgentHarness.valueOf("GEMINI").getResources())
                 .contains(new HarnessResource(
-                        "/gemini/kratis-gemini-acp-truncation.mjs", "/tmp/kratis-gemini-acp-truncation.mjs"));
+                        "gemini/kratis-gemini-acp-truncation.mjs", "/tmp/kratis-gemini-acp-truncation.mjs"));
         assertThat(AgentHarness.valueOf("CODEX").getResources()).isEmpty();
     }
 
@@ -296,32 +314,136 @@ class AgentHarnessTest {
     }
 
     @Test
-    void everyHarness_hasNameSetupAndAgentCommand() {
-        // Disabled harnesses are excluded from values(); validate their definitions too.
-        Set<String> ids = new LinkedHashSet<>();
-        Arrays.stream(AgentHarness.values()).map(AgentHarness::name).forEach(ids::add);
-        ids.addAll(DISABLED_HARNESS_IDS);
+    void everyCatalogDefinition_isResolvableAndCarriesRequiredFields() throws IOException {
+        List<String> ids = catalogIds();
 
         assertThat(ids).hasSizeGreaterThanOrEqualTo(10);
-        ids.forEach(id -> {
+        for (String id : ids) {
             AgentHarness harness = AgentHarness.valueOf(id);
             assertThat(harness.getName()).isNotBlank();
             assertThat(harness.getSetupCommands()).isNotEmpty();
             assertThat(harness.getAgentCommand()).isNotBlank();
-        });
+            assertThat(harness.getAgentLogFiles())
+                    .allSatisfy(path -> assertThat(path).isNotBlank());
+        }
     }
 
     @Test
-    void disabledHarnesses_areExcludedFromTheCatalogButStillResolvable() {
-        // "enabled": false omits a harness from values(); valueOf still resolves so persisted executions load.
-        DISABLED_HARNESS_IDS.forEach(id -> assertThat(AgentHarness.valueOf(id)).isNotNull());
-        assertThat(Arrays.stream(AgentHarness.values()).map(AgentHarness::name))
-                .doesNotContainAnyElementsOf(DISABLED_HARNESS_IDS);
+    void values_matchesEnabledFlagsWhileDisabledDefinitionsStayResolvable() throws IOException {
+        List<String> ids = catalogIds();
+        List<String> expectedEnabled = new ArrayList<>();
+        for (String id : ids) {
+            if (enabled(id)) {
+                expectedEnabled.add(id);
+            }
+        }
+
+        assertThat(Arrays.stream(AgentHarness.values()).map(AgentHarness::name)).isEqualTo(expectedEnabled);
+        assertThat(ids).allSatisfy(id -> assertThat(AgentHarness.valueOf(id)).isNotNull());
+    }
+
+    @Test
+    void readDirectory_missingDirectoryFailsLoudly(@TempDir Path dir) {
+        Path missing = dir.resolve("absent");
+
+        assertThatThrownBy(() -> AgentHarness.readDirectory(missing))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("does not exist");
+    }
+
+    @Test
+    void readDirectory_withoutJsonDefinitionsFailsLoudly(@TempDir Path dir) throws IOException {
+        Files.writeString(dir.resolve("notes.txt"), "not a harness");
+
+        assertThatThrownBy(() -> AgentHarness.readDirectory(dir))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("No harness definitions");
+    }
+
+    @Test
+    void readDirectory_malformedDefinitionFailsLoudly(@TempDir Path dir) throws IOException {
+        Files.writeString(dir.resolve("BROKEN.json"), "{ not json");
+
+        assertThatThrownBy(() -> AgentHarness.readDirectory(dir))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Failed to read harness definition");
+    }
+
+    @Test
+    void readDirectory_definitionWithoutIdFailsLoudly(@TempDir Path dir) throws IOException {
+        Files.writeString(dir.resolve(".json"), minimalDefinitionJson(true));
+
+        assertThatThrownBy(() -> AgentHarness.readDirectory(dir))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("no id");
+    }
+
+    @Test
+    void readDirectory_returnsDefinitionsSortedById(@TempDir Path dir) throws IOException {
+        Files.writeString(dir.resolve("BETA.json"), minimalDefinitionJson(true));
+        Files.writeString(dir.resolve("ALPHA.json"), minimalDefinitionJson(false));
+
+        Map<String, AgentHarness.Definition> definitions = AgentHarness.readDirectory(dir);
+
+        assertThat(definitions.keySet()).containsExactly("ALPHA", "BETA");
+        assertThat(definitions.get("ALPHA").enabled()).isFalse();
+        assertThat(definitions.get("BETA").enabled()).isTrue();
+    }
+
+    @Test
+    void definition_defaultsOptionalCollectionsAndEnabled() {
+        AgentHarness.Definition definition =
+                new AgentHarness.Definition("Name", List.of("echo hi"), null, null, "agent", null);
+
+        assertThat(definition.resources()).isEmpty();
+        assertThat(definition.agentLogFiles()).isEmpty();
+        assertThat(definition.enabled()).isTrue();
+    }
+
+    @Test
+    void definition_rejectsMissingOrInvalidFields() {
+        List<String> setupCommands = List.of("echo hi");
+
+        assertThatThrownBy(() -> new AgentHarness.Definition(null, setupCommands, null, null, "agent", true))
+                .isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> new AgentHarness.Definition("Name", List.of(), null, null, "agent", true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("setupCommands");
+        assertThatThrownBy(() -> new AgentHarness.Definition("Name", setupCommands, null, null, " ", true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("agentCommand");
+        assertThatThrownBy(() -> new AgentHarness.Definition("Name", setupCommands, null, List.of(" "), "agent", true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("agentLogFiles");
+        assertThatThrownBy(() -> new AgentHarness.Definition(" ", setupCommands, null, null, "agent", true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("name");
+    }
+
+    private static List<String> catalogIds() throws IOException {
+        try (Stream<Path> files = Files.list(HarnessCatalogFixture.DIRECTORY)) {
+            return files.map(path -> Objects.requireNonNull(path.getFileName()).toString())
+                    .filter(name -> name.endsWith(".json"))
+                    .map(name -> name.substring(0, name.length() - ".json".length()))
+                    .sorted()
+                    .toList();
+        }
+    }
+
+    private static boolean enabled(String id) throws IOException {
+        try (InputStream in = Files.newInputStream(HarnessCatalogFixture.DIRECTORY.resolve(id + ".json"))) {
+            return MAPPER.readTree(in).path("enabled").asBoolean(true);
+        }
+    }
+
+    private static String minimalDefinitionJson(boolean enabled) {
+        return "{\"name\":\"Test\",\"setupCommands\":[\"echo hi\"],\"agentCommand\":\"agent\",\"enabled\":" + enabled
+                + "}";
     }
 
     @Test
     void values_returnsHarnessesAlphabetically() {
-        // Classpath discovery has no inherent order; the alphabetical order is the UI dropdown contract.
+        // Directory discovery has no inherent order; the alphabetical order is the UI dropdown contract.
         List<String> ids =
                 Arrays.stream(AgentHarness.values()).map(AgentHarness::name).toList();
 

@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.HarnessCatalogFixture;
 import com.kratisai.controlplane.ResourcelessTransactionManager;
 import com.kratisai.controlplane.api.restdto.CreateSandboxExecutionRequest;
 import com.kratisai.controlplane.api.restdto.SandboxExecutionDto;
@@ -26,6 +27,7 @@ import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.LaunchStatus;
 import com.kratisai.controlplane.api.wsdto.PromptStatus;
 import com.kratisai.controlplane.api.wsdto.StopReason;
+import com.kratisai.controlplane.config.HarnessesProperties;
 import com.kratisai.controlplane.config.KratisProperties;
 import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
@@ -47,6 +49,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -138,6 +141,11 @@ class SandboxExecutionServiceTest {
     private static final UUID EXECUTION_ID = UUID.fromString("abcdef12-3456-7890-abcd-ef1234567890");
     private static final UUID USER_ID = UUID.fromString("88888888-8888-8888-8888-888888888888");
 
+    @BeforeAll
+    static void loadHarnessCatalog() {
+        HarnessCatalogFixture.load();
+    }
+
     @BeforeEach
     void setUp() throws Exception {
         litellmProperties = new LiteLLMProperties();
@@ -155,7 +163,8 @@ class SandboxExecutionServiceTest {
                 litellmProvisioningService,
                 litellmProperties,
                 environmentRpcClient,
-                createKratisProperties());
+                createKratisProperties(),
+                createHarnessesProperties());
 
         activityPersistenceService = new ExecutionActivityPersistenceService(
                 activityRepository, sandboxExecutionRepository, objectMapper, eventPublisher);
@@ -207,6 +216,12 @@ class SandboxExecutionServiceTest {
     private KratisProperties createKratisProperties() {
         KratisProperties properties = new KratisProperties();
         properties.setHostname("control-plane.test");
+        return properties;
+    }
+
+    private static HarnessesProperties createHarnessesProperties() {
+        HarnessesProperties properties = new HarnessesProperties();
+        properties.setDirectory(HarnessCatalogFixture.DIRECTORY.toString());
         return properties;
     }
 
@@ -1250,7 +1265,8 @@ class SandboxExecutionServiceTest {
                 litellmProvisioningService,
                 litellmProperties,
                 environmentRpcClient,
-                createKratisProperties());
+                createKratisProperties(),
+                createHarnessesProperties());
 
         ModelProvider provider = createTestModelProvider();
         SandboxExecution execution = createTestExecution(AgentHarness.valueOf("OPENHANDS"), provider, "gpt-4o");

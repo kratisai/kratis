@@ -16,20 +16,20 @@ import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
 /**
- * Agent harness identity and definition. The set of harnesses is the {@code FILENAME.json} files
- * loaded from {@code classpath*:harnesses/} (and an optional overlay directory), not a closed enum.
- * A definition with {@code "enabled": false} is omitted from {@link #values()} but stays resolvable
- * via {@link #valueOf(String)} so persisted executions can still load.
+ * Agent harness identity and definition. The catalogue is the {@code FILENAME.json} files in the
+ * directory named by {@code kratis.harnesses.directory}; deliberately not a classpath scan, which a
+ * native image cannot enumerate.
+ *
+ * <p>A definition with {@code "enabled": false} is omitted from {@link #values()} but stays
+ * resolvable via {@link #valueOf(String)} so persisted executions can still load.
  */
 public final class AgentHarness {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final ConcurrentHashMap<String, AgentHarness> HANDLES = new ConcurrentHashMap<>();
-    private static final AtomicReference<Map<String, Definition>> DEFINITIONS = new AtomicReference<>(loadClasspath());
+    private static final AtomicReference<Map<String, Definition>> DEFINITIONS = new AtomicReference<>();
 
     private final String id;
 
@@ -41,47 +41,24 @@ public final class AgentHarness {
         return HANDLES.computeIfAbsent(id, AgentHarness::new);
     }
 
+    public static void load(Path directory) {
+        DEFINITIONS.set(readDirectory(directory));
+    }
+
     @JsonCreator
     public static AgentHarness valueOf(String id) {
         Objects.requireNonNull(id, "id");
-        if (!DEFINITIONS.get().containsKey(id)) {
+        if (!catalog().containsKey(id)) {
             throw new IllegalArgumentException("Unknown agent harness: " + id);
         }
         return intern(id);
     }
 
     public static AgentHarness[] values() {
-        return DEFINITIONS.get().entrySet().stream()
+        return catalog().entrySet().stream()
                 .filter(entry -> entry.getValue().enabled())
                 .map(entry -> intern(entry.getKey()))
                 .toArray(AgentHarness[]::new);
-    }
-
-    public static void overlayDirectory(String directory) {
-        if (directory == null || directory.isBlank()) {
-            return;
-        }
-        Path dir = Path.of(directory);
-        if (!Files.isDirectory(dir)) {
-            throw new IllegalStateException("Harness directory does not exist: " + dir.toAbsolutePath());
-        }
-        TreeMap<String, Definition> merged = new TreeMap<>(DEFINITIONS.get());
-        try (Stream<Path> files = Files.list(dir)) {
-            for (Path path : files.filter(Files::isRegularFile).toList()) {
-                Path filename = path.getFileName();
-                if (filename == null) {
-                    throw new IllegalStateException("Harness path has no filename: " + path);
-                }
-                String name = filename.toString();
-                if (!name.endsWith(".json")) {
-                    continue;
-                }
-                merged.put(idFromFilename(name), readDefinition(path));
-            }
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to read harness directory " + dir.toAbsolutePath(), e);
-        }
-        DEFINITIONS.set(immutableSorted(merged));
     }
 
     @JsonValue
@@ -110,7 +87,7 @@ public final class AgentHarness {
     }
 
     private Definition definition() {
-        Definition definition = DEFINITIONS.get().get(id);
+        Definition definition = catalog().get(id);
         if (definition == null) {
             throw new IllegalStateException("Unknown agent harness: " + id);
         }
@@ -132,31 +109,41 @@ public final class AgentHarness {
         return id;
     }
 
-    private static Map<String, Definition> loadClasspath() {
-        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
-        try {
-            Resource[] resources = resolver.getResources("classpath*:harnesses/*.json");
-            if (resources.length == 0) {
-                throw new IllegalStateException("No harness definitions found on classpath:harnesses/*.json");
-            }
-            TreeMap<String, Definition> loaded = new TreeMap<>();
-            for (Resource resource : resources) {
-                String filename = resource.getFilename();
-                if (filename == null) {
-                    throw new IllegalStateException("Harness resource has no filename: " + resource);
-                }
-                String id = idFromFilename(filename);
-                try (InputStream in = resource.getInputStream()) {
-                    Definition previous = loaded.put(id, MAPPER.readValue(in, Definition.class));
-                    if (previous != null) {
-                        throw new IllegalStateException("Duplicate harness id " + id);
-                    }
-                }
-            }
-            return immutableSorted(loaded);
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to load harness definitions", e);
+    private static Map<String, Definition> catalog() {
+        Map<String, Definition> definitions = DEFINITIONS.get();
+        if (definitions == null) {
+            throw new IllegalStateException("Agent harness catalogue is not loaded; set "
+                    + "kratis.harnesses.directory and let HarnessCatalogInitializer run first");
         }
+        return definitions;
+    }
+
+    static Map<String, Definition> readDirectory(Path directory) {
+        Objects.requireNonNull(directory, "directory");
+        if (!Files.isDirectory(directory)) {
+            throw new IllegalStateException("Harness directory does not exist: " + directory.toAbsolutePath());
+        }
+        TreeMap<String, Definition> loaded = new TreeMap<>();
+        try (Stream<Path> files = Files.list(directory)) {
+            for (Path path : files.filter(Files::isRegularFile).toList()) {
+                String filename = Objects.requireNonNull(path.getFileName(), "harness path has no filename")
+                        .toString();
+                if (!filename.endsWith(".json")) {
+                    continue;
+                }
+                String id = filename.substring(0, filename.length() - ".json".length());
+                if (id.isBlank()) {
+                    throw new IllegalStateException("Harness filename has no id: " + filename);
+                }
+                loaded.put(id, readDefinition(path));
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read harness directory " + directory.toAbsolutePath(), e);
+        }
+        if (loaded.isEmpty()) {
+            throw new IllegalStateException("No harness definitions (*.json) in " + directory.toAbsolutePath());
+        }
+        return immutableSorted(loaded);
     }
 
     private static Map<String, Definition> immutableSorted(TreeMap<String, Definition> definitions) {
@@ -172,19 +159,8 @@ public final class AgentHarness {
         }
     }
 
-    private static String idFromFilename(String filename) {
-        if (!filename.endsWith(".json")) {
-            throw new IllegalStateException("Harness filename must end with .json: " + filename);
-        }
-        String id = filename.substring(0, filename.length() - ".json".length());
-        if (id.isBlank()) {
-            throw new IllegalStateException("Harness filename has no id: " + filename);
-        }
-        return id;
-    }
-
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record Definition(
+    record Definition(
             String name,
             List<String> setupCommands,
             List<HarnessResource> resources,

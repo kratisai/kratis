@@ -72,9 +72,12 @@ RUN apk add --no-cache git curl tar gcompat libgcc libstdc++ zlib scc docker-cli
 
 COPY --from=builder /app/target/kratis /usr/local/bin/kratis
 COPY --from=sidecar-builder /sidecar/kratis-connector /usr/local/bin/kratis-connector
+# A native image cannot enumerate classpath directories, so harness definitions ship as real files.
+COPY control-plane/harnesses /opt/kratis/harnesses
 
 ENV KRATIS_PARSER_BINARY_PATH=/usr/local/bin/codebase-memory-mcp
 ENV KRATIS_SCC_BINARY_PATH=/usr/bin/scc
+ENV KRATIS_HARNESSES_DIRECTORY=/opt/kratis/harnesses
 ENV KRATIS_VERSION=$VERSION
 ENV KRATIS_BUILD_TAG=$BUILD_TAG
 

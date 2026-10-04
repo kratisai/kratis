@@ -27,6 +27,7 @@ services:
       - 'SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD:-kratis}'
       - 'JWT_SECRET=${JWT_SECRET}'
       - 'KRATIS_KEY_FILE_PATH=/data/config/encryption.key'
+      - 'KRATIS_HARNESSES_DIRECTORY=${KRATIS_HARNESSES_DIRECTORY:-/opt/kratis/harnesses}'
       - 'KRATIS_LITELLM_BASE_URL=http://litellm:4000'
       - 'KRATIS_LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
       - 'KRATIS_LITELLM_SANDBOX_BASE_URL=http://host.docker.internal:${LITELLM_PORT:-4000}'

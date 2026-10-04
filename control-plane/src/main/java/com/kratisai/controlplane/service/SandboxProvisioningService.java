@@ -7,6 +7,7 @@ import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.ExecStatus;
 import com.kratisai.controlplane.api.wsdto.GitRegistrationStatus;
 import com.kratisai.controlplane.api.wsdto.LaunchStatus;
+import com.kratisai.controlplane.config.HarnessesProperties;
 import com.kratisai.controlplane.config.KratisProperties;
 import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
@@ -14,6 +15,7 @@ import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.CanvasRepository;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +47,7 @@ public class SandboxProvisioningService {
     private final TransactionTemplate requiresNewTransactionTemplate;
     private final EnvironmentRpcClient environmentRpcClient;
     private final KratisProperties kratisProperties;
+    private final HarnessesProperties harnessesProperties;
 
     private static final String GIT_USER_NAME = "Kratis";
 
@@ -59,7 +62,8 @@ public class SandboxProvisioningService {
             LiteLLMProvisioningService litellmProvisioningService,
             LiteLLMProperties litellmProperties,
             EnvironmentRpcClient environmentRpcClient,
-            KratisProperties kratisProperties) {
+            KratisProperties kratisProperties,
+            HarnessesProperties harnessesProperties) {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(
@@ -75,6 +79,7 @@ public class SandboxProvisioningService {
         this.litellmProperties = litellmProperties;
         this.environmentRpcClient = environmentRpcClient;
         this.kratisProperties = kratisProperties;
+        this.harnessesProperties = harnessesProperties;
     }
 
     public void provisionEnvironment(ExecutionEnvironment environment, String token) {
@@ -254,10 +259,12 @@ public class SandboxProvisioningService {
     // Harness definitions are pure data, so files they need (e.g. the gemini ACP patch) are declared
     // as resources and materialised here before the setup commands that reference them run.
     private void writeHarnessResources(SandboxExecution execution) throws InterruptedException, TimeoutException {
+        Path harnessDirectory = Path.of(harnessesProperties.getDirectory());
         for (HarnessResource resource : execution.getHarness().getResources()) {
             runSetupCommand(
                     execution,
-                    SandboxFiles.writeCommands(resource.target(), SandboxFiles.readClasspath(resource.source())));
+                    SandboxFiles.writeCommands(
+                            resource.target(), SandboxFiles.readHarnessFile(harnessDirectory, resource.source())));
         }
     }
 
