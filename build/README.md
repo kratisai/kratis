@@ -61,9 +61,12 @@ docker build -f build/Dockerfile.control-plane \
 | `NATIVE_PARALLELISM` | GraalVM thread count |
 | `NATIVE_HEAP` | GraalVM max heap (for example `32g`) |
 
-The release workflow builds the image, runs `smoke-test-image.sh` against it, and only then pushes
-to GHCR — an image that builds but cannot boot (for example a missing harness catalogue) is never
-published.
+The release workflow is multi-arch: each architecture (`linux/amd64`, `linux/arm64`) is built and
+smoke tested separately on a native 8-core/32 GB larger runner of that architecture (GraalVM
+native-image cannot cross-compile, and QEMU emulation is not viable at this heap size), pushed to
+per-arch `smoke-<run>-<arch>` tags, and only then merged into one multi-arch manifest for the real
+release tags. An image that builds but cannot boot is never published; `docker pull` auto-selects
+the variant on x64 Linux, arm64 Linux, and Apple Silicon.
 
 ```bash
 # Boot a built image against a throwaway database and assert /actuator/health goes healthy

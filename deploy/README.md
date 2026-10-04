@@ -8,9 +8,11 @@ See the [root README](../README.md) for product context. Image build: [`build/RE
 
 UI and API: `http://localhost:8080`. All options below produce the same stack.
 
+Images are published for `linux/amd64` and `linux/arm64`; Apple Silicon Macs pick the arm64 variant automatically. LiteLLM and pgvector are pinned to multi-arch digests.
+
 Once the stack is up — account, model provider keys, repositories, plan, execute, publish: [`docs/getting-started.md`](../docs/getting-started.md).
 
-### Option 1 — installer one-liner (recommended) - x86 only
+### Option 1 — installer one-liner (recommended)
 Requires Docker, `curl`, and `openssl`.
 ```bash
 mkdir kratis && cd kratis
@@ -19,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/kratisai/kratis/main/deploy/install
 docker compose up -d --wait
 ```
 
-### Option 2 — from a repository checkout - x86 only
+### Option 2 — from a repository checkout
 
 ```bash
 git clone https://github.com/kratisai/kratis && cd kratis/deploy
@@ -28,7 +30,7 @@ cp .env.example .env
 docker compose up -d --wait
 ```
 
-### Option 3 — build from source - x86 or arm64 (untested)
+### Option 3 — build from source
 
 Build the control-plane image (SPA + Go connector + GraalVM native binary) from a checkout instead of using a pre-built docker image:
 
