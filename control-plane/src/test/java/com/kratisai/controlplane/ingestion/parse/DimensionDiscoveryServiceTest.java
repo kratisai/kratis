@@ -10,6 +10,9 @@ import java.util.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 
 class DimensionDiscoveryServiceTest {
 
@@ -263,5 +266,21 @@ class DimensionDiscoveryServiceTest {
         // Assert
         assertThat(result).contains("=== File: ../outside.java ===");
         assertThat(result).contains("[ACCESS DENIED]");
+    }
+
+    @Test
+    void responseText_concatenatesEveryResponsePart() {
+        ChatResponse response = new ChatResponse(List.of(
+                new Generation(new AssistantMessage("{\"domains\": [{\"name\": \"Split")),
+                new Generation(new AssistantMessage(" across parts\"}]}"))));
+
+        assertThat(DimensionDiscoveryService.responseText(response))
+                .isEqualTo("{\"domains\": [{\"name\": \"Split across parts\"}]}");
+    }
+
+    @Test
+    void responseText_returnsNullWhenNoAnswerTextPresent() {
+        assertThat(DimensionDiscoveryService.responseText(new ChatResponse(List.of())))
+                .isNull();
     }
 }

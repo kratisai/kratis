@@ -433,6 +433,21 @@ class ReActLoopTest {
     }
 
     @Test
+    void mergeChunksShouldMergeMultiplePartsWithinAChunk() {
+        ChatResponse chunk = new ChatResponse(List.of(
+                new Generation(
+                        assistant("First part "),
+                        ChatGenerationMetadata.builder().finishReason("STOP").build()),
+                new Generation(assistant("second part"))));
+
+        var merged = ReActLoop.mergeChunks(List.of(chunk));
+
+        assertThat(merged).isNotNull();
+        assertThat(merged.message().getText()).isEqualTo("First part second part");
+        assertThat(merged.finishReason()).isEqualTo("STOP");
+    }
+
+    @Test
     void mergeChunksShouldHandleNullAndEmpty() {
         assertThat(ReActLoop.mergeChunks(null)).isNull();
         assertThat(ReActLoop.mergeChunks(List.of())).isNull();

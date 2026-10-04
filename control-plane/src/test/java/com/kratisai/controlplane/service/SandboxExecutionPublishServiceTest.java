@@ -170,8 +170,12 @@ class SandboxExecutionPublishServiceTest {
         when(sandboxExecutionRepository.findById(executionId)).thenReturn(Optional.of(execution));
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     private ChatModel createMockChatModel(String responseJson) {
+        return createMockChatModel(new ChatResponse(List.of(new Generation(new AssistantMessage(responseJson)))));
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private ChatModel createMockChatModel(ChatResponse chatResponse) {
         ChatModel mockChatModel = mock(ChatModel.class);
         ChatOptions mockOptions = mock(ChatOptions.class);
         ChatOptions.Builder mockBuilder = mock(ChatOptions.Builder.class, Answers.RETURNS_SELF);
@@ -179,7 +183,6 @@ class SandboxExecutionPublishServiceTest {
         when(mockBuilder.build()).thenReturn(mockOptions);
         when(mockChatModel.getDefaultOptions()).thenReturn(mockOptions);
 
-        ChatResponse chatResponse = new ChatResponse(List.of(new Generation(new AssistantMessage(responseJson))));
         when(mockChatModel.call(any(Prompt.class))).thenReturn(chatResponse);
         return mockChatModel;
     }
@@ -365,6 +368,44 @@ class SandboxExecutionPublishServiceTest {
         assertThat(result.stats().formattedSummary()).isEqualTo("2 staged files (+45, -12 lines)");
         assertThat(result.suggestedTitle()).isEqualTo("refactor: update app components");
         assertThat(result.suggestedBody()).isEqualTo("- Updates App.tsx\n- Adds New.tsx");
+    }
+
+    @Test
+    void getPublishCapabilities_concatenatesMultiPartAiResponse() throws Exception {
+        stubExecutionLookup();
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        EnvironmentConnectorResult.GitDiffSummary summary = new EnvironmentConnectorResult.GitDiffSummary(
+                "base",
+                "head",
+                45,
+                12,
+                0,
+                2,
+                0,
+                true,
+                List.of(),
+                List.of(new EnvironmentConnectorResult.GitDiffSummaryFile(
+                        "src/App.tsx", GitDiffStatus.MODIFIED, 30, 10, false)));
+
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(summary);
+
+        when(sandboxExecutionActivityRepository.findByExecutionIdOrderBySequenceAsc(executionId))
+                .thenReturn(List.of());
+
+        ChatModel mockChatModel = createMockChatModel(new ChatResponse(List.of(
+                new Generation(new AssistantMessage("{\n  \"title\": \"refactor: update app ")),
+                new Generation(new AssistantMessage("components\",\n  \"body\": \"- Updates App.tsx\"\n}")))));
+        when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(mockChatModel);
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        assertThat(result.suggestedTitle()).isEqualTo("refactor: update app components");
+        assertThat(result.suggestedBody()).isEqualTo("- Updates App.tsx");
     }
 
     @Test

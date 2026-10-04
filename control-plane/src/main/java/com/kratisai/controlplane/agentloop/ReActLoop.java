@@ -257,21 +257,19 @@ public final class ReActLoop<T> {
     }
 
     void handleChunk(ChatResponse chunk) {
-        Generation generation = chunk.getResult();
-        if (generation == null) {
-            return;
-        }
-        AssistantMessage output = generation.getOutput();
-        String text = output.getText();
-        if (text == null || text.isEmpty()) {
-            return;
-        }
-        if (isThoughtChunk(output)) {
-            if (onThought != null) {
-                onThought.accept(text);
+        for (Generation generation : chunk.getResults()) {
+            AssistantMessage output = generation.getOutput();
+            String text = output.getText();
+            if (text == null || text.isEmpty()) {
+                continue;
             }
-        } else if (onAnswerChunk != null) {
-            onAnswerChunk.accept(text);
+            if (ChatResponseAssembler.isThought(output)) {
+                if (onThought != null) {
+                    onThought.accept(text);
+                }
+            } else if (onAnswerChunk != null) {
+                onAnswerChunk.accept(text);
+            }
         }
     }
 
@@ -321,28 +319,26 @@ public final class ReActLoop<T> {
         String finishReason = "";
 
         for (ChatResponse chunk : chunks) {
-            Generation gen = chunk.getResult();
-            if (gen == null) {
-                continue;
-            }
-            AssistantMessage msg = gen.getOutput();
-            String t = msg.getText();
-            if (t != null && !isThoughtChunk(msg)) {
-                text.append(t);
-            }
-            for (AssistantMessage.ToolCall tc : msg.getToolCalls()) {
-                // Google GenAI (Gemini) never assigns a per-call id - id() is always ""
-                // Only dedupe when the provider actually supplied a non-blank id
-                if (!tc.id().isBlank() && !seenToolCallIds.add(tc.id())) {
-                    continue;
+            for (Generation gen : chunk.getResults()) {
+                AssistantMessage msg = gen.getOutput();
+                String t = msg.getText();
+                if (t != null && !ChatResponseAssembler.isThought(msg)) {
+                    text.append(t);
                 }
-                toolCalls.add(tc);
-            }
-            mergedMetadata.putAll(msg.getMetadata());
-            ChatGenerationMetadata genMetadata = gen.getMetadata();
-            String reason = genMetadata.getFinishReason();
-            if (reason != null && !reason.isBlank()) {
-                finishReason = reason;
+                for (AssistantMessage.ToolCall tc : msg.getToolCalls()) {
+                    // Google GenAI (Gemini) never assigns a per-call id - id() is always ""
+                    // Only dedupe when the provider actually supplied a non-blank id
+                    if (!tc.id().isBlank() && !seenToolCallIds.add(tc.id())) {
+                        continue;
+                    }
+                    toolCalls.add(tc);
+                }
+                mergedMetadata.putAll(msg.getMetadata());
+                ChatGenerationMetadata genMetadata = gen.getMetadata();
+                String reason = genMetadata.getFinishReason();
+                if (reason != null && !reason.isBlank()) {
+                    finishReason = reason;
+                }
             }
         }
 
@@ -352,15 +348,6 @@ public final class ReActLoop<T> {
                 .properties(mergedMetadata)
                 .build();
         return new LlmTurn(message, finishReason);
-    }
-
-    static boolean isThoughtChunk(AssistantMessage output) {
-        Map<String, Object> metadata = output.getMetadata();
-        return isTruthy(metadata.get("isThought")) || isTruthy(metadata.get("thinking"));
-    }
-
-    static boolean isTruthy(@Nullable Object value) {
-        return value != null && Boolean.parseBoolean(value.toString());
     }
 
     private static String baseSystemText(List<Message> history) {

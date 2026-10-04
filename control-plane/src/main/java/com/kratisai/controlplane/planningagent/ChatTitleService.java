@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.planningagent;
 
+import com.kratisai.controlplane.agentloop.ChatResponseAssembler;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.ChatService;
@@ -17,6 +18,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -154,13 +156,13 @@ public class ChatTitleService {
     private String requestTitle(ModelProvider provider, String modelName, List<Message> excerpt) {
         ChatModel chatModel = chatModelFactory.createChatModel(provider, modelName, false);
         ChatClient chatClient = ChatClient.builder(chatModel).build();
-        String response = chatClient
+        ChatResponse chatResponse = chatClient
                 .prompt()
                 .system(SYSTEM_PROMPT_TEMPLATE.formatted(minWords, maxWords))
                 .messages(excerpt)
                 .call()
-                .content();
-        return sanitizeTitle(response);
+                .chatResponse();
+        return sanitizeTitle(ChatResponseAssembler.answerText(chatResponse));
     }
 
     /** Keep only the most recent {@code maxMessages} user/assistant messages. */
