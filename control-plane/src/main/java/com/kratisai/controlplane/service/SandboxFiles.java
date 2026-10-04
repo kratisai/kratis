@@ -1,8 +1,10 @@
 package com.kratisai.controlplane.service;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -18,15 +20,22 @@ final class SandboxFiles {
 
     private SandboxFiles() {}
 
-    /** Reads a bundled classpath resource; the path is absolute (e.g. {@code /gemini/patch.mjs}). */
-    static String readClasspath(String path) {
-        try (InputStream in = SandboxFiles.class.getResourceAsStream(path)) {
-            if (in == null) {
-                throw new IllegalStateException("Missing bundled resource " + path);
-            }
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    /**
+     * Reads a file from the harness catalogue. {@code source} is relative to {@code harnessDirectory};
+     * escapes outside it are rejected so a definition cannot pull arbitrary host files into a sandbox.
+     */
+    static String readHarnessFile(Path harnessDirectory, String source) {
+        Path base = harnessDirectory.toAbsolutePath().normalize();
+        Path path = base.resolve(source).normalize();
+        if (!path.startsWith(base)) {
+            throw new IllegalStateException("Harness resource escapes the harness directory: " + source);
+        }
+        try {
+            return Files.readString(path, StandardCharsets.UTF_8);
+        } catch (NoSuchFileException e) {
+            throw new IllegalStateException("Missing harness resource " + path, e);
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to read bundled resource " + path, e);
+            throw new IllegalStateException("Failed to read harness resource " + path, e);
         }
     }
 

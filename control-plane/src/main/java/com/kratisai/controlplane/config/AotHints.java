@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.config;
 
+import com.kratisai.controlplane.agentloop.KratisToolResultConverter;
 import com.kratisai.controlplane.client.ModelDiscoveryClient;
 import com.kratisai.controlplane.planningagent.AgentThinking;
 import com.kratisai.controlplane.planningagent.DimensionTool.DimensionDetail;
@@ -105,6 +106,12 @@ public class AotHints implements RuntimeHintsRegistrar {
         // with "No default constructor found". Register the constructor so it can be created.
         hints.reflection().registerType(ValidPasswordValidator.class, MemberCategory.INVOKE_DECLARED_CONSTRUCTORS);
 
+        // Spring AI's ToolUtils instantiates @Tool(resultConverter = ...) reflectively via
+        // getDeclaredConstructor. KratisToolResultConverter is only named by that annotation, so
+        // GraalVM strips its constructor and every MethodToolCallbackProvider build fails with
+        // NoSuchMethodException during startup.
+        hints.reflection().registerType(KratisToolResultConverter.class, MemberCategory.INVOKE_DECLARED_CONSTRUCTORS);
+
         // springdoc's SwaggerConfig.swaggerWelcome(...) takes a @Lazy SpringWebProvider, so
         // Spring AOT pre-generates a CGLIB subclass but does not register the full reflection
         // surface the proxy needs. CGLIB writes the proxy's CGLIB$FACTORY_DATA field
@@ -148,8 +155,6 @@ public class AotHints implements RuntimeHintsRegistrar {
         // unregistered resources, failing startup with "no changelog could be found".
         hints.resources().registerPattern("db/changelog-master.yaml");
         hints.resources().registerPattern("db/changelog/.*");
-        hints.resources().registerPattern("harnesses/.*");
-        hints.resources().registerPattern("gemini/.*");
 
         // Register entity ID array types for Hibernate MultiIdEntityLoaderArrayParam
         hints.reflection().registerType(java.util.UUID[].class, MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS);

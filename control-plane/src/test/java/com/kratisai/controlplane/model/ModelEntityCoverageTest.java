@@ -3,6 +3,7 @@ package com.kratisai.controlplane.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.kratisai.controlplane.HarnessCatalogFixture;
 import com.kratisai.controlplane.api.restdto.InstallationInfoDto;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
@@ -10,9 +11,15 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class ModelEntityCoverageTest {
+
+    @BeforeAll
+    static void loadHarnessCatalog() {
+        HarnessCatalogFixture.load();
+    }
 
     @Test
     void teamCoverage() {

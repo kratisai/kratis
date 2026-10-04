@@ -2,24 +2,20 @@ package com.kratisai.controlplane.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kratisai.controlplane.HarnessCatalogFixture;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class GeminiAcpPatchTest {
 
     private static final String MARKER = "__KRATIS_ACP_TOOL_OUTPUT_CAP__";
-
-    private static final HarnessResource PATCH = AgentHarness.valueOf("GEMINI").getResources().stream()
-            .filter(resource -> resource.target().endsWith("kratis-gemini-acp-truncation.mjs"))
-            .findFirst()
-            .orElseThrow(() -> new AssertionError("GEMINI must declare the ACP tool-output patch resource"));
 
     // Minimal stand-in for the ACP tool runner: it contains the anchor the patch rewrites and, when
     // executed after patching, calls runTool with oversized shell output and reports what happened.
@@ -43,9 +39,14 @@ class GeminiAcpPatchTest {
             console.log('filePointer=' + /tool-outputs/.test(result.llmContent))
             """;
 
+    @BeforeAll
+    static void loadHarnessCatalog() {
+        HarnessCatalogFixture.load();
+    }
+
     @Test
-    void bundledScriptRewritesTheAcpRunnerAnchor() {
-        String script = readClasspath(PATCH.source());
+    void bundledScriptRewritesTheAcpRunnerAnchor() throws IOException {
+        String script = patchScript();
 
         assertThat(script)
                 .contains(MARKER)
@@ -56,7 +57,7 @@ class GeminiAcpPatchTest {
     @Test
     void script_capsShellOutputWhenPatchedIntoAcpRunner(@TempDir Path dir) throws Exception {
         assertNodeAvailable();
-        Path patch = writePatch(dir, readClasspath(PATCH.source()));
+        Path patch = writePatch(dir, patchScript());
         Path bundle = Files.createDirectories(dir.resolve("bundle"));
         Path fixture = bundle.resolve("fixture.mjs");
         Files.writeString(fixture, FIXTURE);
@@ -82,7 +83,7 @@ class GeminiAcpPatchTest {
     @Test
     void script_failsLoudlyWhenAnchorMissing(@TempDir Path dir) throws Exception {
         assertNodeAvailable();
-        Path patch = writePatch(dir, readClasspath(PATCH.source()));
+        Path patch = writePatch(dir, patchScript());
         Path bundle = Files.createDirectories(dir.resolve("bundle"));
         Files.writeString(bundle.resolve("chunk.js"), "const x = 1;\n");
 
@@ -98,21 +99,22 @@ class GeminiAcpPatchTest {
         assertThat(output).contains("anchor found");
     }
 
+    private static HarnessResource geminiPatch() {
+        return AgentHarness.valueOf("GEMINI").getResources().stream()
+                .filter(resource -> resource.target().endsWith("kratis-gemini-acp-truncation.mjs"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("GEMINI must declare the ACP tool-output patch resource"));
+    }
+
+    private static String patchScript() throws IOException {
+        return Files.readString(
+                HarnessCatalogFixture.DIRECTORY.resolve(geminiPatch().source()), StandardCharsets.UTF_8);
+    }
+
     private static Path writePatch(Path dir, String script) throws IOException {
         Path patch = Files.createDirectories(dir.resolve("patch")).resolve("patch.mjs");
         Files.writeString(patch, script);
         return patch;
-    }
-
-    private static String readClasspath(String path) {
-        try (InputStream in = GeminiAcpPatchTest.class.getResourceAsStream(path)) {
-            if (in == null) {
-                throw new AssertionError("Missing classpath resource " + path);
-            }
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new AssertionError("Failed to read classpath resource " + path, e);
-        }
     }
 
     private static String runNode(Path workingDir, String... args) throws Exception {

@@ -25,6 +25,15 @@ description: Control-plane Java conventions. Use when changing control-plane Jav
 
 See [`control-plane/README.md`](../../control-plane/README.md). Do not use `-Pfast` to mark a task complete. Tests: [`control-plane-testing.md`](control-plane-testing.md).
 
+## Harness catalogue
+
+Harness definitions are the `FILENAME.json` files (plus each harness's bundled files) in
+`control-plane/harnesses/`, loaded at startup from `kratis.harnesses.directory` by
+`HarnessCatalogInitializer` (`@Lazy(false)` so it still runs under test lazy-initialization). Change
+a harness by editing that directory. Never reintroduce classpath scanning: a native image cannot
+enumerate classpath directories, so discovery must go through the filesystem. `HarnessResource.source`
+is relative to the harness directory; the container image copies the directory to `/opt/kratis/harnesses`.
+
 ## Dev stack
 
 - `compose.yaml` (Postgres + LiteLLM) is orchestrated by Spring, not started manually. `application.properties` sets `spring.docker.compose.lifecycle-management=start-only`: the stack starts if needed, survives app exit, and restarts reuse it. The integration is inert in prod/native, where no compose file ships.

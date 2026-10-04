@@ -199,6 +199,37 @@ class AotHintsTest {
     }
 
     @Test
+    @DisplayName("registers the tool result converter constructor")
+    void registersToolResultConverterConstructor() {
+        RuntimeHints hints = new RuntimeHints();
+        AotHints aotHints = new AotHints();
+
+        aotHints.registerHints(hints, getClass().getClassLoader());
+
+        // ToolUtils builds @Tool(resultConverter = ...) with getDeclaredConstructor at startup.
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onType(TypeReference.of("com.kratisai.controlplane.agentloop.KratisToolResultConverter"))
+                        .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
+                .accepts(hints);
+    }
+
+    @Test
+    @DisplayName("registers binding hints for the harness definition record")
+    void registersHarnessDefinitionBindingHints() {
+        RuntimeHints hints = new RuntimeHints();
+        AotHints aotHints = new AotHints();
+
+        aotHints.registerHints(hints, getClass().getClassLoader());
+
+        // The catalogue is read from disk at runtime, so Jackson must bind AgentHarness.Definition
+        // inside the native image, not only at build time.
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onType(TypeReference.of("com.kratisai.controlplane.model.AgentHarness$Definition"))
+                        .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
+                .accepts(hints);
+    }
+
+    @Test
     @DisplayName("registers resource hints for OkHttp PublicSuffixDatabase")
     void registersResourceHints() {
         RuntimeHints hints = new RuntimeHints();

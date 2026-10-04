@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "kratis.harnesses")
 public class HarnessesProperties {
 
-    /** Filesystem directory of extra or override {@code FILENAME.json} harnesses. Empty uses classpath only. */
+    /** The single directory holding the harness catalogue. There is no classpath fallback. */
     private String directory = "";
 
     public String getDirectory() {

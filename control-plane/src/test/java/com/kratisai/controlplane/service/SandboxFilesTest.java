@@ -3,10 +3,14 @@ package com.kratisai.controlplane.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class SandboxFilesTest {
 
@@ -45,9 +49,24 @@ class SandboxFilesTest {
     }
 
     @Test
-    void readClasspath_missingResourceFailsLoudly() {
-        assertThatThrownBy(() -> SandboxFiles.readClasspath("/gemini/does-not-exist.mjs"))
+    void readHarnessFile_readsFilesRelativeToTheHarnessDirectory(@TempDir Path dir) throws IOException {
+        Path assets = Files.createDirectories(dir.resolve("gemini"));
+        Files.writeString(assets.resolve("patch.mjs"), "patched");
+
+        assertThat(SandboxFiles.readHarnessFile(dir, "gemini/patch.mjs")).isEqualTo("patched");
+    }
+
+    @Test
+    void readHarnessFile_missingResourceFailsLoudly(@TempDir Path dir) {
+        assertThatThrownBy(() -> SandboxFiles.readHarnessFile(dir, "gemini/does-not-exist.mjs"))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Missing bundled resource");
+                .hasMessageContaining("Missing harness resource");
+    }
+
+    @Test
+    void readHarnessFile_rejectsPathsOutsideTheHarnessDirectory(@TempDir Path dir) {
+        assertThatThrownBy(() -> SandboxFiles.readHarnessFile(dir, "../escape.mjs"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("escapes the harness directory");
     }
 }

@@ -15,7 +15,7 @@
   ],
   "resources": [
     {
-      "source": "/gemini/kratis-gemini-acp-truncation.mjs",
+      "source": "gemini/kratis-gemini-acp-truncation.mjs",
       "target": "/tmp/kratis-gemini-acp-truncation.mjs"
     }
   ],

@@ -62,6 +62,7 @@ To run from source without building a Docker image (JVM mode), use the dev quick
 | `KRATIS_GITHUB_APP_NAME` | empty | no | GitHub App slug |
 | `KRATIS_GITHUB_PRIVATE_KEY_PATH` | empty | no | PEM path inside the container |
 | `KRATIS_TELEMETRY_DISABLED` | `0` | no | Set `1` to disable anonymous usage telemetry |
+| `KRATIS_HARNESSES_DIRECTORY` | `/opt/kratis/harnesses` | no | Directory of harness definitions inside the container. Mount a volume and point here to replace the built-in catalogue without rebuilding the image. |
 | `MEM_LIMIT` | `512m` | no | Memory cap for the kratis container |
 | `LITELLM_MEM_LIMIT` | `2g` | no | Memory cap for the LiteLLM container |
 
@@ -103,3 +104,7 @@ LiteLLM health is checked by a Python script (deploy/litellm/healthcheck.py) tha
 and an authenticated /v2/model/info, and reads the litellm-worker-heartbeat directly from Postgres.
 
 Parser binaries are baked into the control-plane image. For local parser setup, see [`build/README.md`](../build/README.md).
+
+Harness definitions (`FILENAME.json` plus each harness's bundled files) are baked into the image at
+`/opt/kratis/harnesses`. Point `KRATIS_HARNESSES_DIRECTORY` at a mounted directory to use your own
+catalogue instead — the directory is the single source, so a mount replaces the built-in set.

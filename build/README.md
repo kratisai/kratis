@@ -10,6 +10,7 @@ See the [root README](../README.md) for product context. Deploy: [`deploy/README
 |------|------|
 | [`Dockerfile.control-plane`](Dockerfile.control-plane) | Multi-stage: Vite SPA, Go connector, GraalVM native image, Alpine runtime |
 | [`Dockerfile.runner-base`](Dockerfile.runner-base) | Base image for agent sandboxes |
+| [`smoke-test-image.sh`](smoke-test-image.sh) | Boots a control-plane image against a throwaway pgvector DB and fails unless it reports healthy |
 | `bin/codebase-memory-mcp` | Tree-sitter parser (DeusData v0.8.1). Path: `KRATIS_PARSER_BINARY_PATH` |
 | `bin/scc` | Line-count metrics for wiki generation. Path: `KRATIS_SCC_BINARY_PATH` |
 
@@ -45,7 +46,7 @@ Four stages:
 1. **web** — `npm run build`
 2. **sidecar-builder** — `kratis-connector`
 3. **builder** — GraalVM native image (`ghcr.io/graalvm/native-image-community:25.0.2-ol9`) with embedded SPA
-4. **runtime** — Alpine 3.20, user `kratis`, port 8080, `git`, `scc`, `codebase-memory-mcp`, `kratis-connector`
+4. **runtime** — Alpine 3.20, user `kratis`, port 8080, `git`, `scc`, `codebase-memory-mcp`, `kratis-connector`, and `/opt/kratis/harnesses` (harness definitions copied as plain files)
 
 ```bash
 docker build -f build/Dockerfile.control-plane -t kratis-api .
@@ -59,6 +60,15 @@ docker build -f build/Dockerfile.control-plane \
 |-----------|------|
 | `NATIVE_PARALLELISM` | GraalVM thread count |
 | `NATIVE_HEAP` | GraalVM max heap (for example `32g`) |
+
+The release workflow builds the image, runs `smoke-test-image.sh` against it, and only then pushes
+to GHCR — an image that builds but cannot boot (for example a missing harness catalogue) is never
+published.
+
+```bash
+# Boot a built image against a throwaway database and assert /actuator/health goes healthy
+./build/smoke-test-image.sh ghcr.io/kratisai/kratis:latest 180
+```
 
 ## Dockerfile.runner-base
 
