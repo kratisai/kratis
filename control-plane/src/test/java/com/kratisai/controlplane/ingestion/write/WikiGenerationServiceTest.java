@@ -184,7 +184,7 @@ class WikiGenerationServiceTest {
         var message = assertThrows(RuntimeException.class, () -> wikiGenerationService.generateWiki(batch));
 
         assertThat(message)
-                .hasMessageContaining("Exceeded maximum iterations (20) without yielding final completion message.");
+                .hasMessageContaining("Exceeded maximum iterations (30) without yielding final completion message.");
     }
 
     @Test
@@ -220,8 +220,19 @@ class WikiGenerationServiceTest {
                             .findFirst()
                             .ifPresent(trm -> capturedToolResponse.set(
                                     trm.getResponses().getFirst().responseData()));
-                    return new ChatResponse(List.of(new Generation(new AssistantMessage("Wiki generation complete."))));
+                    AssistantMessage.ToolCall writeCall = new AssistantMessage.ToolCall(
+                            "call_2",
+                            "function",
+                            "write_wiki_page",
+                            "{\"pageSlug\":\"overview\",\"title\":\"Overview\",\"content\":\"# Overview\"}");
+                    return new ChatResponse(List.of(new Generation(AssistantMessage.builder()
+                            .toolCalls(List.of(writeCall))
+                            .build())));
                 })
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
                 .maxMatches(1)
                 .build());
 
@@ -456,15 +467,97 @@ class WikiGenerationServiceTest {
     }
 
     @Test
-    void tracksZeroTokensAndToolCallsWhenResponsesCarryNoUsage() {
+    void generateWiki_withNoPages_failsCompletionGateWithoutRecordingUsage() {
         AssistantMessage turn1Message = new AssistantMessage("Wiki generation complete.");
 
         fakeChatModel.addMatcher(
                 PromptMatcher.builder().response(turn1Message).maxMatches(1).build());
 
-        wikiGenerationService.generateWiki(batch);
+        assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("produced no wiki pages");
 
         assertThat(usageTracker.snapshotAndClear(batch.getId())).isEmpty();
+    }
+
+    @Test
+    void unknownParentSlug_isReportedToModelAndRecovered() {
+        AssistantMessage.ToolCall badChildCall = new AssistantMessage.ToolCall(
+                "call_1",
+                "function",
+                "write_wiki_page",
+                "{\"pageSlug\":\"architecture\",\"title\":\"Architecture\",\"content\":\"# Architecture\",\"parentPageSlug\":\"home\"}");
+        AssistantMessage turn1 =
+                AssistantMessage.builder().toolCalls(List.of(badChildCall)).build();
+
+        AssistantMessage.ToolCall rootCall = new AssistantMessage.ToolCall(
+                "call_2",
+                "function",
+                "write_wiki_page",
+                "{\"pageSlug\":\"overview\",\"title\":\"Overview\",\"content\":\"# Overview\"}");
+        AssistantMessage turn2 =
+                AssistantMessage.builder().toolCalls(List.of(rootCall)).build();
+
+        AssistantMessage.ToolCall childCall = new AssistantMessage.ToolCall(
+                "call_3",
+                "function",
+                "write_wiki_page",
+                "{\"pageSlug\":\"architecture\",\"title\":\"Architecture\",\"content\":\"# Architecture\",\"parentPageSlug\":\"overview\"}");
+        AssistantMessage turn3 =
+                AssistantMessage.builder().toolCalls(List.of(childCall)).build();
+
+        AtomicReference<String> capturedError = new AtomicReference<>();
+        fakeChatModel.addMatcher(
+                PromptMatcher.builder().response(turn1).maxMatches(1).build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(prompt -> {
+                    prompt.getInstructions().stream()
+                            .filter(ToolResponseMessage.class::isInstance)
+                            .map(ToolResponseMessage.class::cast)
+                            .findFirst()
+                            .ifPresent(trm -> capturedError.set(
+                                    trm.getResponses().getFirst().responseData()));
+                    return new ChatResponse(List.of(new Generation(turn2)));
+                })
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(
+                PromptMatcher.builder().response(turn3).maxMatches(1).build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .maxMatches(1)
+                .build());
+
+        wikiGenerationService.generateWiki(batch);
+
+        assertThat(capturedError.get()).contains("does not exist").contains("Fix and retry");
+        List<CtxWikiPage> pages = ctxWikiPageRepository.findByBatchId(batch.getId());
+        assertThat(pages).extracting(CtxWikiPage::getPageSlug).containsExactlyInAnyOrder("overview", "architecture");
+    }
+
+    @Test
+    void systemPrompt_instructsRootFirstAndParentDiscovery() {
+        AssistantMessage.ToolCall toolCall = new AssistantMessage.ToolCall(
+                "call_1",
+                "function",
+                "write_wiki_page",
+                "{\"pageSlug\":\"overview\",\"title\":\"Overview\",\"content\":\"# Overview\"}");
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains("list_wiki_pages")
+                .contains("Write the single top-level page FIRST")
+                .contains("If a tool call returns an ERROR")
+                .response(
+                        AssistantMessage.builder().toolCalls(List.of(toolCall)).build())
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .maxMatches(1)
+                .build());
+
+        wikiGenerationService.generateWiki(batch);
+
+        assertThat(ctxWikiPageRepository.findByBatchId(batch.getId())).hasSize(1);
     }
 
     // Best-effort cleanup in test teardown.

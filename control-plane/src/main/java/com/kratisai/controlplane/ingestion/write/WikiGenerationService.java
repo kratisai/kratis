@@ -7,14 +7,17 @@ import com.kratisai.controlplane.agentloop.ReActLoopExhaustedException;
 import com.kratisai.controlplane.agentloop.ReActLoopFatalException;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.ingestion.IngestionUsageTracker;
+import com.kratisai.controlplane.ingestion.ListWikiPagesTool;
 import com.kratisai.controlplane.ingestion.ReadFileTool;
 import com.kratisai.controlplane.ingestion.ReadWikiPageTool;
 import com.kratisai.controlplane.ingestion.WriteWikiPageTool;
+import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.Team;
+import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ProcessExecutor;
@@ -53,6 +56,7 @@ public class WikiGenerationService {
     private final IngestionUsageTracker usageTracker;
     private final ProcessExecutor processExecutor;
     private final ObjectMapper objectMapper;
+    private final CtxWikiPageRepository ctxWikiPageRepository;
     private final String baseCloneDir;
     private final String sccBinaryPath;
     private final Executor agentTaskExecutor;
@@ -63,11 +67,13 @@ public class WikiGenerationService {
             RepositoryIntelligenceTools repositoryIntelligenceTools,
             ReadFileTool readFileTool,
             ReadWikiPageTool readWikiPageTool,
+            ListWikiPagesTool listWikiPagesTool,
             WriteWikiPageTool writeWikiPageTool,
             IngestionBatchLogService ingestionBatchLogService,
             IngestionUsageTracker usageTracker,
             ProcessExecutor processExecutor,
             ObjectMapper objectMapper,
+            CtxWikiPageRepository ctxWikiPageRepository,
             @Qualifier("agentTaskExecutor") Executor agentTaskExecutor,
             @Value("${kratis.ingestion.clone-dir:${java.io.tmpdir}/kratis-ingest}") String baseCloneDir,
             @Value("${kratis.parser.scc-binary-path}") String sccBinaryPath) {
@@ -75,12 +81,17 @@ public class WikiGenerationService {
         this.litellmProvisioningService = litellmProvisioningService;
         this.repositoryIntelligenceTools = repositoryIntelligenceTools;
         this.toolCallbacks = ToolCallbackProvider.from(ToolCallbacks.from(
-                        repositoryIntelligenceTools, readFileTool, readWikiPageTool, writeWikiPageTool))
+                        repositoryIntelligenceTools,
+                        readFileTool,
+                        readWikiPageTool,
+                        listWikiPagesTool,
+                        writeWikiPageTool))
                 .getToolCallbacks();
         this.ingestionBatchLogService = ingestionBatchLogService;
         this.usageTracker = usageTracker;
         this.processExecutor = processExecutor;
         this.objectMapper = objectMapper;
+        this.ctxWikiPageRepository = ctxWikiPageRepository;
         this.agentTaskExecutor = agentTaskExecutor;
         this.baseCloneDir = baseCloneDir;
         this.sccBinaryPath = sccBinaryPath;
@@ -115,9 +126,9 @@ public class WikiGenerationService {
         String systemPrompt = """
                 You are Kratis, an expert technical writer and autonomous architect.
                 You have a codebase under analysis, and must synthesize the human-readable high-level and architectural Markdown documentation for this codebase.
-                You have access to tools to gather information: read_file, read_wiki_page, and write_wiki_page. Parallelize tools when possible.
+                You have access to tools to gather information: read_file, read_wiki_page, list_wiki_pages, and write_wiki_page. Parallelize tools when possible.
                 Use them judiciously to read the repository state and iteratively build the wiki. Do not make unnecessary tool calls - summarise. You can read a maximum of 10 files.
-                You are not constrained to a specific number of pages. The wiki should consist of ONE page. top-level page (no parent) and a hierarchy of child pages.
+                The wiki must have exactly one top-level page (no parent) that roots the hierarchy, plus child pages beneath it.
 
                 Codebase Complexity Analysis:
                 - Approximate Lines of Code: %d
@@ -128,6 +139,8 @@ public class WikiGenerationService {
                 Please use the suggested target number of pages as a guide. A simpler repository should have fewer pages (e.g. 2 pages) while a complex repository should have more pages (up to 20 pages) to cover the repository's topics accurately but concisely. Ensure content is sufficient for a high-level technical review.
 
                 Use the write_wiki_page tool to create or update wiki pages. Provide a unique pageSlug, a title, and the markdown content.
+                Write the single top-level page FIRST, before any child page. A child page MUST set parentPageSlug to a pageSlug that already exists in this batch. Call list_wiki_pages to confirm valid slugs, and never reference a parent you have not written yet.
+                If a tool call returns an ERROR, do not give up: read the error, correct the arguments, and retry that tool. Unknown parent slugs and invalid Mermaid syntax are recoverable errors.
                 Once you have gathered the required information and written the necessary wiki pages, your final response MUST be a simple confirmation message like "Wiki generation complete."
                 Do not return a JSON object. Just confirm completion.
 
@@ -179,7 +192,7 @@ public class WikiGenerationService {
         history.add(new SystemMessage(systemPrompt));
         history.add(new UserMessage("Please analyze the repository and generate the wiki documentation."));
 
-        int maxTurns = 20;
+        int maxTurns = 30;
         String result;
         try {
             result = ReActLoop.text(chatClientFor(batch), toolCallbacks)
@@ -206,7 +219,28 @@ public class WikiGenerationService {
         }
 
         logger.info("GENERATE_WIKI: LLM finished with message: {}", result);
-        batchLogger.info("GENERATE_WIKI", "Target Wiki Generation completed successfully.");
+
+        List<CtxWikiPage> generatedPages = ctxWikiPageRepository.findByBatchId(batch.getId());
+        if (generatedPages.isEmpty()) {
+            String message = "GENERATE_WIKI produced no wiki pages for batch " + batch.getId()
+                    + ": every write_wiki_page call failed or was never attempted.";
+            batchLogger.error("GENERATE_WIKI", message);
+            throw new IllegalStateException(message);
+        }
+
+        int rootCount = ctxWikiPageRepository
+                .findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(batch.getId())
+                .size();
+        if (rootCount > 1) {
+            batchLogger.error(
+                    "GENERATE_WIKI",
+                    "Wiki for batch " + batch.getId() + " has " + rootCount
+                            + " top-level pages; the wiki should have exactly one root.");
+        }
+
+        batchLogger.info(
+                "GENERATE_WIKI",
+                "Target Wiki Generation completed successfully with " + generatedPages.size() + " page(s).");
     }
 
     private void logToolEvent(
