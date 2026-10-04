@@ -148,7 +148,7 @@ type HeartbeatStatus string
 
 const HeartbeatStatusOK HeartbeatStatus = "ok"
 
-// GitAuthStatus is the only valid env.registerGitAuth result status.
+// GitAuthStatus is the only valid env.registerGitAuth and env.registerGitIdentity result status.
 type GitAuthStatus string
 
 const GitAuthStatusSuccess GitAuthStatus = "success"
@@ -308,11 +308,19 @@ type CompleteParams struct {
 type RegisterGitAuthParams struct {
 	CredentialType CredentialType `json:"credentialType"`
 	PrivateKey     string         `json:"privateKey,omitempty"`
-	UserName       string         `json:"userName"`
-	UserEmail      string         `json:"userEmail"`
 }
 
 type RegisterGitAuthResult struct {
+	Status GitAuthStatus `json:"status"`
+}
+
+// RegisterGitIdentityParams is the parameters payload for the env.registerGitIdentity method.
+type RegisterGitIdentityParams struct {
+	UserName  string `json:"userName"`
+	UserEmail string `json:"userEmail"`
+}
+
+type RegisterGitIdentityResult struct {
 	Status GitAuthStatus `json:"status"`
 }
 

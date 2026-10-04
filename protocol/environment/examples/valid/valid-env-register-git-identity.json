@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.registerGitIdentity",
+  "params": {
+    "userName": "Kratis",
+    "userEmail": "kratis@control-plane-host"
+  },
+  "id": 10
+}

@@ -28,7 +28,9 @@ Test             Control Plane       Sandbox/Connector       ACP Agent        Li
  │                    │ copy/start connector │                    │                │
  │                    │─────────────────────>│                    │                │
  │                    │<──── env.register ───│                    │                │
- │                    │ env.registerGitAuth  │                    │                │
+ │                    │ env.registerGitIdentity                   │                │
+ │                    │─────────────────────>│ persist identity   │                │
+ │                    │ env.registerGitAuth (only w/ credential)  │                │
  │                    │─────────────────────>│ deploy auth        │                │
  │                    │ env.checkout (existing repo) or env.exec   │                │
  │                    │    `git init` (new repo)                    │                │
@@ -80,11 +82,12 @@ Test             Control Plane       Sandbox/Connector       ACP Agent        Li
 
 4. **`env.register`** — Connector authenticates to `/ws/env`.
 5. **Connected** — Control Plane persists the environment status and dispatches the execution.
-6. **`env.registerGitAuth`** — Control Plane deploys the credential process-wide (single auth mechanism; the connector exports `GIT_CONFIG_GLOBAL` / `SSH_AUTH_SOCK` + `GIT_SSH_COMMAND` into its environment). The generated global gitconfig also pins the git author identity (`user.name`/`user.email`, with the email hostname derived from the control-plane host) so later commits (publish/PR) never fail with "Author identity unknown".
-7. **Workspace preparation** — Existing-repository canvases: `env.checkout` clones/fetches the canvas-associated repository. New-repository canvases: `env.exec` runs `rm -rf ./* ./.git; git init && git -c user.name="Kratis" -c user.email="kratis@<control-plane-host>" commit --allow-empty -m "Initial commit"`; both paths then pass `git rev-parse --verify HEAD` verification before launch.
-8. **Canonical task file** — Control Plane writes `workspace/.kratis/ACTIVE_TASK.md` via chunked base64 `env.exec` (SPEC content, a dependency-discovery loop the agent follows with `sudo apt` or the repo's own directions, and the Prep/Plan/Implement/DoD gates with an agent-owned §4 scratch section). It lives inside the workspace as git-ignored `.kratis/` platform state because jailed harnesses reject paths outside the workspace; `git add`/`git diff`/publish exclude it and checkout tolerates it. The `session/prompt` carries the same content inline and wins on conflict.
-9. **`env.exec` (N×)** then **`env.launch_acp_agent`** — Control Plane runs each harness setup command via `env.exec` (with env persistence), then launches the ACP agent (handshake only).
-9. **Setup and launch** — Connector installs the current harness dependencies and starts the ACP agent in `/kratis/workspace`. Every steering turn and the `end_turn` wrap-up re-attach the canonical task pointer; an `end_turn` with no EDITED/COMMAND activity re-steers instead of idling.
+6. **`env.registerGitIdentity`** — Control Plane registers the git author identity (`user.name`/`user.email`, with the email hostname derived from the control-plane host) for every execution, with or without a credential. The connector persists it to `$HOME/.gitconfig`, so every git call in the sandbox sees it, it survives connector restarts, and later commits (publish/PR) never fail with "Author identity unknown".
+7. **`env.registerGitAuth`** — only when the repository carries a credential: Control Plane deploys it process-wide (single auth mechanism; the connector exports `GIT_CONFIG_GLOBAL` / `SSH_AUTH_SOCK` + `GIT_SSH_COMMAND` into its environment). The generated credential gitconfig includes `$HOME/.gitconfig`, so the registered identity stays visible while `GIT_CONFIG_GLOBAL` is active.
+8. **Workspace preparation** — Existing-repository canvases: `env.checkout` clones/fetches the canvas-associated repository. New-repository canvases: `env.exec` rejects a non-empty workspace (tolerating `.kratis/`) and runs `git init -b main && git commit --allow-empty -m "Initial commit"`, attributed through `$HOME/.gitconfig`; both paths then pass `git rev-parse --verify HEAD` verification before launch.
+9. **Canonical task file** — Control Plane writes `workspace/.kratis/ACTIVE_TASK.md` via chunked base64 `env.exec` (SPEC content, a dependency-discovery loop the agent follows with `sudo apt` or the repo's own directions, and the Prep/Plan/Implement/DoD gates with an agent-owned §4 scratch section). It lives inside the workspace as git-ignored `.kratis/` platform state because jailed harnesses reject paths outside the workspace; `git add`/`git diff`/publish exclude it and checkout tolerates it. The `session/prompt` carries the same content inline and wins on conflict.
+10. **`env.exec` (N×)** then **`env.launch_acp_agent`** — Control Plane runs each harness setup command via `env.exec` (with env persistence), then launches the ACP agent (handshake only).
+11. **Setup and launch** — Connector installs the current harness dependencies and starts the ACP agent in `/kratis/workspace`. Every steering turn and the `end_turn` wrap-up re-attach the canonical task pointer; an `end_turn` with no EDITED/COMMAND activity re-steers instead of idling.
 
 ### Phase 3: ACP Initialization
 

@@ -53,6 +53,10 @@ public class SidecarWebSocketFixture extends WebSocketFixture<SidecarWebSocketFi
                 payload -> payload.contains("\"method\":\"env.registerGitAuth\""),
                 (session, payload) -> sendResult(session, payload, Map.of("status", "success"))));
 
+        rules.add(new Rule(
+                payload -> payload.contains("\"method\":\"env.registerGitIdentity\""),
+                (session, payload) -> sendResult(session, payload, Map.of("status", "success"))));
+
         rules.add(new Rule(payload -> payload.contains("\"method\":\"env.launch_acp_agent\""), (session, payload) -> {
             updateExecutionId(payload);
             sendResult(

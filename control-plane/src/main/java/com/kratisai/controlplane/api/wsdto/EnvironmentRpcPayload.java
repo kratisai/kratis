@@ -72,6 +72,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
                         case AcpPrompt ignored -> EnvironmentConnectorResult.AcpPrompt.class;
                         case Terminate ignored -> EnvironmentConnectorResult.Terminate.class;
                         case RegisterGitAuth ignored -> EnvironmentConnectorResult.RegisterGitAuth.class;
+                        case RegisterGitIdentity ignored -> EnvironmentConnectorResult.RegisterGitIdentity.class;
                         case GitDiffSummary ignored -> EnvironmentConnectorResult.GitDiffSummary.class;
                         case GitFileDiff ignored -> EnvironmentConnectorResult.GitFileDiff.class;
                         case ReadFileSlice ignored -> EnvironmentConnectorResult.ReadFileSlice.class;
@@ -375,9 +376,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
     /** Register git credentials with the sidecar. Tokens are resolved on-demand by the control plane. */
     record RegisterGitAuth(
             @JsonProperty("credentialType") String credentialType,
-            @JsonProperty("privateKey") String privateKey,
-            @JsonProperty("userName") String userName,
-            @JsonProperty("userEmail") String userEmail)
+            @JsonProperty("privateKey") String privateKey)
             implements OutboundRequestPayload<EnvironmentConnectorResult.RegisterGitAuth> {
         public static final String METHOD = "env.registerGitAuth";
 
@@ -391,12 +390,28 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
 
         public RegisterGitAuth {
             Objects.requireNonNull(credentialType, "credentialType is required");
-            Objects.requireNonNull(userName, "userName is required");
-            Objects.requireNonNull(userEmail, "userEmail is required");
             if (!SUPPORTED_TYPES.contains(credentialType)) {
                 throw new IllegalArgumentException(
                         "Unsupported credentialType: " + credentialType + ". Expected one of " + SUPPORTED_TYPES);
             }
+        }
+    }
+
+    /** Persist the git author identity in the sandbox, independently of credentials. */
+    record RegisterGitIdentity(
+            @JsonProperty("userName") String userName,
+            @JsonProperty("userEmail") String userEmail)
+            implements OutboundRequestPayload<EnvironmentConnectorResult.RegisterGitIdentity> {
+        public static final String METHOD = "env.registerGitIdentity";
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+
+        public RegisterGitIdentity {
+            Objects.requireNonNull(userName, "userName is required");
+            Objects.requireNonNull(userEmail, "userEmail is required");
         }
     }
 

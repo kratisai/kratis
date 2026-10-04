@@ -795,6 +795,7 @@ class ProtocolConformanceTest {
             case "env.acp_prompt" -> EnvironmentConnectorResult.AcpPrompt.class;
             case "env.terminate" -> EnvironmentConnectorResult.Terminate.class;
             case "env.registerGitAuth" -> EnvironmentConnectorResult.RegisterGitAuth.class;
+            case "env.registerGitIdentity" -> EnvironmentConnectorResult.RegisterGitIdentity.class;
             case "env.git_diff_summary" -> EnvironmentConnectorResult.GitDiffSummary.class;
             case "env.git_file_diff" -> EnvironmentConnectorResult.GitFileDiff.class;
             case "env.read_file_slice" -> EnvironmentConnectorResult.ReadFileSlice.class;
@@ -815,6 +816,7 @@ class ProtocolConformanceTest {
             case "acp_prompt" -> EnvironmentConnectorResult.AcpPrompt.class;
             case "terminate" -> EnvironmentConnectorResult.Terminate.class;
             case "register_git_auth" -> EnvironmentConnectorResult.RegisterGitAuth.class;
+            case "register_git_identity" -> EnvironmentConnectorResult.RegisterGitIdentity.class;
             case "git_diff_summary" -> EnvironmentConnectorResult.GitDiffSummary.class;
             case "git_file_diff" -> EnvironmentConnectorResult.GitFileDiff.class;
             case "read_file_slice" -> EnvironmentConnectorResult.ReadFileSlice.class;

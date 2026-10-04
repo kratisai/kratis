@@ -30,16 +30,22 @@ drives every sandbox the same way, independent of provider:
 1. Resolve the provider by type; `spawnSandbox` returns a unique container/workspace id.
 2. Persist the id, then `initializeWorkspace` (inject and start the connector).
 3. The connector connects to `/ws/env` and registers (`env.register`).
-4. Deploy Git auth (`env.registerGitAuth`) — PAT credential-helper or in-memory
-   `ssh-agent`, exported process-wide; also pins `user.name`/`user.email`.
-5. Prepare the workspace: `env.checkout` for an existing repository, or `env.exec`
+4. Register the git author identity (`env.registerGitIdentity`) — always, with or
+   without a credential. The connector persists `user.name`/`user.email` to
+   `$HOME/.gitconfig`, so every git call in the sandbox sees it and it survives
+   connector restarts.
+5. Deploy Git auth when the repository carries a credential (`env.registerGitAuth`)
+   — PAT credential-helper or in-memory `ssh-agent`, exported process-wide. The
+   generated credential gitconfig includes `$HOME/.gitconfig`, so the identity
+   stays visible while `GIT_CONFIG_GLOBAL` is active.
+6. Prepare the workspace: `env.checkout` for an existing repository, or `env.exec`
    `git init` for a new repository; both verify `git rev-parse --verify HEAD`.
-6. Write the canonical task file (`env.exec` chunked base64 to
+7. Write the canonical task file (`env.exec` chunked base64 to
    `workspace/.kratis/ACTIVE_TASK.md`, git-ignored).
-7. Run harness setup commands (`env.exec` ×N).
-8. Launch the ACP agent (`env.launch_acp_agent`).
+8. Run harness setup commands (`env.exec` ×N).
+9. Launch the ACP agent (`env.launch_acp_agent`).
 
-Steps 3–7 are connector-side behaviour; see [`acp-lifecycle.md`](acp-lifecycle.md) and
+Steps 3–8 are connector-side behaviour; see [`acp-lifecycle.md`](acp-lifecycle.md) and
 [`e2e-agent-orchestration.md`](e2e-agent-orchestration.md) for the full sequence.
 
 ## Security boundary

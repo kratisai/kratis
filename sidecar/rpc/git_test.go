@@ -465,9 +465,102 @@ func TestExecuteRegisterGitAuth(t *testing.T) {
 	c.ExecuteRegisterGitAuth(paramsSSH, nil)
 }
 
+// TestExecuteRegisterGitIdentity_PersistsAcrossRestart verifies identity lives
+// in the container filesystem, not in connector process state: a fresh client
+// with no registration and no GIT_CONFIG_GLOBAL still produces commits
+// attributed to the registered identity.
+func TestExecuteRegisterGitIdentity_PersistsAcrossRestart(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	_ = os.Unsetenv("GIT_CONFIG_GLOBAL")
+
+	c := NewClient("ws://localhost:12345", "tok", "", "")
+	c.credentialsDir = t.TempDir()
+	c.ExecuteRegisterGitIdentity(RegisterGitIdentityParams{
+		UserName:  "Kratis",
+		UserEmail: "kratis@control-plane-host",
+	}, nil)
+
+	// Simulated connector restart: nothing in memory or env, only the FS.
+	repo := t.TempDir()
+	runGitOutput(t, repo, "init", "-b", "main")
+	runGitOutput(t, repo, "commit", "--allow-empty", "-m", "Initial commit")
+	author := strings.TrimSpace(runGitOutput(t, repo, "log", "-1", "--format=%an <%ae>"))
+	if author != "Kratis <kratis@control-plane-host>" {
+		t.Errorf("expected commit author 'Kratis <kratis@control-plane-host>', got %q", author)
+	}
+}
+
+// TestExecuteRegisterGitIdentity_RequiresHome verifies registration fails with
+// an error response when $HOME cannot be resolved.
+func TestExecuteRegisterGitIdentity_RequiresHome(t *testing.T) {
+	var (
+		mu           sync.Mutex
+		responseMsg  []byte
+		responseChan = make(chan struct{})
+	)
+
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req JsonRpcRequest
+			if json.Unmarshal(msg, &req) != nil {
+				continue
+			}
+			if req.ID != nil && req.Method == "" {
+				mu.Lock()
+				if responseMsg == nil {
+					responseMsg = msg
+					select {
+					case <-responseChan:
+					default:
+						close(responseChan)
+					}
+				}
+				mu.Unlock()
+			}
+		}
+	})
+
+	c := connectClient(t, wsURL(srv), "tok")
+	defer c.Close()
+
+	t.Setenv("HOME", "")
+	c.ExecuteRegisterGitIdentity(RegisterGitIdentityParams{
+		UserName:  "Kratis",
+		UserEmail: "kratis@control-plane-host",
+	}, uint64(901))
+
+	select {
+	case <-responseChan:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Timeout waiting for registerGitIdentity error response")
+	}
+
+	mu.Lock()
+	respBytes := responseMsg
+	mu.Unlock()
+
+	var resp JsonRpcResponse
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Error == nil {
+		t.Fatal("expected an error response when HOME is unresolved")
+	}
+}
+
 // TestExecuteRegisterGitAuth_ProcessWideEnv verifies registerGitAuth applies auth
-// process-wide via env vars, and re-registration clears the previous state.
+// process-wide via env vars, re-registration clears the previous state, and the
+// generated credential config includes ~/.gitconfig so the identity registered
+// via registerGitIdentity stays visible while GIT_CONFIG_GLOBAL is active.
 func TestExecuteRegisterGitAuth_ProcessWideEnv(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	_ = os.Unsetenv("GIT_CONFIG_GLOBAL")
+
 	c := NewClient("ws://localhost:12345", "tok", "", "")
 	c.credentialsDir = t.TempDir()
 	defer c.Close()
@@ -479,42 +572,36 @@ func TestExecuteRegisterGitAuth_ProcessWideEnv(t *testing.T) {
 	}
 	defer cleanupEnv()
 
-	// PAT registration deploys a generated global gitconfig (credential helper +
-	// git author identity) and sets GIT_CONFIG_GLOBAL
-	c.ExecuteRegisterGitAuth(RegisterGitAuthParams{
-		CredentialType: "PAT",
-		UserName:       "Kratis",
-		UserEmail:      "kratis@control-plane-host",
+	c.ExecuteRegisterGitIdentity(RegisterGitIdentityParams{
+		UserName:  "Kratis",
+		UserEmail: "kratis@control-plane-host",
 	}, nil)
-	if os.Getenv("GIT_CONFIG_GLOBAL") == "" {
-		t.Error("expected GIT_CONFIG_GLOBAL to be set after PAT registration")
+
+	// PAT registration deploys a generated gitconfig (include of ~/.gitconfig +
+	// credential helper) and sets GIT_CONFIG_GLOBAL
+	c.ExecuteRegisterGitAuth(RegisterGitAuthParams{CredentialType: "PAT"}, nil)
+	patConfig := os.Getenv("GIT_CONFIG_GLOBAL")
+	if patConfig == "" {
+		t.Fatal("expected GIT_CONFIG_GLOBAL to be set after PAT registration")
 	}
-	gitConfig := os.Getenv("GIT_CONFIG_GLOBAL")
-	if _, err := os.Stat(gitConfig); err != nil { //nolint:gosec // G703: test temp gitconfig path
-		t.Errorf("expected generated gitconfig to exist at %s: %v", gitConfig, err)
-	}
-	defer func() { _ = os.Remove(gitConfig) }() //nolint:gosec // G703: test temp gitconfig path
-	patContent, err := os.ReadFile(gitConfig)   //nolint:gosec // G304: test reads the generated gitconfig
+	patContent, err := os.ReadFile(patConfig) //nolint:gosec // G304: test reads the generated gitconfig
 	if err != nil {
 		t.Fatalf("failed to read PAT gitconfig: %v", err)
 	}
 	patContentStr := string(patContent)
-	if !strings.Contains(patContentStr, "[user]") {
-		t.Errorf("expected PAT gitconfig to contain a [user] section, got:\n%s", patContentStr)
-	}
-	if !strings.Contains(patContentStr, "name = Kratis") {
-		t.Errorf("expected PAT gitconfig to preserve user.name, got:\n%s", patContentStr)
-	}
-	if !strings.Contains(patContentStr, "email = kratis@control-plane-host") {
-		t.Errorf("expected PAT gitconfig to preserve user.email, got:\n%s", patContentStr)
+	if !strings.Contains(patContentStr, "path = ~/.gitconfig") {
+		t.Errorf("expected PAT gitconfig to include ~/.gitconfig, got:\n%s", patContentStr)
 	}
 	if !strings.Contains(patContentStr, "[credential]") {
 		t.Errorf("expected PAT gitconfig to contain the credential helper, got:\n%s", patContentStr)
 	}
+	if got := strings.TrimSpace(runGitOutput(t, t.TempDir(), "config", "--get", "user.name")); got != "Kratis" {
+		t.Errorf("expected git to resolve user.name Kratis while credentials are active, got %q", got)
+	}
 
 	// SSH registration clears the PAT helper/gitconfig and env, and sets
-	// SSH_AUTH_SOCK/GIT_SSH_COMMAND. A gitconfig with the git author identity is
-	// still persisted so later commits (publish) have an identity.
+	// SSH_AUTH_SOCK/GIT_SSH_COMMAND. The identity persists in $HOME/.gitconfig
+	// and git keeps resolving it without GIT_CONFIG_GLOBAL.
 	keyPath, err := generateSSHTestKey(t)
 	if err != nil {
 		t.Fatalf("failed to generate SSH key: %v", err)
@@ -526,8 +613,6 @@ func TestExecuteRegisterGitAuth_ProcessWideEnv(t *testing.T) {
 	c.ExecuteRegisterGitAuth(RegisterGitAuthParams{
 		CredentialType: "SSH_KEY",
 		PrivateKey:     string(privateKey),
-		UserName:       "Alice Engineer",
-		UserEmail:      "alice@example.com",
 	}, nil)
 	if os.Getenv("SSH_AUTH_SOCK") == "" {
 		t.Error("expected SSH_AUTH_SOCK to be set after SSH registration")
@@ -535,26 +620,17 @@ func TestExecuteRegisterGitAuth_ProcessWideEnv(t *testing.T) {
 	if os.Getenv("GIT_SSH_COMMAND") != "ssh -o StrictHostKeyChecking=no" {
 		t.Errorf("expected GIT_SSH_COMMAND to be 'ssh -o StrictHostKeyChecking=no', got %q", os.Getenv("GIT_SSH_COMMAND"))
 	}
-	if os.Getenv("GIT_CONFIG_GLOBAL") == "" {
-		t.Error("expected GIT_CONFIG_GLOBAL to be set after SSH registration (git identity persists)")
+	if os.Getenv("GIT_CONFIG_GLOBAL") != "" {
+		t.Errorf("expected GIT_CONFIG_GLOBAL to be unset after SSH registration, got %q", os.Getenv("GIT_CONFIG_GLOBAL"))
 	}
-	sshConfig := os.Getenv("GIT_CONFIG_GLOBAL")
-	content, err := os.ReadFile(sshConfig) //nolint:gosec // G304: test reads the generated gitconfig
-	if err != nil {
-		t.Fatalf("failed to read SSH gitconfig: %v", err)
+	if _, statErr := os.Stat(patConfig); !os.IsNotExist(statErr) {
+		t.Errorf("expected the PAT gitconfig to be removed by SSH re-registration")
 	}
-	sshContent := string(content)
-	if !strings.Contains(sshContent, "[user]") {
-		t.Errorf("expected SSH gitconfig to contain a [user] section, got:\n%s", sshContent)
+	if got := strings.TrimSpace(runGitOutput(t, t.TempDir(), "config", "--get", "user.name")); got != "Kratis" {
+		t.Errorf("expected git to resolve user.name Kratis from $HOME/.gitconfig, got %q", got)
 	}
-	if !strings.Contains(sshContent, "name = Alice Engineer") {
-		t.Errorf("expected SSH gitconfig to preserve user.name, got:\n%s", sshContent)
-	}
-	if !strings.Contains(sshContent, "email = alice@example.com") {
-		t.Errorf("expected SSH gitconfig to preserve user.email, got:\n%s", sshContent)
-	}
-	if strings.Contains(sshContent, "[credential]") {
-		t.Errorf("expected SSH gitconfig to have no credential helper, got:\n%s", sshContent)
+	if got := strings.TrimSpace(runGitOutput(t, t.TempDir(), "config", "--get", "user.email")); got != "kratis@control-plane-host" {
+		t.Errorf("expected git to resolve user.email from $HOME/.gitconfig, got %q", got)
 	}
 }
 

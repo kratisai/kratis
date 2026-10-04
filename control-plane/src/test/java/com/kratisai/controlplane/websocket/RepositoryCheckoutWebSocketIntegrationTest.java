@@ -285,8 +285,11 @@ class RepositoryCheckoutWebSocketIntegrationTest {
                 mockSession1, exec1.getEnvironment().getId());
         sandboxExecutionService.dispatchExecution(exec1, mockSession1);
         await().atMost(Duration.ofSeconds(5))
-                .untilAsserted(() -> assertThat(capturedMessages1).hasSize(2));
-        String authPayload1 = capturedMessages1.getFirst().getPayload();
+                .untilAsserted(() -> assertThat(capturedMessages1).hasSize(3));
+        String identityPayload1 = capturedMessages1.getFirst().getPayload();
+        assertThat(identityPayload1).contains("\"method\":\"env.registerGitIdentity\"");
+        assertThat(identityPayload1).contains("\"userName\":\"Kratis\"");
+        String authPayload1 = capturedMessages1.get(1).getPayload();
         assertThat(authPayload1).contains("\"credentialType\":\"GITHUB_APP\"");
         assertThat(authPayload1).doesNotContain("\"token\"");
 
@@ -315,7 +318,7 @@ class RepositoryCheckoutWebSocketIntegrationTest {
     }
 
     @Test
-    void testNewRepositoryExecution_skipsAuthRegistrationAndLaunchesAgent() throws Exception {
+    void testNewRepositoryExecution_registersIdentitySkipsAuthAndLaunchesAgent() throws Exception {
         var scenario = scenarioFactory.startNewRepoOnConnector(
                 auth, chat, "New Repo Connector", "test-plan-newrepo", "fresh-repo");
         UUID executionId = scenario.executionId();
@@ -324,7 +327,10 @@ class RepositoryCheckoutWebSocketIntegrationTest {
                 port, scenario, sidecar -> sidecar.whenMethod("env.registerGitAuth", (session, payload) -> {
                             throw new AssertionError("env.registerGitAuth must not be sent for a new-repo execution");
                         })
+                        .expectTrigger("env.registerGitIdentity", 1)
                         .expectTrigger("env.launch_acp_agent", 1))) {
+            assertThat(pair.sidecar().awaitTrigger("env.registerGitIdentity", 30, TimeUnit.SECONDS))
+                    .isTrue();
             assertThat(pair.sidecar().awaitTrigger("env.launch_acp_agent", 30, TimeUnit.SECONDS))
                     .isTrue();
             await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
@@ -337,9 +343,10 @@ class RepositoryCheckoutWebSocketIntegrationTest {
 
     private void completeMockResultIfRequest(TextMessage message) throws Exception {
         JsonNode envelope = objectMapper.readTree(message.getPayload());
+        String method = envelope.path("method").asText();
         if (envelope.has("method")
                 && envelope.has("id")
-                && "env.registerGitAuth".equals(envelope.get("method").asText())) {
+                && ("env.registerGitAuth".equals(method) || "env.registerGitIdentity".equals(method))) {
             ObjectNode response = objectMapper.createObjectNode();
             response.put("jsonrpc", "2.0");
             response.set("id", envelope.get("id"));

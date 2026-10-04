@@ -14,27 +14,49 @@ import (
 	"kratis-connector/runner"
 )
 
-// ExecuteRegisterGitAuth configures Git credentials and shell proxy helpers for the workspace daemon.
+// ExecuteRegisterGitIdentity persists the git author identity in the container's
+// global git config ($HOME/.gitconfig). Git reads that file natively, so the
+// identity applies to every git invocation in the sandbox and survives connector
+// restarts without any process state.
+func (c *Client) ExecuteRegisterGitIdentity(params RegisterGitIdentityParams, reqID interface{}) {
+	log.Printf("Registering Git identity: user=%s email=%s", params.UserName, params.UserEmail)
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		if reqID != nil {
+			c.sendErrorResponse(reqID, -32000, "Failed to resolve HOME for git identity", err.Error())
+		}
+		return
+	}
+	// --file instead of --global: GIT_CONFIG_GLOBAL (set when credentials are
+	// registered) would redirect --global to the generated credential config.
+	homeConfig := filepath.Join(home, ".gitconfig")
+	for _, setting := range [][2]string{
+		{"user.name", params.UserName},
+		{"user.email", params.UserEmail},
+	} {
+		cmd := exec.Command("git", "config", "--file", homeConfig, setting[0], setting[1]) //nolint:gosec // G204: identity values come from the control-plane request
+		if out, err := cmd.CombinedOutput(); err != nil {
+			if reqID != nil {
+				c.sendErrorResponse(reqID, -32000, "Failed to persist git identity", fmt.Sprintf("%v, output: %s", err, string(out)))
+			}
+			return
+		}
+	}
+
+	if reqID != nil {
+		c.sendSuccessResponse(reqID, RegisterGitIdentityResult{Status: GitAuthStatusSuccess})
+	}
+}
+
+// ExecuteRegisterGitAuth deploys git credential material (token helper or
+// ssh-agent) process-wide. The author identity is registered separately via
+// env.registerGitIdentity and picked up through the generated config's include.
 func (c *Client) ExecuteRegisterGitAuth(params RegisterGitAuthParams, reqID interface{}) {
 	log.Printf("Registering Git credentials: credType=%s", params.CredentialType)
 
 	// Clean up previous agent, helper script, generated gitconfig, and process-wide env
-	c.mu.Lock()
-	if c.sshAgentPID != "" {
-		cmd := exec.Command("kill", c.sshAgentPID) //nolint:gosec // G204: kills the ssh-agent helper this client spawned
-		_ = cmd.Run()
-		c.sshAgentPID = ""
-		c.sshAuthSock = ""
-	}
-	if c.gitHelperScript != "" {
-		_ = os.Remove(c.gitHelperScript)
-		c.gitHelperScript = ""
-	}
-	if c.gitConfigGlobal != "" {
-		_ = os.Remove(c.gitConfigGlobal)
-		c.gitConfigGlobal = ""
-	}
-	c.mu.Unlock()
+	c.cleanupCredentials()
 	_ = os.Unsetenv("SSH_AUTH_SOCK")
 	_ = os.Unsetenv("GIT_SSH_COMMAND")
 	_ = os.Unsetenv("GIT_CONFIG_GLOBAL")
@@ -61,20 +83,14 @@ func (c *Client) ExecuteRegisterGitAuth(params RegisterGitAuthParams, reqID inte
 		c.mu.Unlock()
 		_ = os.Setenv("SSH_AUTH_SOCK", sshAuthSock)
 		_ = os.Setenv("GIT_SSH_COMMAND", "ssh -o StrictHostKeyChecking=no")
-		c.writeGlobalGitConfig("", params.UserName, params.UserEmail)
 	case CredentialTypePAT, CredentialTypeGitHubApp, "GIT_PAT", "GITHUB":
-		c.setupTokenHelper(params.UserName, params.UserEmail)
+		c.setupTokenHelper()
 	default:
 		if reqID != nil {
 			c.sendErrorResponse(reqID, -32602, "invalid params", "unsupported credentialType: "+string(params.CredentialType))
 		}
 		return
 	}
-
-	c.mu.Lock()
-	c.gitUserName = params.UserName
-	c.gitUserEmail = params.UserEmail
-	c.mu.Unlock()
 
 	if reqID != nil {
 		c.sendSuccessResponse(reqID, RegisterGitAuthResult{Status: GitAuthStatusSuccess})
@@ -99,24 +115,19 @@ func (c *Client) writeCredentialHelper() string {
 	return helperScript
 }
 
-// reassertGitIdentity rewrites the generated global gitconfig (and the token
-// credential helper when present) from the identity captured at registerGitAuth
-// time. This makes git identity and credentials resilient to external deletion
-// of /kratis/gitconfig between sandbox init and a later publish.
-func (c *Client) reassertGitIdentity() {
+// reassertCredentialConfig rewrites the generated credential gitconfig (and the
+// token helper) captured at registerGitAuth time, so external deletion of
+// /kratis/gitconfig can never break a later publish.
+func (c *Client) reassertCredentialConfig() {
 	c.mu.Lock()
-	userName := c.gitUserName
-	userEmail := c.gitUserEmail
 	helperScript := c.gitHelperScript
 	c.mu.Unlock()
 
-	if userName == "" && userEmail == "" {
+	if helperScript == "" {
 		return
 	}
-	if helperScript != "" {
-		c.writeCredentialHelper()
-	}
-	c.writeGlobalGitConfig(helperScript, userName, userEmail)
+	c.writeCredentialHelper()
+	c.writeGlobalGitConfig(helperScript)
 }
 
 func (c *Client) setupSSHKey(privateKey string) (string, error) {
@@ -135,7 +146,7 @@ func (c *Client) setupSSHKey(privateKey string) (string, error) {
 	return sshAuthSock, nil
 }
 
-func (c *Client) setupTokenHelper(userName, userEmail string) {
+func (c *Client) setupTokenHelper() {
 	// Persistent, stable paths: credentials must survive the whole sandbox
 	// lifetime, so they cannot live under /tmp (ephemeral) or use the connector
 	// PID (which changes if the sidecar restarts).
@@ -145,27 +156,21 @@ func (c *Client) setupTokenHelper(userName, userEmail string) {
 	c.mu.Unlock()
 
 	c.writeCredentialHelper()
-	c.writeGlobalGitConfig(helperScript, userName, userEmail)
+	c.writeGlobalGitConfig(helperScript)
 }
 
-// writeGlobalGitConfig persists global gitconfig (exported via GIT_CONFIG_GLOBAL)
-// providing git "identity" for both sidecar and agent git-ops.
-func (c *Client) writeGlobalGitConfig(helperScript, userName, userEmail string) {
+// writeGlobalGitConfig persists the credential gitconfig exported via
+// GIT_CONFIG_GLOBAL. GIT_CONFIG_GLOBAL replaces the default global config, so
+// the generated file includes ~/.gitconfig to keep the registered identity
+// visible while credentials are active.
+func (c *Client) writeGlobalGitConfig(helperScript string) {
 	c.mu.Lock()
 	gitConfigGlobal := filepath.Join(c.credentialsDir, "gitconfig")
 	c.gitConfigGlobal = gitConfigGlobal
 	c.mu.Unlock()
 
 	var content strings.Builder
-	if userName != "" || userEmail != "" {
-		content.WriteString("[user]\n")
-		if userName != "" {
-			_, _ = fmt.Fprintf(&content, "\tname = %s\n", userName)
-		}
-		if userEmail != "" {
-			_, _ = fmt.Fprintf(&content, "\temail = %s\n", userEmail)
-		}
-	}
+	content.WriteString("[include]\n\tpath = ~/.gitconfig\n")
 	if helperScript != "" {
 		_, _ = fmt.Fprintf(&content, "[credential]\n\thelper = %s\n", helperScript)
 	}
@@ -949,9 +954,9 @@ func (c *Client) ExecuteGitPush(params GitPushParams, reqID interface{}) {
 	cmdEnv := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	workspace := c.resolveWorkspace()
 
-	// Identity was captured at registerGitAuth time; re-assert the global
-	// gitconfig so a deleted/lost file can never break the publish commit.
-	c.reassertGitIdentity()
+	// Re-assert the credential config so a deleted/lost file can never break
+	// the publish commit.
+	c.reassertCredentialConfig()
 
 	// 1. Refresh remote refs so rebases operate on the latest origin state.
 	fetchCmd := exec.Command("git", "fetch", "origin") //nolint:gosec
@@ -1094,7 +1099,7 @@ func (c *Client) ExecuteGitSetRemote(params GitSetRemoteParams, reqID interface{
 	cmdEnv := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	workspace := c.resolveWorkspace()
 
-	c.reassertGitIdentity()
+	c.reassertCredentialConfig()
 
 	// Replace any stale origin left by a previous attempt so the push below
 	// cannot target the wrong host.

@@ -260,8 +260,10 @@ class EnvironmentRpcClientTest {
                 .isEqualTo(EnvironmentConnectorResult.AcpPrompt.class);
         assertThat(new EnvironmentRpcPayload.Terminate().resultType())
                 .isEqualTo(EnvironmentConnectorResult.Terminate.class);
-        assertThat(new EnvironmentRpcPayload.RegisterGitAuth("PAT", "", "Kratis", "kratis@example.com").resultType())
+        assertThat(new EnvironmentRpcPayload.RegisterGitAuth("PAT", "").resultType())
                 .isEqualTo(EnvironmentConnectorResult.RegisterGitAuth.class);
+        assertThat(new EnvironmentRpcPayload.RegisterGitIdentity("Kratis", "kratis@example.com").resultType())
+                .isEqualTo(EnvironmentConnectorResult.RegisterGitIdentity.class);
         assertThat(new EnvironmentRpcPayload.GitDiffSummary("main", "exec-1").resultType())
                 .isEqualTo(EnvironmentConnectorResult.GitDiffSummary.class);
         assertThat(new EnvironmentRpcPayload.GitFileDiff("src/A.java", "main", "exec-1").resultType())

@@ -221,7 +221,12 @@ class ExecutionStatusChangedWebSocketIntegrationTest {
                 String payload = message.getPayload();
                 try {
                     String execId = extractExecutionId(payload);
-                    if (payload.contains("env.checkout")) {
+                    if (payload.contains("env.registerGitIdentity") || payload.contains("env.registerGitAuth")) {
+                        JsonRpcInboundRequest request = objectMapper.readValue(payload, JsonRpcInboundRequest.class);
+                        Object id = request.id() != null ? request.id() : 0;
+                        wsSession.sendMessage(new TextMessage(objectMapper.writeValueAsString(
+                                Map.of("jsonrpc", "2.0", "id", id, "result", Map.of("status", "success")))));
+                    } else if (payload.contains("env.checkout")) {
                         wsSession.sendMessage(new TextMessage(objectMapper.writeValueAsString(new JsonRpcInboundRequest(
                                 EnvironmentRpcPayload.CheckoutComplete.METHOD,
                                 objectMapper.valueToTree(Map.of(

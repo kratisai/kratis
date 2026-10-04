@@ -92,12 +92,6 @@ type Client struct {
 	gitHelperScript string
 	gitConfigGlobal string
 
-	// Git author identity captured at registerGitAuth time and re-asserted into
-	// the generated global gitconfig whenever a git operation (e.g. publish)
-	// needs it, so identity survives external deletion of /kratis/gitconfig.
-	gitUserName  string
-	gitUserEmail string
-
 	mu             sync.Mutex
 	wsConn         *websocket.Conn
 	writeMu        sync.Mutex
@@ -343,8 +337,9 @@ func (c *Client) failPendingLocked(err error) {
 	}
 }
 
-// cleanupCredentials tears down git credential state. It runs only on shutdown,
-// never on a WebSocket reconnect, so credentials survive connection drops.
+// cleanupCredentials tears down git credential state. It runs on shutdown and
+// before credential re-registration, never on a WebSocket reconnect, so
+// credentials survive connection drops.
 func (c *Client) cleanupCredentials() {
 	c.mu.Lock()
 	sshAgentPID := c.sshAgentPID
@@ -354,8 +349,6 @@ func (c *Client) cleanupCredentials() {
 	c.sshAuthSock = ""
 	c.gitHelperScript = ""
 	c.gitConfigGlobal = ""
-	c.gitUserName = ""
-	c.gitUserEmail = ""
 	c.mu.Unlock()
 
 	if sshAgentPID != "" {
@@ -862,6 +855,24 @@ func (c *Client) handleServerRequest(req JsonRpcRequest) {
 		}
 
 		go c.ExecuteRegisterGitAuth(params, req.ID)
+
+	case "env.registerGitIdentity":
+		var params RegisterGitIdentityParams
+		rawBytes, err := json.Marshal(req.Params)
+		if err != nil {
+			if req.ID != nil {
+				c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
+			}
+			return
+		}
+		if err := json.Unmarshal(rawBytes, &params); err != nil {
+			if req.ID != nil {
+				c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
+			}
+			return
+		}
+
+		go c.ExecuteRegisterGitIdentity(params, req.ID)
 
 	case "env.checkout":
 		var params CheckoutParams

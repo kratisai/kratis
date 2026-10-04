@@ -66,8 +66,16 @@ public sealed interface EnvironmentConnectorResult {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record RegisterGitAuth(@JsonProperty("status") RegisterGitAuthStatus status) implements EnvironmentConnectorResult {
+    record RegisterGitAuth(@JsonProperty("status") GitRegistrationStatus status) implements EnvironmentConnectorResult {
         public RegisterGitAuth {
+            Objects.requireNonNull(status, "status is required");
+        }
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record RegisterGitIdentity(@JsonProperty("status") GitRegistrationStatus status)
+            implements EnvironmentConnectorResult {
+        public RegisterGitIdentity {
             Objects.requireNonNull(status, "status is required");
         }
     }

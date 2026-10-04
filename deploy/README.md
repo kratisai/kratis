@@ -71,6 +71,7 @@ To run from source without building a Docker image (JVM mode), use the dev quick
 ```bash
 docker compose up -d --wait
 docker compose logs -f
+docker compose pull          # upgrade the pre-built docker image
 docker compose down          # keep volumes
 docker compose down -v       # drop data
 ```

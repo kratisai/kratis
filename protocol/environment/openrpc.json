@@ -222,6 +222,28 @@
       }
     },
     {
+      "name": "env.registerGitIdentity",
+      "summary": "Persist the git author identity in the sandbox",
+      "description": "Registers the git author identity independently of credentials. The connector persists it to the container's global git config so it survives connector restarts and applies to every git invocation.",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/register_git_identity.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/register_git_identity.schema.json"
+        }
+      }
+    },
+    {
       "name": "env.checkout",
       "summary": "Dispatch git repository checkout to sidecar; completion arrives via env.checkout_complete",
       "x-kratis-direction": "control-plane-to-connector",
