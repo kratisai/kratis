@@ -3,9 +3,7 @@
   "method": "env.registerGitAuth",
   "params": {
     "credentialType": "PAT",
-    "privateKey": "",
-    "userName": "Kratis",
-    "userEmail": "kratis@control-plane-host"
+    "privateKey": ""
   },
   "id": 11
 }

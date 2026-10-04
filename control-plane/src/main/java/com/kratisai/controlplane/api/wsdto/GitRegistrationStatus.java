@@ -2,12 +2,13 @@ package com.kratisai.controlplane.api.wsdto;
 
 import com.fasterxml.jackson.annotation.JsonValue;
 
-public enum RegisterGitAuthStatus {
+/** Result status shared by the git identity and credential registration methods. */
+public enum GitRegistrationStatus {
     SUCCESS("success");
 
     private final String value;
 
-    RegisterGitAuthStatus(String value) {
+    GitRegistrationStatus(String value) {
         this.value = value;
     }
 

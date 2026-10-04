@@ -84,12 +84,13 @@ Agents pause for questions and for privileged operations. The UI shows live outp
 ```
 Control plane
     │  WebSocket JSON-RPC 2.0 on /ws/env
+    │  - env.registerGitIdentity (author identity → $HOME/.gitconfig)
     │  - env.registerGitAuth (PAT helper or ssh-agent)
     │  - LiteLLM virtual token + gateway URL
     │  - telemetry and HITL
     ▼
 kratis-connector (inside the sandbox)
-    │  1. Deploy Git auth in process memory
+    │  1. Persist git author identity; deploy Git auth in process memory
     │  2. env.checkout of the canvas repo, or git init
     │  3. Harness setup commands
     │  4. Spawn the ACP agent on stdio

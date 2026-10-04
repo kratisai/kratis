@@ -5,8 +5,8 @@ import static org.apache.commons.lang3.StringUtils.isBlank;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.ExecStatus;
+import com.kratisai.controlplane.api.wsdto.GitRegistrationStatus;
 import com.kratisai.controlplane.api.wsdto.LaunchStatus;
-import com.kratisai.controlplane.api.wsdto.RegisterGitAuthStatus;
 import com.kratisai.controlplane.config.KratisProperties;
 import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
@@ -162,14 +162,23 @@ public class SandboxProvisioningService {
                 execution.getId());
     }
 
+    public void registerGitIdentity(SandboxExecution execution) throws InterruptedException, TimeoutException {
+        EnvironmentConnectorResult.RegisterGitIdentity identityResult = environmentRpcClient.request(
+                environmentId(execution), new EnvironmentRpcPayload.RegisterGitIdentity(GIT_USER_NAME, gitUserEmail()));
+        if (identityResult == null || identityResult.status() != GitRegistrationStatus.SUCCESS) {
+            throw new IllegalStateException("Git identity registration failed: "
+                    + (identityResult != null ? identityResult.status() : "no result"));
+        }
+    }
+
     public void registerGitAuth(SandboxExecution execution, RepoCredential credential)
             throws InterruptedException, TimeoutException {
         GitAuthMaterial auth = credentialResolver.resolve(credential);
         EnvironmentConnectorResult.RegisterGitAuth authResult = environmentRpcClient.request(
                 environmentId(execution),
                 new EnvironmentRpcPayload.RegisterGitAuth(
-                        credential.getType().name(), auth.maybeSshKey().orElse(""), GIT_USER_NAME, gitUserEmail()));
-        if (authResult == null || authResult.status() != RegisterGitAuthStatus.SUCCESS) {
+                        credential.getType().name(), auth.maybeSshKey().orElse("")));
+        if (authResult == null || authResult.status() != GitRegistrationStatus.SUCCESS) {
             throw new IllegalStateException(
                     "Git auth registration failed: " + (authResult != null ? authResult.status() : "no result"));
         }
@@ -182,6 +191,7 @@ public class SandboxProvisioningService {
 
         RepoCredential credential = repository.getCredential();
 
+        registerGitIdentity(execution);
         if (credential != null) {
             registerGitAuth(execution, credential);
             logger.info(
@@ -205,6 +215,8 @@ public class SandboxProvisioningService {
     }
 
     private void prepareNewRepository(SandboxExecution execution) throws Exception {
+        registerGitIdentity(execution);
+
         RepoCredential credential = execution.getNewRepoCredential();
         if (credential != null) {
             registerGitAuth(execution, credential);
@@ -215,9 +227,7 @@ public class SandboxProvisioningService {
         }
 
         String initCommand =
-                "if [ -n \"$(ls -A | grep -v '^\\.kratis$')\" ]; then echo \"Workspace is not empty\" >&2; exit 1; fi; git init -b main && git -c user.name=\""
-                        + GIT_USER_NAME + "\" -c user.email=\"" + gitUserEmail()
-                        + "\" commit --allow-empty -m \"Initial commit\"";
+                "if [ -n \"$(ls -A | grep -v '^\\.kratis$')\" ]; then echo \"Workspace is not empty\" >&2; exit 1; fi; git init -b main && git commit --allow-empty -m \"Initial commit\"";
         EnvironmentConnectorResult.Exec result = environmentRpcClient.request(
                 environmentId(execution),
                 new EnvironmentRpcPayload.Exec(

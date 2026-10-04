@@ -1117,8 +1117,6 @@ func TestHandleServerRequest_RegisterGitAuthDispatch(t *testing.T) {
 		Method: "env.registerGitAuth",
 		Params: map[string]interface{}{
 			"credentialType": "GIT_PAT",
-			"userName":       "Kratis",
-			"userEmail":      "kratis@control-plane-host",
 		},
 		ID: uint64(702),
 	})
@@ -1144,6 +1142,93 @@ func TestHandleServerRequest_RegisterGitAuthDispatch(t *testing.T) {
 	c.mu.Unlock()
 	if helper == "" {
 		t.Error("expected gitHelperScript to be set")
+	}
+
+	c.Close()
+}
+
+// TestHandleServerRequest_RegisterGitIdentityDispatch tests that handleServerRequest
+// dispatches env.registerGitIdentity with valid params to ExecuteRegisterGitIdentity.
+func TestHandleServerRequest_RegisterGitIdentityDispatch(t *testing.T) {
+	var (
+		mu           sync.Mutex
+		responseMsg  []byte
+		responseChan = make(chan struct{})
+	)
+
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req JsonRpcRequest
+			if json.Unmarshal(msg, &req) != nil {
+				continue
+			}
+
+			if req.ID != nil && req.Method == "" {
+				mu.Lock()
+				if responseMsg == nil {
+					responseMsg = msg
+					select {
+					case <-responseChan:
+					default:
+						close(responseChan)
+					}
+				}
+				mu.Unlock()
+				continue
+			}
+		}
+	})
+
+	c := connectClient(t, wsURL(srv), "tok")
+	c.credentialsDir = t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	// Earlier tests may leave GIT_CONFIG_GLOBAL pointing at a removed file;
+	// identity must resolve through the default global config.
+	_ = os.Unsetenv("GIT_CONFIG_GLOBAL")
+	errChan := make(chan error, 1)
+	go c.readLoop(errChan)
+
+	c.handleServerRequest(JsonRpcRequest{
+		Method: "env.registerGitIdentity",
+		Params: map[string]interface{}{
+			"userName":  "Kratis",
+			"userEmail": "kratis@control-plane-host",
+		},
+		ID: uint64(703),
+	})
+
+	select {
+	case <-responseChan:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Timeout waiting for registerGitIdentity dispatch response")
+	}
+
+	mu.Lock()
+	respBytes := responseMsg
+	mu.Unlock()
+
+	var resp JsonRpcResponse
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("expected a success response, got error: %+v", resp.Error)
+	}
+
+	var result RegisterGitIdentityResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("failed to parse result: %v", err)
+	}
+	if result.Status != GitAuthStatusSuccess {
+		t.Errorf("expected status 'success', got %q", result.Status)
+	}
+	if got := strings.TrimSpace(runGitOutput(t, t.TempDir(), "config", "--get", "user.name")); got != "Kratis" {
+		t.Errorf("expected identity to be persisted in $HOME/.gitconfig, got %q", got)
 	}
 
 	c.Close()

@@ -19,12 +19,12 @@ import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredRe
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.ExecStatus;
+import com.kratisai.controlplane.api.wsdto.GitRegistrationStatus;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.LaunchStatus;
 import com.kratisai.controlplane.api.wsdto.PromptStatus;
-import com.kratisai.controlplane.api.wsdto.RegisterGitAuthStatus;
 import com.kratisai.controlplane.api.wsdto.StopReason;
 import com.kratisai.controlplane.config.KratisProperties;
 import com.kratisai.controlplane.config.LiteLLMProperties;
@@ -51,6 +51,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -138,7 +139,7 @@ class SandboxExecutionServiceTest {
     private static final UUID USER_ID = UUID.fromString("88888888-8888-8888-8888-888888888888");
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         litellmProperties = new LiteLLMProperties();
         litellmProperties.setBaseUrl("http://localhost:4000");
         // No pause before the final usage fetch in unit tests; the delay is a production concern.
@@ -164,6 +165,10 @@ class SandboxExecutionServiceTest {
         lenient()
                 .when(canvasRepository.findById(any()))
                 .thenAnswer(invocation -> Optional.ofNullable(canvases.get(invocation.getArgument(0))));
+        lenient()
+                .when(environmentRpcClient.request(
+                        eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitIdentity.class)))
+                .thenReturn(new EnvironmentConnectorResult.RegisterGitIdentity(GitRegistrationStatus.SUCCESS));
     }
 
     private SandboxExecutionService newSandboxExecutionService(Executor dispatchExecutor) {
@@ -452,6 +457,38 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
+    void launchAgent_withNewRepository_registersIdentityAndInitsWithoutInlineIdentity() throws Exception {
+        ModelProvider provider = createTestModelProvider();
+        SandboxExecution execution = createTestExecution(AgentHarness.valueOf("OPENCODE"), provider, "gpt-4o");
+        execution.setNewRepoName("fresh-repo");
+
+        when(litellmProvisioningService.buildLiteLLMModelName(provider, "gpt-4o"))
+                .thenReturn("openai-test-provider-gpt-4o-11111111");
+        when(litellmProvisioningService.verifyModelRegistered(provider, "gpt-4o"))
+                .thenReturn(true);
+        when(litellmProvisioningService.buildVirtualKeyAlias(any(), any())).thenReturn("test-alias");
+        when(virtualKeyService.generateKey(any(), any())).thenReturn("sk-virtual-key");
+        stubSuccessfulExec();
+
+        sandboxProvisioningService.launchAgent(execution);
+
+        verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitIdentity.class));
+        verify(environmentRpcClient, never()).request(any(), any(EnvironmentRpcPayload.RegisterGitAuth.class));
+
+        ArgumentCaptor<EnvironmentRpcPayload.Exec> execCaptor =
+                ArgumentCaptor.forClass(EnvironmentRpcPayload.Exec.class);
+        verify(environmentRpcClient, atLeastOnce()).request(eq(ENVIRONMENT_ID), execCaptor.capture());
+        List<String> commands = execCaptor.getAllValues().stream()
+                .map(EnvironmentRpcPayload.Exec::command)
+                .toList();
+        assertThat(commands)
+                .anyMatch(command -> command.contains("git init -b main")
+                        && command.contains("commit --allow-empty -m \"Initial commit\"")
+                        && !command.contains("-c user.name")
+                        && !command.contains("-c user.email"));
+    }
+
+    @Test
     void launchAgent_writesActiveTaskFileBeforeHarnessSetup() throws Exception {
         ModelProvider provider = createTestModelProvider();
         SandboxExecution execution = createTestExecution(AgentHarness.valueOf("OPENCODE"), provider, "gpt-4o");
@@ -582,7 +619,7 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
-    void dispatchCheckout_registersGitAuthWithControlPlaneIdentity() throws Exception {
+    void dispatchCheckout_registersGitIdentityBeforeAuth() throws Exception {
         SandboxExecution execution = createTestExecution();
 
         RepoCredential credential = new RepoCredential();
@@ -596,15 +633,38 @@ class SandboxExecutionServiceTest {
 
         when(credentialResolver.resolve(credential)).thenReturn(GitAuthMaterial.ofToken("pat-secret"));
         when(environmentRpcClient.request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitAuth.class)))
-                .thenReturn(new EnvironmentConnectorResult.RegisterGitAuth(RegisterGitAuthStatus.SUCCESS));
+                .thenReturn(new EnvironmentConnectorResult.RegisterGitAuth(GitRegistrationStatus.SUCCESS));
 
         sandboxProvisioningService.dispatchCheckout(execution);
 
+        ArgumentCaptor<EnvironmentRpcPayload.RegisterGitIdentity> identityCaptor =
+                ArgumentCaptor.forClass(EnvironmentRpcPayload.RegisterGitIdentity.class);
         ArgumentCaptor<EnvironmentRpcPayload.RegisterGitAuth> authCaptor =
                 ArgumentCaptor.forClass(EnvironmentRpcPayload.RegisterGitAuth.class);
-        verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), authCaptor.capture());
-        assertThat(authCaptor.getValue().userName()).isEqualTo("Kratis");
-        assertThat(authCaptor.getValue().userEmail()).isEqualTo("kratis@control-plane.test");
+        InOrder inOrder = inOrder(environmentRpcClient);
+        inOrder.verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), identityCaptor.capture());
+        inOrder.verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), authCaptor.capture());
+
+        assertThat(identityCaptor.getValue().userName()).isEqualTo("Kratis");
+        assertThat(identityCaptor.getValue().userEmail()).isEqualTo("kratis@control-plane.test");
+        assertThat(authCaptor.getValue().credentialType()).isEqualTo("PAT");
+    }
+
+    @Test
+    void dispatchCheckout_withoutCredential_registersIdentityOnly() throws Exception {
+        SandboxExecution execution = createTestExecution();
+
+        Repository repository = new Repository();
+        repository.setId(UUID.fromString("33333333-4444-5555-6666-777777777777"));
+        repository.setUrl("https://github.com/test/repo.git");
+        repository.setBranch("develop");
+        execution.setRepository(repository);
+
+        sandboxProvisioningService.dispatchCheckout(execution);
+
+        verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitIdentity.class));
+        verify(environmentRpcClient, never()).request(any(), any(EnvironmentRpcPayload.RegisterGitAuth.class));
+        verify(environmentRpcClient).send(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.Checkout.class));
     }
 
     @Test

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RegisterGitIdentityParams",
+  "type": "object",
+  "required": ["userName", "userEmail"],
+  "properties": {
+    "userName": { "type": "string" },
+    "userEmail": { "type": "string" }
+  },
+  "additionalProperties": false
+}
