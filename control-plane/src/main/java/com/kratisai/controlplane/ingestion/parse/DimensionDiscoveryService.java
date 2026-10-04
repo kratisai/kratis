@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.ingestion.parse;
 
+import com.kratisai.controlplane.agentloop.ChatResponseAssembler;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.model.CtxDimension;
 import com.kratisai.controlplane.model.CtxEdge;
@@ -18,7 +19,6 @@ import com.kratisai.controlplane.repository.CtxNodeDimensionRepository;
 import com.kratisai.controlplane.repository.CtxNodeRepository;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.IOException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -90,12 +90,9 @@ public class DimensionDiscoveryService {
         return chatModelFactory.createChatModelViaLiteLLM(modelProvider, litellmModelName, virtualKey, false);
     }
 
-    // Generation.getOutput() is contractually non-null in Spring AI (JSpecify-annotated,
-    // defaulted via requireNonNullElse); SpotBugs cannot see those contracts and assumes nullable.
-    @SuppressFBWarnings("NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE")
-    private static String responseText(ChatResponse response) {
-        var result = response.getResult();
-        return result != null ? result.getOutput().getText() : null;
+    static String responseText(ChatResponse response) {
+        String text = ChatResponseAssembler.answerText(response);
+        return text.isBlank() ? null : text;
     }
 
     public static class DimensionDiscoveryException extends RuntimeException {

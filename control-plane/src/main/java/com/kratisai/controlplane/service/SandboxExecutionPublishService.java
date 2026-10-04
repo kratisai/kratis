@@ -2,6 +2,7 @@ package com.kratisai.controlplane.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.agentloop.ChatResponseAssembler;
 import com.kratisai.controlplane.api.restdto.PublishCapabilitiesDto;
 import com.kratisai.controlplane.api.restdto.PublishPrRequestDto;
 import com.kratisai.controlplane.api.restdto.PullRequestResultDto;
@@ -41,6 +42,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -390,13 +392,14 @@ public class SandboxExecutionPublishService {
             promptBuilder.append(
                     "{\n  \"title\": \"conventional commit title under 72 chars\",\n  \"body\": \"concise bulleted markdown summary of changes including agent feedback and verification\"\n}\n");
 
-            String response = ChatClient.builder(model)
+            ChatResponse chatResponse = ChatClient.builder(model)
                     .build()
                     .prompt(promptBuilder.toString())
                     .call()
-                    .content();
+                    .chatResponse();
+            String response = ChatResponseAssembler.answerText(chatResponse);
 
-            if (response != null && !response.isBlank()) {
+            if (!response.isBlank()) {
                 String cleanJson = response.trim();
                 if (cleanJson.startsWith("```json")) {
                     cleanJson = cleanJson.substring(7);

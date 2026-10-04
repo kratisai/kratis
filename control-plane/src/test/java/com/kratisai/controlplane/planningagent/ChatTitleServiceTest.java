@@ -28,6 +28,8 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 
 class ChatTitleServiceTest {
@@ -121,6 +123,19 @@ class ChatTitleServiceTest {
         verify(chatModelFactory).createChatModel(providerCaptor.capture(), eq("gpt-4o"), thinkingCaptor.capture());
         assertThat(providerCaptor.getValue()).isSameAs(provider);
         assertThat(thinkingCaptor.getValue()).isFalse();
+        verify(chatService).updateTitle(chatId, teamId, VALID_TITLE);
+    }
+
+    @Test
+    void maybeUpdateTitle_concatenatesMultiPartResponse() {
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(prompt -> new ChatResponse(List.of(
+                        new Generation(new AssistantMessage("Debug and fix the ")),
+                        new Generation(new AssistantMessage("flaky test suite now")))))
+                .build());
+
+        service.maybeUpdateTitle(provider, "gpt-4o", teamId, chatId);
+
         verify(chatService).updateTitle(chatId, teamId, VALID_TITLE);
     }
 

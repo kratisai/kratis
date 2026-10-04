@@ -13,11 +13,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -269,7 +271,7 @@ class ResearchDimensionWorkerTest {
 
         assertThatThrownBy(() -> researchDimensionWorker.research(task, batchLogger, batch.getId()))
                 .isInstanceOf(IngestionPipelineAbortException.class)
-                .hasMessageContaining("Authentication/Authorization failed");
+                .hasMessageContaining("authentication failed");
     }
 
     @Test
@@ -290,7 +292,7 @@ class ResearchDimensionWorkerTest {
 
         assertThatThrownBy(() -> researchDimensionWorker.research(task, batchLogger, batch.getId()))
                 .isInstanceOf(IngestionPipelineAbortException.class)
-                .hasMessageContaining("Unexpected HTTP client error");
+                .hasMessageContaining("not found");
     }
 
     @Test
@@ -322,5 +324,111 @@ class ResearchDimensionWorkerTest {
         assertThat(result).isNotNull();
         assertThat(result.synopsis()).contains("Retried after resource access exception");
         assertThat(callCount.get()).isEqualTo(2);
+    }
+
+    @Test
+    void shouldAssembleSynopsisFromMultipleResponseParts() {
+        setupDimensionHub(fileNode, dimension, 0.9);
+
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(prompt -> new ChatResponse(List.of(
+                        new Generation(new AssistantMessage("{\"synopsis\": \"The Native Interop & SDK Wrappers")),
+                        new Generation(new AssistantMessage(" archetype bridges low-level C and C++ libraries.\"}")))))
+                .build());
+
+        IngestionBatchLogService.BatchLogger batchLogger =
+                new IngestionBatchLogService.BatchLogger(batch.getId(), team.getId(), ingestionBatchLogService);
+        ResearchDimensionTask task = new ResearchDimensionTask(
+                batch.getId(), team.getIngestionProvider(), team.getIngestionModel(), dimension);
+        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch.getId());
+
+        assertThat(result).isNotNull();
+        assertThat(result.synopsis())
+                .isEqualTo("The Native Interop & SDK Wrappers archetype bridges low-level C and C++ libraries.");
+    }
+
+    @Test
+    void shouldIgnoreThoughtPartsWhenAssemblingSynopsis() {
+        setupDimensionHub(fileNode, dimension, 0.9);
+
+        Map<String, Object> isThought = Map.of("isThought", true);
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(prompt -> new ChatResponse(List.of(
+                        new Generation(AssistantMessage.builder()
+                                .content("Let me reason about the files...")
+                                .properties(isThought)
+                                .build()),
+                        new Generation(new AssistantMessage("{\"synopsis\": \"Answer only.\"}")))))
+                .build());
+
+        IngestionBatchLogService.BatchLogger batchLogger =
+                new IngestionBatchLogService.BatchLogger(batch.getId(), team.getId(), ingestionBatchLogService);
+        ResearchDimensionTask task = new ResearchDimensionTask(
+                batch.getId(), team.getIngestionProvider(), team.getIngestionModel(), dimension);
+        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch.getId());
+
+        assertThat(result).isNotNull();
+        assertThat(result.synopsis()).isEqualTo("Answer only.");
+    }
+
+    @Test
+    void shouldRetryWhenResponseIsTruncated() {
+        setupDimensionHub(fileNode, dimension, 0.9);
+
+        AtomicInteger callCount = new AtomicInteger(0);
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(prompt -> {
+                    int count = callCount.incrementAndGet();
+                    if (count == 1) {
+                        return new ChatResponse(List.of(new Generation(
+                                new AssistantMessage("{\"synopsis\": \"This response was cut off"),
+                                ChatGenerationMetadata.builder()
+                                        .finishReason("MAX_TOKENS")
+                                        .build())));
+                    }
+                    return new ChatResponse(List.of(new Generation(new AssistantMessage("""
+                                    {
+                                      "synopsis": "Recovered after a truncated response."
+                                    }
+                                    """))));
+                })
+                .build());
+
+        IngestionBatchLogService.BatchLogger batchLogger =
+                new IngestionBatchLogService.BatchLogger(batch.getId(), team.getId(), ingestionBatchLogService);
+        ResearchDimensionTask task = new ResearchDimensionTask(
+                batch.getId(), team.getIngestionProvider(), team.getIngestionModel(), dimension);
+        DimensionSynopsisResult result = researchDimensionWorker.research(task, batchLogger, batch.getId());
+
+        assertThat(result).isNotNull();
+        assertThat(result.synopsis()).contains("Recovered after a truncated response");
+        assertThat(callCount.get()).isEqualTo(2);
+    }
+
+    @Test
+    void shouldAbortWhenResponseIsAlwaysTruncated() {
+        setupDimensionHub(fileNode, dimension, 0.9);
+
+        AtomicInteger callCount = new AtomicInteger(0);
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(prompt -> {
+                    callCount.incrementAndGet();
+                    return new ChatResponse(List.of(new Generation(
+                            new AssistantMessage("{\"synopsis\": \"Always cut off"),
+                            ChatGenerationMetadata.builder()
+                                    .finishReason("RECITATION")
+                                    .build())));
+                })
+                .build());
+
+        IngestionBatchLogService.BatchLogger batchLogger =
+                new IngestionBatchLogService.BatchLogger(batch.getId(), team.getId(), ingestionBatchLogService);
+        ResearchDimensionTask task = new ResearchDimensionTask(
+                batch.getId(), team.getIngestionProvider(), team.getIngestionModel(), dimension);
+
+        assertThatThrownBy(() -> researchDimensionWorker.research(task, batchLogger, batch.getId()))
+                .isInstanceOf(IngestionPipelineAbortException.class)
+                .hasMessageContaining("Max retries exceeded");
+        assertThat(callCount.get()).isEqualTo(4);
     }
 }

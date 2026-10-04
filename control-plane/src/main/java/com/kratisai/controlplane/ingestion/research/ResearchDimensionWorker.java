@@ -1,5 +1,8 @@
 package com.kratisai.controlplane.ingestion.research;
 
+import com.kratisai.controlplane.agentloop.ChatResponseAssembler;
+import com.kratisai.controlplane.agentloop.LlmErrorCategory;
+import com.kratisai.controlplane.agentloop.LlmExceptionClassifier;
 import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.ingestion.IngestionPipelineAbortException;
@@ -14,7 +17,6 @@ import com.kratisai.controlplane.repository.CtxNodeDimensionRepository;
 import com.kratisai.controlplane.repository.IngestionModelUsageRepository;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -29,8 +31,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.ResourceAccessException;
+import org.springframework.util.StringUtils;
 
 @Component
 public class ResearchDimensionWorker {
@@ -60,21 +61,20 @@ public class ResearchDimensionWorker {
     }
 
     // NOT transactional - we mustn't hold onto long-lived transactions in the worker thread.
-    // ChatResponse.getMetadata()/Generation.getOutput() are contractually non-null in Spring
-    // AI; SpotBugs cannot see those contracts and assumes nullable.
-    @SuppressFBWarnings("NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE")
     public DimensionSynopsisResult research(
             ResearchDimensionTask task, IngestionBatchLogService.BatchLogger batchLogger, UUID batchId) {
 
         CtxDimension dimension = task.dimension();
         StringBuilder fileSnippets = buildFileSnippets(task.batchId(), dimension);
 
-        String promptText = DimensionPrompt.fromCategory(dimension.getCategory())
+        BeanOutputConverter<DimensionSynopsisResult> converter =
+                new BeanOutputConverter<>(DimensionSynopsisResult.class);
+        String basePromptText = DimensionPrompt.fromCategory(dimension.getCategory())
                 .format(
                         dimension.getName(),
                         dimension.getGlobPatterns(),
                         fileSnippets.toString(),
-                        new BeanOutputConverter<>(DimensionSynopsisResult.class).getFormat());
+                        converter.getFormat());
 
         String litellmModelName = litellmProvisioningService.buildLiteLLMModelName(task.provider(), task.modelName());
         String virtualKey = ingestionModelUsageRepository
@@ -88,6 +88,7 @@ public class ResearchDimensionWorker {
         long initialBackoffMs = ingestionProperties.getDimensionResearch().getInitialBackoffMs();
         long maxBackoffMs = ingestionProperties.getDimensionResearch().getMaxBackoffMs();
 
+        String feedback = "";
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
             logger.debug(
                     "{} research for {}: \"{}\"",
@@ -99,47 +100,72 @@ public class ResearchDimensionWorker {
                     (attempt == 0 ? "Starting" : "Retrying") + " research for " + dimension.getCategory() + ": \""
                             + dimension.getName() + "\"");
             try {
-                Prompt prompt =
-                        new Prompt(promptText, ToolCallingChatOptions.builder().build());
+                Prompt prompt = new Prompt(
+                        basePromptText + feedback,
+                        ToolCallingChatOptions.builder().build());
                 ChatResponse response = chatModel.call(prompt);
-                if (response.getResult() == null
-                        || response.getResult().getOutput().getText() == null) {
-                    throw new IngestionPipelineAbortException("LLM returned null result", null);
-                }
-                String text = response.getResult().getOutput().getText();
+                feedback = "";
 
-                BeanOutputConverter<DimensionSynopsisResult> converter =
-                        new BeanOutputConverter<>(DimensionSynopsisResult.class);
-                return converter.convert(text);
+                String text = ChatResponseAssembler.answerText(response);
+                if (!StringUtils.hasText(text)) {
+                    throw new RetryableResponseException("LLM returned an empty synopsis");
+                }
+                return convertSynopsis(converter, text);
 
-            } catch (HttpClientErrorException e) {
-                if (e.getStatusCode().value() == 401 || e.getStatusCode().value() == 403) {
-                    throw new IngestionPipelineAbortException(
-                            "Authentication/Authorization failed for LLM: " + e.getMessage(), e);
-                }
-                if (e.getStatusCode().value() == 429 || e.getStatusCode().is5xxServerError()) {
-                    if (attempt == maxRetries) {
-                        throw new IngestionPipelineAbortException(
-                                "Max retries exceeded for LLM request: " + e.getMessage(), e);
-                    }
-                    long backoff = Math.min(initialBackoffMs * (long) Math.pow(2, attempt), maxBackoffMs);
-                    sleep(backoff);
-                } else {
-                    throw new IngestionPipelineAbortException("Unexpected HTTP client error: " + e.getMessage(), e);
-                }
-            } catch (ResourceAccessException e) {
+            } catch (RetryableResponseException e) {
                 if (attempt == maxRetries) {
                     throw new IngestionPipelineAbortException(
-                            "Max retries exceeded for LLM request (ResourceAccessException): " + e.getMessage(), e);
+                            "Max retries exceeded for LLM request: " + e.getMessage(), e);
                 }
-                long backoff = Math.min(initialBackoffMs * (long) Math.pow(2, attempt), maxBackoffMs);
-                sleep(backoff);
+                feedback = RETRY_GUIDANCE;
+                sleep(backoff(initialBackoffMs, maxBackoffMs, attempt));
+            } catch (RuntimeException e) {
+                LlmErrorCategory category = LlmExceptionClassifier.classify(e);
+                if (category.isFatal()) {
+                    throw new IngestionPipelineAbortException(category.userMessage() + " Cause: " + e.getMessage(), e);
+                }
+                if (!category.isTransient()) {
+                    throw e;
+                }
+                if (attempt == maxRetries) {
+                    throw new IngestionPipelineAbortException(
+                            "Max retries exceeded for LLM request (" + category + "): " + e.getMessage(), e);
+                }
+                sleep(backoff(initialBackoffMs, maxBackoffMs, attempt));
             }
         }
 
         throw new IngestionPipelineAbortException(
                 "Unexpected exit from retry loop for dimension: " + dimension.getName());
     }
+
+    private static DimensionSynopsisResult convertSynopsis(
+            BeanOutputConverter<DimensionSynopsisResult> converter, String text) {
+        try {
+            return converter.convert(text);
+        } catch (RuntimeException e) {
+            throw new RetryableResponseException("LLM response was not valid JSON: " + e.getMessage(), e);
+        }
+    }
+
+    private static long backoff(long initialBackoffMs, long maxBackoffMs, int attempt) {
+        return Math.min(initialBackoffMs * (long) Math.pow(2, attempt), maxBackoffMs);
+    }
+
+    private static final class RetryableResponseException extends RuntimeException {
+        RetryableResponseException(String message) {
+            super(message);
+        }
+
+        RetryableResponseException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    private static final String RETRY_GUIDANCE = """
+
+            Your previous response could not be used because it was empty, cut off, or not valid JSON.
+            Return ONLY the complete JSON object in the required format, with the synopsis fully written out.""";
 
     private void sleep(long millis) {
         try {

@@ -31,7 +31,7 @@ Your provider key stays in the control plane. Kratis registers the models with L
 |------|-----------|----------------|
 | Public repository | None | Git URL, display name, default branch |
 | Git with SSH key | Kratis generates a 4096-bit RSA key pair; the private key never leaves the server | Add the displayed public key to the host as a deploy key with write access. No PR API: publish pushes a branch, then download the patch or open the PR manually |
-| GitHub | GitHub App (recommended) or fine-grained PAT | App: Installation ID. PAT: Contents Read & write, Metadata Read-only, Pull requests Read & write. Add Administration Read & write to create new repositories |
+| GitHub | Fine-grained PAT (Simplest) or GitHub App (Best for multiple-organisations)  | Contents Read & write, Metadata Read-only, Pull requests Read & write. Add Administration Read & write to create new repositories |
 | GitLab | Group or personal access token, or service account token | `api` + `write_repository`; numeric Group ID for group scope; Developer role in the group to create new projects; optional self-hosted URL |
 | Bitbucket | App password, API token, or workspace access token | Repositories Read & write, Pull requests Read & write. Add Repositories Admin to create new repositories; optional workspace scope |
 | Azure DevOps | PAT | Code Read & write. Add Code Read, write, & manage to create new repositories; organization required, project required for repository creation; server base URL for self-hosted |
