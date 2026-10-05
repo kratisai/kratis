@@ -1727,6 +1727,9 @@ func TestHandlePermissionRequest_SynthesisesDefaultOptions(t *testing.T) {
 	if sink.permRequests[0].options[0].OptionID != "allow" || sink.permRequests[0].options[0].Kind != "allow_once" {
 		t.Errorf("unexpected synthesized option: %+v", sink.permRequests[0].options[0])
 	}
+	if sink.permRequests[0].options[0].Name != "Allow Once" {
+		t.Errorf("expected synthesized option name %q, got %q", "Allow Once", sink.permRequests[0].options[0].Name)
+	}
 }
 
 // runElicitationRequest captures the JSON-RPC response HandleElicitationRequest
@@ -2046,6 +2049,9 @@ func TestHandleFsWriteTextFile_ApprovedWritesFile(t *testing.T) {
 	}
 	if len(req.options) != 2 {
 		t.Errorf("expected synthesised option pair, got %+v", req.options)
+	}
+	if req.options[0].Name != "Allow Once" {
+		t.Errorf("expected synthesised allow name %q, got %q", "Allow Once", req.options[0].Name)
 	}
 
 	select {
