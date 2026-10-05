@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { computeInitialSidebarOpen, useUIStore } from '@/store/ui-store'
+import {
+  computeInitialSidebarOpen,
+  SIDEBAR_WIDTH_DEFAULT,
+  SIDEBAR_WIDTH_MAX,
+  SIDEBAR_WIDTH_MIN,
+  useUIStore,
+} from '@/store/ui-store'
 
 describe('ui-store sidebar defaults', () => {
   it('collapses the sidebar below the 900px threshold', () => {
@@ -43,5 +49,36 @@ describe('ui-store sidebar defaults', () => {
 
     useUIStore.getState().syncSidebarToViewport(700)
     expect(useUIStore.getState().sidebarOpen).toBe(false)
+  })
+})
+
+describe('ui-store sidebar width', () => {
+  it('starts at the default width', () => {
+    expect(SIDEBAR_WIDTH_DEFAULT).toBe(256)
+  })
+
+  it('clamps manual width updates to the allowed range', () => {
+    useUIStore.setState({ sidebarWidth: SIDEBAR_WIDTH_DEFAULT })
+
+    useUIStore.getState().setSidebarWidth(1)
+    expect(useUIStore.getState().sidebarWidth).toBe(SIDEBAR_WIDTH_MIN)
+
+    useUIStore.getState().setSidebarWidth(9_999)
+    expect(useUIStore.getState().sidebarWidth).toBe(SIDEBAR_WIDTH_MAX)
+
+    useUIStore.getState().setSidebarWidth(320)
+    expect(useUIStore.getState().sidebarWidth).toBe(320)
+  })
+
+  it('ignores non-finite width updates', () => {
+    useUIStore.setState({ sidebarWidth: 320 })
+
+    useUIStore.getState().setSidebarWidth(Number.NaN)
+    expect(useUIStore.getState().sidebarWidth).toBe(320)
+  })
+
+  it('persists the sidebar width', () => {
+    useUIStore.getState().setSidebarWidth(320)
+    expect(localStorage.getItem('ui-store')).toContain('"sidebarWidth":320')
   })
 })
