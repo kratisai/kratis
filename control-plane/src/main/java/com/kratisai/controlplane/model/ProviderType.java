@@ -1,37 +1,43 @@
 package com.kratisai.controlplane.model;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonValue;
+import java.util.Objects;
 
 public enum ProviderType {
-    ANTHROPIC("ANTHROPIC"),
-    AZURE_OPENAI("AZURE_OPENAI"),
-    BEDROCK("BEDROCK"),
-    DEEPSEEK("DEEPSEEK"),
-    GOOGLE("GOOGLE"),
-    GROQ("GROQ"),
-    // Open-ai compatible providers
-    KILO("KILO"),
-    MISTRAL("MISTRAL"),
-    OLLAMA("OLLAMA"),
-    OPENAI("OPENAI"),
-    OTHER("OTHER");
+    ANTHROPIC(ApiType.ANTHROPIC_MESSAGES, "anthropic"),
+    AZURE_OPENAI(ApiType.OPENAI_COMPATIBLE, "azure"),
+    BEDROCK(ApiType.OPENAI_COMPATIBLE, "openai"),
+    DEEPSEEK(ApiType.OPENAI_COMPATIBLE, "deepseek"),
+    GOOGLE(ApiType.GEMINI, "gemini"),
+    GROQ(ApiType.OPENAI_COMPATIBLE, "groq"),
+    KILO(ApiType.OPENAI_COMPATIBLE, "openai"),
+    MISTRAL(ApiType.OPENAI_COMPATIBLE, "mistral"),
+    OLLAMA(ApiType.OPENAI_COMPATIBLE, "ollama"),
+    OPENAI(ApiType.OPENAI_COMPATIBLE, "openai"),
+    OTHER(ApiType.OPENAI_COMPATIBLE, "openai");
 
-    private final String value;
+    private final ApiType apiType;
 
-    ProviderType(String value) {
-        this.value = value;
+    // LiteLLM's custom_llm_provider routing label.
+    private final String liteLlmType;
+
+    ProviderType(ApiType apiType, String liteLlmType) {
+        this.apiType = Objects.requireNonNull(apiType);
+        this.liteLlmType = Objects.requireNonNull(liteLlmType);
     }
 
-    @JsonValue
-    public String getValue() {
-        return value;
+    public ApiType getApiType() {
+        return apiType;
+    }
+
+    public String getLiteLlmType() {
+        return liteLlmType;
     }
 
     @JsonCreator
     public static ProviderType fromValue(String value) {
-        for (ProviderType type : ProviderType.values()) {
-            if (type.value.equals(value)) {
+        for (ProviderType type : values()) {
+            if (type.name().equals(value)) {
                 return type;
             }
         }

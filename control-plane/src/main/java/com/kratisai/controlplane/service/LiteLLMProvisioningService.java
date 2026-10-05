@@ -44,18 +44,6 @@ public class LiteLLMProvisioningService {
         INGESTION
     }
 
-    private static final Map<ProviderType, String> PROVIDER_MAPPING = Map.ofEntries(
-            Map.entry(ProviderType.OPENAI, "openai"),
-            Map.entry(ProviderType.ANTHROPIC, "anthropic"),
-            Map.entry(ProviderType.GOOGLE, "gemini"),
-            Map.entry(ProviderType.GROQ, "groq"),
-            Map.entry(ProviderType.KILO, "openai"),
-            Map.entry(ProviderType.MISTRAL, "mistral"),
-            Map.entry(ProviderType.DEEPSEEK, "deepseek"),
-            Map.entry(ProviderType.OLLAMA, "ollama"),
-            Map.entry(ProviderType.AZURE_OPENAI, "azure"),
-            Map.entry(ProviderType.BEDROCK, "openai"));
-
     private final LiteLLMClient liteLLMClient;
     private final ModelProviderRepository modelProviderRepository;
     private final TeamRepository teamRepository;
@@ -234,14 +222,6 @@ public class LiteLLMProvisioningService {
     }
 
     public void provisionModel(ModelProvider provider) {
-        String litellmProvider = resolveLiteLLMProvider(provider.getProviderType());
-        if (litellmProvider == null) {
-            logger.warn(
-                    "Provider type '{}' is not supported by LiteLLM, skipping provisioning",
-                    provider.getProviderType());
-            return;
-        }
-
         List<ProviderModel> models = provider.getModels();
         if (models.isEmpty()) {
             logger.warn(
@@ -293,7 +273,7 @@ public class LiteLLMProvisioningService {
     private void provisionSingleModel(ModelProvider provider, ProviderModel providerModel, ModelCostLookup costLookup) {
         String modelName = providerModel.getModelName();
         ModelKind kind = providerModel.getKind();
-        String litellmProvider = resolveLiteLLMProvider(provider.getProviderType());
+        String litellmProvider = provider.getProviderType().getLiteLlmType();
         String litellmName = buildLiteLLMModelName(provider, modelName);
 
         String apiBase =
@@ -379,10 +359,6 @@ public class LiteLLMProvisioningService {
 
     public boolean verifyModelRegistered(ModelProvider provider, String modelName) {
         return isModelRegisteredInLiteLLM(buildLiteLLMModelName(provider, modelName));
-    }
-
-    public String resolveLiteLLMProvider(ProviderType providerType) {
-        return PROVIDER_MAPPING.get(providerType);
     }
 
     public String buildLiteLLMModelName(ModelProvider provider, String modelName) {

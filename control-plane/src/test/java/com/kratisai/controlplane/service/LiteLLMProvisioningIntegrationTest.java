@@ -178,34 +178,6 @@ class LiteLLMProvisioningIntegrationTest {
     }
 
     @Test
-    void shouldResolveLiteLLMProviderForAllSupportedTypes() {
-        assertThat(provisioningService.resolveLiteLLMProvider(ProviderType.OPENAI))
-                .isEqualTo("openai");
-        assertThat(provisioningService.resolveLiteLLMProvider(ProviderType.ANTHROPIC))
-                .isEqualTo("anthropic");
-        assertThat(provisioningService.resolveLiteLLMProvider(ProviderType.GOOGLE))
-                .isEqualTo("gemini");
-        assertThat(provisioningService.resolveLiteLLMProvider(ProviderType.GROQ))
-                .isEqualTo("groq");
-        assertThat(provisioningService.resolveLiteLLMProvider(ProviderType.MISTRAL))
-                .isEqualTo("mistral");
-        assertThat(provisioningService.resolveLiteLLMProvider(ProviderType.DEEPSEEK))
-                .isEqualTo("deepseek");
-        assertThat(provisioningService.resolveLiteLLMProvider(ProviderType.OLLAMA))
-                .isEqualTo("ollama");
-        assertThat(provisioningService.resolveLiteLLMProvider(ProviderType.AZURE_OPENAI))
-                .isEqualTo("azure");
-        assertThat(provisioningService.resolveLiteLLMProvider(ProviderType.BEDROCK))
-                .isEqualTo("openai");
-    }
-
-    @Test
-    void shouldReturnNullForUnsupportedProviderType() {
-        assertThat(provisioningService.resolveLiteLLMProvider(ProviderType.OTHER))
-                .isNull();
-    }
-
-    @Test
     void shouldRemoveAllModelsForProvider() {
         TestDataFactory.TestContext ctx = testDataFactory.createUserAndTeam();
         Team team = teamRepository.findById(ctx.team().getId()).orElseThrow();

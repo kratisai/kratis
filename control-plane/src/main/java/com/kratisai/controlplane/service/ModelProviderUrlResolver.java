@@ -32,9 +32,11 @@ public final class ModelProviderUrlResolver {
     }
 
     public static String resolveLiteLLMBaseUrl(ProviderType providerType, String liteLLMBaseUrl) {
-        return switch (providerType) {
-            case OPENAI, AZURE_OPENAI, GROQ, OLLAMA, MISTRAL, DEEPSEEK, BEDROCK, OTHER, KILO -> liteLLMBaseUrl + "/v1";
-            case ANTHROPIC, GOOGLE -> liteLLMBaseUrl;
+        // OpenAI-format requests hit the proxy's /v1 routes; native Anthropic/GenAI requests hit
+        // the proxy routes at the root.
+        return switch (providerType.getApiType()) {
+            case OPENAI_COMPATIBLE -> liteLLMBaseUrl + "/v1";
+            case ANTHROPIC_MESSAGES, GEMINI -> liteLLMBaseUrl;
         };
     }
 
