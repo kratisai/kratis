@@ -31,6 +31,19 @@ describe('useDiffReviewStore', () => {
     expect(state.draftComments['exec-1']).toHaveLength(0)
   })
 
+  it('updates an existing draft comment text', () => {
+    const store = useDiffReviewStore.getState()
+    store.addDraftComment('exec-1', 'a.ts', 1, 'original note')
+    const commentId = useDiffReviewStore.getState().draftComments['exec-1'][0].id
+
+    store.updateDraftComment('exec-1', commentId, 'updated note')
+
+    const comments = useDiffReviewStore.getState().draftComments['exec-1']
+    expect(comments).toHaveLength(1)
+    expect(comments[0].id).toBe(commentId)
+    expect(comments[0].comment).toBe('updated note')
+  })
+
   it('clears draft comments for an execution', () => {
     const store = useDiffReviewStore.getState()
     store.addDraftComment('exec-1', 'a.ts', 1, 'note 1')

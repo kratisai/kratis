@@ -101,6 +101,80 @@ describe('DiffInlineComment', () => {
     expect(onCloseDraft).toHaveBeenCalled()
   })
 
+  it('edits an existing comment in place', () => {
+    useDiffReviewStore.setState({
+      draftComments: {
+        'exec-1': [
+          {
+            comment: 'Original note',
+            createdAt: Date.now(),
+            id: 'c1',
+            line: 15,
+            path: 'src/app.ts',
+          },
+        ],
+      },
+    })
+
+    render(
+      <DiffInlineComment
+        comments={useDiffReviewStore.getState().draftComments['exec-1']}
+        executionId="exec-1"
+        isDrafting={false}
+        line={15}
+        onCloseDraft={onCloseDraft}
+        path="src/app.ts"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit comment' }))
+
+    const editTextarea = screen.getByLabelText('Edit review comment')
+    expect(editTextarea).toHaveValue('Original note')
+    fireEvent.change(editTextarea, { target: { value: 'Updated note' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Comment' }))
+
+    const drafts = useDiffReviewStore.getState().draftComments['exec-1']
+    expect(drafts[0].comment).toBe('Updated note')
+    expect(screen.queryByLabelText('Edit review comment')).not.toBeInTheDocument()
+  })
+
+  it('cancels comment editing and keeps the original text', () => {
+    useDiffReviewStore.setState({
+      draftComments: {
+        'exec-1': [
+          {
+            comment: 'Original note',
+            createdAt: Date.now(),
+            id: 'c1',
+            line: 15,
+            path: 'src/app.ts',
+          },
+        ],
+      },
+    })
+
+    render(
+      <DiffInlineComment
+        comments={useDiffReviewStore.getState().draftComments['exec-1']}
+        executionId="exec-1"
+        isDrafting={false}
+        line={15}
+        onCloseDraft={onCloseDraft}
+        path="src/app.ts"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit comment' }))
+    fireEvent.change(screen.getByLabelText('Edit review comment'), {
+      target: { value: 'Changed but discarded' },
+    })
+    fireEvent.click(screen.getAllByRole('button', { name: /cancel/i })[0])
+
+    expect(useDiffReviewStore.getState().draftComments['exec-1'][0].comment).toBe('Original note')
+    expect(screen.getByText('Original note')).toBeInTheDocument()
+  })
+
   it('wraps long code snippets and comments so they never widen the comment box', () => {
     render(
       <DiffInlineComment
