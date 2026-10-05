@@ -306,7 +306,7 @@ func (h *Handler) HandlePermissionRequest(transport *AcpTransport, params map[st
 	// has an option to return.
 	options := p.Options
 	if len(options) == 0 {
-		options = []PermissionOption{{OptionID: "allow", Name: "Allow", Kind: string(ApprovalAllowOnce)}}
+		options = []PermissionOption{{OptionID: "allow", Name: "Allow Once", Kind: string(ApprovalAllowOnce)}}
 	}
 
 	req := PermissionRequest{
@@ -537,7 +537,7 @@ func (h *Handler) HandleTerminalCreate(transport *AcpTransport, params map[strin
 		Command:  command,
 		ActionID: toolCallID,
 		Options: []PermissionOption{
-			{OptionID: "allow", Name: "Allow", Kind: string(ApprovalAllowOnce)},
+			{OptionID: "allow", Name: "Allow Once", Kind: string(ApprovalAllowOnce)},
 			{OptionID: "reject", Name: "Reject", Kind: string(ApprovalRejectOnce)},
 		},
 	}
@@ -961,7 +961,7 @@ func (h *Handler) HandleFsWriteTextFile(transport *AcpTransport, params map[stri
 		Title:    path,
 		Kind:     "write",
 		Options: []PermissionOption{
-			{OptionID: "allow", Name: "Allow", Kind: string(ApprovalAllowOnce)},
+			{OptionID: "allow", Name: "Allow Once", Kind: string(ApprovalAllowOnce)},
 			{OptionID: "reject", Name: "Reject", Kind: string(ApprovalRejectOnce)},
 		},
 		Diff: diff,
