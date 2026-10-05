@@ -19,6 +19,7 @@ public class TestAsyncExecutorConfig {
 
     public static final String DISPATCH_EXECUTOR_BEAN_NAME = "dispatchExecutor";
     public static final String USAGE_REFRESH_SCHEDULER_BEAN_NAME = "usageRefreshScheduler";
+    public static final String WS_CLEANUP_SCHEDULER_BEAN_NAME = "wsCleanupScheduler";
 
     @Bean
     public static BeanDefinitionRegistryPostProcessor trackedAsyncBeanOverrideProcessor() {
@@ -36,6 +37,14 @@ public class TestAsyncExecutorConfig {
                         BeanDefinitionBuilder.genericBeanDefinition(TrackingTaskScheduler.class)
                                 .addPropertyValue("poolSize", 1)
                                 .addPropertyValue("threadNamePrefix", "test-usage-refresh-")
+                                .addPropertyValue("removeOnCancelPolicy", true));
+                replace(
+                        registry,
+                        WS_CLEANUP_SCHEDULER_BEAN_NAME,
+                        BeanDefinitionBuilder.genericBeanDefinition(TrackingTaskScheduler.class)
+                                .addPropertyValue("poolSize", 1)
+                                .addPropertyValue("threadNamePrefix", "test-ws-cleanup-")
+                                .addPropertyValue("daemon", true)
                                 .addPropertyValue("removeOnCancelPolicy", true));
             }
 

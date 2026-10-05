@@ -1,6 +1,7 @@
 package com.kratisai.controlplane;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
@@ -9,7 +10,9 @@ import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.config.AsyncConfig;
 import com.kratisai.controlplane.ingestion.research.DimensionResearchService;
 import com.kratisai.controlplane.service.ClientRealtimeEventListeners;
+import com.kratisai.controlplane.service.ClientSessionRegistry;
 import com.kratisai.controlplane.service.EnvironmentRpcClient;
+import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
 import com.kratisai.controlplane.service.WebSocketDispatch;
 import com.kratisai.controlplane.websocket.client.ClientRpcHandler;
 import com.kratisai.controlplane.websocket.client.ClientWebSocketHandler;
@@ -20,6 +23,7 @@ import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
 import com.tngtech.archunit.core.domain.JavaConstructor;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
+import com.tngtech.archunit.core.domain.JavaField;
 import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.domain.JavaParameter;
@@ -36,6 +40,7 @@ import com.tngtech.archunit.library.GeneralCodingRules;
 import com.tngtech.archunit.library.dependencies.SlicesRuleDefinition;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -131,12 +136,10 @@ public class ArchitectureSanityTest {
             .that()
             .doNotHaveFullyQualifiedName(AsyncConfig.class.getName())
             .should(new ArchCondition<JavaClass>("not create executors or schedulers directly") {
-                // Scoped try-with-resources executors, and WebSocket cleanup schedulers that only
-                // touch in-memory session registries.
-                private static final Set<String> ALLOWED_ORIGINS = Set.of(
-                        DimensionResearchService.class.getName() + "#researchDimensions",
-                        ClientWebSocketHandler.class.getName() + "#<init>",
-                        EnvironmentWebSocketHandler.class.getName() + "#<init>");
+                // researchDimensions joins every Future before the block exits and ExecutorService.close()
+                // blocks until all tasks complete, so no thread outlives the call.
+                private static final Set<String> ALLOWED_ORIGINS =
+                        Set.of(DimensionResearchService.class.getName() + "#researchDimensions");
 
                 @Override
                 public void check(JavaClass javaClass, ConditionEvents events) {
@@ -185,6 +188,71 @@ public class ArchitectureSanityTest {
             })
             .because("Executors and schedulers must be created in AsyncConfig so tests can drain them;"
                     + " untracked background DB work races the schema truncation");
+
+    /**
+     * The {@code researchDimensions} allowance above assumes the executor is scoped to the call:
+     * every Future is joined before the method returns and close() blocks until tasks complete.
+     * Hoisting it into a field would let research tasks outlive the call and race the test-schema
+     * truncation, invisibly to the creation-site rule.
+     */
+    @ArchTest
+    public static final ArchRule RESEARCH_EXECUTOR_MUST_STAY_SCOPED = fields().that()
+            .areDeclaredIn(DimensionResearchService.class)
+            .should(new ArchCondition<JavaField>("not hold executors or schedulers") {
+                @Override
+                public void check(JavaField field, ConditionEvents events) {
+                    JavaClass rawType = field.getRawType();
+                    if (rawType.isAssignableTo(Executor.class) || rawType.isAssignableTo(TaskScheduler.class)) {
+                        events.add(SimpleConditionEvent.violated(
+                                field,
+                                field.getFullName() + " stores an executor; the researchDimensions"
+                                        + " allowance requires a scoped try-with-resources executor"
+                                        + " that cannot outlive the call"));
+                    }
+                }
+            })
+            .because("the EXECUTOR_CREATION_ONLY_IN_ASYNC_CONFIG allowance only holds while the"
+                    + " executor cannot outlive researchDimensions");
+
+    /**
+     * Session registries are mutated from WebSocket transport threads and from periodic cleanup
+     * tasks, neither of which the drain listener awaits (periodic tasks never complete). DB access
+     * belongs in services behind events, dispatched onto a tracked executor — see {@code
+     * EnvironmentWebSocketHandler#runSessionCleanup}.
+     */
+    @ArchTest
+    public static final ArchRule SESSION_REGISTRIES_NEVER_TOUCH_REPOSITORIES = noClasses()
+            .that()
+            .haveFullyQualifiedName(ClientSessionRegistry.class.getName())
+            .or()
+            .haveFullyQualifiedName(EnvironmentSessionRegistry.class.getName())
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage("..repository..")
+            .because("registry calls run on transport and cleanup-scheduler threads that tests"
+                    + " cannot drain; DB work there races the schema truncation");
+
+    /**
+     * Client stale-session cleanup runs directly on the periodic {@code wsCleanupScheduler} task, so
+     * anything a synchronous event listener does would execute on a thread the drain listener never
+     * awaits. {@code EnvironmentSessionRegistry} may publish only because its handler hands cleanup
+     * to the tracked {@code envMessageExecutor} first.
+     */
+    @ArchTest
+    public static final ArchRule CLIENT_SESSION_REGISTRY_PUBLISHES_NO_EVENTS = noClasses()
+            .that()
+            .haveFullyQualifiedName(ClientSessionRegistry.class.getName())
+            .should()
+            .callMethodWhere(new DescribedPredicate<JavaMethodCall>("call ApplicationEventPublisher.publishEvent") {
+                @Override
+                public boolean test(JavaMethodCall call) {
+                    return call.getTarget().getOwner().isAssignableTo(ApplicationEventPublisher.class)
+                            && call.getTarget().getName().equals("publishEvent");
+                }
+            })
+            .because("client cleanup runs on an undrained periodic scheduler thread; a synchronous"
+                    + " listener would put DB work there — hand off to a tracked executor like"
+                    + " EnvironmentWebSocketHandler does");
 
     @ArchTest
     public static final ArchRule NO_CIRCULAR_DEPENDENCIES = SlicesRuleDefinition.slices()
@@ -430,7 +498,7 @@ public class ArchitectureSanityTest {
                     if (raw.isEquivalentTo(List.class) && returnType instanceof JavaParameterizedType parameterized) {
                         List<JavaType> arguments = parameterized.getActualTypeArguments();
                         return arguments.size() == 1
-                                && arguments.get(0).toErasure().isRecord();
+                                && arguments.getFirst().toErasure().isRecord();
                     }
                     return false;
                 }

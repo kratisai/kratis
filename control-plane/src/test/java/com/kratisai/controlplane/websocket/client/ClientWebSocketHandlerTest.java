@@ -3,6 +3,7 @@ package com.kratisai.controlplane.websocket.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -15,8 +16,11 @@ import com.kratisai.controlplane.api.wsdto.JsonRpcResponse;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import com.kratisai.controlplane.service.SubscriptionRegistry;
 import com.kratisai.controlplane.service.WebSocketDispatch;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ScheduledFuture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,6 +29,7 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.quality.Strictness;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -37,6 +42,12 @@ class ClientWebSocketHandlerTest {
     @Mock
     private SubscriptionRegistry subscriptionRegistry;
 
+    @Mock
+    private TaskScheduler cleanupScheduler;
+
+    @Mock
+    private ScheduledFuture<?> cleanupFuture;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private ClientSessionRegistry sessionRegistry;
@@ -47,7 +58,33 @@ class ClientWebSocketHandlerTest {
     void setUp() {
         sessionRegistry = new ClientSessionRegistry(subscriptionRegistry);
         dispatch = new WebSocketDispatch(objectMapper, sessionRegistry, subscriptionRegistry, Runnable::run);
-        handler = new ClientWebSocketHandler(Collections.emptyList(), sessionRegistry, dispatch, objectMapper);
+        doReturn(cleanupFuture)
+                .when(cleanupScheduler)
+                .scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class));
+        handler = new ClientWebSocketHandler(
+                Collections.emptyList(), sessionRegistry, dispatch, objectMapper, cleanupScheduler);
+    }
+
+    @Test
+    void constructor_schedulesPeriodicCleanupOnSharedScheduler() {
+        WebSocketSession session = mockSession();
+        sessionRegistry.authenticateSession(session, "user-1");
+        when(session.isOpen()).thenReturn(false);
+
+        ArgumentCaptor<Runnable> scheduled = ArgumentCaptor.forClass(Runnable.class);
+        verify(cleanupScheduler).scheduleAtFixedRate(scheduled.capture(), any(Instant.class), any(Duration.class));
+
+        // The scheduled task is the registry cleanup, running inline on the shared scheduler.
+        assertThat(sessionRegistry.getAuthenticatedSessionCount()).isEqualTo(1);
+        scheduled.getValue().run();
+        assertThat(sessionRegistry.getAuthenticatedSessionCount()).isEqualTo(0);
+    }
+
+    @Test
+    void destroy_cancelsScheduledCleanup() {
+        handler.destroy();
+
+        verify(cleanupFuture).cancel(false);
     }
 
     @Test
@@ -79,8 +116,8 @@ class ClientWebSocketHandlerTest {
         when(mockRpcHandler.getMethodName()).thenReturn("test.method");
         when(mockRpcHandler.getPayloadType()).thenReturn(ClientRpcPayload.Ping.class);
         when(mockRpcHandler.handle(any(), any(), any())).thenReturn(Flux.empty());
-        ClientWebSocketHandler handlerWithMock =
-                new ClientWebSocketHandler(List.of(mockRpcHandler), sessionRegistry, dispatch, objectMapper);
+        ClientWebSocketHandler handlerWithMock = new ClientWebSocketHandler(
+                List.of(mockRpcHandler), sessionRegistry, dispatch, objectMapper, cleanupScheduler);
 
         WebSocketSession session = mockSession();
         JsonRpcInboundRequest request = new JsonRpcInboundRequest("2.0", "test.method", null, 1);

@@ -31,6 +31,24 @@ public class AsyncConfig {
         return scheduler;
     }
 
+    /**
+     * Shared by the WebSocket handlers' periodic stale-session cleanup. A bean (not a private
+     * per-handler executor) so {@code DrainExecutorsTestExecutionListener} tracks it and tests can
+     * swap a tracking double via {@code TestAsyncExecutorConfig}.
+     */
+    @Bean(name = "wsCleanupScheduler")
+    public ThreadPoolTaskScheduler wsCleanupScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("ws-cleanup-");
+        scheduler.setDaemon(true);
+        scheduler.setRemoveOnCancelPolicy(true);
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(5);
+        scheduler.initialize();
+        return scheduler;
+    }
+
     @Bean(name = "repoIngestTaskExecutor")
     public ThreadPoolTaskExecutor taskExecutor(@Value("${kratis.ingestion.max-concurrent:2}") int maxConcurrent) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
