@@ -161,6 +161,53 @@ class LiteLLMProvisioningServiceTest {
     }
 
     @Test
+    void provisionModel_other_shouldRegisterAsOpenAiCompatible() {
+        ModelProvider provider =
+                new ModelProvider("Custom", ProviderType.OTHER, "custom-key", "https://custom.example.com/v1");
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("custom-model", ModelKind.CHAT)));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        LiteLLMParams params = requestCaptor.getValue().litellmParams();
+        assertThat(params.customLlmProvider()).isEqualTo("openai");
+        assertThat(params.apiBase()).isEqualTo("https://custom.example.com/v1");
+        assertThat(params.apiKey()).isEqualTo("custom-key");
+    }
+
+    @Test
+    void provisionModel_azure_shouldRegisterWithAzureCustomProvider() {
+        ModelProvider provider = new ModelProvider(
+                "Azure", ProviderType.AZURE_OPENAI, "azure-key", "https://my-resource.openai.azure.com");
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("gpt-4o-deployment", ModelKind.CHAT)));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().litellmParams().customLlmProvider()).isEqualTo("azure");
+    }
+
+    @Test
+    void provisionModel_google_shouldRegisterAsGeminiWithoutVersionSuffix() {
+        ModelProvider provider = new ModelProvider(
+                "Google", ProviderType.GOOGLE, "google-key", "https://generativelanguage.googleapis.com");
+        provider.setTeam(testTeam);
+        provider.setModels(List.of(new ProviderModel("gemini-2.0-flash", ModelKind.CHAT)));
+
+        provisioningService.provisionModel(provider);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        LiteLLMParams params = requestCaptor.getValue().litellmParams();
+        assertThat(params.customLlmProvider()).isEqualTo("gemini");
+        assertThat(params.apiBase()).isEqualTo("https://generativelanguage.googleapis.com");
+    }
+
+    @Test
     void provisionModel_bedrock_shouldRegisterAsOpenAiCompatibleWithBearerToken() {
         ModelProvider provider = new ModelProvider(
                 "Bedrock",

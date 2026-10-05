@@ -61,10 +61,10 @@ public class ChatModelFactory {
 
     private ChatModel createChatModel(ChatModelSpec spec) {
         logger.debug("Creating {} Chat model via {}", spec.providerType(), spec.baseUrl());
-        return switch (spec.providerType()) {
-            case ANTHROPIC -> createAnthropicChatModel(spec);
-            case GOOGLE -> createGoogleChatModel(spec);
-            default -> createOpenAiCompatibleChatModel(spec);
+        return switch (spec.providerType().getApiType()) {
+            case ANTHROPIC_MESSAGES -> createAnthropicChatModel(spec);
+            case GEMINI -> createGoogleChatModel(spec);
+            case OPENAI_COMPATIBLE -> createOpenAiCompatibleChatModel(spec);
         };
     }
 

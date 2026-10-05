@@ -694,7 +694,7 @@ class ModelEntityCoverageTest {
     void providerTypeCoverage() {
         assertThat(ProviderType.values()).contains(ProviderType.OPENAI, ProviderType.GOOGLE, ProviderType.KILO);
         assertThat(ProviderType.valueOf("OPENAI")).isEqualTo(ProviderType.OPENAI);
-        assertThat(ProviderType.valueOf("KILO").getValue()).isEqualTo("KILO");
+        assertThat(ProviderType.valueOf("KILO").getLiteLlmType()).isEqualTo("openai");
     }
 
     @Test

@@ -49,10 +49,10 @@ public class EmbeddingModelFactory {
 
     private EmbeddingModel createEmbeddingModel(EmbeddingModelSpec spec) {
         logger.debug("Creating {} Embedding model via {}", spec.providerType(), spec.baseUrl());
-        if (spec.providerType().equals(ProviderType.GOOGLE)) {
-            return createGoogleEmbeddingModel(spec);
-        }
-        return createOpenAiCompatibleEmbeddingModel(spec);
+        return switch (spec.providerType().getApiType()) {
+            case GEMINI -> createGoogleEmbeddingModel(spec);
+            case OPENAI_COMPATIBLE, ANTHROPIC_MESSAGES -> createOpenAiCompatibleEmbeddingModel(spec);
+        };
     }
 
     private EmbeddingModelSpec buildDirectSpec(ModelProvider provider, String modelName) {
