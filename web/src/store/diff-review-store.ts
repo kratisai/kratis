@@ -40,6 +40,7 @@ interface DiffReviewState {
   setDiffViewMode: (mode: 'split' | 'unified') => void
   setIsSteeringFocused: (focused: boolean) => void
   toggleFileCollapsed: (path: string) => void
+  updateDraftComment: (executionId: string, commentId: string, comment: string) => void
 }
 
 export const useDiffReviewStore = create<DiffReviewState>((set) => ({
@@ -114,6 +115,16 @@ export const useDiffReviewStore = create<DiffReviewState>((set) => ({
         collapsedFiles: {
           ...state.collapsedFiles,
           [path]: !current,
+        },
+      }
+    }),
+  updateDraftComment: (executionId, commentId, comment) =>
+    set((state) => {
+      const list = state.draftComments[executionId] ?? []
+      return {
+        draftComments: {
+          ...state.draftComments,
+          [executionId]: list.map((c) => (c.id === commentId ? { ...c, comment } : c)),
         },
       }
     }),
