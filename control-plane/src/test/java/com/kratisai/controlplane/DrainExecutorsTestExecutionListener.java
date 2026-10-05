@@ -33,7 +33,7 @@ public class DrainExecutorsTestExecutionListener implements TestExecutionListene
             "clientBroadcastExecutor",
             "dispatchExecutor");
 
-    private static final List<String> SCHEDULER_BEAN_NAMES = List.of("usageRefreshScheduler");
+    private static final List<String> SCHEDULER_BEAN_NAMES = List.of("usageRefreshScheduler", "wsCleanupScheduler");
 
     static Set<String> trackedBeanNames() {
         return Stream.concat(EXECUTOR_BEAN_NAMES.stream(), SCHEDULER_BEAN_NAMES.stream())

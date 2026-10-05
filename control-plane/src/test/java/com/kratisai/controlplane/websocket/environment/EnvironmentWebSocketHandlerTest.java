@@ -3,6 +3,7 @@ package com.kratisai.controlplane.websocket.environment;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -16,13 +17,17 @@ import com.kratisai.controlplane.service.EnvironmentRpcClient;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
 import com.kratisai.controlplane.service.PendingHitlRegistry;
 import com.kratisai.controlplane.service.WebSocketDispatch;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +39,7 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.quality.Strictness;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -52,6 +58,12 @@ class EnvironmentWebSocketHandlerTest {
     @Mock
     private EnvironmentRpcClient environmentRpcClient;
 
+    @Mock
+    private TaskScheduler cleanupScheduler;
+
+    @Mock
+    private ScheduledFuture<?> cleanupFuture;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private EnvironmentSessionRegistry sessionRegistry;
@@ -62,6 +74,9 @@ class EnvironmentWebSocketHandlerTest {
     void setUp() {
         sessionRegistry = new EnvironmentSessionRegistry(eventPublisher);
         dispatch = new WebSocketDispatch(objectMapper, null, null, Runnable::run);
+        doReturn(cleanupFuture)
+                .when(cleanupScheduler)
+                .scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class));
         handler = new EnvironmentWebSocketHandler(
                 Collections.emptyList(),
                 sessionRegistry,
@@ -69,7 +84,50 @@ class EnvironmentWebSocketHandlerTest {
                 environmentRpcClient,
                 dispatch,
                 objectMapper,
-                Runnable::run);
+                Runnable::run,
+                cleanupScheduler);
+    }
+
+    @Test
+    void scheduledCleanup_isHandedToMessageExecutorNotRunOnSchedulerThread() {
+        TaskScheduler scheduler = mock(TaskScheduler.class);
+        doReturn(cleanupFuture)
+                .when(scheduler)
+                .scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class));
+        List<Runnable> executorTasks = new CopyOnWriteArrayList<>();
+        Executor capturingExecutor = executorTasks::add;
+        WebSocketSession session = mockSession();
+        sessionRegistry.registerEnvironmentSession(session, UUID.randomUUID());
+        when(session.isOpen()).thenReturn(false);
+
+        new EnvironmentWebSocketHandler(
+                Collections.emptyList(),
+                sessionRegistry,
+                pendingHitlRegistry,
+                environmentRpcClient,
+                dispatch,
+                objectMapper,
+                capturingExecutor,
+                scheduler);
+
+        ArgumentCaptor<Runnable> scheduled = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).scheduleAtFixedRate(scheduled.capture(), any(Instant.class), any(Duration.class));
+
+        // The scheduler tick only hands off; cleanup must not run inline on the scheduler thread
+        // because it publishes events whose synchronous listeners write to the database.
+        scheduled.getValue().run();
+        assertThat(executorTasks).hasSize(1);
+        assertThat(sessionRegistry.getEnvironmentSessionCount()).isEqualTo(1);
+
+        executorTasks.getFirst().run();
+        assertThat(sessionRegistry.getEnvironmentSessionCount()).isEqualTo(0);
+    }
+
+    @Test
+    void destroy_cancelsScheduledCleanup() {
+        handler.destroy();
+
+        verify(cleanupFuture).cancel(false);
     }
 
     @Test
@@ -108,7 +166,8 @@ class EnvironmentWebSocketHandlerTest {
                 environmentRpcClient,
                 dispatch,
                 objectMapper,
-                Runnable::run);
+                Runnable::run,
+                cleanupScheduler);
 
         WebSocketSession session = mockSession();
         JsonRpcInboundRequest request = new JsonRpcInboundRequest("2.0", "env.test", null, 1);
@@ -146,7 +205,8 @@ class EnvironmentWebSocketHandlerTest {
                     environmentRpcClient,
                     dispatch,
                     objectMapper,
-                    worker);
+                    worker,
+                    cleanupScheduler);
 
             WebSocketSession session = mockSession();
             handler.afterConnectionEstablished(session);
@@ -208,7 +268,8 @@ class EnvironmentWebSocketHandlerTest {
                 environmentRpcClient,
                 dispatch,
                 objectMapper,
-                Runnable::run);
+                Runnable::run,
+                cleanupScheduler);
 
         WebSocketSession session = mockSession();
         JsonRpcInboundRequest request = new JsonRpcInboundRequest("2.0", "env.test", null, 1);

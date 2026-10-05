@@ -15,19 +15,20 @@ import com.kratisai.controlplane.service.PendingHitlRegistry;
 import com.kratisai.controlplane.service.WebSocketDispatch;
 import com.kratisai.controlplane.websocket.JsonRpcInbound;
 import jakarta.annotation.PreDestroy;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ScheduledFuture;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -64,11 +65,7 @@ public class EnvironmentWebSocketHandler extends TextWebSocketHandler {
     private final WebSocketDispatch dispatch;
     private final Executor messageExecutor;
     private final Map<String, SerialExecutor> sessionExecutors = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService cleanupScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "env-ws-cleanup");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ScheduledFuture<?> cleanupTask;
 
     @SuppressWarnings("rawtypes")
     public EnvironmentWebSocketHandler(
@@ -78,7 +75,8 @@ public class EnvironmentWebSocketHandler extends TextWebSocketHandler {
             EnvironmentRpcClient environmentRpcClient,
             WebSocketDispatch dispatch,
             ObjectMapper objectMapper,
-            @Qualifier("envMessageExecutor") Executor messageExecutor) {
+            @Qualifier("envMessageExecutor") Executor messageExecutor,
+            @Qualifier("wsCleanupScheduler") TaskScheduler cleanupScheduler) {
         this.objectMapper = objectMapper.copy().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true);
         this.sessionRegistry = sessionRegistry;
         this.pendingHitlRegistry = pendingHitlRegistry;
@@ -89,24 +87,19 @@ public class EnvironmentWebSocketHandler extends TextWebSocketHandler {
             this.handlers.put(handler.getMethodName(), handler);
         }
 
-        cleanupScheduler.scheduleAtFixedRate(
-                sessionRegistry::cleanupStaleSessions,
-                CLEANUP_INTERVAL_SECONDS,
-                CLEANUP_INTERVAL_SECONDS,
-                TimeUnit.SECONDS);
+        this.cleanupTask = cleanupScheduler.scheduleAtFixedRate(
+                this::runSessionCleanup,
+                Instant.now().plusSeconds(CLEANUP_INTERVAL_SECONDS),
+                Duration.ofSeconds(CLEANUP_INTERVAL_SECONDS));
+    }
+
+    private void runSessionCleanup() {
+        messageExecutor.execute(sessionRegistry::cleanupStaleSessions);
     }
 
     @PreDestroy
     public void destroy() {
-        cleanupScheduler.shutdown();
-        try {
-            if (!cleanupScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                cleanupScheduler.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            cleanupScheduler.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        cleanupTask.cancel(false);
     }
 
     @Override
