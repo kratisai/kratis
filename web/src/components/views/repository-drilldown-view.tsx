@@ -31,7 +31,7 @@ import {
   useTriggerIngestion,
 } from '@/hooks/use-repositories'
 import { useStartChat } from '@/hooks/use-start-chat'
-import { formatRelativeTime, formatSpend } from '@/lib/format'
+import { formatDurationSeconds, formatRelativeTime, formatSpend } from '@/lib/format'
 
 export function RepositoryDrilldownView() {
   const { repoId } = useParams({ from: '/repos/$repoId' })
@@ -455,7 +455,7 @@ export function RepositoryDrilldownView() {
                       <p className="text-muted-foreground text-xs">Duration</p>
                       <p className="text-sm font-medium">
                         {batchStats.totalDurationSeconds != null
-                          ? formatDuration(batchStats.totalDurationSeconds)
+                          ? formatDurationSeconds(batchStats.totalDurationSeconds)
                           : '—'}
                       </p>
                     </div>
@@ -701,16 +701,6 @@ function DimensionTagCloud({
       )}
     </div>
   )
-}
-
-function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
-  if (minutes < 60) return `${minutes}m ${remainingSeconds}s`
-  const hours = Math.floor(minutes / 60)
-  const remainingMinutes = minutes % 60
-  return `${hours}h ${remainingMinutes}m ${remainingSeconds}s`
 }
 
 function formatTokens(value: null | number): string {

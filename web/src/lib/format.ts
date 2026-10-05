@@ -1,3 +1,15 @@
+export function formatDurationSeconds(value: null | number | undefined): string {
+  if (value == null) return '—'
+  const totalSeconds = Math.max(0, Math.floor(value))
+  if (totalSeconds < 60) return `${totalSeconds}s`
+  const minutes = Math.floor(totalSeconds / 60)
+  const remainingSeconds = totalSeconds % 60
+  if (minutes < 60) return `${minutes}m ${remainingSeconds}s`
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  return `${hours}h ${remainingMinutes}m ${remainingSeconds}s`
+}
+
 export function formatRelativeTime(dateString: string): string {
   const date = new Date(dateString)
   const now = new Date()

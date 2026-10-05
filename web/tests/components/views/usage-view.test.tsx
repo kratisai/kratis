@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { UsageView } from '@/components/views/usage-view'
@@ -69,5 +70,20 @@ describe('UsageView', () => {
     render(<UsageView />)
 
     expect(screen.getAllByText('gpt-4o').length).toBeGreaterThan(0)
+  })
+
+  it('formats the log table duration as human-readable time, not raw seconds', () => {
+    render(<UsageView />)
+
+    expect(screen.getByText('5s')).toBeDefined()
+  })
+
+  it('shows durations on the Time share tab instead of dollar amounts', async () => {
+    const user = userEvent.setup()
+    render(<UsageView />)
+
+    await user.click(screen.getByRole('tab', { name: 'Time' }))
+
+    expect(screen.getByText('10s')).toBeDefined()
   })
 })
