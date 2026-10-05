@@ -23,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useDiffSummary } from '@/hooks/use-diff'
-import { formatRelativeTime, formatSpend } from '@/lib/format'
+import { formatDurationSeconds, formatRelativeTime, formatSpend } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useCanvasStore } from '@/store/canvas-store'
 import { useWebSocketStore } from '@/store/websocket-store'
@@ -415,8 +415,5 @@ function formatDuration(startTime?: string, endTime?: string): string {
   const start = new Date(startTime).getTime()
   const end = endTime ? new Date(endTime).getTime() : Date.now()
   const totalSeconds = Math.max(0, Math.floor((end - start) / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  if (minutes === 0) return `${seconds}s`
-  return `${minutes}m ${seconds}s`
+  return formatDurationSeconds(totalSeconds)
 }

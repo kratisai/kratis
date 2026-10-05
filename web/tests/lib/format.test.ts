@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { formatRelativeTime, formatSpend } from '@/lib/format'
+import { formatDurationSeconds, formatRelativeTime, formatSpend } from '@/lib/format'
 
 describe('formatRelativeTime', () => {
   beforeEach(() => {
@@ -45,5 +45,31 @@ describe('formatSpend', () => {
   it('returns an em dash for nullish values', () => {
     expect(formatSpend(null)).toBe('—')
     expect(formatSpend(undefined)).toBe('—')
+  })
+})
+
+describe('formatDurationSeconds', () => {
+  it('formats seconds under a minute', () => {
+    expect(formatDurationSeconds(0)).toBe('0s')
+    expect(formatDurationSeconds(5)).toBe('5s')
+    expect(formatDurationSeconds(59)).toBe('59s')
+  })
+
+  it('formats minutes and seconds', () => {
+    expect(formatDurationSeconds(60)).toBe('1m 0s')
+    expect(formatDurationSeconds(65)).toBe('1m 5s')
+    expect(formatDurationSeconds(3599)).toBe('59m 59s')
+  })
+
+  it('formats hours, minutes, and seconds', () => {
+    expect(formatDurationSeconds(3600)).toBe('1h 0m 0s')
+    expect(formatDurationSeconds(3665)).toBe('1h 1m 5s')
+    expect(formatDurationSeconds(7325)).toBe('2h 2m 5s')
+  })
+
+  it('returns an em dash for nullish values and clamps negatives', () => {
+    expect(formatDurationSeconds(null)).toBe('—')
+    expect(formatDurationSeconds(undefined)).toBe('—')
+    expect(formatDurationSeconds(-5)).toBe('0s')
   })
 })

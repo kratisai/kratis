@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useUsageLogs, useUsageSummary } from '@/hooks/use-usage'
+import { formatDurationSeconds } from '@/lib/format'
 import { useAuthStore } from '@/store/auth-store'
 
 export function UsageView() {
@@ -229,7 +230,11 @@ export function UsageView() {
                         <span className="truncate font-medium">{item.label}</span>
                       </div>
                       <div className="text-muted-foreground flex shrink-0 items-center gap-3">
-                        <span>${item.cost.toFixed(3)}</span>
+                        <span>
+                          {shareMetric === 'agent-time'
+                            ? formatDurationSeconds(item.cost)
+                            : `$${item.cost.toFixed(3)}`}
+                        </span>
                         <span className="text-foreground font-semibold">
                           {item.percentage.toFixed(1)}%
                         </span>
@@ -357,9 +362,7 @@ export function UsageView() {
                           </div>
                           <div className="text-muted-foreground mt-0.5 flex items-center gap-1 text-xs">
                             <Clock className="h-3 w-3" />
-                            <span>
-                              {entry.durationSeconds !== null ? `${entry.durationSeconds}s` : '—'}
-                            </span>
+                            <span>{formatDurationSeconds(entry.durationSeconds)}</span>
                           </div>
                         </td>
 
