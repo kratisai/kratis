@@ -5,6 +5,10 @@ import type { ModelProviderDto } from '@/types/auth-types'
 
 const SIDEBAR_AUTO_COLLAPSE_MAX_WIDTH = 900
 
+export const SIDEBAR_WIDTH_DEFAULT = 256
+export const SIDEBAR_WIDTH_MAX = 480
+export const SIDEBAR_WIDTH_MIN = 208
+
 type SidebarViewport = 'narrow' | 'wide'
 
 interface UIState {
@@ -12,8 +16,10 @@ interface UIState {
   selectedProviderId: null | string
   setSelectedModel: (providerId: null | string, modelName: null | string) => void
   setSidebarOpen: (open: boolean) => void
+  setSidebarWidth: (width: number) => void
   sidebarOpen: boolean
   sidebarViewport: SidebarViewport
+  sidebarWidth: number
   syncSelectedModel: (providers: ModelProviderDto[] | undefined) => void
   syncSidebarToViewport: (viewportWidth: number) => void
   toggleSidebar: () => void
@@ -21,6 +27,10 @@ interface UIState {
 
 export function computeInitialSidebarOpen(viewportWidth: number): boolean {
   return viewportWidth >= SIDEBAR_AUTO_COLLAPSE_MAX_WIDTH
+}
+
+function clampSidebarWidth(width: number): number {
+  return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.round(width)))
 }
 
 function findFirstChatModel(
@@ -58,10 +68,15 @@ export const useUIStore = create<UIState>()(
       setSelectedModel: (providerId, modelName) =>
         set({ selectedModelName: modelName, selectedProviderId: providerId }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
+      setSidebarWidth: (width) => {
+        if (!Number.isFinite(width)) return
+        set({ sidebarWidth: clampSidebarWidth(width) })
+      },
       sidebarOpen: computeInitialSidebarOpen(
         typeof window === 'undefined' ? 1280 : window.innerWidth,
       ),
       sidebarViewport: viewportBucket(typeof window === 'undefined' ? 1280 : window.innerWidth),
+      sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
       syncSelectedModel: (providers) => {
         const { selectedModelName, selectedProviderId } = get()
         const firstChatModel = findFirstChatModel(providers)
@@ -92,6 +107,7 @@ export const useUIStore = create<UIState>()(
       partialize: (state) => ({
         selectedModelName: state.selectedModelName,
         selectedProviderId: state.selectedProviderId,
+        sidebarWidth: state.sidebarWidth,
       }),
     },
   ),
