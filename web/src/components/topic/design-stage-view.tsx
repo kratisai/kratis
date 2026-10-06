@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { CanvasPanel } from '@/components/canvas/canvas-panel'
 import { AgentWorkingBlock } from '@/components/chat/agent-working-block'
 import { MarkdownMessage } from '@/components/chat/markdown-message'
+import { PLAN_REQUEST_MESSAGE, PlanShortcut } from '@/components/chat/plan-shortcut'
 import { UserMessageInput } from '@/components/chat/user-message-input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -30,6 +31,7 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
   const sendMessage = useChatStore((state) => state.sendMessage)
   const isConnected = useWebSocketStore((state) => state.isConnected)
   const messages = useChatStore((state) => state.messages)
+  const sendingChatIds = useChatStore((state) => state.sendingChatIds)
   const canvases = useCanvasStore((state) => state.canvases)
   const unreadCanvasDocIds = useCanvasStore((state) => state.unreadCanvasDocIds)
   const clearCanvasActivity = useCanvasStore((state) => state.clearCanvasActivity)
@@ -57,6 +59,18 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- canvases[chatId] can be undefined at runtime despite the Record type
   const chatCanvases = chatId ? canvases[chatId] || [] : []
   const hasCanvases = chatCanvases.length > 0
+
+  // The plan shortcut appears once the agent finished responding and no
+  // executable plan canvas (SPEC) exists for the chat yet.
+  const lastMessage = chatMessages.at(-1)
+  const isAgentResponding =
+    sendingChatIds.has(chatId) || chatMessages.some((m) => m.role === 'working' && m.isStreaming)
+  const hasPlanCanvas = chatCanvases.some((doc) => doc.canvasType === 'SPEC')
+  const showPlanShortcut =
+    lastMessage?.role === 'assistant' &&
+    !lastMessage.isError &&
+    !isAgentResponding &&
+    !hasPlanCanvas
 
   useEffect(() => {
     // Desktop scrolls the history pane; mobile scrolls the document (so the
@@ -209,6 +223,12 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
             data-testid="design-chat-composer"
           >
             <div className={cn(!hasCanvases && 'mx-auto max-w-3xl')}>
+              {showPlanShortcut && (
+                <PlanShortcut
+                  disabled={!isConnected}
+                  onGenerate={() => handleSendMessage(PLAN_REQUEST_MESSAGE)}
+                />
+              )}
               <UserMessageInput
                 disabled={!isConnected}
                 onSend={handleSendMessage}

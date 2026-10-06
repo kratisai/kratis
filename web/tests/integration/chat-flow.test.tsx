@@ -1,8 +1,11 @@
 import { act } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useChatStore } from '@/store/chat-store'
+import { useUIStore } from '@/store/ui-store'
 
+import { createMockTeam } from '../support/test-factories'
 import {
   mockListChats,
   mockListTeams,
@@ -434,5 +437,68 @@ describe('Chat Flow', () => {
     await waitFor(() => {
       expect(screen.getByText('Agent exceeded maximum iterations (3).')).toBeInTheDocument()
     })
+  })
+
+  it('shows the plan shortcut after a completed response and sends the plan request on click', async () => {
+    const team = createMockTeam()
+    mockListTeams([team])
+    mockListChats([
+      {
+        createdAt: '2024-01-01T00:00:00Z',
+        createdByDisplayName: 'Test User',
+        id: 'session-plan',
+        teamId: team.id,
+        title: 'Plan Session',
+        updatedAt: '2024-01-01T00:00:00Z',
+      },
+    ])
+
+    setAuthenticated({ teamId: team.id, userId: 'user-1' })
+    renderIntegration(['/chats/session-plan'])
+
+    const ws = setupConnected()
+
+    await waitFor(() => {
+      expect(screen.getByText('Connected')).toBeInTheDocument()
+    })
+
+    // Send a message and stream an assistant reply; the shortcut must stay
+    // hidden until the server confirms the turn with a complete result.
+    act(() => {
+      useUIStore.setState({ selectedModelName: 'model-1', selectedProviderId: 'provider-1' })
+      useChatStore.getState().sendMessage('session-plan', 'Build me a CLI tool')
+    })
+    act(() => {
+      triggerMockMessageEcho(ws, 'Here is my proposal.', 'session-plan', 'assistant', 'msg-plan-1')
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('Here is my proposal.')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('plan-shortcut')).not.toBeInTheDocument()
+
+    act(() => {
+      triggerMockComplete(ws, 'session-plan', 'msg-plan-1', 1)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('plan-shortcut')).toBeInTheDocument()
+    })
+
+    // Clicking the shortcut sends the plan request as a chat message.
+    await userEvent.click(screen.getByRole('button', { name: /implementation plan/i }))
+
+    await waitFor(() => {
+      const planSend = ws.send.mock.calls
+        .map(([payload]) => JSON.parse(payload as string) as {
+          method: string
+          params: { message: string }
+        })
+        .filter((request) => request.method === 'chat.send')
+        .at(-1)
+      expect(planSend?.params.message).toBe('Please create an implementation plan')
+    })
+    expect(screen.getByText('Please create an implementation plan')).toBeInTheDocument()
+    expect(screen.queryByTestId('plan-shortcut')).not.toBeInTheDocument()
   })
 })

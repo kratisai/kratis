@@ -59,6 +59,8 @@ interface ChatState {
   handleMessageResult: (messageResult: MessageResult) => void
   handleTelemetryEvent: (chatId: string, telemetryResult: TelemetryResult) => void
   messages: Record<string, ChatMessage[]>
+  // Chats with a chat.send round-trip in flight (until a complete/chat_error result).
+  sendingChatIds: Set<string>
   sendMessage: (chatId: string, message: string) => void
   subscribeChat: (chatId: string) => void
   subscribedChatIds: Set<string>
@@ -79,8 +81,13 @@ const currentStreamingContent = new Map<string, string>()
 const pendingFlushTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const pendingMessageIds = new Set<string>()
 
-// Track active chat send operations (chat IDs with in-progress sends)
-const activeChatSends = new Set<string>()
+// Returns a new Set with chatId removed (same reference when it is absent).
+function withoutChatId(chatIds: Set<string>, chatId: string): Set<string> {
+  if (!chatIds.has(chatId)) return chatIds
+  const next = new Set(chatIds)
+  next.delete(chatId)
+  return next
+}
 
 let thoughtCounter = 0
 
@@ -185,12 +192,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       currentChatId: null,
       messages: {},
+      sendingChatIds: new Set<string>(),
       subscribedChatIds: new Set<string>(),
     })
 
     currentStreamingContent.clear()
     pendingMessageIds.clear()
-    activeChatSends.clear()
     thoughtCounter = 0
 
     for (const timer of pendingFlushTimers.values()) {
@@ -282,7 +289,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timestamp: new Date(),
     })
 
-    activeChatSends.delete(activeChatId)
+    set((state) => ({ sendingChatIds: withoutChatId(state.sendingChatIds, activeChatId) }))
     get().finishWorking(activeChatId)
   },
 
@@ -294,6 +301,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const activeChatId = chatId || get().currentChatId
       if (activeChatId) {
         get().finishWorking(activeChatId)
+        set((state) => ({ sendingChatIds: withoutChatId(state.sendingChatIds, activeChatId) }))
       }
 
       const pendingTimer = pendingFlushTimers.get(messageId)
@@ -335,7 +343,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   handleDisconnect: () => {
     // Clear all active operations and streaming state
-    activeChatSends.clear()
+    set({ sendingChatIds: new Set<string>() })
     thoughtCounter = 0
 
     // Flush any pending streaming content
@@ -400,7 +408,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     get().addMessage(currentChatId, errorMessage)
 
     // Clear active operations and close out the working block, if any
-    activeChatSends.clear()
+    set({ sendingChatIds: new Set<string>() })
     get().finishWorking(currentChatId)
   },
 
@@ -535,6 +543,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   messages: {},
 
+  sendingChatIds: new Set<string>(),
+
   sendMessage: (chatId: string, message: string) => {
     const { selectedModelName, selectedProviderId } = useUIStore.getState()
     const teamId = useAuthStore.getState().currentTeamId
@@ -563,7 +573,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       teamId,
     }
 
-    activeChatSends.add(chatId)
+    set((state) => ({
+      sendingChatIds: state.sendingChatIds.has(chatId)
+        ? state.sendingChatIds
+        : new Set(state.sendingChatIds).add(chatId),
+    }))
     useWebSocketStore.getState().send('chat.send', params)
   },
 

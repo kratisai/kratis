@@ -37,6 +37,7 @@ vi.mock('@/store/chat-store', () => ({
       addMessage: vi.fn(),
       currentChatId: mockCurrentChatId,
       messages: mockMessages,
+      sendingChatIds: new Set<string>(),
       sendMessage: vi.fn(),
       subscribeChat: mockSubscribeChat,
       unsubscribeChat: mockUnsubscribeChat,

@@ -5,11 +5,15 @@ import { act } from 'react'
 import { toast } from 'sonner'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { ChatMessage } from '@/store/chat-store'
 import type { CanvasDocument } from '@/types/canvas-types'
 
+import { PLAN_REQUEST_MESSAGE } from '@/components/chat/plan-shortcut'
 import { DesignStageView } from '@/components/topic/design-stage-view'
+import { useAuthStore } from '@/store/auth-store'
 import { useCanvasStore } from '@/store/canvas-store'
 import { useChatStore } from '@/store/chat-store'
+import { useUIStore } from '@/store/ui-store'
 import { useWebSocketStore } from '@/store/websocket-store'
 
 let mockParams = { docId: null as null | string, id: 'chat-1' }
@@ -23,6 +27,15 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('sonner', () => ({
   toast: { success: vi.fn() },
 }))
+
+function agentRespondedMessage(): ChatMessage {
+  return {
+    content: 'Here is what we could build.',
+    id: 'm2',
+    role: 'assistant',
+    timestamp: new Date(),
+  }
+}
 
 function canvasDoc(overrides: Partial<CanvasDocument> = {}): CanvasDocument {
   return {
@@ -65,6 +78,7 @@ describe('DesignStageView', () => {
           },
         ],
       },
+      sendingChatIds: new Set<string>(),
     })
   })
 
@@ -387,6 +401,166 @@ describe('DesignStageView', () => {
       )
 
       expect(useCanvasStore.getState().unreadCanvasDocIds['chat-1']).toEqual(['doc-first'])
+    })
+  })
+
+  describe('implementation plan shortcut', () => {
+    function setLastMessage(message: ChatMessage) {
+      useChatStore.setState({
+        messages: {
+          'chat-1': [
+            {
+              content: 'Let us build auth refresh flow',
+              id: 'm1',
+              role: 'user',
+              timestamp: new Date(),
+            },
+            message,
+          ],
+        },
+      })
+    }
+
+    it('renders the shortcut after the agent completed a response', () => {
+      setLastMessage(agentRespondedMessage())
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      const shortcut = screen.getByTestId('plan-shortcut')
+      expect(
+        within(shortcut).getByRole('button', { name: /implementation plan/i }),
+      ).toBeInTheDocument()
+    })
+
+    it('is hidden while the agent has not responded yet', () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      expect(screen.queryByTestId('plan-shortcut')).not.toBeInTheDocument()
+    })
+
+    it('is hidden while the agent is streaming a response', () => {
+      useChatStore.setState({
+        messages: {
+          'chat-1': [
+            {
+              content: 'Let us build auth refresh flow',
+              id: 'm1',
+              role: 'user',
+              timestamp: new Date(),
+            },
+            {
+              endTime: null,
+              id: 'working-1',
+              isStreaming: true,
+              items: [],
+              role: 'working',
+              startTime: Date.now(),
+              timestamp: new Date(),
+            },
+          ],
+        },
+      })
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      expect(screen.queryByTestId('plan-shortcut')).not.toBeInTheDocument()
+    })
+
+    it('is hidden while a chat send is still in flight', () => {
+      setLastMessage(agentRespondedMessage())
+      useChatStore.setState({ sendingChatIds: new Set(['chat-1']) })
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      expect(screen.queryByTestId('plan-shortcut')).not.toBeInTheDocument()
+    })
+
+    it('is hidden when the chat contains an executable plan canvas', () => {
+      setLastMessage(agentRespondedMessage())
+      useCanvasStore.setState({ canvases: { 'chat-1': [canvasDoc({ canvasType: 'SPEC' })] } })
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      expect(screen.queryByTestId('plan-shortcut')).not.toBeInTheDocument()
+    })
+
+    it('is visible when the chat only contains a non-executable canvas', () => {
+      setLastMessage(agentRespondedMessage())
+      useCanvasStore.setState({ canvases: { 'chat-1': [canvasDoc({ canvasType: 'DOCUMENT' })] } })
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      expect(screen.getByTestId('plan-shortcut')).toBeInTheDocument()
+    })
+
+    it('is hidden when the last response is an error', () => {
+      setLastMessage({
+        content: 'Something went wrong.',
+        id: 'm2',
+        isError: true,
+        role: 'assistant',
+        timestamp: new Date(),
+      })
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      expect(screen.queryByTestId('plan-shortcut')).not.toBeInTheDocument()
+    })
+
+    it('sends the plan request message to the agent when clicked', async () => {
+      const user = userEvent.setup()
+      const sendSpy = vi.fn()
+      useWebSocketStore.setState({ send: sendSpy })
+      useAuthStore.setState({ currentTeamId: 'team-1' })
+      useUIStore.getState().setSelectedModel('provider-1', 'model-1')
+      setLastMessage(agentRespondedMessage())
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      await user.click(screen.getByRole('button', { name: /implementation plan/i }))
+
+      expect(sendSpy).toHaveBeenCalledWith(
+        'chat.send',
+        expect.objectContaining({
+          chatId: 'chat-1',
+          message: PLAN_REQUEST_MESSAGE,
+        }),
+      )
+      expect(screen.getByText(PLAN_REQUEST_MESSAGE)).toBeInTheDocument()
+      // The optimistic user message hides the shortcut again.
+      expect(screen.queryByTestId('plan-shortcut')).not.toBeInTheDocument()
     })
   })
 })
