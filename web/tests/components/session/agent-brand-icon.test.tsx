@@ -4,14 +4,17 @@ import { describe, expect, it } from 'vitest'
 import { AgentBrandIcon } from '@/components/session/agent-brand-icon'
 
 describe('AgentBrandIcon', () => {
-  it('renders Anthropic Claude icon for CLAUDE_CODE', () => {
-    render(<AgentBrandIcon harness="CLAUDE_CODE" />)
+  it('renders Claude Code icon for CLAUDE_CODE and Anthropic icon for ANTHROPIC', () => {
+    const { rerender } = render(<AgentBrandIcon harness="CLAUDE_CODE" />)
+    expect(screen.getByLabelText('Claude Code')).toBeInTheDocument()
+
+    rerender(<AgentBrandIcon harness="ANTHROPIC" />)
     expect(screen.getByLabelText('Anthropic Claude')).toBeInTheDocument()
   })
 
-  it('renders OpenAI icon for OPENCODE and CODEX', () => {
+  it('renders OpenCode icon for OPENCODE and OpenAI icon for CODEX', () => {
     const { rerender } = render(<AgentBrandIcon harness="OPENCODE" />)
-    expect(screen.getByLabelText('OpenAI')).toBeInTheDocument()
+    expect(screen.getByLabelText('OpenCode')).toBeInTheDocument()
 
     rerender(<AgentBrandIcon harness="CODEX" />)
     expect(screen.getByLabelText('OpenAI')).toBeInTheDocument()
