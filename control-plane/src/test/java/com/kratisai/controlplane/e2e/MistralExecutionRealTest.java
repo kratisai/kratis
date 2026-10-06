@@ -18,7 +18,8 @@ class MistralExecutionRealTest extends AbstractAgentExecutionRealTest {
     void testMistralInstallationAndExecutionFlow() throws Exception {
         String dockerAccessibleBaseUrl = wireMockLlmServer.getBaseUrl(liteLLMProperties);
         // Mistral Vibe uses "mistral-vibe-cli-latest" as its default model name.
-        // We must register this model with LiteLLM so it routes to WireMock instead of the real Mistral API.
+        // We must register this model with LiteLLM so it routes to WireMock instead of
+        // the real Mistral API.
         ModelProvider modelProvider = testDataFactory.createModelProviderWithLiteLLM(
                 testContext.team(),
                 "Test Provider",

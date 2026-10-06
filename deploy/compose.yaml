@@ -49,6 +49,7 @@ services:
       start_period: 30s
     volumes:
       - kratis-config:/data/config
+      - kratis-blobs:/data/blobs
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       kratis-db:
@@ -120,4 +121,5 @@ services:
 volumes:
   kratis-data:
   kratis-config:
+  kratis-blobs:
   kratis-image-cache:

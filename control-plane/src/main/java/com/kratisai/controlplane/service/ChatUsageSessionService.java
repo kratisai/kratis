@@ -37,7 +37,7 @@ public class ChatUsageSessionService {
         this.virtualKeyService = virtualKeyService;
     }
 
-    public ChatUsageSessionService(
+    ChatUsageSessionService(
             ChatUsageSessionRepository chatUsageSessionRepository, VirtualKeyService virtualKeyService) {
         this(chatUsageSessionRepository, null, virtualKeyService);
     }
