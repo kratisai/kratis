@@ -33,7 +33,9 @@ const MULTI_HUNK_PATCH = `@@ -10,4 +10,4 @@ function calculateTotal()
 
 describe('DiffHunkViewer', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    // restoreAllMocks (not clearAllMocks) so a mockResolvedValueOnce left in the
+    // queue by an earlier test cannot leak into the next one
+    vi.restoreAllMocks()
     useDiffReviewStore.setState({
       activeCommentBox: null,
       activeStickyBreadcrumb: null,
@@ -484,9 +486,7 @@ index 191f8cb..45e4ba8 100644
 
     // Expand down first (lines 14..23), then up (lines 24..29)
     fireEvent.click(screen.getByRole('button', { name: /^more$/i }))
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^more$/i })).toBeInTheDocument()
-    })
+    await screen.findByText('// gap line 1')
 
     fireEvent.click(screen.getByRole('button', { name: /^show$/i }))
     expect(sliceSpy).toHaveBeenLastCalledWith('chat-1', 'exec-1', 'src/multi.ts', 24, 29)

@@ -1,6 +1,16 @@
-import { Blocks, Bot, Feather, FlaskConical, Hammer, Wind, Zap } from 'lucide-react'
+import type { SVGProps } from 'react'
+
+import { Bot } from 'lucide-react'
 import { RiOpenaiFill } from 'react-icons/ri'
-import { SiAnthropic, SiGithub, SiGoogle } from 'react-icons/si'
+import {
+  SiClaude,
+  SiClaudecode,
+  SiGithubcopilot,
+  SiGooglegemini,
+  SiMistralai,
+  SiOpencode,
+  SiQwen,
+} from 'react-icons/si'
 
 import { KiloLogo } from '@/components/settings/model-provider-logos'
 import { cn } from '@/lib/utils'
@@ -10,47 +20,122 @@ interface AgentBrandIconProps {
   harness?: string
 }
 
+type BrandLogoProps = SVGProps<SVGSVGElement>
+
 export function AgentBrandIcon({ className, harness }: AgentBrandIconProps) {
   const normalized = (harness || '').toUpperCase().replace(/[- ]/g, '_')
 
-  if (normalized.includes('CLAUDE') || normalized.includes('ANTHROPIC')) {
-    return <SiAnthropic aria-label="Anthropic Claude" className={cn('text-[#D97757]', className)} />
+  if (normalized.includes('CLAUDE_CODE')) {
+    return <SiClaudecode aria-label="Claude Code" className={cn('text-[#D97757]', className)} />
   }
-  if (
-    normalized.includes('OPENAI') ||
-    normalized.includes('CODEX') ||
-    normalized.includes('OPENCODE') ||
-    normalized.includes('GPT')
-  ) {
+  if (normalized.includes('CLAUDE') || normalized.includes('ANTHROPIC')) {
+    return <SiClaude aria-label="Anthropic Claude" className={cn('text-[#D97757]', className)} />
+  }
+  if (normalized.includes('OPENCODE')) {
+    return <SiOpencode aria-label="OpenCode" className={cn('text-foreground', className)} />
+  }
+  if (normalized.includes('OPENAI') || normalized.includes('CODEX') || normalized.includes('GPT')) {
     return <RiOpenaiFill aria-label="OpenAI" className={cn('text-[#10A37F]', className)} />
   }
   if (normalized.includes('GEMINI') || normalized.includes('GOOGLE')) {
-    return <SiGoogle aria-label="Google Gemini" className={cn('text-[#4285F4]', className)} />
+    return <SiGooglegemini aria-label="Google Gemini" className={cn('text-[#8E75B2]', className)} />
   }
   if (normalized.includes('GITHUB') || normalized.includes('COPILOT')) {
-    return <SiGithub aria-label="GitHub Copilot" className={cn('text-foreground', className)} />
+    return (
+      <SiGithubcopilot aria-label="GitHub Copilot" className={cn('text-foreground', className)} />
+    )
   }
   if (normalized.includes('AIDER')) {
-    return <Hammer aria-label="Aider" className={cn('text-amber-500', className)} />
+    return <AiderLogo aria-label="Aider" className={className} />
   }
   if (normalized.includes('GOOSE')) {
-    return <Wind aria-label="Goose" className={cn('text-teal-500', className)} />
+    return <GooseLogo aria-label="Goose" className={cn('text-foreground', className)} />
   }
   if (normalized.includes('MISTRAL')) {
-    return <Zap aria-label="Mistral" className={cn('text-orange-500', className)} />
+    return <SiMistralai aria-label="Mistral" className={cn('text-[#FA520F]', className)} />
   }
   if (normalized.includes('OPENHANDS')) {
-    return <Blocks aria-label="OpenHands" className={cn('text-blue-500', className)} />
+    return <OpenHandsLogo aria-label="OpenHands" className={cn('text-foreground', className)} />
   }
   if (normalized.includes('PI')) {
-    return <Feather aria-label="Pi" className={cn('text-purple-500', className)} />
+    return <PiAgentLogo aria-label="Pi" className={cn('text-foreground', className)} />
   }
   if (normalized.includes('QWEN')) {
-    return <FlaskConical aria-label="Qwen" className={cn('text-indigo-500', className)} />
+    return <SiQwen aria-label="Qwen" className={cn('text-[#6950EF]', className)} />
   }
   if (normalized.includes('KILO')) {
     return <KiloLogo aria-label="Kilo" className={cn('text-[#84cc16]', className)} />
   }
 
   return <Bot aria-label="Agent" className={cn('text-muted-foreground', className)} />
+}
+
+// Aider has no simple-icons entry; vectorized from the official pixel-letter "a"
+// app icon on aider.chat (mint green on dark green).
+function AiderLogo({ className, ...props }: BrandLogoProps) {
+  return (
+    <svg className={className} height="1em" viewBox="0 0 24 24" width="1em" {...props}>
+      <rect fill="#003921" height="24" rx="3" width="24" />
+      <g fill="#01FEA1">
+        <rect height="4" rx="0.6" width="7.75" x="7.21" y="1.75" />
+        <rect height="4" rx="0.6" width="2.58" x="14.96" y="5.75" />
+        <rect height="4" rx="0.6" width="10.33" x="7.21" y="9.75" />
+        <rect height="4" rx="0.6" width="2.58" x="4.63" y="13.75" />
+        <rect height="4" rx="0.6" width="2.58" x="14.96" y="13.75" />
+        <rect height="4" rx="0.6" width="7.75" x="7.21" y="17.75" />
+        <rect height="4" rx="0.6" width="2.58" x="17.54" y="17.75" />
+      </g>
+    </svg>
+  )
+}
+
+// Official goose (Block) logo silhouette; monochrome in the upstream brand.
+function GooseLogo(props: BrandLogoProps) {
+  return (
+    <svg
+      fill="currentColor"
+      fillRule="evenodd"
+      height="1em"
+      viewBox="0 0 24 24"
+      width="1em"
+      {...props}
+    >
+      <path d="M21.595 23.61c1.167-.254 2.405-.944 2.405-.944l-2.167-1.784a12.124 12.124 0 01-2.695-3.131 12.127 12.127 0 00-3.97-4.049l-.794-.462a1.115 1.115 0 01-.488-.815.844.844 0 01.154-.575c.413-.582 2.548-3.115 2.94-3.44.503-.416 1.065-.762 1.586-1.159.074-.056.148-.112.221-.17.003-.002.007-.004.009-.007.167-.131.325-.272.45-.438.453-.524.563-.988.59-1.193-.061-.197-.244-.639-.753-1.148.319.02.705.272 1.056.569.235-.376.481-.773.727-1.171.165-.266-.08-.465-.086-.471h-.001V3.22c-.007-.007-.206-.25-.471-.086-.567.35-1.134.702-1.639 1.021 0 0-.597-.012-1.305.599a2.464 2.464 0 00-.438.45l-.007.009c-.058.072-.114.147-.17.221-.397.521-.743 1.083-1.16 1.587-.323.391-2.857 2.526-3.44 2.94a.842.842 0 01-.574.153 1.115 1.115 0 01-.815-.488l-.462-.794a12.123 12.123 0 00-4.049-3.97 12.133 12.133 0 01-3.13-2.695L1.332 0S.643 1.238.39 2.405c.352.428 1.27 1.49 2.34 2.302C1.58 4.167.73 3.75.06 3.4c-.103.765-.063 1.92.043 2.816.726.317 1.961.806 3.219 1.066-1.006.236-2.11.278-2.961.262.15.554.358 1.119.64 1.688.119.263.25.52.39.77.452.125 2.222.383 3.164.171l-2.51.897a27.776 27.776 0 002.544 2.726c2.031-1.092 2.494-1.241 4.018-2.238-2.467 2.008-3.108 2.828-3.8 3.67l-.483.678c-.25.351-.469.725-.65 1.117-.61 1.31-1.47 4.1-1.47 4.1-.154.486.202.842.674.674 0 0 2.79-.861 4.1-1.47.392-.182.766-.4 1.118-.65l.677-.483c.227-.187.453-.37.701-.586 0 0 1.705 2.02 3.458 3.349l.896-2.511c-.211.942.046 2.712.17 3.163.252.142.509.272.772.392.569.28 1.134.49 1.688.64-.016-.853.026-1.956.261-2.962.26 1.258.75 2.493 1.067 3.219.895.106 2.051.146 2.816.043a73.87 73.87 0 01-1.308-2.67c.811 1.07 1.874 1.988 2.302 2.34h-.001z" />
+    </svg>
+  )
+}
+
+// Official OpenHands color mark: yellow hands with dark outline.
+function OpenHandsLogo({ className, ...props }: BrandLogoProps) {
+  return (
+    <svg
+      className={className}
+      fill="currentColor"
+      height="1em"
+      viewBox="0 0 24 24"
+      width="1em"
+      {...props}
+    >
+      <path
+        d="M4.75 6.313c.743 0 1.083.357 1.083 1.94 0-1.374.449-1.551.993-1.552.544 0 .9.455.84 1.803-.074 1.719-.235 2.57-.297 3.755-.195 3.751.477 2.62.552 2.432.185-.467.756-1.56 1.559-2.193 1.003-.792 1.504.2 1.348.475-.178.308-.978 1.533-1.348 2.775-.296.994-1.003 2.004-1.56 2.457-1.136.925-3.832 1.004-5.364.317C1.023 17.835.722 16.321.6 15.748c-.211-.99 0-2.07 0-2.59 0-.58-.158-2.335-.21-2.936-.073-.84.166-1.214.694-1.25.406-.026.943.225.943 1.086V8.267c0-.714.614-.98.92-.98.307 0 .903.083.904.98V7.37c0-.528.278-1.056.898-1.057zM19.25 6.313c.62 0 .899.53.899 1.057v.897c0-.896.596-.98.903-.98.306 0 .92.266.92.98v1.791c0-.861.539-1.112.944-1.085.529.035.768.41.695 1.25-.052.6-.212 2.355-.212 2.935 0 .52.212 1.6 0 2.59-.122.573-.423 2.087-1.955 2.774-1.533.687-4.227.608-5.364-.317-.557-.453-1.263-1.463-1.56-2.457-.37-1.242-1.17-2.467-1.347-2.775-.157-.275.344-1.268 1.348-.475.803.634 1.374 1.726 1.559 2.193.075.189.745 1.32.55-2.432-.062-1.186-.221-2.036-.296-3.755-.06-1.348.296-1.802.84-1.803.544 0 .994.177.994 1.553 0-1.583.338-1.94 1.082-1.94z"
+        fill="#FFFF8B"
+      />
+      <path
+        d="M4.75 5.937c.212 0 .43.025.63.11.21.09.382.238.51.445.022.035.04.073.059.112.274-.243.611-.28.877-.28.19 0 .382.04.56.144.177.104.317.26.42.453.196.372.267.905.237 1.6-.038.869-.098 1.519-.155 2.098-.058.58-.112 1.078-.143 1.66-.047.908-.041 1.513-.009 1.907.282-.572.807-1.428 1.51-1.983.29-.23.58-.358.862-.379.287-.022.532.07.716.217.178.141.296.33.357.51.054.158.093.403-.027.61-.193.336-.96 1.507-1.314 2.695-.316 1.06-1.062 2.137-1.682 2.641-.66.538-1.715.797-2.753.848-1.048.051-2.168-.105-3.003-.48C.68 18.095.352 16.39.232 15.828c-.116-.544-.114-1.102-.087-1.573.014-.236.035-.457.05-.644.018-.193.029-.34.029-.452 0-.558-.156-2.288-.21-2.902-.038-.446-.004-.845.17-1.148.193-.336.515-.487.875-.51.184-.013.393.016.592.104v-.435c0-.48.213-.83.485-1.05A1.352 1.352 0 013.51 7.01a1.48 1.48 0 01.255-.591c.216-.291.552-.483.985-.483zm2.076 1.141c-.24 0-.342.041-.412.125-.091.11-.205.383-.205 1.05l-.001.017v.001l-.002.059c-.006.28-.037.91-.073 1.613l-.006.093-.117 2.555-.313.041-1.796.24-.002-.002-2.064.329-.024-.415-.16-2.704V10.06c0-.35-.106-.516-.195-.597a.473.473 0 00-.347-.114c-.168.012-.23.065-.271.136-.06.102-.108.312-.074.707.051.585.213 2.366.213 2.967 0 .15-.015.331-.03.517-.018.192-.037.4-.05.623-.025.445-.023.924.072 1.371.124.582.4 1.908 1.742 2.51.697.312 1.692.46 2.658.413.976-.048 1.837-.291 2.314-.679.494-.402 1.16-1.347 1.436-2.273.37-1.24 1.147-2.462 1.356-2.813-.002-.008-.002-.02-.007-.034a.364.364 0 00-.113-.163.26.26 0 00-.19-.056c-.09.007-.241.053-.452.219-.728.575-1.268 1.597-1.442 2.037-.032.079-.111.23-.223.348a.62.62 0 01-.297.181.493.493 0 01-.481-.15.903.903 0 01-.194-.383 3.145 3.145 0 01-.088-.545c-.039-.444-.043-1.096.006-2.041.032-.604.088-1.124.145-1.696.056-.572.114-1.207.151-2.056.029-.654-.049-1.023-.15-1.215a.369.369 0 00-.134-.155.348.348 0 00-.18-.04zm-3.878.585a.61.61 0 00-.337.139.562.562 0 00-.207.465v1.791l.133 2.267.937-.15V8.268c0-.356-.112-.472-.177-.52-.09-.063-.219-.084-.349-.084zM4.75 6.69a.437.437 0 00-.38.179.856.856 0 00-.142.501v4.698l1.057-.14c.023-.561.055-1.231.087-1.848l.085-1.843c-.002-.778-.09-1.161-.207-1.349a.345.345 0 00-.165-.147.866.866 0 00-.335-.05zM19.252 5.937c.431 0 .767.192.983.483.131.177.213.382.255.591a1.354 1.354 0 011.376.205c.271.222.483.571.483 1.051v.435c.199-.088.408-.117.593-.105.36.024.68.175.874.511.174.303.209.702.17 1.147-.053.615-.21 2.345-.21 2.903 0 .111.012.26.028.452.017.187.037.408.05.644.028.471.03 1.029-.086 1.573-.12.562-.448 2.267-2.17 3.039-.835.374-1.955.53-3.003.479-1.038-.051-2.093-.31-2.753-.848-.62-.504-1.366-1.58-1.682-2.641-.354-1.187-1.119-2.358-1.313-2.695-.12-.207-.081-.452-.027-.61.06-.18.179-.369.357-.51.184-.146.428-.239.716-.217.28.021.57.149.861.379.703.554 1.227 1.41 1.509 1.982.032-.394.039-.999-.008-1.906-.03-.582-.085-1.08-.143-1.66a35.962 35.962 0 01-.154-2.098c-.03-.695.04-1.228.237-1.6.102-.193.242-.349.42-.453.177-.103.37-.143.56-.143.265 0 .6.036.875.279.02-.039.038-.077.06-.112.129-.207.3-.355.51-.445.201-.085.42-.11.631-.11zm-2.078 1.141a.35.35 0 00-.18.04.37.37 0 00-.134.155c-.101.192-.179.561-.15 1.215.037.85.095 1.484.151 2.056.057.572.114 1.092.145 1.696.05.945.045 1.597.006 2.041a3.15 3.15 0 01-.088.545.905.905 0 01-.192.384.494.494 0 01-.481.15.621.621 0 01-.299-.182 1.195 1.195 0 01-.223-.348c-.174-.44-.713-1.462-1.441-2.037-.21-.166-.362-.212-.452-.219a.26.26 0 00-.191.056.365.365 0 00-.112.163c-.005.014-.007.026-.009.034.21.35.988 1.573 1.357 2.813.276.926.942 1.871 1.437 2.273.476.388 1.338.631 2.314.68.967.047 1.961-.102 2.659-.414 1.342-.602 1.616-1.928 1.74-2.51.096-.447.097-.926.072-1.371-.013-.223-.032-.43-.049-.623a6.384 6.384 0 01-.03-.517c0-.601.161-2.382.212-2.967.034-.395-.015-.605-.073-.707-.04-.07-.104-.124-.272-.136a.473.473 0 00-.347.114c-.078.07-.168.207-.19.474l-.005.122v.022l-.159 2.704-.024.415-2.066-.329-2.11-.28-.117-2.554-.005-.093a74.933 74.933 0 01-.075-1.613l-.002-.059v-.017c0-.668-.113-.94-.205-1.05-.07-.085-.172-.126-.412-.126zm3.878.585c-.13 0-.258.021-.349.085-.065.047-.177.163-.177.519v3.909l.936.149.134-2.267V8.267a.563.563 0 00-.205-.465.614.614 0 00-.339-.139zM19.25 6.69c-.159 0-.264.02-.335.05a.346.346 0 00-.165.148c-.116.188-.205.571-.206 1.349l.078 1.699c.034.655.068 1.387.092 1.991l1.059.14V7.37a.857.857 0 00-.143-.501.438.438 0 00-.38-.179z"
+        fillRule="evenodd"
+      />
+      <path d="M8.912 3.873a.377.377 0 01.513.138l1.151 1.993a.377.377 0 01-.652.376l-1.15-1.993a.377.377 0 01.138-.514zM14.555 4.011a.376.376 0 01.652.376l-1.15 1.993a.377.377 0 01-.652-.376l1.15-1.993zM11.989 3c.208 0 .376.169.376.377v2.3a.377.377 0 01-.753 0v-2.3c0-.208.169-.377.377-.377z" />
+    </svg>
+  )
+}
+
+// Official pi.dev brand mark (adapt Pi's own theme: near-black on light, off-white on dark).
+function PiAgentLogo(props: BrandLogoProps) {
+  return (
+    <svg fill="currentColor" height="1em" viewBox="0 0 560 560" width="1em" {...props}>
+      <path d="M420 280H280V140H0V0H420V280Z" />
+      <path d="M560 560H420V280H560V560Z" />
+      <path d="M140 560H0V140H140V280H280V420H140V560Z" />
+    </svg>
+  )
 }
