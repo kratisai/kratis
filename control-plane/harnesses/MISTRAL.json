@@ -3,7 +3,10 @@
   "setupCommands": [
     "export PATH=$HOME/.local/bin:$PATH",
     "export MISTRAL_API_KEY=${VIRTUAL_KEY}",
-    "curl -LsSf https://mistral.ai/vibe/install.sh | bash",
+    "curl -LsSf https://mistral.ai/vibe/install.sh -o /tmp/mistral-install.sh",
+    "bash /tmp/mistral-install.sh",
+    "uv tool install --force mistral-vibe==2.25.8",
+    "vibe --version | grep -q \"2.25.8\"",
     "mkdir -p $HOME/.vibe",
     "printf 'default_agent = \"accept-edits\"\\nactive_model = \"%s\"\\n\\n[[providers]]\\nname = \"mistral\"\\napi_base = \"%s/v1\"\\napi_key_env_var = \"MISTRAL_API_KEY\"\\napi_style = \"openai\"\\n\\n[[models]]\\nname = \"%s\"\\nprovider = \"mistral\"\\nalias = \"%s\"\\n' \"${LLM_MODEL}\" \"${LLM_BASE_URL}\" \"${LLM_MODEL}\" \"${LLM_MODEL}\" > $HOME/.vibe/config.toml"
   ],

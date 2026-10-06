@@ -1,0 +1,72 @@
+databaseChangeLog:
+- changeSet:
+    id: 002-execution-diff-snapshots-001
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: execution_diff_snapshots_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+              unique: true
+              uniqueConstraintName: uq_diff_snapshots_execution
+            name: execution_id
+            type: UUID
+        - column:
+            name: base_commit
+            type: VARCHAR(64)
+        - column:
+            name: head_commit
+            type: VARCHAR(64)
+        - column:
+            constraints:
+              nullable: false
+            name: total_additions
+            type: INT
+        - column:
+            constraints:
+              nullable: false
+            name: total_deletions
+            type: INT
+        - column:
+            constraints:
+              nullable: false
+            name: summary_json
+            type: JSONB
+        - column:
+            constraints:
+              nullable: false
+            name: patch_storage_path
+            type: VARCHAR(255)
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: updated_at
+            type: TIMESTAMP WITH TIME ZONE
+        tableName: execution_diff_snapshots
+    - addForeignKeyConstraint:
+        baseColumnNames: execution_id
+        baseTableName: execution_diff_snapshots
+        constraintName: fk_diff_snapshots_execution
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: sandbox_executions
+        validate: true

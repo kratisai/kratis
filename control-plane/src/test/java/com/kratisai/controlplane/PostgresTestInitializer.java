@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.Map;
@@ -98,16 +99,22 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
         System.setProperty("spring.jpa.properties.hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
         System.setProperty("spring.datasource.driver-class-name", "org.postgresql.Driver");
 
-        // Ensure pgvector is installed in the public schema so all isolated test schemas can access it
+        // Ensure pgvector is installed in public schema and litellm database exists
         try (Connection conn = DriverManager.getConnection(
                         POSTGRES_CONTAINER.getJdbcUrl(),
                         POSTGRES_CONTAINER.getUsername(),
                         POSTGRES_CONTAINER.getPassword());
-                java.sql.Statement stmt = conn.createStatement()) {
+                Statement stmt = conn.createStatement()) {
             stmt.execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;");
             logger.info("✅ Ensured pgvector extension exists in public schema");
+            try (ResultSet rs = stmt.executeQuery("SELECT 1 FROM pg_database WHERE datname = 'litellm'")) {
+                if (!rs.next()) {
+                    stmt.execute("CREATE DATABASE litellm;");
+                    logger.info("✅ Ensured litellm database exists");
+                }
+            }
         } catch (Exception e) {
-            throw new RuntimeException("Failed to install pgvector in public schema", e);
+            throw new RuntimeException("Failed to initialize test postgres database", e);
         }
 
         // Peer alias, not the bridge gateway's published port: that listener lives only in the DinD
