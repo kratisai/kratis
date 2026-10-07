@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DiffChangedParams",
+  "type": "object",
+  "required": [
+    "executionId",
+    "baseCommit",
+    "headCommit",
+    "totalAdditions",
+    "totalDeletions",
+    "files",
+    "patch"
+  ],
+  "properties": {
+    "executionId": {
+      "type": "string"
+    },
+    "baseCommit": {
+      "type": "string"
+    },
+    "headCommit": {
+      "type": "string"
+    },
+    "totalAdditions": {
+      "type": "integer"
+    },
+    "totalDeletions": {
+      "type": "integer"
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "status",
+          "additions",
+          "deletions",
+          "isCollapsedByDefault"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "MODIFIED",
+              "ADDED",
+              "DELETED",
+              "RENAMED"
+            ]
+          },
+          "additions": {
+            "type": "integer"
+          },
+          "deletions": {
+            "type": "integer"
+          },
+          "isCollapsedByDefault": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "patch": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

@@ -64,18 +64,20 @@ type disconnectReport struct {
 var defaultCredentialsDir = "/kratis"
 
 type ClientTimeouts struct {
-	ReconnectDelay    time.Duration
-	HeartbeatInterval time.Duration
-	PermissionTimeout time.Duration
-	PromptQuietPeriod time.Duration
+	ReconnectDelay     time.Duration
+	HeartbeatInterval  time.Duration
+	PermissionTimeout  time.Duration
+	PromptQuietPeriod  time.Duration
+	DiffDebouncePeriod time.Duration
 }
 
 func DefaultClientTimeouts() ClientTimeouts {
 	return ClientTimeouts{
-		ReconnectDelay:    DefaultReconnectDelay,
-		HeartbeatInterval: DefaultHeartbeatInterval,
-		PermissionTimeout: DefaultPermissionTimeout,
-		PromptQuietPeriod: DefaultPromptQuietPeriod,
+		ReconnectDelay:     DefaultReconnectDelay,
+		HeartbeatInterval:  DefaultHeartbeatInterval,
+		PermissionTimeout:  DefaultPermissionTimeout,
+		PromptQuietPeriod:  DefaultPromptQuietPeriod,
+		DiffDebouncePeriod: 500 * time.Millisecond,
 	}
 }
 
@@ -143,6 +145,11 @@ type Client struct {
 
 	// Timeouts for supervisor (used when creating supervisors)
 	supervisorTimeouts runner.SupervisorTimeouts
+
+	// Diff sync state
+	diffMu            sync.Mutex
+	lastDiffHash      string
+	diffDebounceTimer *time.Timer
 
 	// debug gates sidecar-internal diagnostics out of env.output (they always
 	// remain in the Go log)
@@ -477,6 +484,11 @@ func (c *Client) SendActivity(activity acp.Activity) {
 		Status:       ActivityStatus(activity.Status),
 		Detail:       detail,
 	})
+
+	if activity.Status == acp.ActivityCompleted &&
+		(activity.ActivityType == acp.ActivityTypeEdited || activity.ActivityType == acp.ActivityTypeCommand) {
+		c.TriggerDiffCheck()
+	}
 }
 
 func (c *Client) markActivity() {

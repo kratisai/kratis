@@ -1,16 +1,23 @@
 package com.kratisai.controlplane.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.DiffFileDto;
 import com.kratisai.controlplane.api.restdto.DiffSummaryDto;
 import com.kratisai.controlplane.api.restdto.ReadFileSliceDto;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.model.ChatEntity;
+import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.repository.ChatRepository;
+import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -29,22 +36,31 @@ public class SandboxExecutionDiffService {
     private final SandboxExecutionRepository sandboxExecutionRepository;
     private final ChatRepository chatRepository;
     private final EnvironmentRpcClient environmentRpcClient;
+    private final ExecutionDiffSnapshotRepository diffSnapshotRepository;
+    private final BlobStorageService blobStorageService;
+    private final ObjectMapper objectMapper;
 
     public SandboxExecutionDiffService(
             SandboxExecutionRepository sandboxExecutionRepository,
             ChatRepository chatRepository,
-            EnvironmentRpcClient environmentRpcClient) {
+            EnvironmentRpcClient environmentRpcClient,
+            ExecutionDiffSnapshotRepository diffSnapshotRepository,
+            BlobStorageService blobStorageService,
+            ObjectMapper objectMapper) {
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.chatRepository = chatRepository;
         this.environmentRpcClient = environmentRpcClient;
+        this.diffSnapshotRepository = diffSnapshotRepository;
+        this.blobStorageService = blobStorageService;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional(readOnly = true)
     public DiffSummaryDto getDiffSummary(UUID userId, UUID chatId, UUID executionId) {
         SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
         ExecutionEnvironment env = execution.getEnvironment();
-        if (env == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution has no associated environment");
+        if (env == null || env.getStatus() != EnvironmentStatus.CONNECTED) {
+            return getDiffSummaryFromSnapshot(executionId);
         }
 
         String targetBranch = resolveTargetBranch(execution);
@@ -70,12 +86,8 @@ public class SandboxExecutionDiffService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Diff summary request interrupted", e);
-        } catch (TimeoutException e) {
-            throw new ResponseStatusException(
-                    HttpStatus.GATEWAY_TIMEOUT, "Timed out fetching diff summary from sandbox", e);
-        } catch (EnvironmentRpcClient.EnvironmentRpcException e) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_GATEWAY, "Failed to retrieve diff summary: " + e.getMessage(), e);
+        } catch (TimeoutException | EnvironmentRpcClient.EnvironmentRpcException e) {
+            return getDiffSummaryFromSnapshot(executionId);
         }
     }
 
@@ -84,8 +96,8 @@ public class SandboxExecutionDiffService {
         Objects.requireNonNull(path, "path is required");
         SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
         ExecutionEnvironment env = execution.getEnvironment();
-        if (env == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution has no associated environment");
+        if (env == null || env.getStatus() != EnvironmentStatus.CONNECTED) {
+            return getFileDiffFromSnapshot(executionId, path);
         }
 
         String targetBranch = resolveTargetBranch(execution);
@@ -106,12 +118,8 @@ public class SandboxExecutionDiffService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "File diff request interrupted", e);
-        } catch (TimeoutException e) {
-            throw new ResponseStatusException(
-                    HttpStatus.GATEWAY_TIMEOUT, "Timed out fetching file diff from sandbox", e);
-        } catch (EnvironmentRpcClient.EnvironmentRpcException e) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_GATEWAY, "Failed to retrieve file diff: " + e.getMessage(), e);
+        } catch (TimeoutException | EnvironmentRpcClient.EnvironmentRpcException e) {
+            return getFileDiffFromSnapshot(executionId, path);
         }
     }
 
@@ -151,6 +159,16 @@ public class SandboxExecutionDiffService {
 
     @Transactional(readOnly = true)
     public String exportPatch(UUID userId, UUID chatId, UUID executionId) {
+        validateAndGetExecution(userId, chatId, executionId);
+        String patchPath = "diffs/" + executionId + ".patch";
+        if (blobStorageService.exists(patchPath)) {
+            try (InputStream is = blobStorageService.getObject(patchPath)) {
+                return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            } catch (IOException ignored) {
+                // Fall back to live concatenation
+            }
+        }
+
         DiffSummaryDto summary = getDiffSummary(userId, chatId, executionId);
         StringBuilder patchBuilder = new StringBuilder();
 
@@ -167,6 +185,89 @@ public class SandboxExecutionDiffService {
             }
         }
         return patchBuilder.toString();
+    }
+
+    private DiffSummaryDto getDiffSummaryFromSnapshot(UUID executionId) {
+        return diffSnapshotRepository
+                .findByExecutionId(executionId)
+                .map(snapshot -> {
+                    try {
+                        List<EnvironmentConnectorResult.GitDiffSummaryFile> files = objectMapper.readValue(
+                                snapshot.getSummaryJson(),
+                                new TypeReference<List<EnvironmentConnectorResult.GitDiffSummaryFile>>() {});
+                        List<DiffSummaryDto.DiffSummaryFileDto> fileDtos = files.stream()
+                                .map(f -> new DiffSummaryDto.DiffSummaryFileDto(
+                                        f.path(), f.status(), f.additions(), f.deletions(), f.isCollapsedByDefault()))
+                                .toList();
+                        return new DiffSummaryDto(
+                                snapshot.getBaseCommit() != null ? snapshot.getBaseCommit() : "",
+                                snapshot.getHeadCommit() != null ? snapshot.getHeadCommit() : "",
+                                snapshot.getTotalAdditions(),
+                                snapshot.getTotalDeletions(),
+                                fileDtos);
+                    } catch (Exception e) {
+                        return new DiffSummaryDto(
+                                snapshot.getBaseCommit() != null ? snapshot.getBaseCommit() : "",
+                                snapshot.getHeadCommit() != null ? snapshot.getHeadCommit() : "",
+                                snapshot.getTotalAdditions(),
+                                snapshot.getTotalDeletions(),
+                                List.of());
+                    }
+                })
+                .orElse(new DiffSummaryDto("", "", 0, 0, List.of()));
+    }
+
+    private DiffFileDto getFileDiffFromSnapshot(UUID executionId, String path) {
+        String patchStoragePath = "diffs/" + executionId + ".patch";
+        if (!blobStorageService.exists(patchStoragePath)) {
+            return new DiffFileDto(path, "", 0, 0, 0);
+        }
+        try (InputStream is = blobStorageService.getObject(patchStoragePath)) {
+            String fullPatch = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            return extractFileDiff(path, fullPatch);
+        } catch (IOException e) {
+            return new DiffFileDto(path, "", 0, 0, 0);
+        }
+    }
+
+    static DiffFileDto extractFileDiff(String path, String fullPatch) {
+        if (fullPatch == null || fullPatch.isBlank()) {
+            return new DiffFileDto(path, "", 0, 0, 0);
+        }
+
+        String[] lines = fullPatch.split("\\r?\\n");
+        StringBuilder patchBuilder = new StringBuilder();
+        boolean inTargetFile = false;
+        int additions = 0;
+        int deletions = 0;
+
+        for (String line : lines) {
+            if (line.startsWith("diff --git ")) {
+                if (inTargetFile) {
+                    break;
+                }
+                if (line.endsWith(" b/" + path)
+                        || line.contains(" b/" + path + " ")
+                        || line.equals("diff --git a/" + path + " b/" + path)) {
+                    inTargetFile = true;
+                    patchBuilder.append(line).append("\n");
+                    continue;
+                }
+            } else if (inTargetFile) {
+                patchBuilder.append(line).append("\n");
+                if (line.startsWith("+") && !line.startsWith("+++")) {
+                    additions++;
+                } else if (line.startsWith("-") && !line.startsWith("---")) {
+                    deletions++;
+                }
+            }
+        }
+
+        if (!inTargetFile) {
+            return new DiffFileDto(path, "", 0, 0, 0);
+        }
+
+        return new DiffFileDto(path, patchBuilder.toString(), additions, deletions, additions + deletions);
     }
 
     private String resolveTargetBranch(SandboxExecution execution) {

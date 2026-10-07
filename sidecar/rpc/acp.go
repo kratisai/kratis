@@ -220,6 +220,7 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 	}
 
 	if promptErr == nil && stopReason != "" && ValidStopReasons[stopReason] {
+		c.TriggerDiffCheck()
 		// Some harnesses keep working after signalling end_turn; wait for quiet.
 		c.waitForQuiet(c.Timeouts.PromptQuietPeriod)
 		completionParams := AcpPromptCompleteParams{

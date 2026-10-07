@@ -8,6 +8,7 @@ import type {
   CompleteResult,
   ExecutionActivityResult,
   ExecutionCompleteResult,
+  ExecutionDiffChangedResult,
   ExecutionHitlRequiredResult,
   ExecutionHitlResolvedResult,
   ExecutionOutputResult,
@@ -22,6 +23,7 @@ import type {
   UserEntityChangedResult,
 } from '@/types/websocket-types'
 
+import { DIFF_QUERY_KEYS } from '@/hooks/use-diff'
 import { queryClient } from '@/lib/query-client'
 import { useActivityStore } from '@/store/activity-store'
 import { useAuthStore } from '@/store/auth-store'
@@ -164,6 +166,9 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
           break
         case 'execution_complete':
           handleExecutionCompleteResult(response.result)
+          break
+        case 'execution_diff_changed':
+          handleExecutionDiffChangedResult(response.result)
           break
         case 'execution_hitl_required':
           handleExecutionHitlRequired(response.result)
@@ -620,6 +625,16 @@ export function handleExecutionCompleteResult(result: ExecutionCompleteResult): 
       `[System] Command completed ${statusText} with exit code ${result.exitCode}.`,
     )
   useActivityStore.getState().handleExecutionComplete(result)
+}
+
+export function handleExecutionDiffChangedResult(result: ExecutionDiffChangedResult): void {
+  if (result.teamId !== useAuthStore.getState().currentTeamId) return
+  void queryClient.invalidateQueries({
+    queryKey: DIFF_QUERY_KEYS.summary(result.chatId, result.executionId),
+  })
+  void queryClient.invalidateQueries({
+    queryKey: ['execution-diff-file', result.chatId, result.executionId],
+  })
 }
 
 export function handleExecutionStatusChangedResult(result: ExecutionStatusChangedResult): void {

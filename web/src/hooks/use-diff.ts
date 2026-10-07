@@ -4,7 +4,7 @@ import type { SteerExecutionRequest } from '@/types/diff-types'
 
 import { fetchDiffSummary, fetchFileDiff, steerExecution } from '@/lib/diff-api'
 
-const DIFF_QUERY_KEYS = {
+export const DIFF_QUERY_KEYS = {
   file: (chatId: string, executionId: string, path: string) => [
     'execution-diff-file',
     chatId,

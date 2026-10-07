@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionDiffChangedResult",
+  "type": "object",
+  "required": [
+    "type",
+    "executionId",
+    "chatId",
+    "teamId"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "execution_diff_changed"
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "chatId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "teamId": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false
+}

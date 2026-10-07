@@ -99,6 +99,21 @@
       ]
     },
     {
+      "name": "env.diff_changed",
+      "summary": "Notify control plane of workspace git diff update",
+      "x-kratis-direction": "connector-to-control-plane",
+      "x-kratis-message-kind": "notification",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/diff_changed.schema.json"
+          }
+        }
+      ]
+    },
+    {
       "name": "env.complete",
       "summary": "Signal command execution completion",
       "x-kratis-direction": "connector-to-control-plane",

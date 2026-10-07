@@ -192,6 +192,14 @@ export const CLIENT_RESULTS = {
       type: z.literal('execution_complete'),
     })
     .strict(),
+  execution_diff_changed: z
+    .object({
+      chatId: uuid,
+      executionId: uuid,
+      teamId: uuid,
+      type: z.literal('execution_diff_changed'),
+    })
+    .strict(),
   execution_hitl_required: z
     .object({
       command: z.string().optional(),

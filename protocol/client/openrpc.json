@@ -282,6 +282,13 @@
       "schema": {
         "$ref": "./schemas/results/ingestion.schema.json"
       }
+    },
+    {
+      "name": "execution_diff_changed",
+      "summary": "Workspace diff changed for an execution; receivers invalidate diff queries",
+      "schema": {
+        "$ref": "./schemas/results/execution_diff_changed.schema.json"
+      }
     }
   ]
 }

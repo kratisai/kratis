@@ -436,4 +436,19 @@ public sealed interface ClientPayload {
             this(ClientPayloadType.EXECUTION_ACP_INITIALIZED, executionId, sessionId, agentName, agentVersion);
         }
     }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record ExecutionDiffChangedResult(ClientPayloadType type, UUID executionId, UUID chatId, UUID teamId)
+            implements ClientPayload {
+        public ExecutionDiffChangedResult {
+            Objects.requireNonNull(type, "type is required");
+            Objects.requireNonNull(executionId, "executionId is required");
+            Objects.requireNonNull(chatId, "chatId is required");
+            Objects.requireNonNull(teamId, "teamId is required");
+        }
+
+        public ExecutionDiffChangedResult(UUID executionId, UUID chatId, UUID teamId) {
+            this(ClientPayloadType.EXECUTION_DIFF_CHANGED, executionId, chatId, teamId);
+        }
+    }
 }

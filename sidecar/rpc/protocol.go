@@ -431,6 +431,17 @@ type GitDiffSummaryResult struct {
 	Files          []GitDiffSummaryFile `json:"files"`
 }
 
+// DiffChangedParams is the parameters payload for env.diff_changed.
+type DiffChangedParams struct {
+	ExecutionID    string               `json:"executionId"`
+	BaseCommit     string               `json:"baseCommit"`
+	HeadCommit     string               `json:"headCommit"`
+	TotalAdditions int                  `json:"totalAdditions"`
+	TotalDeletions int                  `json:"totalDeletions"`
+	Files          []GitDiffSummaryFile `json:"files"`
+	Patch          string               `json:"patch"`
+}
+
 // GitFileDiffParams is the parameters payload for env.git_file_diff.
 type GitFileDiffParams struct {
 	Path        string `json:"path"`

@@ -258,6 +258,7 @@ public abstract class WebSocketFixture<T extends WebSocketFixture<T>> extends Te
             case EXECUTION_ACTIVITY -> ClientPayload.ExecutionActivityResult.class;
             case EXECUTION_REPLAY_COMPLETE -> ClientPayload.ExecutionReplayCompleteResult.class;
             case EXECUTION_ACP_INITIALIZED -> ClientPayload.ExecutionAcpInitializedResult.class;
+            case EXECUTION_DIFF_CHANGED -> ClientPayload.ExecutionDiffChangedResult.class;
         };
     }
 }

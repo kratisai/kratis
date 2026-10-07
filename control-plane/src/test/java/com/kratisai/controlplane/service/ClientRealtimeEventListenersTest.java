@@ -14,6 +14,7 @@ import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionAcpInitializedResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionActivityResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionCompleteResult;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionDiffChangedResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionOutputResult;
@@ -37,6 +38,7 @@ import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionAcpInitializedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
+import com.kratisai.controlplane.model.event.SandboxExecutionDiffChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlRequiredEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionOutputEvent;
@@ -314,6 +316,21 @@ class ClientRealtimeEventListenersTest {
         ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
         verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
         ExecutionStatusChangedResult result = (ExecutionStatusChangedResult) captor.getValue();
+        assertThat(result.teamId()).isEqualTo(teamId);
+        assertThat(result.chatId()).isEqualTo(chatId);
+        assertThat(result.executionId()).isEqualTo(executionId);
+    }
+
+    @Test
+    void onSandboxExecutionDiffChangedEvent_broadcastsDiffChanged() {
+        UUID teamId = UUID.randomUUID();
+        UUID chatId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
+        listeners.onSandboxExecutionDiffChangedEvent(new SandboxExecutionDiffChangedEvent(teamId, chatId, executionId));
+
+        ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
+        verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
+        ExecutionDiffChangedResult result = (ExecutionDiffChangedResult) captor.getValue();
         assertThat(result.teamId()).isEqualTo(teamId);
         assertThat(result.chatId()).isEqualTo(chatId);
         assertThat(result.executionId()).isEqualTo(executionId);
