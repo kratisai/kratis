@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.diff_changed",
+  "params": {
+    "executionId": "123e4567-e89b-12d3-a456-426614174000",
+    "baseCommit": "abcdef1234567890abcdef1234567890abcdef12",
+    "headCommit": "1234567890abcdef1234567890abcdef12345678",
+    "totalAdditions": 5,
+    "totalDeletions": 2,
+    "files": []
+  }
+}

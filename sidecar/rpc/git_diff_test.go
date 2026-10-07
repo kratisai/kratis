@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func setupTestGitRepo(t *testing.T) string {
@@ -392,4 +393,48 @@ func captureGitDiffSummary(t *testing.T, c *Client, _ GitDiffSummaryParams) GitD
 		t.Fatalf("Failed to unmarshal diff summary: %v", err)
 	}
 	return envelope.Result
+}
+
+func TestTriggerDiffCheck_EmitsDiffChanged(t *testing.T) {
+	dir := setupTestGitRepo(t)
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	client, received := connectedGitClient(t, dir)
+	client.currentExecutionID = "exec-test-diff"
+	client.Timeouts.DiffDebouncePeriod = 10 * time.Millisecond
+
+	// Modify a file in workspace
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Modified README\n"), 0600); err != nil {
+		t.Fatalf("Failed to write README: %v", err)
+	}
+
+	client.TriggerDiffCheck()
+
+	select {
+	case msg := <-received:
+		var notification struct {
+			Method string            `json:"method"`
+			Params DiffChangedParams `json:"params"`
+		}
+		if err := json.Unmarshal(msg, &notification); err != nil {
+			t.Fatalf("Failed to unmarshal notification: %v", err)
+		}
+		if notification.Method != "env.diff_changed" {
+			t.Fatalf("Expected env.diff_changed notification, got %s", notification.Method)
+		}
+		if notification.Params.ExecutionID != "exec-test-diff" {
+			t.Errorf("Expected execution ID exec-test-diff, got %s", notification.Params.ExecutionID)
+		}
+		if len(notification.Params.Files) != 1 {
+			t.Fatalf("Expected 1 changed file, got %d", len(notification.Params.Files))
+		}
+		if notification.Params.Files[0].Path != "README.md" {
+			t.Errorf("Expected README.md in files, got %s", notification.Params.Files[0].Path)
+		}
+		if !strings.Contains(notification.Params.Patch, "Modified README") {
+			t.Errorf("Expected patch to contain 'Modified README', got: %s", notification.Params.Patch)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timed out waiting for env.diff_changed notification")
+	}
 }

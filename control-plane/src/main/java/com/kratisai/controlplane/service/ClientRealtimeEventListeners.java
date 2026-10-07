@@ -167,4 +167,15 @@ public class ClientRealtimeEventListeners {
             logger.error("Failed to publish execution acp initialized event for execution {}", event.executionId(), e);
         }
     }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onSandboxExecutionDiffChangedEvent(SandboxExecutionDiffChangedEvent event) {
+        try {
+            dispatch.broadcastNotificationToTeam(
+                    event.teamId(),
+                    new ExecutionDiffChangedResult(event.executionId(), event.chatId(), event.teamId()));
+        } catch (Exception e) {
+            logger.error("Failed to publish execution diff changed event for execution {}", event.executionId(), e);
+        }
+    }
 }

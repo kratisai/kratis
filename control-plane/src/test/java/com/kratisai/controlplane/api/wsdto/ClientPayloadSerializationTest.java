@@ -145,4 +145,17 @@ class ClientPayloadSerializationTest {
         assertThat(json.has("resolvedByDisplayName")).isTrue();
         assertThat(json.get("resolvedByDisplayName").isNull()).isTrue();
     }
+
+    @Test
+    void executionDiffChangedResult_serializesExpectedFields() {
+        UUID execId = UUID.randomUUID();
+        UUID chatId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        JsonNode json = objectMapper.valueToTree(new ClientPayload.ExecutionDiffChangedResult(execId, chatId, teamId));
+
+        assertThat(json.get("type").asText()).isEqualTo("execution_diff_changed");
+        assertThat(json.get("executionId").asText()).isEqualTo(execId.toString());
+        assertThat(json.get("chatId").asText()).isEqualTo(chatId.toString());
+        assertThat(json.get("teamId").asText()).isEqualTo(teamId.toString());
+    }
 }

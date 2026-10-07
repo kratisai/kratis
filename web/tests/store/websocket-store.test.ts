@@ -9,6 +9,7 @@ import { useChatStore } from '@/store/chat-store'
 import { useExecutionStore } from '@/store/execution-store'
 import {
   handleExecutionCompleteResult,
+  handleExecutionDiffChangedResult,
   handleExecutionStatusChangedResult,
   handleIngestionResult,
   resyncActiveExecution,
@@ -115,6 +116,48 @@ describe('handleExecutionStatusChangedResult', () => {
       executionId: 'exec-1',
       teamId: 'team-1',
       type: 'execution_status_changed',
+    })
+
+    expect(invalidateSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleExecutionDiffChangedResult', () => {
+  beforeEach(() => {
+    useAuthStore.setState({ currentTeamId: 'team-1' })
+    vi.restoreAllMocks()
+  })
+
+  afterEach(() => {
+    useAuthStore.setState({ currentTeamId: null })
+  })
+
+  it('invalidates summary and file diff queries when team matches', () => {
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined)
+
+    handleExecutionDiffChangedResult({
+      chatId: 'chat-1',
+      executionId: 'exec-1',
+      teamId: 'team-1',
+      type: 'execution_diff_changed',
+    })
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['execution-diff-summary', 'chat-1', 'exec-1'],
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['execution-diff-file', 'chat-1', 'exec-1'],
+    })
+  })
+
+  it('does nothing when team does not match', () => {
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined)
+
+    handleExecutionDiffChangedResult({
+      chatId: 'chat-1',
+      executionId: 'exec-1',
+      teamId: 'team-other',
+      type: 'execution_diff_changed',
     })
 
     expect(invalidateSpy).not.toHaveBeenCalled()

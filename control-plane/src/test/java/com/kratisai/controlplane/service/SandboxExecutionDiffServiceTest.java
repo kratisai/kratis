@@ -8,10 +8,14 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.api.restdto.DiffFileDto;
 import com.kratisai.controlplane.api.restdto.DiffSummaryDto;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.model.ChatEntity;
+import com.kratisai.controlplane.model.EnvironmentStatus;
+import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
@@ -19,7 +23,10 @@ import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.ChatRepository;
+import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -44,12 +51,20 @@ class SandboxExecutionDiffServiceTest {
     @Mock
     private EnvironmentRpcClient environmentRpcClient;
 
+    @Mock
+    private ExecutionDiffSnapshotRepository diffSnapshotRepository;
+
+    @Mock
+    private BlobStorageService blobStorageService;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private SandboxExecutionDiffService service;
 
     private UUID userId;
     private UUID chatId;
     private UUID executionId;
     private UUID envId;
+    private ExecutionEnvironment environment;
     private SandboxExecution execution;
     private Repository repository;
 
@@ -67,9 +82,10 @@ class SandboxExecutionDiffServiceTest {
         ChatEntity chat = new ChatEntity(team, user, "Session");
         chat.setId(chatId);
 
-        ExecutionEnvironment environment = new ExecutionEnvironment();
+        environment = new ExecutionEnvironment();
         environment.setId(envId);
         environment.setTeam(team);
+        environment.setStatus(EnvironmentStatus.CONNECTED);
 
         repository = new Repository("my-repo", "https://github.com/test/repo.git", "main", RepositoryType.GITHUB);
         repository.setTeam(team);
@@ -80,7 +96,13 @@ class SandboxExecutionDiffServiceTest {
         execution.setEnvironment(environment);
         execution.setRepository(repository);
 
-        service = new SandboxExecutionDiffService(sandboxExecutionRepository, chatRepository, environmentRpcClient);
+        service = new SandboxExecutionDiffService(
+                sandboxExecutionRepository,
+                chatRepository,
+                environmentRpcClient,
+                diffSnapshotRepository,
+                blobStorageService,
+                objectMapper);
 
         when(chatRepository.findById(chatId)).thenReturn(Optional.of(chat));
         when(sandboxExecutionRepository.findById(executionId)).thenReturn(Optional.of(execution));
@@ -155,10 +177,68 @@ class SandboxExecutionDiffServiceTest {
     }
 
     @Test
-    void getDiffSummary_noEnvironment_throwsBadRequest() {
+    void getDiffSummary_disconnectedEnvironment_fallsBackToSnapshot() {
+        environment.setStatus(EnvironmentStatus.DISCONNECTED);
+        ExecutionDiffSnapshot snapshot = new ExecutionDiffSnapshot(
+                executionId,
+                "commit-1",
+                "commit-2",
+                8,
+                2,
+                "[{\"path\":\"src/App.tsx\",\"status\":\"MODIFIED\",\"additions\":8,\"deletions\":2,\"isCollapsedByDefault\":false}]",
+                "diffs/" + executionId + ".patch");
+        when(diffSnapshotRepository.findByExecutionId(executionId)).thenReturn(Optional.of(snapshot));
+
+        DiffSummaryDto result = service.getDiffSummary(userId, chatId, executionId);
+
+        assertThat(result.baseCommit()).isEqualTo("commit-1");
+        assertThat(result.totalAdditions()).isEqualTo(8);
+        assertThat(result.totalDeletions()).isEqualTo(2);
+        assertThat(result.files()).hasSize(1);
+        assertThat(result.files().getFirst().path()).isEqualTo("src/App.tsx");
+    }
+
+    @Test
+    void getFileDiff_disconnectedEnvironment_extractsFileFromSnapshotBlob() {
+        environment.setStatus(EnvironmentStatus.DISCONNECTED);
+        String fullPatch = "diff --git a/src/App.tsx b/src/App.tsx\n"
+                + "--- a/src/App.tsx\n"
+                + "+++ b/src/App.tsx\n"
+                + "@@ -1,2 +1,3 @@\n"
+                + "-old\n"
+                + "+new\n"
+                + "+extra\n";
+        String patchPath = "diffs/" + executionId + ".patch";
+        when(blobStorageService.exists(patchPath)).thenReturn(true);
+        when(blobStorageService.getObject(patchPath))
+                .thenReturn(new ByteArrayInputStream(fullPatch.getBytes(StandardCharsets.UTF_8)));
+
+        DiffFileDto fileDiff = service.getFileDiff(userId, chatId, executionId, "src/App.tsx");
+
+        assertThat(fileDiff.path()).isEqualTo("src/App.tsx");
+        assertThat(fileDiff.additions()).isEqualTo(2);
+        assertThat(fileDiff.deletions()).isEqualTo(1);
+        assertThat(fileDiff.patch()).contains("+new");
+    }
+
+    @Test
+    void exportPatch_readsStoredBlobDirectly() {
+        String fullPatch = "diff --git a/file.txt b/file.txt\n+hello";
+        String patchPath = "diffs/" + executionId + ".patch";
+        when(blobStorageService.exists(patchPath)).thenReturn(true);
+        when(blobStorageService.getObject(patchPath))
+                .thenReturn(new ByteArrayInputStream(fullPatch.getBytes(StandardCharsets.UTF_8)));
+
+        String patch = service.exportPatch(userId, chatId, executionId);
+
+        assertThat(patch).isEqualTo(fullPatch);
+    }
+
+    @Test
+    void getReadFileSlice_noEnvironment_throwsBadRequest() {
         execution.setEnvironment(null);
 
-        assertThatThrownBy(() -> service.getDiffSummary(userId, chatId, executionId))
+        assertThatThrownBy(() -> service.getReadFileSlice(userId, chatId, executionId, "src/App.tsx", 1, 10))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("associated environment");
     }

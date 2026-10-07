@@ -81,6 +81,8 @@ func (c *Client) ExecuteExec(params ExecParams, reqID interface{}) {
 		status = ExecFailed
 	}
 
+	c.TriggerDiffCheck()
+
 	c.sendSuccessResponse(reqID, ExecResult{
 		Status:   status,
 		ExitCode: exitCode,

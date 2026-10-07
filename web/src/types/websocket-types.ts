@@ -141,6 +141,13 @@ export interface ExecutionCompleteResult {
   type: 'execution_complete'
 }
 
+export interface ExecutionDiffChangedResult {
+  chatId: string
+  executionId: string
+  teamId: string
+  type: 'execution_diff_changed'
+}
+
 export interface ExecutionHitlRequiredResult {
   command?: string
   commandSegments?: CommandSegment[]
@@ -241,6 +248,7 @@ export type JsonRpcResult =
   | CompleteResult
   | ExecutionActivityResult
   | ExecutionCompleteResult
+  | ExecutionDiffChangedResult
   | ExecutionHitlRequiredResult
   | ExecutionHitlResolvedResult
   | ExecutionOutputResult

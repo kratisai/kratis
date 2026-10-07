@@ -1,6 +1,8 @@
 package rpc
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"kratis-connector/runner"
 )
@@ -555,17 +558,30 @@ func isGeneratedOrLarge(path string, additions, deletions int) bool {
 
 // ExecuteGitDiffSummary produces a high-level summary manifest of all modified/added/deleted files.
 func (c *Client) ExecuteGitDiffSummary(params GitDiffSummaryParams, reqID interface{}) {
+	res, err := c.buildGitDiffSummary(params.BaseBranch)
+	if err != nil {
+		if reqID != nil {
+			c.sendErrorResponse(reqID, -32000, "Unable to resolve diff base", err.Error())
+		}
+		return
+	}
+	if reqID != nil {
+		c.sendSuccessResponse(reqID, res)
+	}
+}
+
+// buildGitDiffSummary produces a high-level summary manifest of all modified/added/deleted files.
+func (c *Client) buildGitDiffSummary(baseBranch string) (GitDiffSummaryResult, error) {
 	workspace := c.resolveWorkspace()
 
 	if _, err := os.Stat(filepath.Join(workspace, ".git")); err != nil {
-		c.sendSuccessResponse(reqID, GitDiffSummaryResult{
+		return GitDiffSummaryResult{
 			BaseCommit:     "",
 			HeadCommit:     "",
 			TotalAdditions: 0,
 			TotalDeletions: 0,
 			Files:          []GitDiffSummaryFile{},
-		})
-		return
+		}, nil
 	}
 
 	headCmd := exec.Command("git", "rev-parse", "HEAD") //nolint:gosec
@@ -573,12 +589,9 @@ func (c *Client) ExecuteGitDiffSummary(params GitDiffSummaryParams, reqID interf
 	headBytes, _ := headCmd.Output()
 	headCommit := strings.TrimSpace(string(headBytes))
 
-	baseCommit, err := resolveDiffBase(workspace, params.BaseBranch)
+	baseCommit, err := resolveDiffBase(workspace, baseBranch)
 	if err != nil {
-		if reqID != nil {
-			c.sendErrorResponse(reqID, -32000, "Unable to resolve diff base", err.Error())
-		}
-		return
+		return GitDiffSummaryResult{}, err
 	}
 
 	statusMap := make(map[string]GitDiffStatus)
@@ -761,7 +774,7 @@ func (c *Client) ExecuteGitDiffSummary(params GitDiffSummaryParams, reqID interf
 
 	hasChanges := commitsAhead > 0 || len(fileList) > 0 || stagedFiles > 0 || unstagedFiles > 0
 
-	c.sendSuccessResponse(reqID, GitDiffSummaryResult{
+	return GitDiffSummaryResult{
 		BaseCommit:     baseCommit,
 		HeadCommit:     headCommit,
 		TotalAdditions: totalAdds,
@@ -772,6 +785,116 @@ func (c *Client) ExecuteGitDiffSummary(params GitDiffSummaryParams, reqID interf
 		HasChanges:     hasChanges,
 		CommitMessages: commitMessages,
 		Files:          fileList,
+	}, nil
+}
+
+// buildGitFullDiff produces the complete unified diff patch across all modified, added,
+// deleted, and untracked files against baseCommit.
+func (c *Client) buildGitFullDiff(baseCommit string) string {
+	workspace := c.resolveWorkspace()
+	var sb strings.Builder
+
+	if baseCommit != "" {
+		diffCmd := exec.Command("git", "diff", "-U3", baseCommit) //nolint:gosec
+		diffCmd.Dir = workspace
+		if out, err := diffCmd.Output(); err == nil && len(out) > 0 {
+			sb.Write(out)
+			if !strings.HasSuffix(sb.String(), "\n") {
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	porcelainCmd := exec.Command("git", "status", "--porcelain", "-uall") //nolint:gosec
+	porcelainCmd.Dir = workspace
+	if pOut, err := porcelainCmd.Output(); err == nil {
+		for _, line := range strings.Split(string(pOut), "\n") {
+			if strings.HasPrefix(line, "??") {
+				filePath := strings.TrimSpace(line[2:])
+				if filePath == "" || isKratisPlatformPath(filePath) {
+					continue
+				}
+				fullPath := filepath.Join(workspace, filePath)
+				content, err := os.ReadFile(fullPath) //nolint:gosec
+				if err != nil {
+					continue
+				}
+				fmt.Fprintf(&sb, "diff --git a/%s b/%s\n", filePath, filePath)
+				sb.WriteString("new file mode 100644\n")
+				sb.WriteString("--- /dev/null\n")
+				fmt.Fprintf(&sb, "+++ b/%s\n", filePath)
+				sb.WriteString(syntheticNewFilePatch(content))
+				if !strings.HasSuffix(sb.String(), "\n") {
+					sb.WriteString("\n")
+				}
+			}
+		}
+	}
+	return sb.String()
+}
+
+// TriggerDiffCheck inspects workspace git status and emits env.diff_changed if changed.
+func (c *Client) TriggerDiffCheck() {
+	workspace := c.resolveWorkspace()
+	if _, err := os.Stat(filepath.Join(workspace, ".git")); err != nil {
+		return
+	}
+
+	cmd := exec.Command("git", "status", "--porcelain", "-uall") //nolint:gosec
+	cmd.Dir = workspace
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+
+	hash := sha256.Sum256(out)
+	hashStr := hex.EncodeToString(hash[:])
+
+	c.diffMu.Lock()
+	defer c.diffMu.Unlock()
+
+	if hashStr == c.lastDiffHash {
+		return
+	}
+	c.lastDiffHash = hashStr
+
+	debouncePeriod := c.Timeouts.DiffDebouncePeriod
+	if debouncePeriod <= 0 {
+		go c.emitDiffChanged()
+		return
+	}
+
+	if c.diffDebounceTimer != nil {
+		c.diffDebounceTimer.Stop()
+	}
+	c.diffDebounceTimer = time.AfterFunc(debouncePeriod, func() {
+		c.emitDiffChanged()
+	})
+}
+
+// emitDiffChanged computes the diff summary and unified patch and sends env.diff_changed.
+func (c *Client) emitDiffChanged() {
+	c.mu.Lock()
+	execID := c.currentExecutionID
+	c.mu.Unlock()
+	if execID == "" {
+		return
+	}
+
+	summary, err := c.buildGitDiffSummary("")
+	if err != nil {
+		return
+	}
+	patch := c.buildGitFullDiff(summary.BaseCommit)
+
+	_ = c.sendNotification("env.diff_changed", DiffChangedParams{
+		ExecutionID:    execID,
+		BaseCommit:     summary.BaseCommit,
+		HeadCommit:     summary.HeadCommit,
+		TotalAdditions: summary.TotalAdditions,
+		TotalDeletions: summary.TotalDeletions,
+		Files:          summary.Files,
+		Patch:          patch,
 	})
 }
 
