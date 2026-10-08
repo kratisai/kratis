@@ -2,6 +2,7 @@ package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.client.litellm.LiteLLMClient;
 import com.kratisai.controlplane.client.litellm.LiteLLMDto.*;
+import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderModel;
@@ -19,7 +20,6 @@ import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpServerErrorException;
@@ -47,7 +47,7 @@ public class LiteLLMProvisioningService {
     private final LiteLLMClient liteLLMClient;
     private final ModelProviderRepository modelProviderRepository;
     private final TeamRepository teamRepository;
-    private final boolean reconcileOnStartup;
+    private final boolean reconciliationEnabled;
 
     private final AtomicBoolean reconciliationSettled = new AtomicBoolean(false);
     private final AtomicInteger reconcileFailures = new AtomicInteger(0);
@@ -56,16 +56,16 @@ public class LiteLLMProvisioningService {
             LiteLLMClient liteLLMClient,
             ModelProviderRepository modelProviderRepository,
             TeamRepository teamRepository,
-            @Value("${kratis.litellm.reconcile-on-startup:true}") boolean reconcileOnStartup) {
+            LiteLLMProperties liteLLMProperties) {
         this.liteLLMClient = liteLLMClient;
         this.modelProviderRepository = modelProviderRepository;
         this.teamRepository = teamRepository;
-        this.reconcileOnStartup = reconcileOnStartup;
+        this.reconciliationEnabled = liteLLMProperties.getReconciliation().isEnabled();
     }
 
     @PostConstruct
     void reconcileOnStartup() {
-        if (!reconcileOnStartup) {
+        if (!reconciliationEnabled) {
             reconciliationSettled.set(true);
             logger.info("LiteLLM startup reconciliation skipped (disabled by configuration)");
             return;
@@ -116,9 +116,9 @@ public class LiteLLMProvisioningService {
         }
     }
 
-    @Scheduled(fixedDelayString = "${kratis.litellm.reconcile-retry-delay-ms:10000}")
+    @Scheduled(fixedDelayString = "${kratis.litellm.reconciliation.retry-interval:10s}")
     void retryReconciliation() {
-        if (!reconcileOnStartup || reconciliationSettled.get()) {
+        if (!reconciliationEnabled || reconciliationSettled.get()) {
             return;
         }
         if (reconcileFailures.get() >= MAX_STARTUP_RECONCILE_RETRIES) {

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.kratisai.controlplane.client.litellm.LiteLLMClient;
 import com.kratisai.controlplane.client.litellm.LiteLLMDto.*;
+import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderModel;
@@ -50,8 +51,8 @@ class LiteLLMProvisioningServiceTest {
 
     @BeforeEach
     void setUp() {
-        provisioningService =
-                new LiteLLMProvisioningService(liteLLMClient, modelProviderRepository, teamRepository, true);
+        provisioningService = new LiteLLMProvisioningService(
+                liteLLMClient, modelProviderRepository, teamRepository, new LiteLLMProperties());
 
         testTeam = new Team();
         testTeam.setId(UUID.fromString("12345678-1234-1234-1234-123456789abc"));

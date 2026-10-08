@@ -60,8 +60,8 @@ public class TelemetryService {
     }
 
     @Scheduled(
-            initialDelayString = "${kratis.telemetry.initial-delay-ms:60000}",
-            fixedDelayString = "${kratis.telemetry.fixed-delay-ms:86400000}")
+            initialDelayString = "${kratis.telemetry.initial-delay:60s}",
+            fixedDelayString = "${kratis.telemetry.fixed-delay:1d}")
     public void reportUsage() {
         if (!properties.isEnabled()) {
             logger.debug("Usage telemetry disabled; skipping report");

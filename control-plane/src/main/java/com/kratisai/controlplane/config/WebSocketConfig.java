@@ -3,7 +3,6 @@ package com.kratisai.controlplane.config;
 import com.kratisai.controlplane.websocket.client.ClientWebSocketHandler;
 import com.kratisai.controlplane.websocket.environment.EnvironmentWebSocketHandler;
 import java.util.Arrays;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
@@ -41,13 +40,11 @@ public class WebSocketConfig implements WebSocketConfigurer {
     public WebSocketConfig(
             EnvironmentWebSocketHandler environmentWebSocketHandler,
             ClientWebSocketHandler clientWebSocketHandler,
-            @Value("${kratis.security.client-allowed-origins:${kratis.security.allowed-origins:*}}")
-                    String clientAllowedOriginsProperty,
-            @Value("${kratis.security.env-allowed-origins:*}") String envAllowedOriginsProperty) {
+            SecurityProperties securityProperties) {
         this.environmentWebSocketHandler = environmentWebSocketHandler;
         this.clientWebSocketHandler = clientWebSocketHandler;
-        this.clientAllowedOrigins = parseOrigins(clientAllowedOriginsProperty);
-        this.envAllowedOrigins = parseOrigins(envAllowedOriginsProperty);
+        this.clientAllowedOrigins = parseOrigins(securityProperties.getClientAllowedOrigins());
+        this.envAllowedOrigins = parseOrigins(securityProperties.getEnvAllowedOrigins());
     }
 
     private static String[] parseOrigins(String originsProperty) {

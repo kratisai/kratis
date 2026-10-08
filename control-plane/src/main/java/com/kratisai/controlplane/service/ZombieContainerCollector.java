@@ -1,5 +1,7 @@
 package com.kratisai.controlplane.service;
 
+import com.kratisai.controlplane.config.InstanceProperties;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
@@ -9,14 +11,13 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@ConditionalOnProperty(value = "kratis.zombie-collector.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(value = "kratis.sandbox.reconciliation.enabled", havingValue = "true", matchIfMissing = true)
 public class ZombieContainerCollector {
 
     private static final Logger logger = LoggerFactory.getLogger(ZombieContainerCollector.class);
@@ -36,16 +37,17 @@ public class ZombieContainerCollector {
             ExecutionEnvironmentRepository environmentRepository,
             List<SandboxProvider> sandboxProviders,
             Optional<ProcessExecutor> processExecutor,
-            @Value("${kratis.instance.id:default}") String instanceId,
-            @Value("${kratis.zombie-collector.grace-period-seconds:30}") long gracePeriodSeconds) {
+            InstanceProperties instanceProperties,
+            SandboxProperties sandboxProperties) {
         this.environmentRepository = environmentRepository;
         this.sandboxProviders = sandboxProviders;
         this.processExecutor = processExecutor;
-        this.instanceId = instanceId;
-        this.gracePeriodSeconds = gracePeriodSeconds;
+        this.instanceId = instanceProperties.getId();
+        this.gracePeriodSeconds =
+                sandboxProperties.getReconciliation().getGracePeriod().toSeconds();
     }
 
-    @Scheduled(fixedRateString = "${kratis.zombie-collector.fixed-rate-ms:10000}")
+    @Scheduled(fixedRateString = "${kratis.sandbox.reconciliation.poll-interval:10s}")
     @Transactional
     public void collectZombies() {
         logger.debug("Starting zombie container collection cycle...");

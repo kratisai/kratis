@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.DatabaseCleaner;
 import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.TestDataFactory;
+import com.kratisai.controlplane.config.ParserProperties;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.CtxEdgeRepository;
 import com.kratisai.controlplane.repository.CtxNodeRepository;
@@ -77,13 +78,11 @@ abstract @SpringIntegrationTest class BaseCodebaseMemoryParserIntegrationTest {
 
     /** Create the parser service with the resolved binary path. */
     protected CodebaseMemoryParserService createParserService(File binaryFile) {
+        ParserProperties parserProperties = new ParserProperties();
+        parserProperties.setBinaryPath(binaryFile.getAbsolutePath());
+        parserProperties.setTempDir(System.getProperty("java.io.tmpdir"));
         return new CodebaseMemoryParserService(
-                ctxNodeRepository,
-                ctxEdgeRepository,
-                new ProcessExecutor(),
-                objectMapper,
-                binaryFile.getAbsolutePath(),
-                System.getProperty("java.io.tmpdir"));
+                ctxNodeRepository, ctxEdgeRepository, new ProcessExecutor(), objectMapper, parserProperties);
     }
 
     /** Run the parser on the given sample directory. */

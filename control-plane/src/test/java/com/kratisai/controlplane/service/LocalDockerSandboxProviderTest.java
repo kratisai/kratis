@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.kratisai.controlplane.config.InstanceProperties;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.EnvironmentProvider;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
@@ -27,14 +29,30 @@ class LocalDockerSandboxProviderTest {
     private ExecutionEnvironmentRepository mockEnvRepository;
     private LocalDockerSandboxProvider provider;
 
+    private static LocalDockerSandboxProvider sandboxProvider(
+            ProcessExecutor processExecutor,
+            ExecutionEnvironmentRepository repository,
+            String connectUrl,
+            String registryMirror,
+            String runnerImage,
+            boolean debug) {
+        InstanceProperties instanceProperties = new InstanceProperties();
+        instanceProperties.setId("unit-test-instance");
+        SandboxProperties sandboxProperties = new SandboxProperties();
+        sandboxProperties.getDocker().setConnectUrl(connectUrl);
+        sandboxProperties.getDocker().setRegistryMirror(registryMirror);
+        sandboxProperties.getDocker().setRunnerImage(runnerImage);
+        sandboxProperties.getDocker().setDebug(debug);
+        return new LocalDockerSandboxProvider(processExecutor, repository, instanceProperties, sandboxProperties);
+    }
+
     @BeforeEach
     void setUp() {
         mockProcessExecutor = mock(ProcessExecutor.class);
         mockEnvRepository = mock(ExecutionEnvironmentRepository.class);
-        provider = new LocalDockerSandboxProvider(
+        provider = sandboxProvider(
                 mockProcessExecutor,
                 mockEnvRepository,
-                "unit-test-instance",
                 "ws://localhost:8080/ws",
                 "http://host.docker.internal:5001",
                 "kratis-runner-base:latest",
@@ -114,10 +132,9 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testSpawnSandboxUsesConfiguredRunnerImage() throws Exception {
-        LocalDockerSandboxProvider customImageProvider = new LocalDockerSandboxProvider(
+        LocalDockerSandboxProvider customImageProvider = sandboxProvider(
                 mockProcessExecutor,
                 mockEnvRepository,
-                "unit-test-instance",
                 "ws://localhost:8080/ws",
                 "http://host.docker.internal:5001",
                 "ghcr.io/kratisai/kratis-runner-base:latest",
@@ -145,10 +162,9 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testInitializeWorkspaceAppendsDebugFlagWhenEnabled() throws Exception {
-        LocalDockerSandboxProvider debugProvider = new LocalDockerSandboxProvider(
+        LocalDockerSandboxProvider debugProvider = sandboxProvider(
                 mockProcessExecutor,
                 mockEnvRepository,
-                "unit-test-instance",
                 "ws://localhost:8080/ws",
                 "http://host.docker.internal:5001",
                 "kratis-runner-base:latest",
@@ -627,10 +643,9 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testTerminateSandboxCapturesSidecarLogsInDebugMode() throws Exception {
-        LocalDockerSandboxProvider debugProvider = new LocalDockerSandboxProvider(
+        LocalDockerSandboxProvider debugProvider = sandboxProvider(
                 mockProcessExecutor,
                 mockEnvRepository,
-                "unit-test-instance",
                 "ws://localhost:8080/ws",
                 "http://host.docker.internal:5001",
                 "kratis-runner-base:latest",
@@ -699,10 +714,9 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testSpawnSandboxWithCustomRegistryMirror() throws Exception {
-        LocalDockerSandboxProvider customMirrorProvider = new LocalDockerSandboxProvider(
+        LocalDockerSandboxProvider customMirrorProvider = sandboxProvider(
                 mockProcessExecutor,
                 mockEnvRepository,
-                "unit-test-instance",
                 "ws://localhost:8080/ws",
                 "http://custom-mirror:5001",
                 "kratis-runner-base:latest",

@@ -10,11 +10,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.kratisai.controlplane.api.restdto.AuthTokensResponse;
+import com.kratisai.controlplane.config.AuthProperties;
 import com.kratisai.controlplane.model.RefreshToken;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.RefreshTokenRepository;
 import com.kratisai.controlplane.repository.UserRepository;
 import jakarta.persistence.EntityManager;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,6 +61,8 @@ class UserServiceTest {
 
     @BeforeEach
     void setUp() {
+        AuthProperties authProperties = new AuthProperties();
+        authProperties.setRefreshExpiration(Duration.ofMillis(REFRESH_EXPIRATION_MS));
         userService = new UserService(
                 userRepository,
                 refreshTokenRepository,
@@ -67,7 +71,7 @@ class UserServiceTest {
                 entityManager,
                 transactionManager,
                 teamService,
-                REFRESH_EXPIRATION_MS);
+                authProperties);
     }
 
     private static RefreshToken validToken(User user) {

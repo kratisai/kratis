@@ -5,6 +5,7 @@ import com.kratisai.controlplane.agentloop.ReActLoopExhaustedException;
 import com.kratisai.controlplane.agentloop.ReActLoopFatalException;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.api.wsdto.JsonRpcErrorCodes;
+import com.kratisai.controlplane.config.PlanningProperties;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.repository.ModelProviderRepository;
 import com.kratisai.controlplane.service.ChatModelFactory;
@@ -26,7 +27,6 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.augment.AugmentedToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -62,7 +62,7 @@ public class PlanningAgentService {
             ScratchpadTool scratchpadTool,
             WebSearchTool webSearchTool,
             ScratchpadService scratchpadService,
-            @Value("${kratis.agent.max-iterations:25}") int maxIterations,
+            PlanningProperties planningProperties,
             @Qualifier("agentTaskExecutor") TaskExecutor agentTaskExecutor) {
 
         this.modelProviderRepository = modelProviderRepository;
@@ -75,8 +75,8 @@ public class PlanningAgentService {
 
         ToolCallback[] toolCallbacks =
                 getWrappedTools(canvasTool, repositoryTool, dimensionTool, wikiTool, scratchpadTool, webSearchTool);
-        this.orchestrationLoop =
-                new PlanningAgentLoop(chatMemory, scratchpadService, toolCallbacks, maxIterations, agentTaskExecutor);
+        this.orchestrationLoop = new PlanningAgentLoop(
+                chatMemory, scratchpadService, toolCallbacks, planningProperties.getMaxIterations(), agentTaskExecutor);
     }
 
     /** Add AgentThinking to our tool-callbacks * */

@@ -13,6 +13,13 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 
 class WebSocketConfigTest {
 
+    private static SecurityProperties securityProperties(String clientOrigins, String envOrigins) {
+        SecurityProperties properties = new SecurityProperties();
+        properties.setClientAllowedOrigins(clientOrigins);
+        properties.setEnvAllowedOrigins(envOrigins);
+        return properties;
+    }
+
     @Test
     void registerWebSocketHandlers_withWildcardOrigin_configuresWildcard() {
         EnvironmentWebSocketHandler envHandler = mock(EnvironmentWebSocketHandler.class);
@@ -24,7 +31,7 @@ class WebSocketConfigTest {
         when(registry.addHandler(eq(envHandler), eq("/ws/env"))).thenReturn(envRegistration);
         when(registry.addHandler(eq(clientHandler), eq("/ws/client"))).thenReturn(clientRegistration);
 
-        WebSocketConfig config = new WebSocketConfig(envHandler, clientHandler, "*", "*");
+        WebSocketConfig config = new WebSocketConfig(envHandler, clientHandler, securityProperties("*", "*"));
         config.registerWebSocketHandlers(registry);
 
         verify(envRegistration).setAllowedOrigins(new String[] {"*"});
@@ -45,8 +52,8 @@ class WebSocketConfigTest {
         WebSocketConfig config = new WebSocketConfig(
                 envHandler,
                 clientHandler,
-                " https://kratis.example.com , http://localhost:5173 ",
-                " http://sidecar.internal ");
+                securityProperties(
+                        " https://kratis.example.com , http://localhost:5173 ", " http://sidecar.internal "));
         config.registerWebSocketHandlers(registry);
 
         verify(clientRegistration)
@@ -65,7 +72,7 @@ class WebSocketConfigTest {
         when(registry.addHandler(eq(envHandler), eq("/ws/env"))).thenReturn(envRegistration);
         when(registry.addHandler(eq(clientHandler), eq("/ws/client"))).thenReturn(clientRegistration);
 
-        WebSocketConfig config = new WebSocketConfig(envHandler, clientHandler, "", "");
+        WebSocketConfig config = new WebSocketConfig(envHandler, clientHandler, securityProperties("", ""));
         config.registerWebSocketHandlers(registry);
 
         verify(envRegistration).setAllowedOrigins(new String[] {"*"});

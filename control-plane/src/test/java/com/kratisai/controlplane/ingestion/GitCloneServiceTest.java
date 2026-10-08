@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.TestDataFactory;
+import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.git.GitTransportUrlBuilder;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.Repository;
@@ -43,7 +44,9 @@ class GitCloneServiceTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        gitCloneService = new GitCloneService(tempDir.toString(), credentialResolver, transportUrlBuilder);
+        IngestionProperties ingestionProperties = new IngestionProperties();
+        ingestionProperties.setCloneDir(tempDir.toString());
+        gitCloneService = new GitCloneService(ingestionProperties, credentialResolver, transportUrlBuilder);
 
         // Default: public repositories resolve to no auth
         lenient().when(credentialResolver.resolve(any(Repository.class))).thenReturn(GitAuthMaterial.none());

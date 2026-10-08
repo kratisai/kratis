@@ -28,7 +28,7 @@ import com.kratisai.controlplane.api.wsdto.LaunchStatus;
 import com.kratisai.controlplane.api.wsdto.PromptStatus;
 import com.kratisai.controlplane.api.wsdto.StopReason;
 import com.kratisai.controlplane.config.HarnessesProperties;
-import com.kratisai.controlplane.config.KratisProperties;
+import com.kratisai.controlplane.config.InstanceProperties;
 import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.*;
@@ -163,7 +163,7 @@ class SandboxExecutionServiceTest {
                 litellmProvisioningService,
                 litellmProperties,
                 environmentRpcClient,
-                createKratisProperties(),
+                createInstanceProperties(),
                 createHarnessesProperties());
 
         activityPersistenceService = new ExecutionActivityPersistenceService(
@@ -213,8 +213,8 @@ class SandboxExecutionServiceTest {
         return createTestExecution(AgentHarness.valueOf("OPENCODE"), createTestModelProvider(), "gpt-4o");
     }
 
-    private KratisProperties createKratisProperties() {
-        KratisProperties properties = new KratisProperties();
+    private InstanceProperties createInstanceProperties() {
+        InstanceProperties properties = new InstanceProperties();
         properties.setHostname("control-plane.test");
         return properties;
     }
@@ -1265,7 +1265,7 @@ class SandboxExecutionServiceTest {
                 litellmProvisioningService,
                 litellmProperties,
                 environmentRpcClient,
-                createKratisProperties(),
+                createInstanceProperties(),
                 createHarnessesProperties());
 
         ModelProvider provider = createTestModelProvider();

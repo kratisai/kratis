@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.config;
 
+import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -14,9 +15,9 @@ public class TelemetryProperties {
     private String version = "unknown";
     private String buildTag = "unknown";
     private String endpoint = DEFAULT_POSTHOG_ENDPOINT;
-    private long initialDelayMs = 60_000;
-    private long fixedDelayMs = 86_400_000;
-    private long httpTimeoutMs = 10_000;
+    private Duration initialDelay = Duration.ofMinutes(1);
+    private Duration fixedDelay = Duration.ofDays(1);
+    private Duration httpTimeout = Duration.ofSeconds(10);
 
     public boolean isEnabled() {
         return !flag(disabled) && !flag(doNotTrack);
@@ -70,27 +71,27 @@ public class TelemetryProperties {
         this.endpoint = endpoint;
     }
 
-    public long getInitialDelayMs() {
-        return initialDelayMs;
+    public Duration getInitialDelay() {
+        return initialDelay;
     }
 
-    public void setInitialDelayMs(long initialDelayMs) {
-        this.initialDelayMs = initialDelayMs;
+    public void setInitialDelay(Duration initialDelay) {
+        this.initialDelay = initialDelay;
     }
 
-    public long getFixedDelayMs() {
-        return fixedDelayMs;
+    public Duration getFixedDelay() {
+        return fixedDelay;
     }
 
-    public void setFixedDelayMs(long fixedDelayMs) {
-        this.fixedDelayMs = fixedDelayMs;
+    public void setFixedDelay(Duration fixedDelay) {
+        this.fixedDelay = fixedDelay;
     }
 
-    public long getHttpTimeoutMs() {
-        return httpTimeoutMs;
+    public Duration getHttpTimeout() {
+        return httpTimeout;
     }
 
-    public void setHttpTimeoutMs(long httpTimeoutMs) {
-        this.httpTimeoutMs = httpTimeoutMs;
+    public void setHttpTimeout(Duration httpTimeout) {
+        this.httpTimeout = httpTimeout;
     }
 }

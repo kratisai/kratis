@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.kratisai.controlplane.*;
+import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.ingestion.IngestionPipelineAbortException;
 import com.kratisai.controlplane.model.*;
@@ -23,7 +24,6 @@ import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.ResourceAccessException;
@@ -58,8 +58,8 @@ class ResearchDimensionWorkerTest {
     @Autowired
     private IngestionBatchLogService ingestionBatchLogService;
 
-    @Value("${kratis.ingestion.clone-dir:${java.io.tmpdir}/kratis-ingest}")
-    private String baseCloneDir;
+    @Autowired
+    private IngestionProperties ingestionProperties;
 
     private Team team;
     private IngestionBatch batch;
@@ -86,7 +86,7 @@ class ResearchDimensionWorkerTest {
         ctxDimensionRepository.save(dimension);
 
         // Create temp clone directory and file for ReadFileTool
-        tempCloneDir = Path.of(baseCloneDir, batch.getId().toString());
+        tempCloneDir = Path.of(ingestionProperties.getCloneDir(), batch.getId().toString());
         Files.createDirectories(tempCloneDir.resolve("src/main/java"));
         Files.writeString(tempCloneDir.resolve("src/main/java/Test.java"), "public class Test {}");
     }

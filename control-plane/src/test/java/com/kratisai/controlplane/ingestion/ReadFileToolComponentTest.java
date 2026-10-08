@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.kratisai.controlplane.DatabaseCleaner;
 import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.TestDataFactory;
+import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import java.io.IOException;
@@ -64,7 +65,9 @@ class ReadFileToolComponentTest {
         Files.writeString(testFile, "public class Test {}");
 
         // Use a ReadFileTool with the temp base dir
-        ReadFileTool tool = new ReadFileTool(tmpDir.toString());
+        IngestionProperties ingestionProperties = new IngestionProperties();
+        ingestionProperties.setCloneDir(tmpDir.toString());
+        ReadFileTool tool = new ReadFileTool(ingestionProperties);
         ToolContext ctx = new ToolContext(java.util.Map.of("batchId", batch.getId()));
 
         var result = tool.readFile("test.java", ctx);

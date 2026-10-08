@@ -796,7 +796,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 "[E2E-Lifecycle] tearDown() starting for test: {} on thread {}",
                 this.getClass().getSimpleName(),
                 Thread.currentThread().getName());
-        localDockerSandboxProvider.setServerUrl(originalServerUrl);
+        localDockerSandboxProvider.setConnectUrl(originalServerUrl);
         Mockito.reset(processExecutor);
 
         if (wireMockLlmServer != null) {
@@ -998,7 +998,7 @@ public abstract class AbstractAgentExecutionRealTest {
     protected void executeAgentInstallationAndExecutionFlow(ModelProvider modelProvider) throws Exception {
         // Point localDockerSandboxProvider to this running spring boot server port
         String testServerUrl = "ws://host.docker.internal:" + port + "/ws/env";
-        localDockerSandboxProvider.setServerUrl(testServerUrl);
+        localDockerSandboxProvider.setConnectUrl(testServerUrl);
 
         // Create a SPEC canvas bound to the dummy repo and launch execution
         String canvasId = "test-plan-" + getHarness().name().toLowerCase();

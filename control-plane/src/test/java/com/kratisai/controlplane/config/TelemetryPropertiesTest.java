@@ -2,6 +2,7 @@ package com.kratisai.controlplane.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 class TelemetryPropertiesTest {
@@ -68,8 +69,8 @@ class TelemetryPropertiesTest {
         assertThat(props.getVersion()).isEqualTo("unknown");
         assertThat(props.getBuildTag()).isEqualTo("unknown");
         assertThat(props.getEndpoint()).isEqualTo("https://us.i.posthog.com/capture/");
-        assertThat(props.getFixedDelayMs()).isEqualTo(86_400_000);
-        assertThat(props.getInitialDelayMs()).isEqualTo(60_000);
-        assertThat(props.getHttpTimeoutMs()).isEqualTo(10_000);
+        assertThat(props.getFixedDelay()).isEqualTo(Duration.ofDays(1));
+        assertThat(props.getInitialDelay()).isEqualTo(Duration.ofMinutes(1));
+        assertThat(props.getHttpTimeout()).isEqualTo(Duration.ofSeconds(10));
     }
 }

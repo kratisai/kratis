@@ -2,6 +2,7 @@ package com.kratisai.controlplane.ingestion.parse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.Team;
@@ -24,7 +25,9 @@ class DimensionDiscoveryServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DimensionDiscoveryService(null, null, null, null, null, null, null, null, tempDir.toString());
+        IngestionProperties ingestionProperties = new IngestionProperties();
+        ingestionProperties.setCloneDir(tempDir.toString());
+        service = new DimensionDiscoveryService(null, null, null, null, null, null, null, null, ingestionProperties);
 
         Team team = new Team();
         team.setId(UUID.randomUUID());

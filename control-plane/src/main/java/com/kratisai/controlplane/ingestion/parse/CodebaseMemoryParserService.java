@@ -4,6 +4,7 @@ import static org.apache.commons.lang3.StringUtils.isEmpty;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.config.ParserProperties;
 import com.kratisai.controlplane.model.CtxEdge;
 import com.kratisai.controlplane.model.CtxNode;
 import com.kratisai.controlplane.model.IngestionBatch;
@@ -20,7 +21,6 @@ import java.util.*;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -50,14 +50,13 @@ public class CodebaseMemoryParserService {
             CtxEdgeRepository ctxEdgeRepository,
             ProcessExecutor processExecutor,
             ObjectMapper objectMapper,
-            @Value("${kratis.parser.binary-path}") String binaryPath,
-            @Value("${kratis.parser.temp-dir}") String dbTempDir) {
+            ParserProperties parserProperties) {
         this.ctxNodeRepository = ctxNodeRepository;
         this.ctxEdgeRepository = ctxEdgeRepository;
         this.processExecutor = processExecutor;
         this.objectMapper = objectMapper;
-        this.binaryPath = binaryPath;
-        this.dbTempDir = dbTempDir;
+        this.binaryPath = parserProperties.getBinaryPath();
+        this.dbTempDir = parserProperties.getTempDir();
         if (isEmpty(dbTempDir)) {
             throw new IllegalArgumentException("dbTempDir must not be empty");
         }

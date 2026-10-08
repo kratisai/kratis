@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.ingestion.parse;
 
 import com.kratisai.controlplane.agentloop.ChatResponseAssembler;
+import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.model.CtxDimension;
 import com.kratisai.controlplane.model.CtxEdge;
@@ -32,7 +33,6 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.converter.BeanOutputConverter;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -67,7 +67,7 @@ public class DimensionDiscoveryService {
             LiteLLMProvisioningService litellmProvisioningService,
             IngestionBatchLogService ingestionBatchLogService,
             TreeHelper treeHelper,
-            @Value("${kratis.ingestion.clone-dir:${java.io.tmpdir}/kratis-ingest}") String baseCloneDir) {
+            IngestionProperties ingestionProperties) {
         this.ctxNodeRepository = ctxNodeRepository;
         this.ctxEdgeRepository = ctxEdgeRepository;
         this.ctxDimensionRepository = ctxDimensionRepository;
@@ -76,7 +76,7 @@ public class DimensionDiscoveryService {
         this.litellmProvisioningService = litellmProvisioningService;
         this.ingestionBatchLogService = ingestionBatchLogService;
         this.treeHelper = treeHelper;
-        this.baseCloneDir = baseCloneDir;
+        this.baseCloneDir = ingestionProperties.getCloneDir();
     }
 
     private ChatModel getChatModel(IngestionBatch batch) {

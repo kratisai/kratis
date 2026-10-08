@@ -26,6 +26,41 @@ public class LiteLLMProperties {
 
     private Duration readTimeout = Duration.ofSeconds(30);
 
+    private final Reconciliation reconciliation = new Reconciliation();
+
+    public Reconciliation getReconciliation() {
+        return reconciliation;
+    }
+
+    /**
+     * Startup reconciliation of the configured models against LiteLLM. The sweep runs once at
+     * startup and retries at {@code retry-interval} until LiteLLM is reachable or the attempt
+     * budget is exhausted, then settles.
+     */
+    public static class Reconciliation {
+
+        /** Master switch for both the startup sweep and its retry loop. */
+        private boolean enabled = true;
+
+        private Duration retryInterval = Duration.ofSeconds(10);
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public Duration getRetryInterval() {
+            return retryInterval;
+        }
+
+        public void setRetryInterval(Duration retryInterval) {
+            this.retryInterval = retryInterval;
+        }
+    }
+
     public Duration getConnectTimeout() {
         return connectTimeout;
     }

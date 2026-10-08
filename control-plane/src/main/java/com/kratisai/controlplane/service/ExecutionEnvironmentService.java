@@ -4,6 +4,7 @@ import com.kratisai.controlplane.api.restdto.CreateExecutionEnvironmentRequest;
 import com.kratisai.controlplane.api.restdto.CreateExecutionEnvironmentResponse;
 import com.kratisai.controlplane.api.restdto.ExecutionEnvironmentDto;
 import com.kratisai.controlplane.api.restdto.UpdateExecutionEnvironmentRequest;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionEnvironmentType;
@@ -27,7 +28,6 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpStatus;
@@ -55,7 +55,7 @@ public class ExecutionEnvironmentService {
     private final VirtualKeyService virtualKeyService;
     private final SandboxExecutionService sandboxExecutionService;
     private final ExecutionActivityPersistenceService executionActivityPersistenceService;
-    private final String websocketUrl;
+    private final String connectUrl;
     private final TransactionTemplate terminationTemplate;
     private final TransactionTemplate pollTemplate;
 
@@ -71,7 +71,7 @@ public class ExecutionEnvironmentService {
             VirtualKeyService virtualKeyService,
             SandboxExecutionService sandboxExecutionService,
             ExecutionActivityPersistenceService executionActivityPersistenceService,
-            @Value("${kratis.server.websocket.url:ws://localhost:8080/ws/env}") String websocketUrl,
+            SandboxProperties sandboxProperties,
             PlatformTransactionManager transactionManager) {
         this.executionEnvironmentRepository = executionEnvironmentRepository;
         this.teamMemberRepository = teamMemberRepository;
@@ -84,7 +84,7 @@ public class ExecutionEnvironmentService {
         this.virtualKeyService = virtualKeyService;
         this.sandboxExecutionService = sandboxExecutionService;
         this.executionActivityPersistenceService = executionActivityPersistenceService;
-        this.websocketUrl = websocketUrl;
+        this.connectUrl = sandboxProperties.getConnectUrl();
         this.terminationTemplate = new TransactionTemplate(transactionManager);
         this.terminationTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.pollTemplate = new TransactionTemplate(transactionManager);
@@ -137,7 +137,7 @@ public class ExecutionEnvironmentService {
 
         String authToken = UUID.randomUUID().toString();
         String installCommand =
-                String.format("kratis-connector --mode=daemon --server-url=%s --token=%s", websocketUrl, authToken);
+                String.format("kratis-connector --mode=daemon --server-url=%s --token=%s", connectUrl, authToken);
 
         ExecutionEnvironment env = new ExecutionEnvironment();
         env.setTeam(team);

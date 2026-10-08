@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.service;
 
+import com.kratisai.controlplane.config.AuthProperties;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -8,7 +9,6 @@ import java.util.Date;
 import java.util.Map;
 import java.util.UUID;
 import javax.crypto.SecretKey;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -18,13 +18,10 @@ public class JwtService {
     private final long accessTokenExpiration;
     private final long refreshTokenExpiration;
 
-    public JwtService(
-            @Value("${kratis.auth.jwt.secret}") String secret,
-            @Value("${kratis.auth.jwt.expiration}") long accessTokenExpiration,
-            @Value("${kratis.auth.jwt.refresh-expiration}") long refreshTokenExpiration) {
-        this.signingKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-        this.accessTokenExpiration = accessTokenExpiration;
-        this.refreshTokenExpiration = refreshTokenExpiration;
+    public JwtService(AuthProperties authProperties) {
+        this.signingKey = Keys.hmacShaKeyFor(authProperties.getSecret().getBytes(StandardCharsets.UTF_8));
+        this.accessTokenExpiration = authProperties.getExpiration().toMillis();
+        this.refreshTokenExpiration = authProperties.getRefreshExpiration().toMillis();
     }
 
     public String generateAccessToken(UUID userId, String email) {

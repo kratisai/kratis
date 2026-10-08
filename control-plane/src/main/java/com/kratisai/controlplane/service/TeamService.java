@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.api.restdto.*;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.model.event.UserEntityChangedEvent;
 import com.kratisai.controlplane.model.event.UserEntityType;
@@ -8,7 +9,6 @@ import com.kratisai.controlplane.repository.*;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -37,7 +37,7 @@ public class TeamService {
             EnvironmentProviderRepository environmentProviderRepository,
             ExecutionEnvironmentRepository executionEnvironmentRepository,
             LiteLLMProvisioningService liteLLMProvisioningService,
-            @Value("${kratis.sandbox.runner-image}") String runnerImage) {
+            SandboxProperties sandboxProperties) {
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
         this.userRepository = userRepository;
@@ -46,7 +46,7 @@ public class TeamService {
         this.environmentProviderRepository = environmentProviderRepository;
         this.executionEnvironmentRepository = executionEnvironmentRepository;
         this.liteLLMProvisioningService = liteLLMProvisioningService;
-        this.runnerImage = runnerImage;
+        this.runnerImage = sandboxProperties.getDocker().getRunnerImage();
     }
 
     @Transactional

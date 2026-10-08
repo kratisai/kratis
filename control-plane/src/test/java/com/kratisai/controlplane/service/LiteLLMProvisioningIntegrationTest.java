@@ -17,10 +17,10 @@ import org.springframework.test.context.TestPropertySource;
 
 @UseRealLlmClient
 @SpringIntegrationTest
-// The test profile normally sets kratis.litellm.reconcile-on-startup=false so @PostConstruct
+// The test profile normally sets kratis.litellm.reconciliation.enabled=false so @PostConstruct
 // doesn't hit LiteLLM on every context boot. Override it back to true here so the reconciliation
 // test below exercises the real behavior, against a Spring context reserved for this override.
-@TestPropertySource(properties = "kratis.litellm.reconcile-on-startup=true")
+@TestPropertySource(properties = "kratis.litellm.reconciliation.enabled=true")
 class LiteLLMProvisioningIntegrationTest {
 
     @Autowired

@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.config;
 
+import java.nio.file.Path;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -16,6 +17,12 @@ public class IngestionProperties {
     private int maxConcurrent = 2;
 
     /**
+     * Root directory holding each batch's working clone; per-batch subdirectories are created under it.
+     */
+    private String cloneDir =
+            Path.of(System.getProperty("java.io.tmpdir"), "kratis-ingest").toString();
+
+    /**
      * Dimension research specific configuration.
      */
     private DimensionResearch dimensionResearch = new DimensionResearch();
@@ -26,6 +33,14 @@ public class IngestionProperties {
 
     public void setMaxConcurrent(int maxConcurrent) {
         this.maxConcurrent = maxConcurrent;
+    }
+
+    public String getCloneDir() {
+        return cloneDir;
+    }
+
+    public void setCloneDir(String cloneDir) {
+        this.cloneDir = cloneDir;
     }
 
     public DimensionResearch getDimensionResearch() {
