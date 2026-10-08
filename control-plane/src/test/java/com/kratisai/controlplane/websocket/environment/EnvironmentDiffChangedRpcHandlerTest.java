@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.websocket.environment;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -52,8 +53,6 @@ class EnvironmentDiffChangedRpcHandlerTest {
     private final UUID executionId = UUID.randomUUID();
     private final String sessionId = "env-session-1";
 
-    private SandboxExecution execution;
-
     @BeforeEach
     void setUp() {
         handler = new EnvironmentDiffChangedRpcHandler(
@@ -64,7 +63,7 @@ class EnvironmentDiffChangedRpcHandlerTest {
         ChatEntity chat = new ChatEntity(team, null, "Chat");
         chat.setId(chatId);
 
-        execution = new SandboxExecution();
+        SandboxExecution execution = new SandboxExecution();
         execution.setId(executionId);
         execution.setChat(chat);
 
@@ -127,5 +126,22 @@ class EnvironmentDiffChangedRpcHandlerTest {
         assertThat(existing.getHeadCommit()).isEqualTo("new-b");
         assertThat(existing.getTotalAdditions()).isEqualTo(10);
         assertThat(existing.getTotalDeletions()).isEqualTo(4);
+    }
+
+    @Test
+    void handle_propagatesBlobStorageFailure() {
+        EnvironmentRpcPayload.DiffChanged payload = new EnvironmentRpcPayload.DiffChanged(
+                executionId.toString(), "commit-a", "commit-b", 5, 2, List.of(), "diff --git a/src/main.go");
+
+        org.mockito.Mockito.doThrow(
+                        new java.io.UncheckedIOException(new java.nio.file.AccessDeniedException("/data/blobs")))
+                .when(blobStorageService)
+                .putObject(any(), any(InputStream.class), org.mockito.ArgumentMatchers.anyLong(), any());
+
+        assertThatThrownBy(() -> handler.handle(sessionId, null, payload).blockLast())
+                .isInstanceOf(java.io.UncheckedIOException.class);
+
+        verify(diffSnapshotRepository, org.mockito.Mockito.never()).save(any(ExecutionDiffSnapshot.class));
+        verify(eventPublisher, org.mockito.Mockito.never()).publishEvent(any(SandboxExecutionDiffChangedEvent.class));
     }
 }

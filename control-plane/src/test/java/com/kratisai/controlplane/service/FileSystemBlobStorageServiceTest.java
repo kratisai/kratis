@@ -74,4 +74,28 @@ class FileSystemBlobStorageServiceTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Path traversal");
     }
+
+    @Test
+    void validator_acceptsWritableRoot() {
+        new FileSystemBlobStorageService.BlobStorageValidator(storageService);
+
+        assertThat(storageService.exists(".startup-write-probe-leak")).isFalse();
+    }
+
+    @Test
+    void validator_rejectsUnwritableRoot() {
+        Path missing = tempDir.resolve("no-such-dir-" + System.nanoTime());
+        FileSystemBlobStorageService broken =
+                new FileSystemBlobStorageService(missing.resolve("uncreatable").resolve("root")) {
+                    @Override
+                    public void putObject(String path, byte[] content, String contentType) {
+                        throw new java.io.UncheckedIOException(
+                                new java.nio.file.AccessDeniedException(missing.toString()));
+                    }
+                };
+
+        assertThatThrownBy(() -> new FileSystemBlobStorageService.BlobStorageValidator(broken))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("not writable");
+    }
 }

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"kratis-connector/runner"
 )
 
 func setupTestGitRepo(t *testing.T) string {
@@ -436,5 +438,205 @@ func TestTriggerDiffCheck_EmitsDiffChanged(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Timed out waiting for env.diff_changed notification")
+	}
+}
+
+// captureDiffChangedNotification reads frames until the next env.diff_changed
+// notification, tolerating booking frames (checkout results, responses).
+func captureDiffChangedNotification(t *testing.T, received chan []byte) DiffChangedParams {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case data := <-received:
+			var envelope struct {
+				Method string            `json:"method"`
+				Params DiffChangedParams `json:"params"`
+			}
+			if err := json.Unmarshal(data, &envelope); err != nil {
+				t.Fatalf("Failed to unmarshal notification: %v", err)
+			}
+			if envelope.Method == "env.diff_changed" {
+				return envelope.Params
+			}
+		case <-deadline:
+			t.Fatal("Timed out waiting for env.diff_changed notification")
+			return DiffChangedParams{}
+		}
+	}
+}
+
+func containsFile(files []GitDiffSummaryFile, path string) bool {
+	for _, f := range files {
+		if f.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+// TestTriggerDiffCheck_EmitsDiffChangedWithOriginRemote locks in the sandbox
+// regression where emitDiffChanged failed on an origin-remote workspace with an
+// empty base branch, so no env.diff_changed ever reached the control plane.
+func TestTriggerDiffCheck_EmitsDiffChangedWithOriginRemote(t *testing.T) {
+	bareDir, workDir := setupTestGitRepoWithRemote(t)
+	defer func() {
+		_ = os.RemoveAll(bareDir)
+		_ = os.RemoveAll(workDir)
+	}()
+
+	client, received := connectedGitClient(t, workDir)
+	client.currentExecutionID = "exec-diff-origin"
+	client.baseBranch = "main"
+	client.Timeouts.DiffDebouncePeriod = 10 * time.Millisecond
+
+	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Origin workspace change\n"), 0600); err != nil {
+		t.Fatalf("Failed to write README: %v", err)
+	}
+
+	client.TriggerDiffCheck()
+
+	params := captureDiffChangedNotification(t, received)
+	if params.ExecutionID != "exec-diff-origin" {
+		t.Errorf("Expected execution ID exec-diff-origin, got %s", params.ExecutionID)
+	}
+	if !containsFile(params.Files, "README.md") {
+		t.Errorf("Expected README.md in diff files, got %+v", params.Files)
+	}
+	if !strings.Contains(params.Patch, "Origin workspace change") {
+		t.Errorf("Expected patch to contain the change, got: %s", params.Patch)
+	}
+}
+
+// TestResolveDiffBase_EmptyBranchOnOriginWorkspaceFallsBackToRootCommit covers
+// the notification-path fallback for workspaces with an unknown or missing branch.
+func TestResolveDiffBase_EmptyBranchOnOriginWorkspaceFallsBackToRootCommit(t *testing.T) {
+	bareDir, workDir := setupTestGitRepoWithRemote(t)
+	defer func() {
+		_ = os.RemoveAll(bareDir)
+		_ = os.RemoveAll(workDir)
+	}()
+
+	base, err := resolveDiffBase(workDir, "")
+	if err != nil {
+		t.Fatalf("Expected empty branch to fall back instead of erroring: %v", err)
+	}
+	root, err := rootCommit(workDir)
+	if err != nil {
+		t.Fatalf("Failed to resolve root commit: %v", err)
+	}
+	if base != root {
+		t.Errorf("Expected empty base branch to fall back to root commit %s, got %s", root, base)
+	}
+}
+
+// TestExecuteCheckout_RecordsDiffBaseBranch verifies the checked-out branch is
+// stored as the diff base for later workspace change notifications.
+func TestExecuteCheckout_RecordsDiffBaseBranch(t *testing.T) {
+	bareDir, workDir := setupTestGitRepoWithRemote(t)
+	defer func() {
+		_ = os.RemoveAll(bareDir)
+		_ = os.RemoveAll(workDir)
+	}()
+
+	client, _ := connectedGitClient(t, workDir)
+	client.ExecuteCheckout(CheckoutParams{URL: bareDir, Branch: "main", ExecutionID: "exec-checkout-base"}, "req-co")
+
+	if client.currentExecutionID != "exec-checkout-base" {
+		t.Errorf("Expected current execution ID to be recorded, got %q", client.currentExecutionID)
+	}
+	if client.baseBranch != "main" {
+		t.Errorf("Expected checkout branch 'main' recorded as diff base, got %q", client.baseBranch)
+	}
+}
+
+// TestSendComplete_FlushesDiffChangedBeforeComplete guarantees a terminal diff
+// emit: SendComplete must deliver env.diff_changed before env.complete when
+// the workspace changed and no mid-run trigger emitted it yet.
+func TestSendComplete_FlushesDiffChangedBeforeComplete(t *testing.T) {
+	bareDir, workDir := setupTestGitRepoWithRemote(t)
+	defer func() {
+		_ = os.RemoveAll(bareDir)
+		_ = os.RemoveAll(workDir)
+	}()
+
+	client, received := connectedGitClient(t, workDir)
+	client.currentExecutionID = "exec-final-flush"
+	client.baseBranch = "main"
+	client.Timeouts.DiffDebouncePeriod = 10 * time.Millisecond
+
+	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Final flush change\n"), 0600); err != nil {
+		t.Fatalf("Failed to write README: %v", err)
+	}
+
+	client.SendComplete(runner.CompletionInfo{ExitCode: 0, Reason: "terminate"})
+
+	params := captureDiffChangedNotification(t, received)
+	if params.ExecutionID != "exec-final-flush" {
+		t.Errorf("Expected execution ID exec-final-flush, got %s", params.ExecutionID)
+	}
+	if !containsFile(params.Files, "README.md") {
+		t.Errorf("Expected README.md in the flushed diff, got %+v", params.Files)
+	}
+
+	// env.complete must still follow the flush.
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case data := <-received:
+			var envelope struct {
+				Method string `json:"method"`
+			}
+			if err := json.Unmarshal(data, &envelope); err != nil {
+				t.Fatalf("Failed to unmarshal frame: %v", err)
+			}
+			if envelope.Method == "env.complete" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("env.complete missing after the flushed diff emit")
+		}
+	}
+}
+
+// TestSendComplete_SkipsFlushWhenWorkspaceUnchanged verifies the terminal flush
+// stays silent when the last mid-run check already emitted the current state.
+func TestSendComplete_SkipsFlushWhenWorkspaceUnchanged(t *testing.T) {
+	bareDir, workDir := setupTestGitRepoWithRemote(t)
+	defer func() {
+		_ = os.RemoveAll(bareDir)
+		_ = os.RemoveAll(workDir)
+	}()
+
+	client, received := connectedGitClient(t, workDir)
+	client.currentExecutionID = "exec-no-change"
+	client.Timeouts.DiffDebouncePeriod = 10 * time.Millisecond
+
+	// Baseline check on the clean workspace records the hash and debounces an emit.
+	client.TriggerDiffCheck()
+	captureDiffChangedNotification(t, received)
+	time.Sleep(50 * time.Millisecond) // let the baseline debounce window run out
+
+	client.SendComplete(runner.CompletionInfo{ExitCode: 0, Reason: "terminate"})
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case data := <-received:
+			var envelope struct {
+				Method string `json:"method"`
+			}
+			if err := json.Unmarshal(data, &envelope); err != nil {
+				t.Fatalf("Failed to unmarshal frame: %v", err)
+			}
+			if envelope.Method == "env.diff_changed" {
+				t.Fatal("Expected no diff emit for an unchanged workspace, got env.diff_changed")
+			}
+			if envelope.Method == "env.complete" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("Timed out waiting for env.complete")
+		}
 	}
 }
