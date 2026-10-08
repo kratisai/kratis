@@ -74,7 +74,6 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
                         case RegisterGitAuth ignored -> EnvironmentConnectorResult.RegisterGitAuth.class;
                         case RegisterGitIdentity ignored -> EnvironmentConnectorResult.RegisterGitIdentity.class;
                         case GitDiffSummary ignored -> EnvironmentConnectorResult.GitDiffSummary.class;
-                        case GitFileDiff ignored -> EnvironmentConnectorResult.GitFileDiff.class;
                         case ReadFileSlice ignored -> EnvironmentConnectorResult.ReadFileSlice.class;
                         case GitPush ignored -> EnvironmentConnectorResult.GitPush.class;
                         case GitSetRemote ignored -> EnvironmentConnectorResult.GitSetRemote.class;
@@ -234,7 +233,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
             @JsonProperty("totalDeletions") int totalDeletions,
             @JsonProperty("files") List<EnvironmentConnectorResult.GitDiffSummaryFile> files,
             @JsonProperty("patch") String patch)
-            implements InboundNotificationPayload {
+            implements InboundRequestPayload {
         public static final String METHOD = "env.diff_changed";
 
         @Override
@@ -531,24 +530,6 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         @Override
         public String method() {
             return METHOD;
-        }
-    }
-
-    /** Retrieve git unified diff patch for a single file. */
-    record GitFileDiff(
-            @JsonProperty("path") String path,
-            @JsonProperty("baseBranch") String baseBranch,
-            @JsonProperty("executionId") String executionId)
-            implements OutboundRequestPayload<EnvironmentConnectorResult.GitFileDiff> {
-        public static final String METHOD = "env.git_file_diff";
-
-        @Override
-        public String method() {
-            return METHOD;
-        }
-
-        public GitFileDiff {
-            Objects.requireNonNull(path, "path is required");
         }
     }
 

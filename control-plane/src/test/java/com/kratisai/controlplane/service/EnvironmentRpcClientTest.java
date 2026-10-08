@@ -266,8 +266,6 @@ class EnvironmentRpcClientTest {
                 .isEqualTo(EnvironmentConnectorResult.RegisterGitIdentity.class);
         assertThat(new EnvironmentRpcPayload.GitDiffSummary("main", "exec-1").resultType())
                 .isEqualTo(EnvironmentConnectorResult.GitDiffSummary.class);
-        assertThat(new EnvironmentRpcPayload.GitFileDiff("src/A.java", "main", "exec-1").resultType())
-                .isEqualTo(EnvironmentConnectorResult.GitFileDiff.class);
         assertThat(new EnvironmentRpcPayload.ReadFileSlice("src/A.java", 1, 10, "exec-1").resultType())
                 .isEqualTo(EnvironmentConnectorResult.ReadFileSlice.class);
     }

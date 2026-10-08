@@ -8,9 +8,6 @@ import com.kratisai.controlplane.api.restdto.ReadFileSliceDto;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.model.ChatEntity;
-import com.kratisai.controlplane.model.EnvironmentStatus;
-import com.kratisai.controlplane.model.ExecutionEnvironment;
-import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
@@ -20,6 +17,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -28,10 +26,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+/**
+ * Serves every diff review read from the control-plane copy.
+ */
 @Service
 public class SandboxExecutionDiffService {
 
-    private static final long DIFF_TIMEOUT_SECONDS = 30;
+    private static final long SLICE_TIMEOUT_SECONDS = 30;
 
     private final SandboxExecutionRepository sandboxExecutionRepository;
     private final ChatRepository chatRepository;
@@ -57,78 +58,24 @@ public class SandboxExecutionDiffService {
 
     @Transactional(readOnly = true)
     public DiffSummaryDto getDiffSummary(UUID userId, UUID chatId, UUID executionId) {
-        SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
-        ExecutionEnvironment env = execution.getEnvironment();
-        if (env == null || env.getStatus() != EnvironmentStatus.CONNECTED) {
-            return getDiffSummaryFromSnapshot(executionId);
-        }
-
-        String targetBranch = resolveTargetBranch(execution);
-
-        try {
-            EnvironmentConnectorResult.GitDiffSummary result = environmentRpcClient.request(
-                    env.getId(),
-                    new EnvironmentRpcPayload.GitDiffSummary(targetBranch, executionId.toString()),
-                    DIFF_TIMEOUT_SECONDS,
-                    TimeUnit.SECONDS);
-
-            if (result == null) {
-                return new DiffSummaryDto("", "", 0, 0, List.of());
-            }
-
-            List<DiffSummaryDto.DiffSummaryFileDto> files = result.files().stream()
-                    .map(f -> new DiffSummaryDto.DiffSummaryFileDto(
-                            f.path(), f.status(), f.additions(), f.deletions(), f.isCollapsedByDefault()))
-                    .toList();
-
-            return new DiffSummaryDto(
-                    result.baseCommit(), result.headCommit(), result.totalAdditions(), result.totalDeletions(), files);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Diff summary request interrupted", e);
-        } catch (TimeoutException | EnvironmentRpcClient.EnvironmentRpcException e) {
-            return getDiffSummaryFromSnapshot(executionId);
-        }
+        validateAndGetExecution(userId, chatId, executionId);
+        return getDiffSummaryFromSnapshot(executionId);
     }
 
     @Transactional(readOnly = true)
     public DiffFileDto getFileDiff(UUID userId, UUID chatId, UUID executionId, String path) {
         Objects.requireNonNull(path, "path is required");
-        SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
-        ExecutionEnvironment env = execution.getEnvironment();
-        if (env == null || env.getStatus() != EnvironmentStatus.CONNECTED) {
-            return getFileDiffFromSnapshot(executionId, path);
-        }
-
-        String targetBranch = resolveTargetBranch(execution);
-
-        try {
-            EnvironmentConnectorResult.GitFileDiff result = environmentRpcClient.request(
-                    env.getId(),
-                    new EnvironmentRpcPayload.GitFileDiff(path, targetBranch, executionId.toString()),
-                    DIFF_TIMEOUT_SECONDS,
-                    TimeUnit.SECONDS);
-
-            if (result == null) {
-                return new DiffFileDto(path, "", 0, 0, 0);
-            }
-
-            return new DiffFileDto(
-                    result.path(), result.patch(), result.additions(), result.deletions(), result.totalLines());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "File diff request interrupted", e);
-        } catch (TimeoutException | EnvironmentRpcClient.EnvironmentRpcException e) {
-            return getFileDiffFromSnapshot(executionId, path);
-        }
+        validateAndGetExecution(userId, chatId, executionId);
+        return getFileDiffFromSnapshot(executionId, path);
     }
 
+    /** Live-only: reads the current workspace file content from the sandbox for hunk expansion. */
     @Transactional(readOnly = true)
     public ReadFileSliceDto getReadFileSlice(
             UUID userId, UUID chatId, UUID executionId, String path, int startLine, int endLine) {
         Objects.requireNonNull(path, "path is required");
         SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
-        ExecutionEnvironment env = execution.getEnvironment();
+        var env = execution.getEnvironment();
         if (env == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution has no associated environment");
         }
@@ -137,7 +84,7 @@ public class SandboxExecutionDiffService {
             EnvironmentConnectorResult.ReadFileSlice result = environmentRpcClient.request(
                     env.getId(),
                     new EnvironmentRpcPayload.ReadFileSlice(path, startLine, endLine, executionId.toString()),
-                    DIFF_TIMEOUT_SECONDS,
+                    SLICE_TIMEOUT_SECONDS,
                     TimeUnit.SECONDS);
 
             if (result == null) {
@@ -160,31 +107,7 @@ public class SandboxExecutionDiffService {
     @Transactional(readOnly = true)
     public String exportPatch(UUID userId, UUID chatId, UUID executionId) {
         validateAndGetExecution(userId, chatId, executionId);
-        String patchPath = "diffs/" + executionId + ".patch";
-        if (blobStorageService.exists(patchPath)) {
-            try (InputStream is = blobStorageService.getObject(patchPath)) {
-                return new String(is.readAllBytes(), StandardCharsets.UTF_8);
-            } catch (IOException ignored) {
-                // Fall back to live concatenation
-            }
-        }
-
-        DiffSummaryDto summary = getDiffSummary(userId, chatId, executionId);
-        StringBuilder patchBuilder = new StringBuilder();
-
-        for (DiffSummaryDto.DiffSummaryFileDto file : summary.files()) {
-            DiffFileDto fileDiff = getFileDiff(userId, chatId, executionId, file.path());
-            if (fileDiff.patch() != null && !fileDiff.patch().isBlank()) {
-                patchBuilder
-                        .append("diff --git a/")
-                        .append(file.path())
-                        .append(" b/")
-                        .append(file.path())
-                        .append("\n");
-                patchBuilder.append(fileDiff.patch()).append("\n");
-            }
-        }
-        return patchBuilder.toString();
+        return readFullPatch(executionId).orElse("");
     }
 
     private DiffSummaryDto getDiffSummaryFromSnapshot(UUID executionId) {
@@ -218,15 +141,20 @@ public class SandboxExecutionDiffService {
     }
 
     private DiffFileDto getFileDiffFromSnapshot(UUID executionId, String path) {
+        return readFullPatch(executionId)
+                .map(fullPatch -> extractFileDiff(path, fullPatch))
+                .orElse(new DiffFileDto(path, "", 0, 0, 0));
+    }
+
+    private Optional<String> readFullPatch(UUID executionId) {
         String patchStoragePath = "diffs/" + executionId + ".patch";
         if (!blobStorageService.exists(patchStoragePath)) {
-            return new DiffFileDto(path, "", 0, 0, 0);
+            return Optional.empty();
         }
         try (InputStream is = blobStorageService.getObject(patchStoragePath)) {
-            String fullPatch = new String(is.readAllBytes(), StandardCharsets.UTF_8);
-            return extractFileDiff(path, fullPatch);
+            return Optional.of(new String(is.readAllBytes(), StandardCharsets.UTF_8));
         } catch (IOException e) {
-            return new DiffFileDto(path, "", 0, 0, 0);
+            return Optional.empty();
         }
     }
 
@@ -251,7 +179,6 @@ public class SandboxExecutionDiffService {
                         || line.equals("diff --git a/" + path + " b/" + path)) {
                     inTargetFile = true;
                     patchBuilder.append(line).append("\n");
-                    continue;
                 }
             } else if (inTargetFile) {
                 patchBuilder.append(line).append("\n");
@@ -268,17 +195,6 @@ public class SandboxExecutionDiffService {
         }
 
         return new DiffFileDto(path, patchBuilder.toString(), additions, deletions, additions + deletions);
-    }
-
-    private String resolveTargetBranch(SandboxExecution execution) {
-        if (execution.getTargetBranch() != null && !execution.getTargetBranch().isBlank()) {
-            return execution.getTargetBranch();
-        }
-        Repository repo = execution.getRepository();
-        if (repo != null && repo.getBranch() != null && !repo.getBranch().isBlank()) {
-            return repo.getBranch();
-        }
-        return "main"; // new Repo.
     }
 
     private SandboxExecution validateAndGetExecution(UUID userId, UUID chatId, UUID executionId) {

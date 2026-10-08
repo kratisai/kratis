@@ -62,11 +62,6 @@ class ProtocolDefaultsTest {
         assertThat(payloadSummary.direction()).isEqualTo(Direction.CONTROL_PLANE_TO_CONNECTOR);
         assertThat(payloadSummary.method()).isEqualTo(EnvironmentRpcPayload.GitDiffSummary.METHOD);
 
-        EnvironmentRpcPayload payloadFile = new EnvironmentRpcPayload.GitFileDiff("src/A.java", "main", "exec-1");
-        assertThat(payloadFile.messageKind()).isEqualTo(MessageKind.REQUEST);
-        assertThat(payloadFile.direction()).isEqualTo(Direction.CONTROL_PLANE_TO_CONNECTOR);
-        assertThat(payloadFile.method()).isEqualTo(EnvironmentRpcPayload.GitFileDiff.METHOD);
-
         EnvironmentRpcPayload payloadSlice = new EnvironmentRpcPayload.ReadFileSlice("src/A.java", 1, 10, "exec-1");
         assertThat(payloadSlice.messageKind()).isEqualTo(MessageKind.REQUEST);
         assertThat(payloadSlice.direction()).isEqualTo(Direction.CONTROL_PLANE_TO_CONNECTOR);

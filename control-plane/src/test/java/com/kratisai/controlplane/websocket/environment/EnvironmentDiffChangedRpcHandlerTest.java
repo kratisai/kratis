@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
+import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.GitDiffStatus;
 import com.kratisai.controlplane.model.ChatEntity;
@@ -80,7 +81,10 @@ class EnvironmentDiffChangedRpcHandlerTest {
 
         when(diffSnapshotRepository.findByExecutionId(executionId)).thenReturn(Optional.empty());
 
-        handler.handle(sessionId, null, payload).blockLast();
+        EnvironmentResponsePayload ack =
+                handler.handle(sessionId, null, payload).blockLast();
+
+        assertThat(ack).isEqualTo(new EnvironmentResponsePayload.EnvironmentDiffChangedResult());
 
         byte[] patchBytes = payload.patch().getBytes(java.nio.charset.StandardCharsets.UTF_8);
         verify(blobStorageService)
@@ -119,8 +123,10 @@ class EnvironmentDiffChangedRpcHandlerTest {
         EnvironmentRpcPayload.DiffChanged payload = new EnvironmentRpcPayload.DiffChanged(
                 executionId.toString(), "new-a", "new-b", 10, 4, List.of(), "diff content");
 
-        handler.handle(sessionId, null, payload).blockLast();
+        EnvironmentResponsePayload ack =
+                handler.handle(sessionId, null, payload).blockLast();
 
+        assertThat(ack).isEqualTo(new EnvironmentResponsePayload.EnvironmentDiffChangedResult());
         verify(diffSnapshotRepository).save(existing);
         assertThat(existing.getBaseCommit()).isEqualTo("new-a");
         assertThat(existing.getHeadCommit()).isEqualTo("new-b");

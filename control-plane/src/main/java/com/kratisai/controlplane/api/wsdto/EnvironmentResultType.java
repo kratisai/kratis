@@ -7,7 +7,8 @@ import java.util.Map;
 
 public enum EnvironmentResultType {
     ENV_REGISTER("env_register"),
-    ENV_HEARTBEAT("env_heartbeat");
+    ENV_HEARTBEAT("env_heartbeat"),
+    ENV_DIFF_CHANGED("env_diff_changed");
 
     private static final Map<String, EnvironmentResultType> BY_WIRE = new HashMap<>();
 

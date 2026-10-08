@@ -6,8 +6,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 
 	"kratis-connector/runner"
 )
@@ -191,30 +194,6 @@ func TestExecuteGitDiffSummaryAndFileDiff(t *testing.T) {
 	} else if newFile.Status != GitDiffAdded {
 		t.Errorf("Expected new_file.txt status ADDED, got %s", newFile.Status)
 	}
-
-	// Test GitFileDiff for README.md
-	fileDiff := buildGitFileDiff(dir, "README.md", "HEAD")
-	if !strings.Contains(fileDiff.Patch, "@@") {
-		t.Errorf("Expected unified patch header in file diff, got: %s", fileDiff.Patch)
-	}
-	if fileDiff.Additions <= 0 {
-		t.Errorf("Expected additions > 0, got %d", fileDiff.Additions)
-	}
-	if fileDiff.TotalLines <= 0 {
-		t.Errorf("Expected totalLines > 0 for README.md, got %d", fileDiff.TotalLines)
-	}
-
-	// Test GitFileDiff for untracked new_file.txt
-	newFileDiff := buildGitFileDiff(dir, "new_file.txt", "HEAD")
-	if !strings.Contains(newFileDiff.Patch, "@@ -0,0 +1,2 @@") {
-		t.Errorf("Expected synthetic patch for untracked file, got: %s", newFileDiff.Patch)
-	}
-	if newFileDiff.Additions != 2 {
-		t.Errorf("Expected 2 additions for new_file.txt, got %d", newFileDiff.Additions)
-	}
-	if newFileDiff.TotalLines != 2 {
-		t.Errorf("Expected totalLines 2 for new_file.txt, got %d", newFileDiff.TotalLines)
-	}
 }
 
 // setupTestNewRepo mirrors provisioning: an empty "Initial commit", an agent
@@ -305,39 +284,255 @@ func TestExecuteGitDiffSummary_NewRepoWithOriginButNoUpstreamBranchDiffsAgainstR
 	}
 }
 
-func TestExecuteGitFileDiff_NewRepoDiffsAgainstRootCommit(t *testing.T) {
-	dir, _ := setupTestNewRepo(t)
-	defer func() { _ = os.RemoveAll(dir) }()
-
-	client, received := connectedGitClient(t, dir)
-	client.ExecuteGitFileDiff(GitFileDiffParams{Path: "main.go", BaseBranch: "main"}, "req-new-file")
-
-	var envelope struct {
-		Result GitFileDiffResult `json:"result"`
-	}
-	if err := json.Unmarshal(captureNextResponse(t, received), &envelope); err != nil {
-		t.Fatalf("Failed to unmarshal file diff: %v", err)
-	}
-	if !strings.Contains(envelope.Result.Patch, "@@") {
-		t.Errorf("Expected a unified patch for committed agent file, got %q", envelope.Result.Patch)
-	}
-	if envelope.Result.Additions <= 0 {
-		t.Errorf("Expected additions > 0 for committed agent file, got %d", envelope.Result.Additions)
-	}
-}
-
-func TestBuildGitFileDiff_UnchangedTrackedFile(t *testing.T) {
+// TestBuildGitFullDiff_SynthesizesUntrackedFiles locks in the persisted full
+// patch rendering untracked files as full-file addition hunks.
+func TestBuildGitFullDiff_SynthesizesUntrackedFiles(t *testing.T) {
 	dir := setupTestGitRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	// README.md is committed but unchanged: it must NOT be reported as a
-	// synthetic full-file addition.
-	diff := buildGitFileDiff(dir, "README.md", "HEAD")
-	if strings.TrimSpace(diff.Patch) != "" {
-		t.Errorf("Expected empty patch for unchanged tracked file, got: %s", diff.Patch)
+	client := &Client{workspace: dir}
+
+	if err := os.WriteFile(filepath.Join(dir, "new_file.txt"), []byte("Hello World\nNew Line 2\n"), 0600); err != nil {
+		t.Fatalf("Failed to write new file: %v", err)
 	}
-	if diff.Additions != 0 || diff.Deletions != 0 {
-		t.Errorf("Expected no additions/deletions for unchanged tracked file, got %d/%d", diff.Additions, diff.Deletions)
+
+	patch := client.buildGitFullDiff("HEAD")
+	if !strings.Contains(patch, "@@ -0,0 +1,2 @@") {
+		t.Errorf("Expected synthetic patch for untracked file, got: %s", patch)
+	}
+	if !strings.Contains(patch, "+Hello World") || !strings.Contains(patch, "+New Line 2") {
+		t.Errorf("Expected full-file addition lines in patch, got: %s", patch)
+	}
+}
+
+// TestRegister_RepushesCurrentDiffStateAfterReconnect locks in the convergence
+// guarantee: after a (re)registration the sidecar re-pushes the current diff so
+// the control-plane copy heals pushes lost while disconnected.
+func TestRegister_RepushesCurrentDiffStateAfterReconnect(t *testing.T) {
+	dir := setupTestGitRepo(t)
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	received := make(chan []byte, 16)
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req JsonRpcRequest
+			if err := json.Unmarshal(data, &req); err != nil {
+				continue
+			}
+			switch req.Method {
+			case "env.register":
+				raw, _ := json.Marshal(RegisterResult{Type: "env_register", Status: "registered", EnvironmentID: "env-123"})
+				_ = conn.WriteJSON(JsonRpcResponse{JsonRPC: "2.0", Result: raw, ID: req.ID})
+			case "env.diff_changed":
+				ackDiffChanged(conn, req)
+			}
+			received <- data
+		}
+	})
+
+	client := connectClient(t, wsURL(srv), "test-token")
+	defer client.Close()
+	setTestClientTimeouts(client)
+	client.workspace = dir
+	client.currentExecutionID = "exec-reconnect"
+	client.baseBranch = "main"
+	errChan := make(chan error, 1)
+	go client.readLoop(errChan)
+
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Reconnect change\n"), 0600); err != nil {
+		t.Fatalf("Failed to write README: %v", err)
+	}
+
+	if err := client.register(); err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	params := captureDiffChangedNotification(t, received)
+	if params.ExecutionID != "exec-reconnect" {
+		t.Errorf("Expected re-push for execution exec-reconnect, got %s", params.ExecutionID)
+	}
+	if !containsFile(params.Files, "README.md") {
+		t.Errorf("Expected re-push to carry README.md, got %+v", params.Files)
+	}
+	if !strings.Contains(params.Patch, "Reconnect change") {
+		t.Errorf("Expected re-push patch to contain the workspace change, got: %s", params.Patch)
+	}
+}
+
+// TestDiffPush_RetriesUntilAcknowledged locks in the durability guarantee: a
+// diff push whose control-plane ack is missing is retried with backoff until
+// the persistence acknowledgment arrives.
+func TestDiffPush_RetriesUntilAcknowledged(t *testing.T) {
+	dir := setupTestGitRepo(t)
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	var attempts int
+	var mu sync.Mutex
+	ackFromAttempt := 3
+
+	received := make(chan []byte, 16)
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req JsonRpcRequest
+			if err := json.Unmarshal(data, &req); err != nil {
+				continue
+			}
+			if req.Method == "env.diff_changed" {
+				mu.Lock()
+				attempts++
+				n := attempts
+				mu.Unlock()
+				if n >= ackFromAttempt {
+					ackDiffChanged(conn, req)
+				}
+			}
+			received <- data
+		}
+	})
+
+	client := connectClient(t, wsURL(srv), "test-token")
+	defer client.Close()
+	client.workspace = dir
+	client.currentExecutionID = "exec-retry"
+	client.baseBranch = "main"
+	client.requestTimeout = 50 * time.Millisecond
+	client.Timeouts.DiffRetryInitialDelay = 5 * time.Millisecond
+	client.Timeouts.DiffRetryMaxDelay = 25 * time.Millisecond
+	errChan := make(chan error, 1)
+	go client.readLoop(errChan)
+
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Retry change\n"), 0600); err != nil {
+		t.Fatalf("Failed to write README: %v", err)
+	}
+
+	client.emitDiffChanged()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		mu.Lock()
+		n := attempts
+		mu.Unlock()
+		if n >= ackFromAttempt {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected the diff push to be retried until attempt %d, got %d", ackFromAttempt, n)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	params := captureDiffChangedNotification(t, received)
+	if params.ExecutionID != "exec-retry" {
+		t.Errorf("Expected re-push for execution exec-retry, got %s", params.ExecutionID)
+	}
+	if !strings.Contains(params.Patch, "Retry change") {
+		t.Errorf("Expected patch to contain the workspace change, got: %s", params.Patch)
+	}
+}
+
+// TestDiffPush_NewerStateSupersedesRetriedState locks in the supersede rule: a
+// failed older full state is dropped once a newer full state is queued, so the
+// control plane never receives stale diff content after a fresh emit.
+func TestDiffPush_NewerStateSupersedesRetriedState(t *testing.T) {
+	dir := setupTestGitRepo(t)
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	var oldAttempts, newAttempts int
+	var mu sync.Mutex
+	oldAttemptSeen := make(chan struct{}, 1)
+
+	received := make(chan []byte, 16)
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req JsonRpcRequest
+			if err := json.Unmarshal(data, &req); err != nil {
+				continue
+			}
+			if req.Method == "env.diff_changed" {
+				var params DiffChangedParams
+				b, _ := json.Marshal(req.Params)
+				_ = json.Unmarshal(b, &params)
+				switch params.ExecutionID {
+				case "exec-old":
+					mu.Lock()
+					oldAttempts++
+					mu.Unlock()
+					select {
+					case oldAttemptSeen <- struct{}{}:
+					default:
+					}
+				case "exec-new":
+					mu.Lock()
+					newAttempts++
+					mu.Unlock()
+					ackDiffChanged(conn, req)
+				}
+			}
+			received <- data
+		}
+	})
+
+	client := connectClient(t, wsURL(srv), "test-token")
+	defer client.Close()
+	client.workspace = dir
+	client.requestTimeout = 50 * time.Millisecond
+	client.Timeouts.DiffRetryInitialDelay = 5 * time.Millisecond
+	client.Timeouts.DiffRetryMaxDelay = 25 * time.Millisecond
+	errChan := make(chan error, 1)
+	go client.readLoop(errChan)
+
+	// The old state is never acknowledged, so its first attempt will fail.
+	client.queueDiffPush(DiffChangedParams{ExecutionID: "exec-old"})
+
+	// As soon as the old attempt reaches the server, a newer full state is
+	// queued while the old is still in flight: it must supersede the retry.
+	select {
+	case <-oldAttemptSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected the older diff state attempt to reach the server")
+	}
+	client.queueDiffPush(DiffChangedParams{ExecutionID: "exec-new"})
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		mu.Lock()
+		newN := newAttempts
+		mu.Unlock()
+		if newN >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected the newer diff state to be pushed and acked, got newAttempts=%d", newN)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	time.Sleep(120 * time.Millisecond) // allow any (wrong) retry of the old state to surface
+
+	mu.Lock()
+	oldN := oldAttempts
+	newN := newAttempts
+	mu.Unlock()
+	if oldN != 1 {
+		t.Errorf("expected the older superseded state to be attempted once, got %d attempts", oldN)
+	}
+	if newN != 1 {
+		t.Errorf("expected the newer state to be pushed once, got %d attempts", newN)
 	}
 }
 

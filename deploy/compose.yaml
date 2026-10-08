@@ -27,6 +27,7 @@ services:
       - 'SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD:-kratis}'
       - 'JWT_SECRET=${JWT_SECRET}'
       - 'KRATIS_KEY_FILE_PATH=/data/config/encryption.key'
+      - 'KRATIS_STORAGE_LOCAL_PATH=/data/blobs'
       - 'KRATIS_HARNESSES_DIRECTORY=${KRATIS_HARNESSES_DIRECTORY:-/opt/kratis/harnesses}'
       - 'KRATIS_LITELLM_BASE_URL=http://litellm:4000'
       - 'KRATIS_LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'

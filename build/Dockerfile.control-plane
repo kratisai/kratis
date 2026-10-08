@@ -84,7 +84,7 @@ ENV KRATIS_BUILD_TAG=$BUILD_TAG
 # Non-root user 'kratis'; writable mounted volumes.
 RUN addgroup -S -g 1000 kratis \
     && adduser -S -u 1000 -G kratis kratis \
-    && mkdir -p /data/config \
+    && mkdir -p /data/config /data/blobs \
     && chown -R kratis:kratis /data
 USER kratis
 

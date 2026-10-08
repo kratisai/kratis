@@ -788,6 +788,7 @@ class ProtocolConformanceTest {
         return switch (method) {
             case "env.register" -> EnvironmentResponsePayload.EnvironmentRegisterResult.class;
             case "env.heartbeat" -> EnvironmentResponsePayload.EnvironmentHeartbeatResult.class;
+            case "env.diff_changed" -> EnvironmentResponsePayload.EnvironmentDiffChangedResult.class;
             case "env.hitl_request" -> EnvironmentResponsePayload.HitlResult.class;
             case "env.git_token" -> EnvironmentResponsePayload.GitTokenResult.class;
             case "env.exec" -> EnvironmentConnectorResult.Exec.class;
@@ -797,7 +798,6 @@ class ProtocolConformanceTest {
             case "env.registerGitAuth" -> EnvironmentConnectorResult.RegisterGitAuth.class;
             case "env.registerGitIdentity" -> EnvironmentConnectorResult.RegisterGitIdentity.class;
             case "env.git_diff_summary" -> EnvironmentConnectorResult.GitDiffSummary.class;
-            case "env.git_file_diff" -> EnvironmentConnectorResult.GitFileDiff.class;
             case "env.read_file_slice" -> EnvironmentConnectorResult.ReadFileSlice.class;
             case "env.git_push" -> EnvironmentConnectorResult.GitPush.class;
             case "env.git_set_remote" -> EnvironmentConnectorResult.GitSetRemote.class;
@@ -809,6 +809,7 @@ class ProtocolConformanceTest {
         return switch (name) {
             case "register" -> EnvironmentResponsePayload.EnvironmentRegisterResult.class;
             case "heartbeat" -> EnvironmentResponsePayload.EnvironmentHeartbeatResult.class;
+            case "diff_changed" -> EnvironmentResponsePayload.EnvironmentDiffChangedResult.class;
             case "hitl_request" -> EnvironmentResponsePayload.HitlResult.class;
             case "git_token" -> EnvironmentResponsePayload.GitTokenResult.class;
             case "exec" -> EnvironmentConnectorResult.Exec.class;
@@ -818,7 +819,6 @@ class ProtocolConformanceTest {
             case "register_git_auth" -> EnvironmentConnectorResult.RegisterGitAuth.class;
             case "register_git_identity" -> EnvironmentConnectorResult.RegisterGitIdentity.class;
             case "git_diff_summary" -> EnvironmentConnectorResult.GitDiffSummary.class;
-            case "git_file_diff" -> EnvironmentConnectorResult.GitFileDiff.class;
             case "read_file_slice" -> EnvironmentConnectorResult.ReadFileSlice.class;
             case "git_push" -> EnvironmentConnectorResult.GitPush.class;
             case "git_set_remote" -> EnvironmentConnectorResult.GitSetRemote.class;

@@ -917,11 +917,12 @@ func (c *Client) flushDiffCheck() {
 	c.diffMu.Unlock()
 
 	if shouldEmit {
-		c.emitDiffChanged()
+		c.emitDiffChangedSync()
 	}
 }
 
-// emitDiffChanged computes the diff summary and unified patch and sends env.diff_changed.
+// emitDiffChanged computes the diff summary and unified patch and enqueues the
+// full-state env.diff_changed push.
 func (c *Client) emitDiffChanged() {
 	c.mu.Lock()
 	execID := c.currentExecutionID
@@ -933,19 +934,19 @@ func (c *Client) emitDiffChanged() {
 
 	summary, err := c.buildGitDiffSummary(baseBranch)
 	if err != nil {
-		log.Printf("[DIFF] Unable to emit env.diff_changed for execution %s: %v", execID, err)
+		log.Printf("[DIFF] Unable to compute env.diff_changed for execution %s: %v", execID, err)
 		return
 	}
 	patch := c.buildGitFullDiff(summary.BaseCommit)
 	log.Printf(
-		"[DIFF] emitted env.diff_changed for execution %s: baseBranch=%q baseCommit=%s files=%d patchBytes=%d",
+		"[DIFF] enqueued env.diff_changed for execution %s: baseBranch=%q baseCommit=%s files=%d patchBytes=%d",
 		execID,
 		baseBranch,
 		summary.BaseCommit,
 		len(summary.Files),
 		len(patch))
 
-	_ = c.sendNotification("env.diff_changed", DiffChangedParams{
+	c.queueDiffPush(DiffChangedParams{
 		ExecutionID:    execID,
 		BaseCommit:     summary.BaseCommit,
 		HeadCommit:     summary.HeadCommit,
@@ -956,81 +957,129 @@ func (c *Client) emitDiffChanged() {
 	})
 }
 
-// ExecuteGitFileDiff returns the unified diff patch for a single file.
-func (c *Client) ExecuteGitFileDiff(params GitFileDiffParams, reqID interface{}) {
-	workspace := c.resolveWorkspace()
-	cleanRelPath := filepath.Clean(params.Path)
-	if strings.HasPrefix(cleanRelPath, "..") || filepath.IsAbs(params.Path) {
-		c.sendErrorResponse(reqID, -32602, "Invalid path: outside workspace", params.Path)
-		return
+// flushDiffOnRegister re-pushes the current diff state after a (re)registration.
+func (c *Client) flushDiffOnRegister() {
+	c.diffMu.Lock()
+	if c.diffDebounceTimer != nil {
+		c.diffDebounceTimer.Stop()
+		c.diffDebounceTimer = nil
 	}
-	if isKratisPlatformPath(cleanRelPath) {
-		c.sendErrorResponse(reqID, -32602, "Invalid path: Kratis platform state is not diffable", params.Path)
-		return
-	}
+	c.diffMu.Unlock()
+	c.emitDiffChanged()
+}
 
-	baseCommit, err := resolveDiffBase(workspace, params.BaseBranch)
+// diffPushState is one full-state diff push awaiting control-plane acknowledgment.
+type diffPushState struct {
+	params DiffChangedParams
+	seq    uint64
+}
+
+// queueDiffPush serializes diff pushes so the latest full workspace state is
+// always the one being sent.
+func (c *Client) queueDiffPush(params DiffChangedParams) {
+	c.diffMu.Lock()
+	c.diffSeq++
+	c.pendingDiff = &diffPushState{params: params, seq: c.diffSeq}
+	if !c.pushingDiff {
+		c.pushingDiff = true
+		go c.diffPushLoop()
+	}
+	c.diffMu.Unlock()
+}
+
+// diffPushLoop drains the pending diff slot, retrying with backoff until the
+// latest full state is acknowledged. Terminal failures (frames over the byte
+// limit) drop the push; the control plane keeps its previous copy and the next
+// trigger or (re)registration delivers a fresh state.
+func (c *Client) diffPushLoop() {
+	defer func() {
+		c.diffMu.Lock()
+		c.pushingDiff = false
+		c.diffMu.Unlock()
+	}()
+	backoff := c.Timeouts.DiffRetryInitialDelay
+	for {
+		c.diffMu.Lock()
+		state := c.pendingDiff
+		c.pendingDiff = nil
+		c.diffMu.Unlock()
+		if state == nil {
+			return
+		}
+
+		if err := c.sendDiffAcked(state.params); err != nil {
+			var fte *frameTooLargeError
+			if errors.As(err, &fte) {
+				log.Printf("[DIFF] dropped env.diff_changed push: %v", err)
+				continue
+			}
+			log.Printf("[DIFF] env.diff_changed push failed, will retry: %v", err)
+			c.diffMu.Lock()
+			// Only put the failed state back if nothing newer was queued while
+			// it was in flight; a newer full-state emit supersedes it.
+			if c.pendingDiff == nil && state.seq == c.diffSeq {
+				c.pendingDiff = state
+			}
+			c.diffMu.Unlock()
+
+			time.Sleep(backoff)
+			if backoff < c.Timeouts.DiffRetryMaxDelay {
+				backoff *= 2
+				if backoff > c.Timeouts.DiffRetryMaxDelay {
+					backoff = c.Timeouts.DiffRetryMaxDelay
+				}
+			}
+			continue
+		}
+		backoff = c.Timeouts.DiffRetryInitialDelay
+	}
+}
+
+// sendDiffAcked delivers one env.diff_changed push and waits for the
+// control-plane persistence acknowledgment. A JSON-RPC error response is
+// retryable (e.g. transient storage failure) and surfaces as an error here.
+func (c *Client) sendDiffAcked(params DiffChangedParams) error {
+	resp, err := c.sendRequest("env.diff_changed", params)
 	if err != nil {
-		if reqID != nil {
-			c.sendErrorResponse(reqID, -32000, "Unable to resolve diff base", err.Error())
-		}
+		return err
+	}
+	if resp.Error != nil {
+		return fmt.Errorf("control plane rejected diff_changed: code=%d message=%q", resp.Error.Code, resp.Error.Message)
+	}
+	return nil
+}
+
+// emitDiffChangedSync computes and synchronously pushes the current diff state,
+// blocking until the control plane acknowledges persistence. Called from
+// SendComplete so the terminal diff lands before env.complete. On failure the
+// state is queued for background retries so the copy still converges.
+func (c *Client) emitDiffChangedSync() {
+	c.mu.Lock()
+	execID := c.currentExecutionID
+	baseBranch := c.baseBranch
+	c.mu.Unlock()
+	if execID == "" {
 		return
 	}
 
-	c.sendSuccessResponse(reqID, buildGitFileDiff(workspace, cleanRelPath, baseCommit))
-}
-
-// buildGitFileDiff computes the unified diff for a single workspace file.
-func buildGitFileDiff(workspace, cleanRelPath, baseCommit string) GitFileDiffResult {
-	diffCmd := exec.Command("git", "diff", "-U3", baseCommit, "--", cleanRelPath) //nolint:gosec
-	diffCmd.Dir = workspace
-	out, _ := diffCmd.Output()
-
-	patch := string(out)
-	fullPath := filepath.Join(workspace, cleanRelPath)
-	content, readErr := os.ReadFile(fullPath) //nolint:gosec
-
-	// Untracked files are invisible to `git diff <base>`, so synthesize a
-	// full-file addition hunk instead of returning an empty patch.
-	if strings.TrimSpace(patch) == "" && readErr == nil && !isTrackedFile(workspace, cleanRelPath) {
-		patch = syntheticNewFilePatch(content)
+	summary, err := c.buildGitDiffSummary(baseBranch)
+	if err != nil {
+		log.Printf("[DIFF] Unable to compute terminal env.diff_changed for execution %s: %v", execID, err)
+		return
 	}
-
-	adds := 0
-	dels := 0
-	totalLines := 0
-
-	if readErr == nil {
-		rawContent := strings.TrimSuffix(string(content), "\r\n")
-		rawContent = strings.TrimSuffix(rawContent, "\n")
-		if len(rawContent) > 0 {
-			totalLines = len(strings.Split(rawContent, "\n"))
-		}
+	params := DiffChangedParams{
+		ExecutionID:    execID,
+		BaseCommit:     summary.BaseCommit,
+		HeadCommit:     summary.HeadCommit,
+		TotalAdditions: summary.TotalAdditions,
+		TotalDeletions: summary.TotalDeletions,
+		Files:          summary.Files,
+		Patch:          c.buildGitFullDiff(summary.BaseCommit),
 	}
-
-	for _, line := range strings.Split(patch, "\n") {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			adds++
-		} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-			dels++
-		}
+	if err := c.sendDiffAcked(params); err != nil {
+		log.Printf("[DIFF] terminal env.diff_changed push failed, queued for retry: %v", err)
+		c.queueDiffPush(params)
 	}
-
-	return GitFileDiffResult{
-		Path:       cleanRelPath,
-		Patch:      patch,
-		Additions:  adds,
-		Deletions:  dels,
-		TotalLines: totalLines,
-	}
-}
-
-// isTrackedFile reports whether a workspace path is tracked by git (present in
-// the index or HEAD).
-func isTrackedFile(workspace, cleanRelPath string) bool {
-	cmd := exec.Command("git", "ls-files", "--error-unmatch", "--", cleanRelPath) //nolint:gosec
-	cmd.Dir = workspace
-	return cmd.Run() == nil
 }
 
 // syntheticNewFilePatch renders an untracked file as a full-file addition hunk
