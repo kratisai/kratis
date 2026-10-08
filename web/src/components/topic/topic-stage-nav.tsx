@@ -6,11 +6,12 @@ import {
   ChevronDown,
   GitCompare,
   Loader2,
+  Moon,
   PenTool,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
-import type { ExecutionStatus, SandboxExecutionDto } from '@/lib/execution-api'
+import type { ExecutionDisplayStatus, SandboxExecutionDto } from '@/lib/execution-api'
 import type { CanvasDocument } from '@/types/canvas-types'
 
 import { AgentBrandIcon } from '@/components/session/agent-brand-icon'
@@ -23,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useDiffSummary } from '@/hooks/use-diff'
+import { executionDisplayStatus } from '@/lib/execution-api'
 import { formatDurationSeconds, formatRelativeTime, formatSpend } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useCanvasStore } from '@/store/canvas-store'
@@ -252,6 +254,8 @@ export function TopicStageNav({
         const launchedStr = exec.startedAt ? formatRelativeTime(exec.startedAt) : ''
         const durationStr = formatDuration(exec.startedAt, exec.completedAt ?? undefined)
         const harnessName = harnessDisplayName(exec.harness ?? '')
+        const displayStatus = executionDisplayStatus(exec)
+        const isAsleep = displayStatus === 'SLEEPING'
 
         return (
           <div
@@ -265,7 +269,7 @@ export function TopicStageNav({
             key={exec.id}
             title={`${harnessName} · Launched ${new Date(exec.startedAt).toLocaleString()}${
               durationStr ? ` · ran ${durationStr}` : ''
-            }`}
+            }${isAsleep ? ' · Asleep' : ''}`}
           >
             <button
               aria-label={`${harnessName} activity`}
@@ -281,7 +285,7 @@ export function TopicStageNav({
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="flex items-center gap-1.5 truncate font-mono text-[10px] tabular-nums">
-                  <ExecutionStatusIcon status={exec.status} />
+                  <ExecutionStatusIcon status={displayStatus} />
                   <span className="truncate">{launchedStr}</span>
                 </span>
                 <span className="font-mono text-[10px] tabular-nums">
@@ -338,6 +342,7 @@ export function TopicStageNav({
               const durationStr = formatDuration(exec.startedAt, exec.completedAt ?? undefined)
               const launchedStr = exec.startedAt ? formatRelativeTime(exec.startedAt) : ''
               const isSelected = currentStage === 'execution' && activeExecutionId === exec.id
+              const displayStatus = executionDisplayStatus(exec)
 
               return (
                 <DropdownMenuItem
@@ -350,7 +355,7 @@ export function TopicStageNav({
                 >
                   <div className="flex flex-col gap-0.5">
                     <div className="flex items-center gap-1.5 font-medium">
-                      <ExecutionStatusIcon status={exec.status} />
+                      <ExecutionStatusIcon status={displayStatus} />
                       <span>Run {exec.runNumber}</span>
                     </div>
                     <div className="text-muted-foreground flex items-center gap-1 text-[10px]">
@@ -396,7 +401,7 @@ export function TopicStageNav({
   )
 }
 
-function ExecutionStatusIcon({ status }: { status: ExecutionStatus }) {
+function ExecutionStatusIcon({ status }: { status: ExecutionDisplayStatus }) {
   switch (status) {
     case 'COMPLETED':
     case 'IDLE':
@@ -405,6 +410,14 @@ function ExecutionStatusIcon({ status }: { status: ExecutionStatus }) {
       return <AlertCircle className="text-destructive h-3.5 w-3.5" />
     case 'RUNNING':
       return <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />
+    case 'SLEEPING':
+      return (
+        <Moon
+          aria-label="Asleep"
+          className="h-3.5 w-3.5 text-indigo-500"
+          data-testid="execution-sleeping-icon"
+        />
+      )
     default:
       return <Bot className="text-muted-foreground h-3.5 w-3.5" />
   }

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.HarnessCatalogFixture;
 import com.kratisai.controlplane.api.wsdto.ActivityDetail;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
@@ -19,8 +20,13 @@ import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.PlanEntry;
 import com.kratisai.controlplane.api.wsdto.PlanEntryPriority;
 import com.kratisai.controlplane.api.wsdto.PlanEntryStatus;
+import com.kratisai.controlplane.model.AgentHarness;
+import com.kratisai.controlplane.model.ChatEntity;
+import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.model.Team;
+import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlRequiredEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
@@ -30,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -52,6 +59,11 @@ class ExecutionActivityPersistenceServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private ExecutionActivityPersistenceService service;
+
+    @BeforeAll
+    static void loadHarnessCatalog() {
+        HarnessCatalogFixture.load();
+    }
 
     @BeforeEach
     void setUp() {
@@ -676,5 +688,54 @@ class ExecutionActivityPersistenceServiceTest {
         when(repository.findByExecutionIdOrderBySequenceAsc(executionId)).thenReturn(rows);
 
         assertThat(service.getActivities(executionId)).isSameAs(rows);
+    }
+
+    @Test
+    void recordHarnessSleep_recordsMessageAndPublishesEvent() {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+
+        Team team = new Team();
+        team.setId(teamId);
+        ChatEntity chat = new ChatEntity();
+        chat.setId(UUID.randomUUID());
+        chat.setTeam(team);
+
+        SandboxExecution execution = new SandboxExecution();
+        execution.setId(executionId);
+        execution.setChat(chat);
+        execution.setHarness(AgentHarness.valueOf("CLAUDE_CODE"));
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+        when(repository.nextSequence(executionId)).thenReturn(1L);
+
+        service.recordHarnessSleep(executionId);
+
+        assertInsertedRow(
+                capturedSave(),
+                executionId,
+                1,
+                null,
+                ActivityType.MESSAGE,
+                ActivityStatus.COMPLETED,
+                "Claude Code has gone to sleep");
+
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        SandboxExecutionActivityEvent event = (SandboxExecutionActivityEvent) eventCaptor.getValue();
+        assertThat(event.teamId()).isEqualTo(teamId);
+        assertThat(event.executionId()).isEqualTo(executionId);
+        assertThat(event.activityType()).isEqualTo(ActivityType.MESSAGE);
+        assertThat(event.description()).isEqualTo("Claude Code has gone to sleep");
+    }
+
+    @Test
+    void recordHarnessSleep_withUnknownExecution_isNoOp() {
+        UUID executionId = UUID.randomUUID();
+        when(executionRepository.findById(executionId)).thenReturn(Optional.empty());
+
+        service.recordHarnessSleep(executionId);
+
+        verify(repository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any());
     }
 }

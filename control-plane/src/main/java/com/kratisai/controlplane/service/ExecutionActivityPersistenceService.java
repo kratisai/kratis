@@ -13,6 +13,8 @@ import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedRe
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.StopReason;
+import com.kratisai.controlplane.model.AgentHarness;
+import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
@@ -255,6 +257,25 @@ public class ExecutionActivityPersistenceService {
                 .map(execution -> execution.getChat().getTeam().getId())
                 .ifPresent(teamId -> eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
                         teamId, executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null)));
+    }
+
+    @Transactional
+    public void recordHarnessSleep(UUID executionId) {
+        SandboxExecution execution = executionRepository.findById(executionId).orElse(null);
+        if (execution == null) {
+            return;
+        }
+        AgentHarness harness = execution.getHarness();
+        String description = (harness != null ? harness.getName() : "Agent") + " has gone to sleep";
+        recordActivity(executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null);
+        eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
+                execution.getChat().getTeam().getId(),
+                executionId,
+                ActivityType.MESSAGE,
+                description,
+                null,
+                ActivityStatus.COMPLETED,
+                null));
     }
 
     @Transactional

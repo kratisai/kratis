@@ -2,12 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SandboxExecutionDto } from '@/lib/execution-api'
 
-import { terminateExecution } from '@/lib/execution-api'
+import { executionDisplayStatus, terminateExecution } from '@/lib/execution-api'
 import { useAuthStore } from '@/store/auth-store'
 
-type EnvIdRemoved = 'environmentId' extends keyof SandboxExecutionDto ? never : true
-const envIdRemoved: EnvIdRemoved = true
-void envIdRemoved
+type HasEnvironmentFields = 'environmentId' extends keyof SandboxExecutionDto
+  ? 'environmentStatus' extends keyof SandboxExecutionDto
+    ? true
+    : never
+  : never
+const hasEnvironmentFields: HasEnvironmentFields = true
+void hasEnvironmentFields
 
 describe('terminateExecution', () => {
   beforeEach(() => {
@@ -49,5 +53,39 @@ describe('terminateExecution', () => {
     await expect(terminateExecution('chat-1', 'exec-1')).rejects.toMatchObject({
       message: 'nope',
     })
+  })
+})
+
+describe('executionDisplayStatus', () => {
+  function execution(overrides: Partial<SandboxExecutionDto>): SandboxExecutionDto {
+    return {
+      chatId: 'chat-1',
+      id: 'exec-1',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      status: 'RUNNING',
+      ...overrides,
+    }
+  }
+
+  it('reports SLEEPING for a non-completed run whose environment is asleep', () => {
+    expect(
+      executionDisplayStatus(execution({ environmentStatus: 'SLEEPING', status: 'FAILED' })),
+    ).toBe('SLEEPING')
+    expect(
+      executionDisplayStatus(execution({ environmentStatus: 'SLEEPING', status: 'IDLE' })),
+    ).toBe('SLEEPING')
+  })
+
+  it('keeps COMPLETED even when the environment is asleep', () => {
+    expect(
+      executionDisplayStatus(execution({ environmentStatus: 'SLEEPING', status: 'COMPLETED' })),
+    ).toBe('COMPLETED')
+  })
+
+  it('returns the execution status when the environment is awake', () => {
+    expect(
+      executionDisplayStatus(execution({ environmentStatus: 'CONNECTED', status: 'RUNNING' })),
+    ).toBe('RUNNING')
+    expect(executionDisplayStatus(execution({ status: 'FAILED' }))).toBe('FAILED')
   })
 })

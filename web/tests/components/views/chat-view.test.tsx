@@ -80,9 +80,13 @@ vi.mock('@/lib/environment-api', () => ({
   resumeEnvironment: resumeEnvironmentMock,
 }))
 
-vi.mock('@/lib/execution-api', () => ({
-  listChatExecutions: vi.fn(() => Promise.resolve([])),
-}))
+vi.mock('@/lib/execution-api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/execution-api')>()
+  return {
+    ...actual,
+    listChatExecutions: vi.fn(() => Promise.resolve([])),
+  }
+})
 
 vi.mock('sonner', () => ({
   toast: {

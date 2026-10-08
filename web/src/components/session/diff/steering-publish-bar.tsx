@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 
 import type { ExecutionStatus } from '@/lib/execution-api'
 import type { DiffCommentDraft } from '@/types/diff-types'
+import type { EnvironmentStatus } from '@/types/websocket-types'
 
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -17,6 +18,7 @@ const EMPTY_COMMENTS: DiffCommentDraft[] = []
 
 interface SteeringPublishBarProps {
   chatId: string
+  environmentStatus?: EnvironmentStatus
   executionId: string
   executionStatus?: ExecutionStatus
   isAutoHidden?: boolean
@@ -24,6 +26,7 @@ interface SteeringPublishBarProps {
 
 export function SteeringPublishBar({
   chatId,
+  environmentStatus,
   executionId,
   executionStatus,
   isAutoHidden = false,
@@ -43,6 +46,12 @@ export function SteeringPublishBar({
 
   // Completely hide when typing an inline comment
   if (activeCommentBox !== null) {
+    return null
+  }
+
+  // Steering and publishing both need a live environment, so the bar is hidden
+  // while the sandbox is asleep; resume is offered from the execution stage view.
+  if (environmentStatus === 'SLEEPING') {
     return null
   }
 

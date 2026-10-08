@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ExecutionStageView } from '@/components/topic/execution-stage-view'
+import { useResumeEnvironment } from '@/hooks/use-environments'
 import { useChatExecutions } from '@/hooks/use-executions'
 import * as diffApi from '@/lib/diff-api'
 import * as execApi from '@/lib/execution-api'
@@ -12,9 +13,14 @@ import { useDiffReviewStore } from '@/store/diff-review-store'
 import { useExecutionStore } from '@/store/execution-store'
 
 let mockSearch: { tab?: string } = { tab: undefined }
+const resumeMutateMock = vi.fn()
 
 vi.mock('@tanstack/react-router', () => ({
   useSearch: () => mockSearch,
+}))
+
+vi.mock('@/hooks/use-environments', () => ({
+  useResumeEnvironment: vi.fn(),
 }))
 
 vi.mock('@/components/session/execution-activity-log', () => ({
@@ -47,6 +53,7 @@ function completedExecution(): execApi.SandboxExecutionDto {
   return {
     chatId: 'session-1',
     completedAt: '2026-01-02T00:00:00.000Z',
+    environmentId: 'env-1',
     exitCode: 0,
     harness: 'OPENCODE',
     id: 'exec-1',
@@ -68,6 +75,10 @@ describe('ExecutionStageView', () => {
       data: [],
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof useChatExecutions>)
+    vi.mocked(useResumeEnvironment).mockReturnValue({
+      isPending: false,
+      mutate: resumeMutateMock,
+    } as unknown as ReturnType<typeof useResumeEnvironment>)
     useActivityStore.setState({ activitiesByExecution: {} })
     useExecutionStore.setState({
       logs: {},
@@ -257,5 +268,110 @@ describe('ExecutionStageView', () => {
 
     const bar = screen.getByTestId('steering-publish-bar')
     expect(bar).toHaveClass('fixed', 'md:absolute')
+  })
+
+  it('shows a sleeping banner and resumes the environment', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useChatExecutions).mockReturnValue({
+      data: [
+        {
+          ...completedExecution(),
+          completedAt: null,
+          environmentId: 'env-1',
+          environmentStatus: 'SLEEPING',
+          status: 'FAILED',
+        },
+      ],
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useChatExecutions>)
+
+    renderView()
+
+    expect(screen.getByTestId('execution-sleeping-banner')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /resume environment/i }))
+    expect(resumeMutateMock).toHaveBeenCalledWith(
+      'env-1',
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    )
+  })
+
+  it('offers Resume environment from the options menu when asleep', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useChatExecutions).mockReturnValue({
+      data: [
+        {
+          ...completedExecution(),
+          completedAt: null,
+          environmentId: 'env-1',
+          environmentStatus: 'SLEEPING',
+          status: 'FAILED',
+        },
+      ],
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useChatExecutions>)
+
+    renderView()
+
+    await user.click(screen.getByRole('button', { name: /activity log options/i }))
+    await user.click(screen.getByRole('menuitem', { name: /resume environment/i }))
+
+    expect(resumeMutateMock).toHaveBeenCalledWith(
+      'env-1',
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    )
+  })
+
+  it('does not show the sleeping banner when the environment is awake', () => {
+    vi.mocked(useChatExecutions).mockReturnValue({
+      data: [{ ...completedExecution(), environmentStatus: 'CONNECTED' }],
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useChatExecutions>)
+
+    renderView()
+
+    expect(screen.queryByTestId('execution-sleeping-banner')).not.toBeInTheDocument()
+  })
+
+  it('offers the terminal and resume while the environment is asleep', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useChatExecutions).mockReturnValue({
+      data: [
+        {
+          ...completedExecution(),
+          completedAt: null,
+          environmentStatus: 'SLEEPING',
+          status: 'FAILED',
+        },
+      ],
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useChatExecutions>)
+
+    renderView()
+
+    await user.click(screen.getByRole('button', { name: /activity log options/i }))
+    expect(screen.getByRole('menuitem', { name: /show terminal/i })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /resume environment/i })).toBeInTheDocument()
+  })
+
+  it('offers the terminal for a resumed execution that is not live', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useChatExecutions).mockReturnValue({
+      data: [
+        {
+          ...completedExecution(),
+          completedAt: null,
+          environmentStatus: 'CONNECTED',
+          status: 'FAILED',
+        },
+      ],
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useChatExecutions>)
+
+    renderView()
+
+    await user.click(screen.getByRole('button', { name: /activity log options/i }))
+    expect(screen.getByRole('menuitem', { name: /show terminal/i })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /resume environment/i })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /terminate/i })).toBeNull()
   })
 })

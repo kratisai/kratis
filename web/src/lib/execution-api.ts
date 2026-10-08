@@ -1,3 +1,5 @@
+import type { EnvironmentStatus } from '@/types/websocket-types'
+
 import { useAuthStore } from '@/store/auth-store'
 
 import { ApiError } from './auth-api'
@@ -20,12 +22,16 @@ export interface CreateSandboxExecutionRequest {
   providerId?: string
 }
 
+export type ExecutionDisplayStatus = 'SLEEPING' | ExecutionStatus
+
 export type ExecutionStatus = 'COMPLETED' | 'FAILED' | 'IDLE' | 'RUNNING'
 
 export interface SandboxExecutionDto {
   chatId: string
   completedAt?: null | string
   completionTokens?: null | number
+  environmentId?: null | string
+  environmentStatus?: EnvironmentStatus
   exitCode?: null | number
   harness?: string
   id: string
@@ -47,6 +53,13 @@ export async function createSandboxExecution(
     method: 'POST',
   })
   return response.json()
+}
+
+export function executionDisplayStatus(execution: SandboxExecutionDto): ExecutionDisplayStatus {
+  if (execution.environmentStatus === 'SLEEPING' && execution.status !== 'COMPLETED') {
+    return 'SLEEPING'
+  }
+  return execution.status
 }
 
 export async function fetchHarnesses(teamId: string): Promise<AgentHarnessOption[]> {
