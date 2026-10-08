@@ -57,6 +57,7 @@ func (c *Client) ExecuteExec(params ExecParams, reqID interface{}) {
 
 	outputCallback := func(ol runner.OutputLine) {
 		log.Printf("[Exec] [%s] %s", ol.Stream, ol.Line)
+		c.appendTerminalLog(ol.Stream, ol.Line)
 		_ = c.sendNotification("env.output", OutputParams{
 			Line:        ol.Line,
 			Stream:      OutputStream(ol.Stream),

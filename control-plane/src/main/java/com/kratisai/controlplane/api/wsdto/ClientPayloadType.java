@@ -31,7 +31,8 @@ public enum ClientPayloadType {
     EXECUTION_ACTIVITY("execution_activity"),
     EXECUTION_REPLAY_COMPLETE("execution_replay_complete"),
     EXECUTION_ACP_INITIALIZED("execution_acp_initialized"),
-    EXECUTION_DIFF_CHANGED("execution_diff_changed");
+    EXECUTION_DIFF_CHANGED("execution_diff_changed"),
+    EXECUTION_LOGS("execution_logs");
 
     private static final Map<String, ClientPayloadType> BY_WIRE = new HashMap<>();
 

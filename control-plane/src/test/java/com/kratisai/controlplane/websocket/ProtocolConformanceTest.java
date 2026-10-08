@@ -801,6 +801,7 @@ class ProtocolConformanceTest {
             case "env.registerGitIdentity" -> EnvironmentConnectorResult.RegisterGitIdentity.class;
             case "env.git_diff_summary" -> EnvironmentConnectorResult.GitDiffSummary.class;
             case "env.read_file_slice" -> EnvironmentConnectorResult.ReadFileSlice.class;
+            case "env.get_logs" -> EnvironmentConnectorResult.GetLogs.class;
             case "env.git_push" -> EnvironmentConnectorResult.GitPush.class;
             case "env.git_set_remote" -> EnvironmentConnectorResult.GitSetRemote.class;
             default -> null;
@@ -824,6 +825,7 @@ class ProtocolConformanceTest {
             case "register_git_identity" -> EnvironmentConnectorResult.RegisterGitIdentity.class;
             case "git_diff_summary" -> EnvironmentConnectorResult.GitDiffSummary.class;
             case "read_file_slice" -> EnvironmentConnectorResult.ReadFileSlice.class;
+            case "get_logs" -> EnvironmentConnectorResult.GetLogs.class;
             case "git_push" -> EnvironmentConnectorResult.GitPush.class;
             case "git_set_remote" -> EnvironmentConnectorResult.GitSetRemote.class;
             default -> throw new AssertionError("Unexpected environment result fixture: " + name);
@@ -854,6 +856,7 @@ class ProtocolConformanceTest {
             case EXECUTION_REPLAY_COMPLETE -> ClientPayload.ExecutionReplayCompleteResult.class;
             case EXECUTION_ACP_INITIALIZED -> ClientPayload.ExecutionAcpInitializedResult.class;
             case EXECUTION_DIFF_CHANGED -> ClientPayload.ExecutionDiffChangedResult.class;
+            case EXECUTION_LOGS -> ClientPayload.ExecutionLogsResult.class;
         };
     }
 

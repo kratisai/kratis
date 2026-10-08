@@ -52,6 +52,7 @@ var EnvironmentMethods = []MethodDef{
 	{Name: "env.terminate", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &TerminateParams{}, Result: &TerminateResult{}},
 	{Name: "env.git_diff_summary", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GitDiffSummaryParams{}, Result: &GitDiffSummaryResult{}},
 	{Name: "env.read_file_slice", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &ReadFileSliceParams{}, Result: &ReadFileSliceResult{}},
+	{Name: "env.get_logs", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GetLogsParams{}, Result: &GetLogsResult{}},
 	{Name: "env.git_push", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GitPushParams{}, Result: &GitPushResult{}},
 	{Name: "env.git_set_remote", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GitSetRemoteParams{}, Result: &GitSetRemoteResult{}},
 }

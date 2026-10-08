@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GetLogsParams",
+  "type": "object",
+  "required": [
+    "tailLines"
+  ],
+  "properties": {
+    "tailLines": { "type": "integer", "minimum": 1 }
+  },
+  "additionalProperties": false
+}

@@ -422,6 +422,27 @@
       }
     },
     {
+      "name": "env.get_logs",
+      "summary": "Read the trailing lines of the sandbox terminal log for console catch-up",
+      "x-kratis-direction": "control-plane-to-connector",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/get_logs.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/get_logs.schema.json"
+        }
+      }
+    },
+    {
       "name": "env.git_push",
       "summary": "Stage, commit, and push branch to remote origin",
       "x-kratis-direction": "control-plane-to-connector",

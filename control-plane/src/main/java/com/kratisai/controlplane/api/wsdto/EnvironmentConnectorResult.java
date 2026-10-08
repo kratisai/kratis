@@ -176,6 +176,14 @@ public sealed interface EnvironmentConnectorResult {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
+    record GetLogs(@JsonProperty("lines") List<String> lines) implements EnvironmentConnectorResult {
+        public GetLogs {
+            Objects.requireNonNull(lines, "lines is required");
+            lines = List.copyOf(lines);
+        }
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record GitPush(
             @JsonProperty("commitSha") String commitSha,
             @JsonProperty("branchName") String branchName,

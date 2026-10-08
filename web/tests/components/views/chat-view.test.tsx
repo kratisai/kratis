@@ -72,6 +72,14 @@ vi.mock('@tanstack/react-router', async () => {
   }
 })
 
+const { resumeEnvironmentMock } = vi.hoisted(() => ({
+  resumeEnvironmentMock: vi.fn(),
+}))
+
+vi.mock('@/lib/environment-api', () => ({
+  resumeEnvironment: resumeEnvironmentMock,
+}))
+
 vi.mock('@/lib/execution-api', () => ({
   listChatExecutions: vi.fn(() => Promise.resolve([])),
 }))
@@ -113,7 +121,9 @@ describe('ChatView', () => {
       canvases: {},
     })
     useExecutionStore.setState({
+      logEnvironmentId: {},
       logs: {},
+      logStatus: {},
       replayingExecutionId: null,
       terminalFullscreen: false,
       terminalHeight: 256,
@@ -382,5 +392,65 @@ describe('ChatView', () => {
       expect(screen.getByTestId('stage-card-run-exec-1')).toBeInTheDocument()
     })
     expect(useExecutionStore.getState().terminalOpen).toBe(false)
+  })
+
+  describe('terminal log catch-up', () => {
+    async function sendMock() {
+      const { useWebSocketStore } = await import('@/store/websocket-store')
+      return useWebSocketStore.getState().send as ReturnType<typeof vi.fn>
+    }
+
+    it('requests terminal history when the drawer opens', async () => {
+      useExecutionStore.setState({ terminalOpen: true })
+      renderWithProviders(<ChatView />)
+
+      const send = await sendMock()
+      await waitFor(() => {
+        expect(send).toHaveBeenCalledWith('execution.get_logs', { executionId: 'exec-1' })
+      })
+    })
+
+    it('does not request history while the drawer is closed', async () => {
+      renderWithProviders(<ChatView />)
+
+      const send = await sendMock()
+      expect(send).not.toHaveBeenCalledWith('execution.get_logs', expect.anything())
+    })
+
+    it('shows a wake prompt for a sleeping sandbox and resumes it on click', async () => {
+      const user = userEvent.setup()
+      resumeEnvironmentMock.mockResolvedValue({})
+      useExecutionStore.setState({
+        logEnvironmentId: { 'exec-1': 'env-1' },
+        logStatus: { 'exec-1': 'SLEEPING' },
+        terminalOpen: true,
+      })
+      renderWithProviders(<ChatView />)
+
+      expect(screen.getByText('Sandbox is asleep.')).toBeInTheDocument()
+      const send = await sendMock()
+      send.mockClear()
+
+      await user.click(screen.getByRole('button', { name: /wake sandbox to view console/i }))
+
+      await waitFor(() => {
+        expect(resumeEnvironmentMock).toHaveBeenCalledWith('team-1', 'env-1')
+      })
+      await waitFor(() => {
+        expect(send).toHaveBeenCalledWith('execution.get_logs', { executionId: 'exec-1' })
+      })
+    })
+
+    it('shows a terminated notice without a wake action', () => {
+      useExecutionStore.setState({
+        logEnvironmentId: { 'exec-1': 'env-1' },
+        logStatus: { 'exec-1': 'TERMINATED' },
+        terminalOpen: true,
+      })
+      renderWithProviders(<ChatView />)
+
+      expect(screen.getByTestId('terminal-terminated-notice')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /wake sandbox/i })).toBeNull()
+    })
   })
 })

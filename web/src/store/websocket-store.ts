@@ -11,6 +11,7 @@ import type {
   ExecutionDiffChangedResult,
   ExecutionHitlRequiredResult,
   ExecutionHitlResolvedResult,
+  ExecutionLogsResult,
   ExecutionOutputResult,
   ExecutionReplayCompleteResult,
   ExecutionStatusChangedResult,
@@ -176,6 +177,9 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
         case 'execution_hitl_resolved':
           handleExecutionHitlResolved(response.result)
           break
+        case 'execution_logs':
+          handleExecutionLogsResult(response.result)
+          break
         case 'execution_output':
           handleExecutionOutputResult(response.result)
           break
@@ -238,6 +242,10 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
     const linePrefix =
       result.stream === 'stderr' ? '[Error]' : result.stream === 'agent' ? '[Agent]' : '[Output]'
     useExecutionStore.getState().addLog(result.executionId, `${linePrefix} ${result.line}`)
+  }
+
+  function handleExecutionLogsResult(result: ExecutionLogsResult) {
+    useExecutionStore.getState().handleLogsResult(result)
   }
 
   function handleExecutionReplayCompleteResult(result: ExecutionReplayCompleteResult) {

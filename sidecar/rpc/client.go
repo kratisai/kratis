@@ -92,6 +92,8 @@ type Client struct {
 	workspace       string
 	envFile         string
 	credentialsDir  string
+	terminalLogFile string
+	terminalLogMu   sync.Mutex
 	executor        *runner.Executor
 	sshAgentPID     string
 	sshAuthSock     string
@@ -175,6 +177,7 @@ func NewClient(serverURL, token, containerID, workspace string) *Client {
 		workspace:          workspace,
 		envFile:            defaultEnvFile,
 		credentialsDir:     defaultCredentialsDir,
+		terminalLogFile:    defaultTerminalLogFile,
 		executor:           runner.NewExecutor(),
 		pending:            make(map[interface{}]chan *JsonRpcResponse),
 		nextID:             1,
@@ -407,6 +410,7 @@ func (c *Client) SendOutput(line string, stream string) {
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	c.mu.Unlock()
+	c.appendTerminalLog(stream, line)
 	for _, chunk := range chunkString(line, maxOutputChunkBytes) {
 		_ = c.sendNotification("env.output", OutputParams{Line: chunk, Stream: OutputStream(stream), ExecutionID: execID})
 	}
@@ -1003,6 +1007,19 @@ func (c *Client) handleServerRequest(req JsonRpcRequest) {
 			return
 		}
 		go c.ExecuteReadFileSlice(params, req.ID)
+
+	case "env.get_logs":
+		var params GetLogsParams
+		rawBytes, err := json.Marshal(req.Params)
+		if err != nil {
+			c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
+			return
+		}
+		if err := json.Unmarshal(rawBytes, &params); err != nil {
+			c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
+			return
+		}
+		go c.ExecuteGetLogs(params, req.ID)
 
 	case "env.git_push":
 		var params GitPushParams

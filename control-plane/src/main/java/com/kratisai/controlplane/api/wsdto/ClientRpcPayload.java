@@ -140,4 +140,24 @@ public sealed interface ClientRpcPayload extends RpcPayload {
             Objects.requireNonNull(executionId, "executionId is required");
         }
     }
+
+    /** Fetch the trailing terminal log lines of an execution's environment. */
+    record ExecutionGetLogs(
+            @JsonProperty("executionId") String executionId,
+            @JsonProperty("tailLines") Integer tailLines) implements ClientRpcPayload {
+        public static final String METHOD = "execution.get_logs";
+        public static final int MAX_TAIL_LINES = 5000;
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+
+        public ExecutionGetLogs {
+            Objects.requireNonNull(executionId, "executionId is required");
+            if (tailLines != null && (tailLines < 1 || tailLines > MAX_TAIL_LINES)) {
+                throw new IllegalArgumentException("tailLines must be between 1 and " + MAX_TAIL_LINES);
+            }
+        }
+    }
 }

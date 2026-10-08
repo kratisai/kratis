@@ -49,6 +49,13 @@ export const chatUnsubscribeParamsSchema = z
   })
   .strict()
 
+export const executionGetLogsParamsSchema = z
+  .object({
+    executionId: z.string().uuid(),
+    tailLines: z.number().int().min(1).max(5000).optional(),
+  })
+  .strict()
+
 export const executionReplayActivitiesParamsSchema = z
   .object({
     executionId: z.string().uuid(),
@@ -83,6 +90,11 @@ export const CLIENT_METHODS = {
     direction: Direction.WebToControlPlane,
     messageKind: MessageKind.Request,
     paramsSchema: chatUnsubscribeParamsSchema,
+  },
+  'execution.get_logs': {
+    direction: Direction.WebToControlPlane,
+    messageKind: MessageKind.Request,
+    paramsSchema: executionGetLogsParamsSchema,
   },
   'execution.replay_activities': {
     direction: Direction.WebToControlPlane,
