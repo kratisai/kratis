@@ -1,5 +1,5 @@
 import { formatDistanceToNow } from 'date-fns'
-import { Copy, Plus, Square, Trash2 } from 'lucide-react'
+import { Copy, Play, Plus, Square, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -30,6 +30,7 @@ import {
   useCreateConnector,
   useDeleteEnvironment,
   useEnvironments,
+  useResumeEnvironment,
   useTerminateEnvironment,
 } from '@/hooks/use-environments'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -43,6 +44,7 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
   const { data: environments, isLoading } = useEnvironments()
   const deleteEnvironment = useDeleteEnvironment()
   const terminateEnvironment = useTerminateEnvironment()
+  const resumeEnvironment = useResumeEnvironment()
   const createConnector = useCreateConnector()
   const environmentFeaturesEnabled = isEnvironmentFeaturesEnabled()
 
@@ -79,6 +81,22 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
   const isRunningSandbox = (env: ExecutionEnvironmentDto) =>
     env.type === 'SANDBOX' && !!env.containerId && env.status === 'CONNECTED'
 
+  const isSleepingSandbox = (env: ExecutionEnvironmentDto) =>
+    env.type === 'SANDBOX' && env.status === 'SLEEPING'
+
+  const resumeAction = (env: ExecutionEnvironmentDto) =>
+    isSleepingSandbox(env) ? (
+      <Button
+        aria-label={`Resume ${env.name}`}
+        onClick={() => resumeEnvironment.mutate(env.id)}
+        size="icon"
+        title="Resume"
+        variant="ghost"
+      >
+        <Play className="h-4 w-4 fill-current" />
+      </Button>
+    ) : null
+
   const handleCreateConnector = () => {
     if (!connectorName.trim()) {
       toast.error('Connector name is required')
@@ -104,6 +122,10 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
         return <Badge variant="secondary">Disconnected</Badge>
       case 'PENDING_RECONNECT':
         return <Badge variant="outline">Pending Reconnect</Badge>
+      case 'SLEEPING':
+        return <Badge variant="secondary">Sleeping</Badge>
+      case 'TERMINATED':
+        return <Badge variant="destructive">Terminated</Badge>
       default:
         return <Badge variant="outline">{status}</Badge>
     }
@@ -170,6 +192,7 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
                         {isOwner && (
                           <TableCell>
                             <div className="flex items-center gap-2">
+                              {resumeAction(env)}
                               {isRunningSandbox(env) && (
                                 <Button
                                   aria-label={`Terminate ${env.name}`}
@@ -216,6 +239,7 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
                       </div>
                       {isOwner && (
                         <div className="flex shrink-0 gap-1">
+                          {resumeAction(env)}
                           {isRunningSandbox(env) && (
                             <Button
                               aria-label={`Terminate ${env.name}`}

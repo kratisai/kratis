@@ -48,6 +48,16 @@ export async function getEnvironments(teamId: string): Promise<ExecutionEnvironm
   return response.json()
 }
 
+export async function resumeEnvironment(
+  teamId: string,
+  envId: string,
+): Promise<ExecutionEnvironmentDto> {
+  const response = await fetchWithAuth(`/api/v1/teams/${teamId}/environments/${envId}/resume`, {
+    method: 'POST',
+  })
+  return response.json()
+}
+
 export async function terminateEnvironment(teamId: string, envId: string): Promise<void> {
   await fetchWithAuth(`/api/v1/teams/${teamId}/environments/${envId}/terminate`, {
     method: 'POST',

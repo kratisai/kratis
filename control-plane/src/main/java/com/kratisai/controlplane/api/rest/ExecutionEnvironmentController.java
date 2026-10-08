@@ -103,6 +103,30 @@ public class ExecutionEnvironmentController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/{envId}/resume")
+    @Operation(
+            summary = "Resume an environment",
+            description = "Resumes a sleeping sandbox from its provider-native disk snapshot")
+    @ApiResponses(
+            value = {
+                @ApiResponse(
+                        responseCode = "200",
+                        description = "Environment resumed",
+                        content = @Content(schema = @Schema(implementation = ExecutionEnvironmentDto.class))),
+                @ApiResponse(responseCode = "400", description = "Environment is not sleeping", content = @Content),
+                @ApiResponse(
+                        responseCode = "410",
+                        description = "Environment was terminated after its suspend snapshot expired",
+                        content = @Content),
+                @ApiResponse(responseCode = "403", description = "Not a member of this team", content = @Content),
+                @ApiResponse(responseCode = "404", description = "Environment not found", content = @Content)
+            })
+    public ResponseEntity<ExecutionEnvironmentDto> resumeEnvironment(
+            @PathVariable UUID teamId, @PathVariable UUID envId) {
+        UUID userId = SecurityUtil.getCurrentUserId();
+        return ResponseEntity.ok(executionEnvironmentService.resumeEnvironment(userId, teamId, envId));
+    }
+
     @DeleteMapping("/{envId}")
     @Operation(summary = "Delete an environment", description = "Deletes an execution environment from the team")
     @ApiResponses(
