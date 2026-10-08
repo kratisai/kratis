@@ -10,6 +10,7 @@ public class PostHogClientConfig {
 
     @Bean
     public PostHogClient postHogClient(TelemetryProperties properties) {
-        return new PostHogCaptureClient(properties.getEndpoint(), properties.getHttpTimeoutMs());
+        return new PostHogCaptureClient(
+                properties.getEndpoint(), properties.getHttpTimeout().toMillis());
     }
 }

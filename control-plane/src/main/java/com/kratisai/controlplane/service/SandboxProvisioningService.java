@@ -8,7 +8,7 @@ import com.kratisai.controlplane.api.wsdto.ExecStatus;
 import com.kratisai.controlplane.api.wsdto.GitRegistrationStatus;
 import com.kratisai.controlplane.api.wsdto.LaunchStatus;
 import com.kratisai.controlplane.config.HarnessesProperties;
-import com.kratisai.controlplane.config.KratisProperties;
+import com.kratisai.controlplane.config.InstanceProperties;
 import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.*;
@@ -46,7 +46,7 @@ public class SandboxProvisioningService {
     private final TransactionTemplate transactionTemplate;
     private final TransactionTemplate requiresNewTransactionTemplate;
     private final EnvironmentRpcClient environmentRpcClient;
-    private final KratisProperties kratisProperties;
+    private final InstanceProperties instanceProperties;
     private final HarnessesProperties harnessesProperties;
 
     private static final String GIT_USER_NAME = "Kratis";
@@ -62,7 +62,7 @@ public class SandboxProvisioningService {
             LiteLLMProvisioningService litellmProvisioningService,
             LiteLLMProperties litellmProperties,
             EnvironmentRpcClient environmentRpcClient,
-            KratisProperties kratisProperties,
+            InstanceProperties instanceProperties,
             HarnessesProperties harnessesProperties) {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
@@ -78,7 +78,7 @@ public class SandboxProvisioningService {
         this.litellmProvisioningService = litellmProvisioningService;
         this.litellmProperties = litellmProperties;
         this.environmentRpcClient = environmentRpcClient;
-        this.kratisProperties = kratisProperties;
+        this.instanceProperties = instanceProperties;
         this.harnessesProperties = harnessesProperties;
     }
 
@@ -380,6 +380,6 @@ public class SandboxProvisioningService {
     }
 
     private String gitUserEmail() {
-        return GIT_USER_NAME.toLowerCase() + "@" + kratisProperties.resolveHostname();
+        return GIT_USER_NAME.toLowerCase() + "@" + instanceProperties.resolveHostname();
     }
 }

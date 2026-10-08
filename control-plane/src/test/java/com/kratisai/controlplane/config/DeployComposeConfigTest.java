@@ -54,7 +54,7 @@ class DeployComposeConfigTest {
                 .contains(
                         "KRATIS_LITELLM_BASE_URL=http://litellm:4000",
                         "KRATIS_LITELLM_SANDBOX_BASE_URL=http://host.docker.internal:${LITELLM_PORT:-4000}",
-                        "KRATIS_SANDBOX_SERVER_URL=ws://host.docker.internal:${API_PORT:-8080}/ws/env");
+                        "KRATIS_SANDBOX_DOCKER_CONNECT_URL=ws://host.docker.internal:${API_PORT:-8080}/ws/env");
     }
 
     @Test
@@ -65,7 +65,7 @@ class DeployComposeConfigTest {
         assertThat(environment)
                 .as("docker run auto-pulls only registry-qualified images; the unqualified default "
                         + "would resolve to Docker Hub and fail")
-                .contains("KRATIS_SANDBOX_RUNNER_IMAGE=ghcr.io/kratisai/kratis-runner-base:latest");
+                .contains("KRATIS_SANDBOX_DOCKER_RUNNER_IMAGE=ghcr.io/kratisai/kratis-runner-base:latest");
     }
 
     @Test

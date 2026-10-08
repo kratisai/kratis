@@ -9,9 +9,15 @@ import org.springframework.web.cors.CorsConfigurationSource;
 
 class SecurityConfigTest {
 
+    private static SecurityProperties securityProperties(String allowedOrigins) {
+        SecurityProperties properties = new SecurityProperties();
+        properties.setAllowedOrigins(allowedOrigins);
+        return properties;
+    }
+
     @Test
     void corsConfigurationSource_withWildcard_allowsAllOrigins() {
-        SecurityConfig config = new SecurityConfig("*");
+        SecurityConfig config = new SecurityConfig(securityProperties("*"));
         CorsConfigurationSource source = config.corsConfigurationSource();
 
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/health");
@@ -29,7 +35,7 @@ class SecurityConfigTest {
 
     @Test
     void corsConfigurationSource_withEmptyString_defaultsToWildcard() {
-        SecurityConfig config = new SecurityConfig("");
+        SecurityConfig config = new SecurityConfig(securityProperties(""));
         CorsConfigurationSource source = config.corsConfigurationSource();
 
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/health");
@@ -42,7 +48,8 @@ class SecurityConfigTest {
 
     @Test
     void corsConfigurationSource_withSpecificOrigins_enforcesWhitelist() {
-        SecurityConfig config = new SecurityConfig(" https://kratis.example.com , http://localhost:3000 ");
+        SecurityConfig config =
+                new SecurityConfig(securityProperties(" https://kratis.example.com , http://localhost:3000 "));
         CorsConfigurationSource source = config.corsConfigurationSource();
 
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/health");

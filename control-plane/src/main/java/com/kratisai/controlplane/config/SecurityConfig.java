@@ -3,7 +3,6 @@ package com.kratisai.controlplane.config;
 import com.kratisai.controlplane.service.JwtService;
 import java.util.Arrays;
 import java.util.List;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -26,8 +25,8 @@ public class SecurityConfig {
 
     private final String allowedOrigins;
 
-    public SecurityConfig(@Value("${kratis.security.allowed-origins:*}") String allowedOrigins) {
-        this.allowedOrigins = allowedOrigins;
+    public SecurityConfig(SecurityProperties securityProperties) {
+        this.allowedOrigins = securityProperties.getAllowedOrigins();
     }
 
     @Bean

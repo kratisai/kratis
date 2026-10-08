@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.planningagent;
 
 import com.kratisai.controlplane.agentloop.ChatResponseAssembler;
+import com.kratisai.controlplane.config.TitlesProperties;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.ChatService;
@@ -19,7 +20,6 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -60,15 +60,13 @@ public class ChatTitleService {
             ChatModelFactory chatModelFactory,
             ChatMemory chatMemory,
             ChatService chatService,
-            @Value("${kratis.titles.min-words:8}") int minWords,
-            @Value("${kratis.titles.max-words:30}") int maxWords,
-            @Value("${kratis.titles.max-messages:10}") int maxMessages) {
+            TitlesProperties titlesProperties) {
         this.chatModelFactory = chatModelFactory;
         this.chatMemory = chatMemory;
         this.chatService = chatService;
-        this.minWords = minWords;
-        this.maxWords = maxWords;
-        this.maxMessages = maxMessages;
+        this.minWords = titlesProperties.getMinWords();
+        this.maxWords = titlesProperties.getMaxWords();
+        this.maxMessages = titlesProperties.getMaxMessages();
     }
 
     /**

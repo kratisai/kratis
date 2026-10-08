@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.ingestion;
 
 import com.kratisai.controlplane.agentloop.KratisTool;
+import com.kratisai.controlplane.config.IngestionProperties;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -9,7 +10,6 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -19,8 +19,8 @@ public class ReadFileTool {
 
     private final String baseCloneDir;
 
-    public ReadFileTool(@Value("${kratis.ingestion.clone-dir:${java.io.tmpdir}/kratis-ingest}") String baseCloneDir) {
-        this.baseCloneDir = baseCloneDir;
+    public ReadFileTool(IngestionProperties ingestionProperties) {
+        this.baseCloneDir = ingestionProperties.getCloneDir();
     }
 
     @KratisTool(

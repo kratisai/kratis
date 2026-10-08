@@ -3,6 +3,7 @@ package com.kratisai.controlplane.service;
 import com.kratisai.controlplane.api.restdto.AuthTokensResponse;
 import com.kratisai.controlplane.api.restdto.UpdateUserRequest;
 import com.kratisai.controlplane.api.restdto.UserDto;
+import com.kratisai.controlplane.config.AuthProperties;
 import com.kratisai.controlplane.model.RefreshToken;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.RefreshTokenRepository;
@@ -10,7 +11,6 @@ import com.kratisai.controlplane.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.util.UUID;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -40,14 +40,14 @@ public class UserService {
             EntityManager entityManager,
             PlatformTransactionManager transactionManager,
             TeamService teamService,
-            @Value("${kratis.auth.jwt.refresh-expiration}") long refreshTokenExpirationMs) {
+            AuthProperties authProperties) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.jwtService = jwtService;
         this.passwordEncoder = passwordEncoder;
         this.entityManager = entityManager;
         this.teamService = teamService;
-        this.refreshTokenExpirationMs = refreshTokenExpirationMs;
+        this.refreshTokenExpirationMs = authProperties.getRefreshExpiration().toMillis();
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }

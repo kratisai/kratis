@@ -164,7 +164,7 @@ that `PostgresTestInitializer`'s `withReuse(true)` call requires — without it,
 silently disabled (a log warning, not an error) and the containers accumulate.
 
 **Registry cache:** the sibling is started with `--registry-mirror` from
-`kratis.sandbox.registry-mirror`. The dev compose stack publishes its cache on 5002 and deploy
+`kratis.sandbox.docker.registry-mirror`. The dev compose stack publishes its cache on 5002 and deploy
 on 5001, so each profile must point at the port its stack actually publishes — the provider
 warns at spawn time when the mirror refuses connections, and dockerd otherwise silently falls
 back to docker.io, so a stale port looks like slow pulls rather than an error.

@@ -2,6 +2,7 @@ package com.kratisai.controlplane.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kratisai.controlplane.config.SecurityProperties;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,11 +14,17 @@ class EncryptionKeyManagerTest {
     @TempDir
     Path tempDir;
 
+    private static SecurityProperties securityProperties(Path keyFile) {
+        SecurityProperties properties = new SecurityProperties();
+        properties.setKeyFilePath(keyFile.toString());
+        return properties;
+    }
+
     @Test
     void shouldGenerateKeyWhenFileDoesNotExist() {
         Path keyFile = tempDir.resolve("new-key.key");
 
-        EncryptionKeyManager manager = new EncryptionKeyManager(keyFile.toString());
+        EncryptionKeyManager manager = new EncryptionKeyManager(securityProperties(keyFile));
 
         assertThat(manager.getEncryptionKey()).isNotBlank();
         assertThat(Files.exists(keyFile)).isTrue();
@@ -29,7 +36,7 @@ class EncryptionKeyManagerTest {
         String expectedKey = "TestKey1234567890123456789012345678901234567890";
         Files.writeString(keyFile, expectedKey);
 
-        EncryptionKeyManager manager = new EncryptionKeyManager(keyFile.toString());
+        EncryptionKeyManager manager = new EncryptionKeyManager(securityProperties(keyFile));
 
         assertThat(manager.getEncryptionKey()).isEqualTo(expectedKey);
     }
@@ -38,11 +45,11 @@ class EncryptionKeyManagerTest {
     void shouldPersistKeyToDisk() {
         Path keyFile = tempDir.resolve("persist-key.key");
 
-        EncryptionKeyManager manager = new EncryptionKeyManager(keyFile.toString());
+        EncryptionKeyManager manager = new EncryptionKeyManager(securityProperties(keyFile));
         String firstKey = manager.getEncryptionKey();
 
         // Create a new instance - should load the same key
-        EncryptionKeyManager manager2 = new EncryptionKeyManager(keyFile.toString());
+        EncryptionKeyManager manager2 = new EncryptionKeyManager(securityProperties(keyFile));
         String secondKey = manager2.getEncryptionKey();
 
         assertThat(firstKey).isEqualTo(secondKey);
@@ -52,7 +59,7 @@ class EncryptionKeyManagerTest {
     void shouldCreateParentDirectories() {
         Path keyFile = tempDir.resolve("subdir/nested/key.key");
 
-        EncryptionKeyManager manager = new EncryptionKeyManager(keyFile.toString());
+        EncryptionKeyManager manager = new EncryptionKeyManager(securityProperties(keyFile));
 
         assertThat(manager.getEncryptionKey()).isNotBlank();
         assertThat(Files.exists(keyFile)).isTrue();
@@ -62,7 +69,7 @@ class EncryptionKeyManagerTest {
     void shouldGenerateBase64EncodedKey() {
         Path keyFile = tempDir.resolve("base64-key.key");
 
-        EncryptionKeyManager manager = new EncryptionKeyManager(keyFile.toString());
+        EncryptionKeyManager manager = new EncryptionKeyManager(securityProperties(keyFile));
         String key = manager.getEncryptionKey();
 
         // Should be valid base64

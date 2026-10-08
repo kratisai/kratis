@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.service;
 
+import com.kratisai.controlplane.config.SecurityProperties;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -11,7 +12,6 @@ import java.util.Base64;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -27,8 +27,8 @@ public class EncryptionKeyManager {
     private final Path keyFilePath;
     private final String encryptionKey;
 
-    public EncryptionKeyManager(@Value("${kratis.security.key-file-path}") String keyFilePath) {
-        this.keyFilePath = Paths.get(keyFilePath).toAbsolutePath();
+    public EncryptionKeyManager(SecurityProperties securityProperties) {
+        this.keyFilePath = Paths.get(securityProperties.getKeyFilePath()).toAbsolutePath();
         this.encryptionKey = loadOrGenerateKey();
     }
 

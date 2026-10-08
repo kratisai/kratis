@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.ingestion;
 
+import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.git.GitTransportUrlBuilder;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.git.credential.SshKeyFile;
@@ -14,7 +15,6 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -27,10 +27,10 @@ public class GitCloneService {
     private final GitTransportUrlBuilder transportUrlBuilder;
 
     public GitCloneService(
-            @Value("${kratis.ingestion.clone-dir:${java.io.tmpdir}/kratis-ingest}") String baseCloneDir,
+            IngestionProperties ingestionProperties,
             GitCredentialResolver credentialResolver,
             GitTransportUrlBuilder transportUrlBuilder) {
-        this.baseCloneDir = baseCloneDir;
+        this.baseCloneDir = ingestionProperties.getCloneDir();
         this.credentialResolver = credentialResolver;
         this.transportUrlBuilder = transportUrlBuilder;
     }

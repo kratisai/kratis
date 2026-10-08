@@ -167,12 +167,12 @@ class GitCredentialFlowRealTest {
         modelProvider = testDataFactory.createModelProviderWithLiteLLM(
                 testContext.team(), "Test Provider", ProviderType.OPENAI, "sk-mock-key-123", List.of("gpt-4o"));
 
-        localDockerSandboxProvider.setServerUrl("ws://host.docker.internal:" + port + "/ws/env");
+        localDockerSandboxProvider.setConnectUrl("ws://host.docker.internal:" + port + "/ws/env");
     }
 
     @AfterEach
     void tearDown() {
-        localDockerSandboxProvider.setServerUrl(originalServerUrl);
+        localDockerSandboxProvider.setConnectUrl(originalServerUrl);
         Mockito.reset(processExecutor);
         if (spawnedContainerId != null) {
             try {

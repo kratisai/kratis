@@ -14,6 +14,8 @@ import com.kratisai.controlplane.DatabaseCleaner;
 import com.kratisai.controlplane.SlowTest;
 import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.TestDataFactory;
+import com.kratisai.controlplane.config.InstanceProperties;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.Team;
@@ -94,14 +96,14 @@ class SandboxTestcontainersIntegrationTest {
             return new ProcessExecutor.ProcessResult(0, "".getBytes());
         });
 
+        InstanceProperties instanceProperties = new InstanceProperties();
+        instanceProperties.setId("kratis-e2e-instance");
+        SandboxProperties sandboxProperties = new SandboxProperties();
+        sandboxProperties.getDocker().setConnectUrl("ws://host.docker.internal:8080/ws/env");
+        sandboxProperties.getDocker().setRegistryMirror("http://host.docker.internal:5001");
+        sandboxProperties.getDocker().setRunnerImage("kratis-runner-base:latest");
         LocalDockerSandboxProvider provider = new LocalDockerSandboxProvider(
-                mockExecutor,
-                environmentRepository,
-                "kratis-e2e-instance",
-                "ws://host.docker.internal:8080/ws/env",
-                "http://host.docker.internal:5001",
-                "kratis-runner-base:latest",
-                false);
+                mockExecutor, environmentRepository, instanceProperties, sandboxProperties);
 
         // 1. Spawn Sandbox topology: Network -> DinD sibling -> Runner
         String spawnedContainerId = provider.spawnSandbox(env, "auth-token-xyz");

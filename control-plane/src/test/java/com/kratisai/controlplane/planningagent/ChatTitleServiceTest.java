@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import com.kratisai.controlplane.FakeChatModel;
 import com.kratisai.controlplane.PromptMatcher;
+import com.kratisai.controlplane.config.TitlesProperties;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
 import com.kratisai.controlplane.service.ChatModelFactory;
@@ -55,7 +56,8 @@ class ChatTitleServiceTest {
         when(chatModelFactory.createChatModel(any(), any(), anyBoolean())).thenReturn(fakeChatModel);
         chatMemory = mock(ChatMemory.class);
         chatService = mock(ChatService.class);
-        service = new ChatTitleService(chatModelFactory, chatMemory, chatService, MIN_WORDS, MAX_WORDS, 10);
+        service = new ChatTitleService(
+                chatModelFactory, chatMemory, chatService, titlesProperties(MIN_WORDS, MAX_WORDS, 10));
         provider = new ModelProvider("Test Provider", ProviderType.OPENAI, "test-api-key", null);
         chatId = UUID.randomUUID();
         teamId = UUID.randomUUID();
@@ -63,6 +65,14 @@ class ChatTitleServiceTest {
         when(chatService.updateTitle(eq(chatId), eq(teamId), any())).thenReturn(true);
         when(chatMemory.get(chatId.toString()))
                 .thenReturn(List.of(new UserMessage("Debug the build pipeline"), new AssistantMessage("Done.")));
+    }
+
+    private static TitlesProperties titlesProperties(int minWords, int maxWords, int maxMessages) {
+        TitlesProperties properties = new TitlesProperties();
+        properties.setMinWords(minWords);
+        properties.setMaxWords(maxWords);
+        properties.setMaxMessages(maxMessages);
+        return properties;
     }
 
     @Test
@@ -92,7 +102,7 @@ class ChatTitleServiceTest {
 
     @Test
     void isWithinLimits_respectsConfiguredWordBoundaries() {
-        service = new ChatTitleService(chatModelFactory, chatMemory, chatService, 8, 30, 10);
+        service = new ChatTitleService(chatModelFactory, chatMemory, chatService, titlesProperties(8, 30, 10));
         assertThat(service.isWithinLimits("one two three four five six seven eight"))
                 .isTrue();
         assertThat(service.isWithinLimits(String.join(" ", Collections.nCopies(60, "word"))))
@@ -106,7 +116,7 @@ class ChatTitleServiceTest {
 
     @Test
     void isWithinLimits_rejectsTitleExceedingDatabaseColumnLength() {
-        service = new ChatTitleService(chatModelFactory, chatMemory, chatService, 8, 30, 10);
+        service = new ChatTitleService(chatModelFactory, chatMemory, chatService, titlesProperties(8, 30, 10));
         String tooLong = String.join(" ", Collections.nCopies(9, "w".repeat(60)));
         assertThat(ChatTitleService.wordCount(tooLong)).isEqualTo(9);
         assertThat(service.isWithinLimits(tooLong)).isFalse();

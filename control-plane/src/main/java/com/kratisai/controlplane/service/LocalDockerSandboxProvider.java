@@ -1,5 +1,7 @@
 package com.kratisai.controlplane.service;
 
+import com.kratisai.controlplane.config.InstanceProperties;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionProviderType;
@@ -19,7 +21,6 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -48,27 +49,25 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
     private final String registryMirror;
     private final String runnerImage;
     private final boolean debug;
-    private String serverUrl;
+    private String connectUrl;
 
     public LocalDockerSandboxProvider(
             ProcessExecutor processExecutor,
             ExecutionEnvironmentRepository executionEnvironmentRepository,
-            @Value("${kratis.instance.id}") String instanceId,
-            @Value("${kratis.sandbox.server-url:ws://host.docker.internal:8080/ws/env}") String serverUrl,
-            @Value("${kratis.sandbox.registry-mirror:http://host.docker.internal:5001}") String registryMirror,
-            @Value("${kratis.sandbox.runner-image:kratis-runner-base:latest}") String runnerImage,
-            @Value("${kratis.sandbox.debug:false}") boolean debug) {
+            InstanceProperties instanceProperties,
+            SandboxProperties sandboxProperties) {
         this.processExecutor = processExecutor;
         this.executionEnvironmentRepository = executionEnvironmentRepository;
-        this.instanceId = instanceId;
-        this.serverUrl = serverUrl;
-        this.registryMirror = registryMirror;
-        this.runnerImage = runnerImage;
-        this.debug = debug;
+        this.instanceId = instanceProperties.getId();
+        SandboxProperties.Docker docker = sandboxProperties.getDocker();
+        this.connectUrl = docker.getConnectUrl();
+        this.registryMirror = docker.getRegistryMirror();
+        this.runnerImage = docker.getRunnerImage();
+        this.debug = docker.isDebug();
     }
 
-    public void setServerUrl(String serverUrl) {
-        this.serverUrl = serverUrl;
+    public void setConnectUrl(String connectUrl) {
+        this.connectUrl = connectUrl;
     }
 
     @Override
@@ -234,7 +233,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             if (!isReachable(uri.getHost(), port)) {
                 logger.warn(
                         "Registry mirror {} is unreachable; image pulls will bypass the cache"
-                                + " (check kratis.sandbox.registry-mirror)",
+                                + " (check kratis.sandbox.docker.registry-mirror)",
                         registryMirror);
             }
         } catch (RuntimeException e) {
@@ -392,7 +391,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                     "/usr/local/bin/kratis-connector",
                     "--mode=sidecar",
                     "--server-url",
-                    serverUrl,
+                    connectUrl,
                     "--token",
                     token,
                     "--log-file",

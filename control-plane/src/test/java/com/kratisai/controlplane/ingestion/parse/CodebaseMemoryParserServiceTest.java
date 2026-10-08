@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.config.ParserProperties;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
@@ -52,13 +53,11 @@ class CodebaseMemoryParserServiceTest {
         ctxNodeRepository = mock(CtxNodeRepository.class);
         ctxEdgeRepository = mock(CtxEdgeRepository.class);
         processExecutor = mock(ProcessExecutor.class);
+        ParserProperties parserProperties = new ParserProperties();
+        parserProperties.setBinaryPath(BINARY_PATH);
+        parserProperties.setTempDir(cacheDir.toString());
         parserService = new CodebaseMemoryParserService(
-                ctxNodeRepository,
-                ctxEdgeRepository,
-                processExecutor,
-                new ObjectMapper(),
-                BINARY_PATH,
-                cacheDir.toString());
+                ctxNodeRepository, ctxEdgeRepository, processExecutor, new ObjectMapper(), parserProperties);
 
         Team team = new Team("team", "description");
         team.setId(UUID.randomUUID());

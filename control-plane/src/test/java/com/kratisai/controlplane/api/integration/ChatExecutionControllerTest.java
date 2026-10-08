@@ -160,7 +160,7 @@ class ChatExecutionControllerTest {
         Mockito.reset(processExecutor);
 
         // Restore server URL
-        localDockerSandboxProvider.setServerUrl(originalServerUrl);
+        localDockerSandboxProvider.setConnectUrl(originalServerUrl);
 
         // Terminate any container that was spawned during test
         if (spawnedContainerId != null) {
@@ -324,7 +324,7 @@ class ChatExecutionControllerTest {
     void launchExecution_withRealDocker_shouldConnectAndRegister() throws Exception {
         // 1. Set the server url to local port
         String testServerUrl = "ws://host.docker.internal:" + port + "/ws/env";
-        localDockerSandboxProvider.setServerUrl(testServerUrl);
+        localDockerSandboxProvider.setConnectUrl(testServerUrl);
 
         // Create a SPEC canvas document for the execution
         canvasService.createCanvas(

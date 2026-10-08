@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
@@ -89,6 +90,8 @@ class ExecutionEnvironmentServiceTest {
     void setUp() {
         ExecutionActivityPersistenceService activityPersistenceService = new ExecutionActivityPersistenceService(
                 activityRepository, sandboxExecutionRepository, new ObjectMapper(), eventPublisher);
+        SandboxProperties sandboxProperties = new SandboxProperties();
+        sandboxProperties.setConnectUrl("ws://localhost:8080/ws/env");
         executionEnvironmentService = new ExecutionEnvironmentService(
                 executionEnvironmentRepository,
                 teamMemberRepository,
@@ -101,7 +104,7 @@ class ExecutionEnvironmentServiceTest {
                 virtualKeyService,
                 sandboxExecutionService,
                 activityPersistenceService,
-                "ws://localhost:8080/ws/env",
+                sandboxProperties,
                 transactionManager);
     }
 

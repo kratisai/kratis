@@ -3,6 +3,8 @@ package com.kratisai.controlplane.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.kratisai.controlplane.config.AuthProperties;
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,7 +16,11 @@ class JwtServiceTest {
 
     @BeforeEach
     void setUp() {
-        jwtService = new JwtService("test-secret-key-that-is-at-least-256-bits-long-for-hs256", 3600000, 604800000);
+        AuthProperties authProperties = new AuthProperties();
+        authProperties.setSecret("test-secret-key-that-is-at-least-256-bits-long-for-hs256");
+        authProperties.setExpiration(Duration.ofHours(1));
+        authProperties.setRefreshExpiration(Duration.ofDays(7));
+        jwtService = new JwtService(authProperties);
     }
 
     @Test

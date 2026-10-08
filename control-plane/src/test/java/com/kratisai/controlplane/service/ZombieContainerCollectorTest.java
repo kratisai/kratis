@@ -6,12 +6,16 @@ import static org.mockito.Mockito.*;
 import com.kratisai.controlplane.DatabaseCleaner;
 import com.kratisai.controlplane.SlowTest;
 import com.kratisai.controlplane.SpringIntegrationTest;
+import com.kratisai.controlplane.config.InstanceProperties;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +36,20 @@ class ZombieContainerCollectorTest {
     private DatabaseCleaner databaseCleaner;
 
     private Team team;
+
+    private static ZombieContainerCollector newCollector(
+            ExecutionEnvironmentRepository environmentRepository,
+            List<SandboxProvider> providers,
+            Optional<ProcessExecutor> processExecutor,
+            String instanceId,
+            long gracePeriodSeconds) {
+        InstanceProperties instanceProperties = new InstanceProperties();
+        instanceProperties.setId(instanceId);
+        SandboxProperties sandboxProperties = new SandboxProperties();
+        sandboxProperties.getReconciliation().setGracePeriod(Duration.ofSeconds(gracePeriodSeconds));
+        return new ZombieContainerCollector(
+                environmentRepository, providers, processExecutor, instanceProperties, sandboxProperties);
+    }
 
     @BeforeEach
     void setUp() {
@@ -57,7 +75,7 @@ class ZombieContainerCollectorTest {
         when(mockSandboxProvider.getActiveSandboxIds())
                 .thenReturn(List.of("container-orphan", "container-delinquent", "container-connected"));
 
-        ZombieContainerCollector collector = new ZombieContainerCollector(
+        ZombieContainerCollector collector = newCollector(
                 environmentRepository, List.of(mockSandboxProvider), java.util.Optional.empty(), "test-instance", 1);
 
         // Create environment in DB for container-delinquent (DISCONNECTED,
@@ -113,7 +131,7 @@ class ZombieContainerCollectorTest {
         when(providerB.getProviderType()).thenReturn(ExecutionProviderType.DOCKER);
         when(providerB.getActiveSandboxIds()).thenReturn(List.of("sandbox-orphan-b", "sandbox-delinquent-b"));
 
-        ZombieContainerCollector collector = new ZombieContainerCollector(
+        ZombieContainerCollector collector = newCollector(
                 environmentRepository, List.of(providerA, providerB), java.util.Optional.empty(), "test-instance", 1);
 
         // Save DB records for delinquents
@@ -163,7 +181,7 @@ class ZombieContainerCollectorTest {
         when(mockSandboxProvider.getProviderType()).thenReturn(ExecutionProviderType.DOCKER);
         when(mockSandboxProvider.getActiveSandboxIds()).thenReturn(List.of("container-delinquent-hb"));
 
-        ZombieContainerCollector collector = new ZombieContainerCollector(
+        ZombieContainerCollector collector = newCollector(
                 environmentRepository, List.of(mockSandboxProvider), java.util.Optional.empty(), "test-instance", 5);
 
         // Create environment in DB with lastHeartbeat set
@@ -196,7 +214,7 @@ class ZombieContainerCollectorTest {
         when(mockSandboxProvider.getProviderType()).thenReturn(ExecutionProviderType.DOCKER);
         when(mockSandboxProvider.getActiveSandboxIds()).thenReturn(List.of("container-delinquent-recovered"));
 
-        ZombieContainerCollector collector = new ZombieContainerCollector(
+        ZombieContainerCollector collector = newCollector(
                 environmentRepository, List.of(mockSandboxProvider), java.util.Optional.empty(), "test-instance", 1);
 
         // Create environment in DB for container-delinquent-recovered (DISCONNECTED)
@@ -234,7 +252,7 @@ class ZombieContainerCollectorTest {
         when(providerEmpty.getProviderType()).thenReturn(ExecutionProviderType.DOCKER);
         when(providerEmpty.getActiveSandboxIds()).thenReturn(List.of());
 
-        ZombieContainerCollector collector = new ZombieContainerCollector(
+        ZombieContainerCollector collector = newCollector(
                 environmentRepository,
                 List.of(providerNull, providerEmpty),
                 java.util.Optional.empty(),
@@ -255,7 +273,7 @@ class ZombieContainerCollectorTest {
         // Cycle 1 returns the delinquent sandbox
         when(mockSandboxProvider.getActiveSandboxIds()).thenReturn(List.of("sandbox-delinquent"));
 
-        ZombieContainerCollector collector = new ZombieContainerCollector(
+        ZombieContainerCollector collector = newCollector(
                 environmentRepository, List.of(mockSandboxProvider), java.util.Optional.empty(), "test-instance", 30);
 
         // Create environment in DB for sandbox-delinquent (DISCONNECTED)
@@ -329,7 +347,7 @@ class ZombieContainerCollectorTest {
                         any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "2\n".getBytes()));
 
-        ZombieContainerCollector collector = new ZombieContainerCollector(
+        ZombieContainerCollector collector = newCollector(
                 environmentRepository,
                 List.of(mockSandboxProvider),
                 java.util.Optional.of(mockProcessExecutor),
@@ -373,7 +391,7 @@ class ZombieContainerCollectorTest {
                         any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "0\n".getBytes()));
 
-        ZombieContainerCollector collector = new ZombieContainerCollector(
+        ZombieContainerCollector collector = newCollector(
                 environmentRepository,
                 List.of(mockSandboxProvider),
                 java.util.Optional.of(mockProcessExecutor),

@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.agentloop.ReActLoop;
 import com.kratisai.controlplane.agentloop.ReActLoopExhaustedException;
 import com.kratisai.controlplane.agentloop.ReActLoopFatalException;
+import com.kratisai.controlplane.config.IngestionProperties;
+import com.kratisai.controlplane.config.ParserProperties;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.ingestion.IngestionUsageTracker;
 import com.kratisai.controlplane.ingestion.ListWikiPagesTool;
@@ -40,7 +42,6 @@ import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -75,8 +76,8 @@ public class WikiGenerationService {
             ObjectMapper objectMapper,
             CtxWikiPageRepository ctxWikiPageRepository,
             @Qualifier("agentTaskExecutor") Executor agentTaskExecutor,
-            @Value("${kratis.ingestion.clone-dir:${java.io.tmpdir}/kratis-ingest}") String baseCloneDir,
-            @Value("${kratis.parser.scc-binary-path}") String sccBinaryPath) {
+            IngestionProperties ingestionProperties,
+            ParserProperties parserProperties) {
         this.chatModelFactory = chatModelFactory;
         this.litellmProvisioningService = litellmProvisioningService;
         this.repositoryIntelligenceTools = repositoryIntelligenceTools;
@@ -93,8 +94,8 @@ public class WikiGenerationService {
         this.objectMapper = objectMapper;
         this.ctxWikiPageRepository = ctxWikiPageRepository;
         this.agentTaskExecutor = agentTaskExecutor;
-        this.baseCloneDir = baseCloneDir;
-        this.sccBinaryPath = sccBinaryPath;
+        this.baseCloneDir = ingestionProperties.getCloneDir();
+        this.sccBinaryPath = parserProperties.getSccBinaryPath();
     }
 
     private ChatClient chatClientFor(IngestionBatch batch) {
