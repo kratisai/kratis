@@ -98,6 +98,16 @@ class EnvironmentIdleSleeperServiceTest {
                 .thenReturn(Optional.empty());
     }
 
+    private void stubContainerRunning() {
+        when(executionEnvironmentService.isContainerRunning(any(ExecutionEnvironment.class)))
+                .thenReturn(true);
+    }
+
+    private void stubContainerStopped() {
+        when(executionEnvironmentService.isContainerRunning(any(ExecutionEnvironment.class)))
+                .thenReturn(false);
+    }
+
     private EnvironmentIdleSleeperService zeroThresholdService() {
         return new EnvironmentIdleSleeperService(
                 environmentRepository, sandboxExecutionRepository, executionEnvironmentService, sandboxProperties(0));
@@ -109,6 +119,7 @@ class EnvironmentIdleSleeperServiceTest {
         stubEnvironments(env);
         stubNoRunningExecutions();
         stubHasExecution();
+        stubContainerRunning();
 
         // First pass starts the idle countdown; a real threshold later elapses. A zero-minute
         // threshold simulates the elapsed countdown on the next scheduled pass.
@@ -170,10 +181,25 @@ class EnvironmentIdleSleeperServiceTest {
         stubEnvironments(env);
         stubNoRunningExecutions();
         stubHasExecution();
+        stubContainerRunning();
         doThrow(new IllegalStateException("docker unavailable"))
                 .when(executionEnvironmentService)
                 .sleepEnvironmentInternal(env);
 
         assertThatCode(zeroThresholdService()::sleepIdleEnvironments).doesNotThrowAnyException();
+    }
+
+    @Test
+    void marksStoppedContainerDisconnectedWithoutSuspending() {
+        ExecutionEnvironment env = connectedSandbox();
+        stubEnvironments(env);
+        stubNoRunningExecutions();
+        stubHasExecution();
+        stubContainerStopped();
+
+        zeroThresholdService().sleepIdleEnvironments();
+
+        verify(executionEnvironmentService, never()).sleepEnvironmentInternal(any());
+        verify(executionEnvironmentService).handleStoppedContainer(env);
     }
 }

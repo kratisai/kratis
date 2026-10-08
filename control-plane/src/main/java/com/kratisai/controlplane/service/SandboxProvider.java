@@ -11,6 +11,8 @@ public interface SandboxProvider {
 
     void initializeWorkspace(String containerId);
 
+    boolean isContainerRunning(String envId);
+
     void suspend(String envId);
 
     String resume(String envId, ExecutionEnvironment environment, String token);

@@ -253,6 +253,37 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
+    void isContainerRunning_delegatesToProvider() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        when(sandboxProvider.isContainerRunning(ENV_ID.toString())).thenReturn(true);
+
+        assertThat(executionEnvironmentService.isContainerRunning(env)).isTrue();
+    }
+
+    @Test
+    void isContainerRunning_withoutProvider_isFalse() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setProvider(null);
+
+        assertThat(executionEnvironmentService.isContainerRunning(env)).isFalse();
+        verifyNoInteractions(sandboxOrchestratorService);
+    }
+
+    @Test
+    void handleStoppedContainer_marksDisconnectedAndClearsContainerId() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+
+        executionEnvironmentService.handleStoppedContainer(env);
+
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.DISCONNECTED);
+        assertThat(env.getContainerId()).isNull();
+        verify(executionEnvironmentRepository).save(env);
+        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+    }
+
+    @Test
     void resumeEnvironment_resumesFromSnapshotAndInitializesWorkspace() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);

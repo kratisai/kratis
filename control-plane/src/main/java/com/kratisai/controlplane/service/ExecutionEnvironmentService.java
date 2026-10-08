@@ -251,7 +251,7 @@ public class ExecutionEnvironmentService {
                     .map(execution -> execution.getStatus() != SandboxExecutionStatus.RUNNING
                             && execution.getStatus() != SandboxExecutionStatus.IDLE)
                     .orElse(true));
-            if (completed) {
+            if (Boolean.TRUE.equals(completed)) {
                 return true;
             }
             try {
@@ -316,6 +316,28 @@ public class ExecutionEnvironmentService {
 
         executionEnvironmentRepository.delete(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
+    }
+
+    public boolean isContainerRunning(ExecutionEnvironment env) {
+        if (env.getProvider() == null) {
+            return false;
+        }
+        SandboxProvider sandboxProvider =
+                sandboxOrchestratorService.getProvider(env.getProvider().getType());
+        return sandboxProvider.isContainerRunning(env.getId().toString());
+    }
+
+    /**
+     * Reconciles an environment whose sandbox container stopped outside Kratis. There is no live
+     * container to snapshot, so it cannot be resumed; mark it disconnected and drop the stale
+     * container reference.
+     */
+    @Transactional
+    public void handleStoppedContainer(ExecutionEnvironment env) {
+        env.setStatus(EnvironmentStatus.DISCONNECTED);
+        env.setContainerId(null);
+        executionEnvironmentRepository.save(env);
+        eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
     }
 
     @Transactional

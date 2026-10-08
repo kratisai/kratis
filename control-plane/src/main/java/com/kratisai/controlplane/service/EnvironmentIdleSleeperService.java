@@ -77,6 +77,14 @@ public class EnvironmentIdleSleeperService {
                 continue;
             }
             idleFirstSeen.remove(envId);
+            if (!executionEnvironmentService.isContainerRunning(env)) {
+                logger.info(
+                        "Environment {} idle for {}s but its container is not running; marking disconnected",
+                        envId,
+                        idleSeconds);
+                executionEnvironmentService.handleStoppedContainer(env);
+                continue;
+            }
             logger.info("Environment {} idle for {}s; suspending", envId, idleSeconds);
             try {
                 executionEnvironmentService.sleepEnvironmentInternal(env);
