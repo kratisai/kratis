@@ -32,10 +32,12 @@ If the target branch is missing, `resolveBaseRef` returns an error.
 
 ## Diff storage and the read path
 
-The sidecar pushes the full diff state (`env.diff_changed`, acknowledged as a
-request) after each workspace change, before execution completion, and after
-every (re)registration; the control plane persists the patch in blob storage
-and the manifest in `execution_diff_snapshots`.
+The sidecar pushes the diff manifest (`env.diff_manifest`) after each workspace
+change, before execution completion, and after every (re)registration.
+The manifest lists each changed file with the sha of its diff section.
+The control plane asks for missing sections (`env.diff_sections`), stores each
+section in blob storage at `diffs/{executionId}/{sha}`, and commits the
+manifest to `execution_diff_snapshots`. There is no other diff transport.
 
 The diff view (`/diff/summary`, `/diff/file`, `/diff/export`) is served only
 from that persisted copy and never calls the connector — diffs stay viewable

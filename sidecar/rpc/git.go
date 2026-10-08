@@ -795,52 +795,7 @@ func (c *Client) buildGitDiffSummary(baseBranch string) (GitDiffSummaryResult, e
 	}, nil
 }
 
-// buildGitFullDiff produces the complete unified diff patch across all modified, added,
-// deleted, and untracked files against baseCommit.
-func (c *Client) buildGitFullDiff(baseCommit string) string {
-	workspace := c.resolveWorkspace()
-	var sb strings.Builder
-
-	if baseCommit != "" {
-		diffCmd := exec.Command("git", "diff", "-U3", baseCommit) //nolint:gosec
-		diffCmd.Dir = workspace
-		if out, err := diffCmd.Output(); err == nil && len(out) > 0 {
-			sb.Write(out)
-			if !strings.HasSuffix(sb.String(), "\n") {
-				sb.WriteString("\n")
-			}
-		}
-	}
-
-	porcelainCmd := exec.Command("git", "status", "--porcelain", "-uall") //nolint:gosec
-	porcelainCmd.Dir = workspace
-	if pOut, err := porcelainCmd.Output(); err == nil {
-		for _, line := range strings.Split(string(pOut), "\n") {
-			if strings.HasPrefix(line, "??") {
-				filePath := strings.TrimSpace(line[2:])
-				if filePath == "" || isKratisPlatformPath(filePath) {
-					continue
-				}
-				fullPath := filepath.Join(workspace, filePath)
-				content, err := os.ReadFile(fullPath) //nolint:gosec
-				if err != nil {
-					continue
-				}
-				fmt.Fprintf(&sb, "diff --git a/%s b/%s\n", filePath, filePath)
-				sb.WriteString("new file mode 100644\n")
-				sb.WriteString("--- /dev/null\n")
-				fmt.Fprintf(&sb, "+++ b/%s\n", filePath)
-				sb.WriteString(syntheticNewFilePatch(content))
-				if !strings.HasSuffix(sb.String(), "\n") {
-					sb.WriteString("\n")
-				}
-			}
-		}
-	}
-	return sb.String()
-}
-
-// TriggerDiffCheck inspects workspace git status and emits env.diff_changed if changed.
+// TriggerDiffCheck inspects workspace git status and pushes the diff manifest if changed.
 func (c *Client) TriggerDiffCheck() {
 	workspace := c.resolveWorkspace()
 	if _, err := os.Stat(filepath.Join(workspace, ".git")); err != nil {
@@ -864,7 +819,7 @@ func (c *Client) TriggerDiffCheck() {
 
 	debouncePeriod := c.Timeouts.DiffDebouncePeriod
 	if debouncePeriod <= 0 {
-		go c.emitDiffChanged()
+		go c.pushDiffManifest()
 		return
 	}
 
@@ -875,7 +830,7 @@ func (c *Client) TriggerDiffCheck() {
 		c.diffMu.Lock()
 		c.diffDebounceTimer = nil
 		c.diffMu.Unlock()
-		c.emitDiffChanged()
+		c.pushDiffManifest()
 	})
 }
 
@@ -892,7 +847,7 @@ func (c *Client) workspaceStatusHash(workspace string) (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
-// flushDiffCheck synchronously emits env.diff_changed when the workspace
+// flushDiffCheck synchronously pushes the diff manifest when the workspace
 // changed since the last check or a debounced emit is still pending. Called
 // from SendComplete so the persisted diff snapshot reflects the terminal
 // workspace state regardless of which mid-run trigger fired last.
@@ -919,12 +874,12 @@ func (c *Client) flushDiffCheck() {
 	c.diffMu.Unlock()
 
 	if shouldEmit {
-		c.emitDiffChangedSync()
+		c.pushDiffManifestSync()
 	}
 }
 
-// emitDiffChanged computes the diff summary, sections and manifest, and enqueues the sync.
-func (c *Client) emitDiffChanged() {
+// pushDiffManifest computes the diff summary, sections and manifest, and enqueues the sync.
+func (c *Client) pushDiffManifest() {
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	baseBranch := c.baseBranch
@@ -939,7 +894,6 @@ func (c *Client) emitDiffChanged() {
 		return
 	}
 	manifest.ExecutionID = execID
-	patch := c.buildGitFullDiff(summary.BaseCommit)
 	log.Printf(
 		"[DIFF] enqueued env.diff_manifest for execution %s: baseBranch=%q baseCommit=%s files=%d manifestDigest=%s",
 		execID,
@@ -948,17 +902,7 @@ func (c *Client) emitDiffChanged() {
 		len(summary.Files),
 		manifest.ManifestDigest)
 
-	params := DiffChangedParams{
-		ExecutionID:    execID,
-		BaseCommit:     summary.BaseCommit,
-		HeadCommit:     summary.HeadCommit,
-		TotalAdditions: summary.TotalAdditions,
-		TotalDeletions: summary.TotalDeletions,
-		Files:          summary.Files,
-		Patch:          patch,
-	}
-
-	c.queueDiffPush(params, manifest, sections)
+	c.queueDiffPush(manifest, sections)
 }
 
 // flushDiffOnRegister re-pushes the current diff state after a (re)registration.
@@ -969,7 +913,7 @@ func (c *Client) flushDiffOnRegister() {
 		c.diffDebounceTimer = nil
 	}
 	c.diffMu.Unlock()
-	c.emitDiffChanged()
+	c.pushDiffManifest()
 }
 
 // buildDiffSections splits the git diff across files, produces individual file sections,
@@ -1037,7 +981,7 @@ func (c *Client) buildDiffSections(baseBranch string) (GitDiffSummaryResult, Dif
 		}
 	}
 
-	var manifestFiles []GitDiffManifestFile
+	manifestFiles := []GitDiffManifestFile{}
 	shaToSection := make(map[string]string)
 
 	for _, file := range summary.Files {
@@ -1090,7 +1034,6 @@ func (c *Client) buildDiffSections(baseBranch string) (GitDiffSummaryResult, Dif
 }
 
 type diffPushState struct {
-	params   DiffChangedParams
 	manifest DiffManifestParams
 	sections map[string]string // sha -> section data
 	seq      uint64
@@ -1098,10 +1041,10 @@ type diffPushState struct {
 
 // queueDiffPush serializes diff pushes so the latest full workspace state is
 // always the one being sent.
-func (c *Client) queueDiffPush(params DiffChangedParams, manifest DiffManifestParams, sections map[string]string) {
+func (c *Client) queueDiffPush(manifest DiffManifestParams, sections map[string]string) {
 	c.diffMu.Lock()
 	c.diffSeq++
-	c.pendingDiff = &diffPushState{params: params, manifest: manifest, sections: sections, seq: c.diffSeq}
+	c.pendingDiff = &diffPushState{manifest: manifest, sections: sections, seq: c.diffSeq}
 	if !c.pushingDiff {
 		c.pushingDiff = true
 		go c.diffPushLoop()
@@ -1214,17 +1157,11 @@ func (c *Client) diffPushLoop() {
 			return
 		}
 
-		// First send legacy env.diff_changed for backwards compatibility with tests and older control planes,
-		// and also execute incremental diff_manifest sync if supported.
-		err := c.sendDiffAcked(state.params)
-		if err == nil && state.manifest.ManifestDigest != "" {
-			_ = c.syncDiffSections(state.manifest, state.sections)
-		}
-
+		err := c.syncDiffSections(state.manifest, state.sections)
 		if err != nil {
 			var fte *frameTooLargeError
 			if errors.As(err, &fte) {
-				log.Printf("[DIFF] dropped env.diff_changed push: %v", err)
+				log.Printf("[DIFF] dropped env.diff_manifest push: %v", err)
 				continue
 			}
 			log.Printf("[DIFF] diff push failed, will retry: %v", err)
@@ -1249,25 +1186,11 @@ func (c *Client) diffPushLoop() {
 	}
 }
 
-// sendDiffAcked delivers one env.diff_changed push and waits for the
-// control-plane persistence acknowledgment. A JSON-RPC error response is
-// retryable (e.g. transient storage failure) and surfaces as an error here.
-func (c *Client) sendDiffAcked(params DiffChangedParams) error {
-	resp, err := c.sendRequest("env.diff_changed", params)
-	if err != nil {
-		return err
-	}
-	if resp.Error != nil {
-		return fmt.Errorf("control plane rejected diff_changed: code=%d message=%q", resp.Error.Code, resp.Error.Message)
-	}
-	return nil
-}
-
-// emitDiffChangedSync computes and synchronously pushes the current diff state,
-// blocking until the control plane acknowledges persistence. Called from
+// pushDiffManifestSync computes and synchronously pushes the current diff state,
+// blocking until the control plane commits the manifest. Called from
 // SendComplete so the terminal diff lands before env.complete. On failure the
 // state is queued for background retries so the copy still converges.
-func (c *Client) emitDiffChangedSync() {
+func (c *Client) pushDiffManifestSync() {
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	baseBranch := c.baseBranch
@@ -1276,29 +1199,16 @@ func (c *Client) emitDiffChangedSync() {
 		return
 	}
 
-	summary, manifest, sections, err := c.buildDiffSections(baseBranch)
+	_, manifest, sections, err := c.buildDiffSections(baseBranch)
 	if err != nil {
-		log.Printf("[DIFF] Unable to compute terminal env.diff_changed for execution %s: %v", execID, err)
+		log.Printf("[DIFF] Unable to compute terminal diff manifest for execution %s: %v", execID, err)
 		return
 	}
 	manifest.ExecutionID = execID
-	params := DiffChangedParams{
-		ExecutionID:    execID,
-		BaseCommit:     summary.BaseCommit,
-		HeadCommit:     summary.HeadCommit,
-		TotalAdditions: summary.TotalAdditions,
-		TotalDeletions: summary.TotalDeletions,
-		Files:          summary.Files,
-		Patch:          c.buildGitFullDiff(summary.BaseCommit),
-	}
 
-	syncErr := c.sendDiffAcked(params)
-	if syncErr == nil && manifest.ManifestDigest != "" {
-		_ = c.syncDiffSections(manifest, sections)
-	}
-	if syncErr != nil {
+	if syncErr := c.syncDiffSections(manifest, sections); syncErr != nil {
 		log.Printf("[DIFF] terminal diff push failed, queued for retry: %v", syncErr)
-		c.queueDiffPush(params, manifest, sections)
+		c.queueDiffPush(manifest, sections)
 	}
 }
 

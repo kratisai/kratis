@@ -42,8 +42,6 @@ func TestIncrementalDiffSync_ManifestAndSectionsFlow(t *testing.T) {
 			case "env.register":
 				res, _ := json.Marshal(RegisterResult{Type: "env_register", Status: "registered", EnvironmentID: "env-1"})
 				_ = conn.WriteJSON(JsonRpcResponse{JsonRPC: "2.0", Result: res, ID: req.ID})
-			case "env.diff_changed":
-				ackDiffChanged(conn, req)
 			case "env.diff_manifest":
 				paramsBytes, _ := json.Marshal(req.Params)
 				var params DiffManifestParams
@@ -103,7 +101,7 @@ func TestIncrementalDiffSync_ManifestAndSectionsFlow(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	client.emitDiffChangedSync()
+	client.pushDiffManifestSync()
 
 	time.Sleep(100 * time.Millisecond)
 

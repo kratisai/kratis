@@ -34,7 +34,6 @@ var EnvironmentMethods = []MethodDef{
 	{Name: "env.git_token", MessageKind: Request, Direction: ConnectorToControlPlane, Params: &GitTokenParams{}, Result: &GitTokenResult{}},
 	{Name: "env.output", MessageKind: Notification, Direction: ConnectorToControlPlane, Params: &OutputParams{}},
 	{Name: "env.sidecar_error", MessageKind: Notification, Direction: ConnectorToControlPlane, Params: &SidecarErrorParams{}},
-	{Name: "env.diff_changed", MessageKind: Request, Direction: ConnectorToControlPlane, Params: &DiffChangedParams{}, Result: &DiffChangedResult{}},
 	{Name: "env.diff_manifest", MessageKind: Request, Direction: ConnectorToControlPlane, Params: &DiffManifestParams{}, Result: &DiffManifestResult{}},
 	{Name: "env.diff_sections", MessageKind: Request, Direction: ConnectorToControlPlane, Params: &DiffSectionsParams{}, Result: &DiffSectionsResult{}},
 	{Name: "env.activity", MessageKind: Notification, Direction: ConnectorToControlPlane, Params: &ActivityParams{}},

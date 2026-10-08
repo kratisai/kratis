@@ -284,9 +284,9 @@ func TestExecuteGitDiffSummary_NewRepoWithOriginButNoUpstreamBranchDiffsAgainstR
 	}
 }
 
-// TestBuildGitFullDiff_SynthesizesUntrackedFiles locks in the persisted full
-// patch rendering untracked files as full-file addition hunks.
-func TestBuildGitFullDiff_SynthesizesUntrackedFiles(t *testing.T) {
+// TestBuildDiffSections_SynthesizesUntrackedFiles locks in the pushed diff
+// section rendering untracked files as full-file addition hunks.
+func TestBuildDiffSections_SynthesizesUntrackedFiles(t *testing.T) {
 	dir := setupTestGitRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
 
@@ -296,7 +296,16 @@ func TestBuildGitFullDiff_SynthesizesUntrackedFiles(t *testing.T) {
 		t.Fatalf("Failed to write new file: %v", err)
 	}
 
-	patch := client.buildGitFullDiff("HEAD")
+	_, manifest, sections, err := client.buildDiffSections("HEAD")
+	if err != nil {
+		t.Fatalf("buildDiffSections failed: %v", err)
+	}
+	var patch string
+	for _, f := range manifest.Files {
+		if f.Path == "new_file.txt" {
+			patch = sections[f.Sha]
+		}
+	}
 	if !strings.Contains(patch, "@@ -0,0 +1,2 @@") {
 		t.Errorf("Expected synthetic patch for untracked file, got: %s", patch)
 	}
@@ -354,8 +363,8 @@ func TestRegister_RepushesCurrentDiffStateAfterReconnect(t *testing.T) {
 			case "env.register":
 				raw, _ := json.Marshal(RegisterResult{Type: "env_register", Status: "registered", EnvironmentID: "env-123"})
 				_ = conn.WriteJSON(JsonRpcResponse{JsonRPC: "2.0", Result: raw, ID: req.ID})
-			case "env.diff_changed":
-				ackDiffChanged(conn, req)
+			case "env.diff_manifest":
+				ackDiffSync(conn, req)
 			}
 			received <- data
 		}
@@ -378,15 +387,12 @@ func TestRegister_RepushesCurrentDiffStateAfterReconnect(t *testing.T) {
 		t.Fatalf("register failed: %v", err)
 	}
 
-	params := captureDiffChangedNotification(t, received)
+	params := captureDiffManifest(t, received)
 	if params.ExecutionID != "exec-reconnect" {
 		t.Errorf("Expected re-push for execution exec-reconnect, got %s", params.ExecutionID)
 	}
 	if !containsFile(params.Files, "README.md") {
 		t.Errorf("Expected re-push to carry README.md, got %+v", params.Files)
-	}
-	if !strings.Contains(params.Patch, "Reconnect change") {
-		t.Errorf("Expected re-push patch to contain the workspace change, got: %s", params.Patch)
 	}
 }
 
@@ -413,13 +419,13 @@ func TestDiffPush_RetriesUntilAcknowledged(t *testing.T) {
 			if err := json.Unmarshal(data, &req); err != nil {
 				continue
 			}
-			if req.Method == "env.diff_changed" {
+			if req.Method == "env.diff_manifest" {
 				mu.Lock()
 				attempts++
 				n := attempts
 				mu.Unlock()
 				if n >= ackFromAttempt {
-					ackDiffChanged(conn, req)
+					ackDiffSync(conn, req)
 				}
 			}
 			received <- data
@@ -441,7 +447,7 @@ func TestDiffPush_RetriesUntilAcknowledged(t *testing.T) {
 		t.Fatalf("Failed to write README: %v", err)
 	}
 
-	client.emitDiffChanged()
+	client.pushDiffManifest()
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -457,12 +463,9 @@ func TestDiffPush_RetriesUntilAcknowledged(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	params := captureDiffChangedNotification(t, received)
+	params := captureDiffManifest(t, received)
 	if params.ExecutionID != "exec-retry" {
 		t.Errorf("Expected re-push for execution exec-retry, got %s", params.ExecutionID)
-	}
-	if !strings.Contains(params.Patch, "Retry change") {
-		t.Errorf("Expected patch to contain the workspace change, got: %s", params.Patch)
 	}
 }
 
@@ -489,8 +492,8 @@ func TestDiffPush_NewerStateSupersedesRetriedState(t *testing.T) {
 			if err := json.Unmarshal(data, &req); err != nil {
 				continue
 			}
-			if req.Method == "env.diff_changed" {
-				var params DiffChangedParams
+			if req.Method == "env.diff_manifest" {
+				var params DiffManifestParams
 				b, _ := json.Marshal(req.Params)
 				_ = json.Unmarshal(b, &params)
 				switch params.ExecutionID {
@@ -506,7 +509,7 @@ func TestDiffPush_NewerStateSupersedesRetriedState(t *testing.T) {
 					mu.Lock()
 					newAttempts++
 					mu.Unlock()
-					ackDiffChanged(conn, req)
+					ackDiffSync(conn, req)
 				}
 			}
 			received <- data
@@ -523,7 +526,7 @@ func TestDiffPush_NewerStateSupersedesRetriedState(t *testing.T) {
 	go client.readLoop(errChan)
 
 	// The old state is never acknowledged, so its first attempt will fail.
-	client.queueDiffPush(DiffChangedParams{ExecutionID: "exec-old"}, DiffManifestParams{ExecutionID: "exec-old"}, nil)
+	client.queueDiffPush(DiffManifestParams{ExecutionID: "exec-old"}, nil)
 
 	// As soon as the old attempt reaches the server, a newer full state is
 	// queued while the old is still in flight: it must supersede the retry.
@@ -532,7 +535,7 @@ func TestDiffPush_NewerStateSupersedesRetriedState(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected the older diff state attempt to reach the server")
 	}
-	client.queueDiffPush(DiffChangedParams{ExecutionID: "exec-new"}, DiffManifestParams{ExecutionID: "exec-new"}, nil)
+	client.queueDiffPush(DiffManifestParams{ExecutionID: "exec-new"}, nil)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -618,7 +621,7 @@ func captureGitDiffSummary(t *testing.T, c *Client, _ GitDiffSummaryParams) GitD
 	return envelope.Result
 }
 
-func TestTriggerDiffCheck_EmitsDiffChanged(t *testing.T) {
+func TestTriggerDiffCheck_PushesDiffManifest(t *testing.T) {
 	dir := setupTestGitRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
 
@@ -636,14 +639,14 @@ func TestTriggerDiffCheck_EmitsDiffChanged(t *testing.T) {
 	select {
 	case msg := <-received:
 		var notification struct {
-			Method string            `json:"method"`
-			Params DiffChangedParams `json:"params"`
+			Method string             `json:"method"`
+			Params DiffManifestParams `json:"params"`
 		}
 		if err := json.Unmarshal(msg, &notification); err != nil {
 			t.Fatalf("Failed to unmarshal notification: %v", err)
 		}
-		if notification.Method != "env.diff_changed" {
-			t.Fatalf("Expected env.diff_changed notification, got %s", notification.Method)
+		if notification.Method != "env.diff_manifest" {
+			t.Fatalf("Expected env.diff_manifest notification, got %s", notification.Method)
 		}
 		if notification.Params.ExecutionID != "exec-test-diff" {
 			t.Errorf("Expected execution ID exec-test-diff, got %s", notification.Params.ExecutionID)
@@ -654,40 +657,37 @@ func TestTriggerDiffCheck_EmitsDiffChanged(t *testing.T) {
 		if notification.Params.Files[0].Path != "README.md" {
 			t.Errorf("Expected README.md in files, got %s", notification.Params.Files[0].Path)
 		}
-		if !strings.Contains(notification.Params.Patch, "Modified README") {
-			t.Errorf("Expected patch to contain 'Modified README', got: %s", notification.Params.Patch)
-		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("Timed out waiting for env.diff_changed notification")
+		t.Fatal("Timed out waiting for env.diff_manifest notification")
 	}
 }
 
-// captureDiffChangedNotification reads frames until the next env.diff_changed
+// captureDiffManifest reads frames until the next env.diff_manifest
 // notification, tolerating booking frames (checkout results, responses).
-func captureDiffChangedNotification(t *testing.T, received chan []byte) DiffChangedParams {
+func captureDiffManifest(t *testing.T, received chan []byte) DiffManifestParams {
 	t.Helper()
 	deadline := time.After(3 * time.Second)
 	for {
 		select {
 		case data := <-received:
 			var envelope struct {
-				Method string            `json:"method"`
-				Params DiffChangedParams `json:"params"`
+				Method string             `json:"method"`
+				Params DiffManifestParams `json:"params"`
 			}
 			if err := json.Unmarshal(data, &envelope); err != nil {
 				t.Fatalf("Failed to unmarshal notification: %v", err)
 			}
-			if envelope.Method == "env.diff_changed" {
+			if envelope.Method == "env.diff_manifest" {
 				return envelope.Params
 			}
 		case <-deadline:
-			t.Fatal("Timed out waiting for env.diff_changed notification")
-			return DiffChangedParams{}
+			t.Fatal("Timed out waiting for env.diff_manifest notification")
+			return DiffManifestParams{}
 		}
 	}
 }
 
-func containsFile(files []GitDiffSummaryFile, path string) bool {
+func containsFile(files []GitDiffManifestFile, path string) bool {
 	for _, f := range files {
 		if f.Path == path {
 			return true
@@ -696,10 +696,10 @@ func containsFile(files []GitDiffSummaryFile, path string) bool {
 	return false
 }
 
-// TestTriggerDiffCheck_EmitsDiffChangedWithOriginRemote locks in the sandbox
-// regression where emitDiffChanged failed on an origin-remote workspace with an
-// empty base branch, so no env.diff_changed ever reached the control plane.
-func TestTriggerDiffCheck_EmitsDiffChangedWithOriginRemote(t *testing.T) {
+// TestTriggerDiffCheck_PushesDiffManifestWithOriginRemote locks in the sandbox
+// regression where pushDiffManifest failed on an origin-remote workspace with an
+// empty base branch, so no env.diff_manifest ever reached the control plane.
+func TestTriggerDiffCheck_PushesDiffManifestWithOriginRemote(t *testing.T) {
 	bareDir, workDir := setupTestGitRepoWithRemote(t)
 	defer func() {
 		_ = os.RemoveAll(bareDir)
@@ -717,15 +717,12 @@ func TestTriggerDiffCheck_EmitsDiffChangedWithOriginRemote(t *testing.T) {
 
 	client.TriggerDiffCheck()
 
-	params := captureDiffChangedNotification(t, received)
+	params := captureDiffManifest(t, received)
 	if params.ExecutionID != "exec-diff-origin" {
 		t.Errorf("Expected execution ID exec-diff-origin, got %s", params.ExecutionID)
 	}
 	if !containsFile(params.Files, "README.md") {
 		t.Errorf("Expected README.md in diff files, got %+v", params.Files)
-	}
-	if !strings.Contains(params.Patch, "Origin workspace change") {
-		t.Errorf("Expected patch to contain the change, got: %s", params.Patch)
 	}
 }
 
@@ -771,10 +768,10 @@ func TestExecuteCheckout_RecordsDiffBaseBranch(t *testing.T) {
 	}
 }
 
-// TestSendComplete_FlushesDiffChangedBeforeComplete guarantees a terminal diff
-// emit: SendComplete must deliver env.diff_changed before env.complete when
+// TestSendComplete_FlushesDiffManifestBeforeComplete guarantees a terminal diff
+// emit: SendComplete must deliver env.diff_manifest before env.complete when
 // the workspace changed and no mid-run trigger emitted it yet.
-func TestSendComplete_FlushesDiffChangedBeforeComplete(t *testing.T) {
+func TestSendComplete_FlushesDiffManifestBeforeComplete(t *testing.T) {
 	bareDir, workDir := setupTestGitRepoWithRemote(t)
 	defer func() {
 		_ = os.RemoveAll(bareDir)
@@ -792,7 +789,7 @@ func TestSendComplete_FlushesDiffChangedBeforeComplete(t *testing.T) {
 
 	client.SendComplete(runner.CompletionInfo{ExitCode: 0, Reason: "terminate"})
 
-	params := captureDiffChangedNotification(t, received)
+	params := captureDiffManifest(t, received)
 	if params.ExecutionID != "exec-final-flush" {
 		t.Errorf("Expected execution ID exec-final-flush, got %s", params.ExecutionID)
 	}
@@ -835,7 +832,7 @@ func TestSendComplete_SkipsFlushWhenWorkspaceUnchanged(t *testing.T) {
 
 	// Baseline check on the clean workspace records the hash and debounces an emit.
 	client.TriggerDiffCheck()
-	captureDiffChangedNotification(t, received)
+	captureDiffManifest(t, received)
 	time.Sleep(50 * time.Millisecond) // let the baseline debounce window run out
 
 	client.SendComplete(runner.CompletionInfo{ExitCode: 0, Reason: "terminate"})
@@ -850,8 +847,8 @@ func TestSendComplete_SkipsFlushWhenWorkspaceUnchanged(t *testing.T) {
 			if err := json.Unmarshal(data, &envelope); err != nil {
 				t.Fatalf("Failed to unmarshal frame: %v", err)
 			}
-			if envelope.Method == "env.diff_changed" {
-				t.Fatal("Expected no diff emit for an unchanged workspace, got env.diff_changed")
+			if envelope.Method == "env.diff_manifest" {
+				t.Fatal("Expected no diff emit for an unchanged workspace, got env.diff_manifest")
 			}
 			if envelope.Method == "env.complete" {
 				return

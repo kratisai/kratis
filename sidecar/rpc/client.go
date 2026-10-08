@@ -850,7 +850,7 @@ func (c *Client) register() error {
 	}
 
 	// Re-push the current diff state so the control-plane copy converges even
-	// when a previous env.diff_changed push was lost during disconnection. The
+	// when a previous env.diff_manifest push was lost during disconnection. The
 	// control plane treats the push as an idempotent upsert, so an unchanged
 	// workspace just refreshes the same snapshot.
 	c.flushDiffOnRegister()

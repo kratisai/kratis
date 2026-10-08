@@ -1,0 +1,15 @@
+databaseChangeLog:
+- changeSet:
+    id: 004-execution-diff-snapshots-manifest-only-001
+    author: kratis
+    comment: Diff snapshots are manifest-only; rows written in the legacy single-patch shape are discarded.
+    changes:
+    - delete:
+        tableName: execution_diff_snapshots
+    - dropColumn:
+        tableName: execution_diff_snapshots
+        columnName: patch_storage_path
+    - addNotNullConstraint:
+        tableName: execution_diff_snapshots
+        columnName: manifest_digest
+        columnDataType: VARCHAR(64)
