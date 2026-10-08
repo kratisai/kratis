@@ -117,6 +117,30 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
     }
 
     @Override
+    public boolean isContainerRunning(String envId) {
+        if (envId == null || envId.isBlank()) {
+            return false;
+        }
+        String runnerContainerId = resolveRunnerContainerId(envId);
+        if (runnerContainerId == null) {
+            return false;
+        }
+        try {
+            ProcessExecutor.ProcessResult result = processExecutor.execute(
+                    List.of("docker", "inspect", "--format", "{{.State.Running}}", runnerContainerId), null, null);
+            return result.exitCode() == 0 && "true".equals(new String(result.output()).trim());
+        } catch (IOException | InterruptedException e) {
+            // The runtime state is unobservable; report running so callers keep the suspend path.
+            logger.warn(
+                    "Failed to inspect running state of container {} for environment {}: {}",
+                    runnerContainerId,
+                    envId,
+                    e.getMessage());
+            return true;
+        }
+    }
+
+    @Override
     public void suspend(String envId) {
         if (envId == null || envId.isBlank()) {
             throw new IllegalArgumentException("Environment id is required to suspend a sandbox");
@@ -199,7 +223,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             containerId = executionEnvironmentRepository
                     .findById(UUID.fromString(envId))
                     .map(ExecutionEnvironment::getContainerId)
-                    .filter(id -> id != null && !id.isBlank())
+                    .filter(id -> !id.isBlank())
                     .orElse(null);
         } catch (IllegalArgumentException e) {
             logger.debug("Environment id {} is not a UUID; falling back to label lookup", envId);

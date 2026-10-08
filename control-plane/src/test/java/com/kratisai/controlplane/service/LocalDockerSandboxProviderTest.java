@@ -19,6 +19,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -271,7 +274,7 @@ class LocalDockerSandboxProviderTest {
     @Test
     void testSpawnDindSiblingUnmasksProcWithoutPrivilegeOrExtraCapabilities() throws Exception {
         ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setId(java.util.UUID.randomUUID());
+        env.setId(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
@@ -296,7 +299,7 @@ class LocalDockerSandboxProviderTest {
     @Test
     void testSpawnDindSiblingSkipsHostGatewayIpWhenNetworkGatewayIsUnknown() throws Exception {
         ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setId(java.util.UUID.randomUUID());
+        env.setId(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
@@ -723,7 +726,7 @@ class LocalDockerSandboxProviderTest {
                 false);
 
         ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setId(java.util.UUID.randomUUID());
+        env.setId(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
@@ -784,7 +787,7 @@ class LocalDockerSandboxProviderTest {
     @Test
     void testSpawnSandboxGrantsRootlesskitApparmorProfileOnlyWhenUsernsRestricted() throws Exception {
         ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setId(java.util.UUID.randomUUID());
+        env.setId(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
@@ -802,12 +805,12 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testSuspendCommitsSnapshotAndTearsDownSandbox() throws Exception {
-        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        UUID envUuid = UUID.randomUUID();
         ExecutionEnvironment envRow = new ExecutionEnvironment();
         envRow.setContainerId("runner-container-id");
-        when(mockEnvRepository.findById(envUuid)).thenReturn(java.util.Optional.of(envRow));
+        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.of(envRow));
 
-        java.util.concurrent.atomic.AtomicInteger imageLookups = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicInteger imageLookups = new AtomicInteger();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
             if (cmd.contains("images")) {
@@ -837,8 +840,8 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testSuspendFailsWhenNoRunnerContainerExists() throws Exception {
-        java.util.UUID envUuid = java.util.UUID.randomUUID();
-        when(mockEnvRepository.findById(envUuid)).thenReturn(java.util.Optional.empty());
+        UUID envUuid = UUID.randomUUID();
+        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.empty());
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(1, "".getBytes()));
 
@@ -847,12 +850,12 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testSuspendFallsBackToLabelLookupWhenDbContainerIdIsStale() throws Exception {
-        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        UUID envUuid = UUID.randomUUID();
         ExecutionEnvironment envRow = new ExecutionEnvironment();
         envRow.setContainerId("stale-container-id");
-        when(mockEnvRepository.findById(envUuid)).thenReturn(java.util.Optional.of(envRow));
+        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.of(envRow));
 
-        java.util.concurrent.atomic.AtomicInteger imageLookups = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicInteger imageLookups = new AtomicInteger();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
             if (cmd.contains("images")) {
@@ -878,8 +881,76 @@ class LocalDockerSandboxProviderTest {
     }
 
     @Test
+    void testIsContainerRunningTrueWhenInspectReportsRunning() throws Exception {
+        UUID envUuid = UUID.randomUUID();
+        ExecutionEnvironment envRow = new ExecutionEnvironment();
+        envRow.setContainerId("runner-container-id");
+        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.of(envRow));
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("{{.State.Running}}")) {
+                return new ProcessExecutor.ProcessResult(0, "true\n".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+        });
+
+        assertThat(provider.isContainerRunning(envUuid.toString())).isTrue();
+    }
+
+    @Test
+    void testIsContainerRunningFalseWhenInspectReportsStopped() throws Exception {
+        UUID envUuid = UUID.randomUUID();
+        ExecutionEnvironment envRow = new ExecutionEnvironment();
+        envRow.setContainerId("runner-container-id");
+        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.of(envRow));
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("{{.State.Running}}")) {
+                return new ProcessExecutor.ProcessResult(0, "false\n".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+        });
+
+        assertThat(provider.isContainerRunning(envUuid.toString())).isFalse();
+    }
+
+    @Test
+    void testIsContainerRunningFalseWhenNoContainerExists() throws Exception {
+        UUID envUuid = UUID.randomUUID();
+        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.empty());
+        when(mockProcessExecutor.execute(any(), any(), any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(1, "".getBytes()));
+
+        assertThat(provider.isContainerRunning(envUuid.toString())).isFalse();
+    }
+
+    @Test
+    void testIsContainerRunningTrueWhenRuntimeStateUnobservable() throws Exception {
+        UUID envUuid = UUID.randomUUID();
+        ExecutionEnvironment envRow = new ExecutionEnvironment();
+        envRow.setContainerId("runner-container-id");
+        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.of(envRow));
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("{{.State.Running}}")) {
+                throw new IOException("docker down");
+            }
+            return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+        });
+
+        assertThat(provider.isContainerRunning(envUuid.toString())).isTrue();
+    }
+
+    @Test
+    void testIsContainerRunningFalseForBlankEnvId() {
+        assertThat(provider.isContainerRunning(null)).isFalse();
+        assertThat(provider.isContainerRunning(" ")).isFalse();
+        verifyNoInteractions(mockProcessExecutor);
+    }
+
+    @Test
     void testResumeStartsRunnerFromSnapshotImage() throws Exception {
-        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        UUID envUuid = UUID.randomUUID();
         ExecutionEnvironment env = new ExecutionEnvironment();
         env.setId(envUuid);
         env.setProvider(null);
@@ -912,7 +983,7 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testResumeFailsWhenSnapshotIsMissing() throws Exception {
-        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        UUID envUuid = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
         ExecutionEnvironment env = new ExecutionEnvironment();
@@ -928,7 +999,7 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testDestroyRemovesSnapshotImageForSleepingEnvironment() throws Exception {
-        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        UUID envUuid = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
 
@@ -940,10 +1011,10 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testDestroyTerminatesRunningResourcesAndRemovesSnapshot() throws Exception {
-        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        UUID envUuid = UUID.randomUUID();
         ExecutionEnvironment envRow = new ExecutionEnvironment();
         envRow.setContainerId("runner-container-id");
-        when(mockEnvRepository.findById(envUuid)).thenReturn(java.util.Optional.of(envRow));
+        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.of(envRow));
 
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
@@ -963,12 +1034,11 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testDestroyIsTolerantOfMissingSnapshotAndContainer() throws Exception {
-        java.util.UUID envUuid = java.util.UUID.randomUUID();
-        when(mockEnvRepository.findById(envUuid)).thenReturn(java.util.Optional.empty());
+        UUID envUuid = UUID.randomUUID();
+        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.empty());
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(1, "No such image".getBytes()));
 
-        org.assertj.core.api.Assertions.assertThatCode(() -> provider.destroy(envUuid.toString()))
-                .doesNotThrowAnyException();
+        Assertions.assertThatCode(() -> provider.destroy(envUuid.toString())).doesNotThrowAnyException();
     }
 }
