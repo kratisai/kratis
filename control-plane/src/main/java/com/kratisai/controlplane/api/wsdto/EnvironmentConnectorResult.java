@@ -94,6 +94,33 @@ public sealed interface EnvironmentConnectorResult {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
+    record GitDiffManifestFile(
+            @JsonProperty("path") String path,
+            @JsonProperty("status") GitDiffStatus status,
+            @JsonProperty("additions") int additions,
+            @JsonProperty("deletions") int deletions,
+            @JsonProperty("isCollapsedByDefault") boolean isCollapsedByDefault,
+            @JsonProperty("sha") String sha,
+            @JsonProperty("size") int size) {
+        public GitDiffManifestFile {
+            Objects.requireNonNull(path, "path is required");
+            Objects.requireNonNull(status, "status is required");
+            Objects.requireNonNull(sha, "sha is required");
+        }
+    }
+
+    record DiffSectionPart(
+            @JsonProperty("sha") String sha,
+            @JsonProperty("partIndex") int partIndex,
+            @JsonProperty("partCount") int partCount,
+            @JsonProperty("data") String data) {
+        public DiffSectionPart {
+            Objects.requireNonNull(sha, "sha is required");
+            Objects.requireNonNull(data, "data is required");
+        }
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record GitCommitMessage(
             @JsonProperty("sha") String sha,
             @JsonProperty("subject") String subject,

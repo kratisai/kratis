@@ -1,0 +1,13 @@
+databaseChangeLog:
+- changeSet:
+    id: 003-execution-diff-snapshots-manifest-digest-001
+    author: kratis
+    changes:
+    - addColumn:
+        tableName: execution_diff_snapshots
+        columns:
+        - column:
+            name: manifest_digest
+            type: VARCHAR(64)
+            constraints:
+              nullable: true

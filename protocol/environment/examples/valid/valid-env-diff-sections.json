@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.diff_sections",
+  "params": {
+    "executionId": "123e4567-e89b-12d3-a456-426614174000",
+    "manifestDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "parts": [
+      {
+        "sha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+        "partIndex": 0,
+        "partCount": 1,
+        "data": "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,2 +1,5 @@\n-println!(\"hello\");\n+println!(\"world\");\n"
+      }
+    ]
+  }
+}

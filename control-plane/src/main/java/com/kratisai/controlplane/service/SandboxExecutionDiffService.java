@@ -8,6 +8,7 @@ import com.kratisai.controlplane.api.restdto.ReadFileSliceDto;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.model.ChatEntity;
+import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
@@ -107,6 +108,30 @@ public class SandboxExecutionDiffService {
     @Transactional(readOnly = true)
     public String exportPatch(UUID userId, UUID chatId, UUID executionId) {
         validateAndGetExecution(userId, chatId, executionId);
+        Optional<ExecutionDiffSnapshot> snapshotOpt = diffSnapshotRepository.findByExecutionId(executionId);
+        if (snapshotOpt.isEmpty()) {
+            return "";
+        }
+        ExecutionDiffSnapshot snapshot = snapshotOpt.get();
+        if (snapshot.getManifestDigest() != null) {
+            try {
+                List<EnvironmentConnectorResult.GitDiffManifestFile> files = objectMapper.readValue(
+                        snapshot.getSummaryJson(),
+                        new TypeReference<List<EnvironmentConnectorResult.GitDiffManifestFile>>() {});
+                StringBuilder fullPatch = new StringBuilder();
+                for (EnvironmentConnectorResult.GitDiffManifestFile file : files) {
+                    String blobPath = "diffs/" + executionId + "/" + file.sha();
+                    if (blobStorageService.exists(blobPath)) {
+                        try (InputStream is = blobStorageService.getObject(blobPath)) {
+                            fullPatch.append(new String(is.readAllBytes(), StandardCharsets.UTF_8));
+                        }
+                    }
+                }
+                return fullPatch.toString();
+            } catch (Exception e) {
+                // fall back to readFullPatch
+            }
+        }
         return readFullPatch(executionId).orElse("");
     }
 
@@ -141,6 +166,32 @@ public class SandboxExecutionDiffService {
     }
 
     private DiffFileDto getFileDiffFromSnapshot(UUID executionId, String path) {
+        Optional<ExecutionDiffSnapshot> snapshotOpt = diffSnapshotRepository.findByExecutionId(executionId);
+        if (snapshotOpt.isPresent() && snapshotOpt.get().getManifestDigest() != null) {
+            try {
+                List<EnvironmentConnectorResult.GitDiffManifestFile> files = objectMapper.readValue(
+                        snapshotOpt.get().getSummaryJson(),
+                        new TypeReference<List<EnvironmentConnectorResult.GitDiffManifestFile>>() {});
+                for (EnvironmentConnectorResult.GitDiffManifestFile file : files) {
+                    if (file.path().equals(path)) {
+                        String blobPath = "diffs/" + executionId + "/" + file.sha();
+                        if (blobStorageService.exists(blobPath)) {
+                            try (InputStream is = blobStorageService.getObject(blobPath)) {
+                                String sectionPatch = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                                return new DiffFileDto(
+                                        path,
+                                        sectionPatch,
+                                        file.additions(),
+                                        file.deletions(),
+                                        file.additions() + file.deletions());
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // fall back to full patch
+            }
+        }
         return readFullPatch(executionId)
                 .map(fullPatch -> extractFileDiff(path, fullPatch))
                 .orElse(new DiffFileDto(path, "", 0, 0, 0));

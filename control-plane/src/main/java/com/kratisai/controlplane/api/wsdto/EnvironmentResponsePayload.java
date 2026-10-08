@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.api.wsdto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -12,6 +13,8 @@ public sealed interface EnvironmentResponsePayload
         permits EnvironmentResponsePayload.EnvironmentRegisterResult,
                 EnvironmentResponsePayload.EnvironmentHeartbeatResult,
                 EnvironmentResponsePayload.EnvironmentDiffChangedResult,
+                EnvironmentResponsePayload.DiffManifestResult,
+                EnvironmentResponsePayload.DiffSectionsResult,
                 EnvironmentResponsePayload.HitlResult,
                 EnvironmentResponsePayload.GitTokenResult {
 
@@ -87,6 +90,52 @@ public sealed interface EnvironmentResponsePayload
 
         public EnvironmentDiffChangedResult() {
             this(EnvironmentResultType.ENV_DIFF_CHANGED, EnvironmentDiffChangedStatus.PERSISTED);
+        }
+    }
+
+    enum DiffManifestStatus {
+        @JsonProperty("committed")
+        COMMITTED,
+        @JsonProperty("incomplete")
+        INCOMPLETE
+    }
+
+    enum DiffSectionsStatus {
+        @JsonProperty("stored")
+        STORED
+    }
+
+    record DiffManifestResult(
+            @JsonProperty("type") EnvironmentResultType type,
+            @JsonProperty("status") DiffManifestStatus status,
+            @JsonProperty("missing") List<String> missing)
+            implements EnvironmentResponsePayload {
+        public DiffManifestResult {
+            Objects.requireNonNull(type, "type is required");
+            Objects.requireNonNull(status, "status is required");
+            Objects.requireNonNull(missing, "missing is required");
+            missing = List.copyOf(missing);
+        }
+
+        public DiffManifestResult(DiffManifestStatus status, List<String> missing) {
+            this(EnvironmentResultType.ENV_DIFF_MANIFEST, status, missing);
+        }
+    }
+
+    record DiffSectionsResult(
+            @JsonProperty("type") EnvironmentResultType type,
+            @JsonProperty("status") DiffSectionsStatus status,
+            @JsonProperty("missing") List<String> missing)
+            implements EnvironmentResponsePayload {
+        public DiffSectionsResult {
+            Objects.requireNonNull(type, "type is required");
+            Objects.requireNonNull(status, "status is required");
+            Objects.requireNonNull(missing, "missing is required");
+            missing = List.copyOf(missing);
+        }
+
+        public DiffSectionsResult(DiffSectionsStatus status, List<String> missing) {
+            this(EnvironmentResultType.ENV_DIFF_SECTIONS, status, missing);
         }
     }
 }

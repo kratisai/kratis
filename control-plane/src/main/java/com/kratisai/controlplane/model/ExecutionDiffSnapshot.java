@@ -46,6 +46,9 @@ public class ExecutionDiffSnapshot {
     @Column(name = "patch_storage_path", nullable = false, length = 255)
     private String patchStoragePath;
 
+    @Column(name = "manifest_digest", length = 64)
+    private String manifestDigest;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -149,6 +152,14 @@ public class ExecutionDiffSnapshot {
 
     public void setPatchStoragePath(String patchStoragePath) {
         this.patchStoragePath = patchStoragePath;
+    }
+
+    public String getManifestDigest() {
+        return manifestDigest;
+    }
+
+    public void setManifestDigest(String manifestDigest) {
+        this.manifestDigest = manifestDigest;
     }
 
     public Instant getCreatedAt() {

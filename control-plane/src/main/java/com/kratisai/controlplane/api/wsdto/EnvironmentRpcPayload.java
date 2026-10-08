@@ -251,6 +251,54 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         }
     }
 
+    /** Submit a git diff manifest with per-file SHA hashes and check for missing sections. */
+    record DiffManifest(
+            @JsonProperty("executionId") String executionId,
+            @JsonProperty("baseCommit") String baseCommit,
+            @JsonProperty("headCommit") String headCommit,
+            @JsonProperty("totalAdditions") int totalAdditions,
+            @JsonProperty("totalDeletions") int totalDeletions,
+            @JsonProperty("manifestDigest") String manifestDigest,
+            @JsonProperty("files") List<EnvironmentConnectorResult.GitDiffManifestFile> files)
+            implements InboundRequestPayload {
+        public static final String METHOD = "env.diff_manifest";
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+
+        public DiffManifest {
+            Objects.requireNonNull(executionId, "executionId is required");
+            Objects.requireNonNull(baseCommit, "baseCommit is required");
+            Objects.requireNonNull(headCommit, "headCommit is required");
+            Objects.requireNonNull(manifestDigest, "manifestDigest is required");
+            Objects.requireNonNull(files, "files is required");
+            files = List.copyOf(files);
+        }
+    }
+
+    /** Upload missing diff file section parts. */
+    record DiffSections(
+            @JsonProperty("executionId") String executionId,
+            @JsonProperty("manifestDigest") String manifestDigest,
+            @JsonProperty("parts") List<EnvironmentConnectorResult.DiffSectionPart> parts)
+            implements InboundRequestPayload {
+        public static final String METHOD = "env.diff_sections";
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+
+        public DiffSections {
+            Objects.requireNonNull(executionId, "executionId is required");
+            Objects.requireNonNull(manifestDigest, "manifestDigest is required");
+            Objects.requireNonNull(parts, "parts is required");
+            parts = List.copyOf(parts);
+        }
+    }
+
     /** Report agent activity on an execution. */
     record Activity(
             @JsonProperty("activityType") ActivityType activityType,

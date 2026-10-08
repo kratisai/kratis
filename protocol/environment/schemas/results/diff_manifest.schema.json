@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DiffManifestResult",
+  "type": "object",
+  "required": ["type", "status", "missing"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["env_diff_manifest"],
+      "const": "env_diff_manifest"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["committed", "incomplete"]
+    },
+    "missing": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}
