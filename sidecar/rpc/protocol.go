@@ -431,36 +431,6 @@ type GitDiffSummaryResult struct {
 	Files          []GitDiffSummaryFile `json:"files"`
 }
 
-// DiffChangedParams is the parameters payload for env.diff_changed.
-type DiffChangedParams struct {
-	ExecutionID    string               `json:"executionId"`
-	BaseCommit     string               `json:"baseCommit"`
-	HeadCommit     string               `json:"headCommit"`
-	TotalAdditions int                  `json:"totalAdditions"`
-	TotalDeletions int                  `json:"totalDeletions"`
-	Files          []GitDiffSummaryFile `json:"files"`
-	Patch          string               `json:"patch"`
-}
-
-// DiffChangedResultType is the discriminator for the env.diff_changed result payload.
-type DiffChangedResultType string
-
-const DiffChangedResultTypeEnvDiffChanged DiffChangedResultType = "env_diff_changed"
-
-// DiffChangedStatus is the only valid env.diff_changed result status: the
-// control plane persisted the diff copy.
-type DiffChangedStatus string
-
-const DiffChangedStatusPersisted DiffChangedStatus = "persisted"
-
-// DiffChangedResult is the acknowledgment payload for env.diff_changed. The
-// control plane answers only after the patch blob and manifest row are written,
-// so the sidecar can retry until its copy is durable.
-type DiffChangedResult struct {
-	Type   DiffChangedResultType `json:"type"`
-	Status DiffChangedStatus     `json:"status"`
-}
-
 // GitDiffManifestFile represents one file's summary and its diff section digest.
 type GitDiffManifestFile struct {
 	Path                 string        `json:"path"`

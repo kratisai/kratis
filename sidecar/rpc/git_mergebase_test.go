@@ -65,7 +65,7 @@ func connectedGitClientWith(t *testing.T, workspace string) (*Client, chan []byt
 			}
 			var req JsonRpcRequest
 			if json.Unmarshal(data, &req) == nil {
-				ackDiffChanged(conn, req)
+				ackDiffSync(conn, req)
 			}
 			received <- data
 		}
@@ -133,7 +133,7 @@ func TestExecuteGitDiffSummary_DiffsAgainstMergeBase(t *testing.T) {
 	}
 }
 
-func TestBuildGitFullDiff_ExcludesUpstreamChanges(t *testing.T) {
+func TestBuildDiffSections_ExcludesUpstreamChanges(t *testing.T) {
 	bareDir, workDir := setupTestGitRepoWithRemote(t)
 	defer func() {
 		_ = os.RemoveAll(bareDir)
@@ -148,14 +148,20 @@ func TestBuildGitFullDiff_ExcludesUpstreamChanges(t *testing.T) {
 	commitToBareMain(t, bareDir, "upstream.txt", "upstream\n")
 	runGitCmd(t, workDir, "fetch", "origin")
 
-	base := gitOutput(t, workDir, "merge-base", "origin/main", "HEAD")
-	patch := client.buildGitFullDiff(base)
-
-	if strings.Contains(patch, "upstream.txt") {
-		t.Errorf("Expected upstream-only changes to be excluded from the full patch, got: %s", patch)
+	_, manifest, sections, err := client.buildDiffSections("main")
+	if err != nil {
+		t.Fatalf("buildDiffSections failed: %v", err)
 	}
-	if !strings.Contains(patch, "README.md") || !strings.Contains(patch, "Agent change") {
-		t.Errorf("Expected the agent change in the full patch, got: %s", patch)
+
+	var all strings.Builder
+	for _, f := range manifest.Files {
+		if f.Path == "upstream.txt" {
+			t.Errorf("Expected upstream-only changes to be excluded from the manifest, got %+v", manifest.Files)
+		}
+		all.WriteString(sections[f.Sha])
+	}
+	if !strings.Contains(all.String(), "README.md") || !strings.Contains(all.String(), "Agent change") {
+		t.Errorf("Expected the agent change in the diff sections, got: %s", all.String())
 	}
 }
 

@@ -225,33 +225,6 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         }
     }
 
-    /** Report workspace git diff change on an execution. */
-    record DiffChanged(
-            @JsonProperty("executionId") String executionId,
-            @JsonProperty("baseCommit") String baseCommit,
-            @JsonProperty("headCommit") String headCommit,
-            @JsonProperty("totalAdditions") int totalAdditions,
-            @JsonProperty("totalDeletions") int totalDeletions,
-            @JsonProperty("files") List<EnvironmentConnectorResult.GitDiffSummaryFile> files,
-            @JsonProperty("patch") String patch)
-            implements InboundRequestPayload {
-        public static final String METHOD = "env.diff_changed";
-
-        @Override
-        public String method() {
-            return METHOD;
-        }
-
-        public DiffChanged {
-            Objects.requireNonNull(executionId, "executionId is required");
-            Objects.requireNonNull(baseCommit, "baseCommit is required");
-            Objects.requireNonNull(headCommit, "headCommit is required");
-            Objects.requireNonNull(files, "files is required");
-            Objects.requireNonNull(patch, "patch is required");
-            files = List.copyOf(files);
-        }
-    }
-
     /** Submit a git diff manifest with per-file SHA hashes and check for missing sections. */
     record DiffManifest(
             @JsonProperty("executionId") String executionId,

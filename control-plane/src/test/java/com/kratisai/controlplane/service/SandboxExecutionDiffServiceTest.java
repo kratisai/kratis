@@ -28,7 +28,6 @@ import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
-import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
@@ -109,25 +108,28 @@ class SandboxExecutionDiffServiceTest {
         when(sandboxExecutionRepository.findById(executionId)).thenReturn(Optional.of(execution));
     }
 
-    private ExecutionDiffSnapshot snapshot(String summaryJson) {
-        return new ExecutionDiffSnapshot(
-                executionId, "commit-1", "commit-2", 8, 2, summaryJson, "diffs/" + executionId + ".patch");
+    private static String manifestEntry(String path, int additions, int deletions, String sha) {
+        return "{\"path\":\"" + path + "\",\"status\":\"MODIFIED\",\"additions\":" + additions
+                + ",\"deletions\":" + deletions + ",\"isCollapsedByDefault\":false,\"sha\":\"" + sha
+                + "\",\"size\":10}";
     }
 
-    private void persistedBlob(String fullPatch) {
-        String patchPath = "diffs/" + executionId + ".patch";
-        when(blobStorageService.exists(patchPath)).thenReturn(true);
-        when(blobStorageService.getObject(patchPath))
-                .thenReturn(new ByteArrayInputStream(fullPatch.getBytes(StandardCharsets.UTF_8)));
+    private ExecutionDiffSnapshot snapshot(String manifestJson) {
+        return new ExecutionDiffSnapshot(executionId, "commit-1", "commit-2", 8, 2, manifestJson, "digest-1");
+    }
+
+    private void storedSection(String sha, String section) {
+        when(blobStorageService.getObjectBytes("diffs/" + executionId + "/" + sha))
+                .thenReturn(section.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void givenSnapshot(String manifestJson) {
+        when(diffSnapshotRepository.findByExecutionId(executionId)).thenReturn(Optional.of(snapshot(manifestJson)));
     }
 
     @Test
-    void getDiffSummary_mapsPersistedSnapshot() {
-        when(diffSnapshotRepository.findByExecutionId(executionId))
-                .thenReturn(
-                        Optional.of(
-                                snapshot(
-                                        "[{\"path\":\"src/App.tsx\",\"status\":\"MODIFIED\",\"additions\":8,\"deletions\":2,\"isCollapsedByDefault\":false}]")));
+    void getDiffSummary_mapsManifestEntries() {
+        givenSnapshot("[" + manifestEntry("src/App.tsx", 8, 2, "abc123") + "]");
 
         DiffSummaryDto result = service.getDiffSummary(userId, chatId, executionId);
 
@@ -138,6 +140,7 @@ class SandboxExecutionDiffServiceTest {
         assertThat(result.files()).hasSize(1);
         assertThat(result.files().getFirst().path()).isEqualTo("src/App.tsx");
         assertThat(result.files().getFirst().status()).isEqualTo(GitDiffStatus.MODIFIED);
+        assertThat(result.files().getFirst().additions()).isEqualTo(8);
     }
 
     @Test
@@ -154,19 +157,26 @@ class SandboxExecutionDiffServiceTest {
     }
 
     @Test
-    void getDiffSummary_corruptSummaryJson_returnsTotalsWithoutFiles() {
-        when(diffSnapshotRepository.findByExecutionId(executionId)).thenReturn(Optional.of(snapshot("not-json")));
+    void getDiffSummary_corruptManifest_failsLoudly() {
+        givenSnapshot("not-json");
 
-        DiffSummaryDto result = service.getDiffSummary(userId, chatId, executionId);
+        assertThatThrownBy(() -> service.getDiffSummary(userId, chatId, executionId))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("unreadable");
+    }
 
-        assertThat(result.baseCommit()).isEqualTo("commit-1");
-        assertThat(result.totalAdditions()).isEqualTo(8);
-        assertThat(result.files()).isEmpty();
+    @Test
+    void getDiffSummary_entryWithoutSha_failsLoudly() {
+        givenSnapshot(
+                "[{\"path\":\"src/App.tsx\",\"status\":\"MODIFIED\",\"additions\":8,\"deletions\":2,\"isCollapsedByDefault\":false}]");
+
+        assertThatThrownBy(() -> service.getDiffSummary(userId, chatId, executionId))
+                .isInstanceOf(ResponseStatusException.class);
     }
 
     @Test
     void getDiffSummary_connectedEnvironment_neverContactsConnector() {
-        when(diffSnapshotRepository.findByExecutionId(executionId)).thenReturn(Optional.of(snapshot("[]")));
+        givenSnapshot("[]");
 
         service.getDiffSummary(userId, chatId, executionId);
 
@@ -174,17 +184,9 @@ class SandboxExecutionDiffServiceTest {
     }
 
     @Test
-    void getFileDiff_extractsFileFromPersistedBlob() {
-        String fullPatch = """
-                diff --git a/src/App.tsx b/src/App.tsx
-                --- a/src/App.tsx
-                +++ b/src/App.tsx
-                @@ -1,2 +1,3 @@
-                -old
-                +new
-                +extra
-                """;
-        persistedBlob(fullPatch);
+    void getFileDiff_returnsStoredSectionWithManifestCounts() {
+        givenSnapshot("[" + manifestEntry("src/App.tsx", 2, 1, "abc123") + "]");
+        storedSection("abc123", "diff --git a/src/App.tsx b/src/App.tsx\n-old\n+new\n+extra\n");
 
         DiffFileDto fileDiff = service.getFileDiff(userId, chatId, executionId, "src/App.tsx");
 
@@ -195,42 +197,47 @@ class SandboxExecutionDiffServiceTest {
     }
 
     @Test
-    void getFileDiff_missingBlob_returnsEmptyPatch() {
-        when(blobStorageService.exists("diffs/" + executionId + ".patch")).thenReturn(false);
-
-        DiffFileDto fileDiff = service.getFileDiff(userId, chatId, executionId, "src/App.tsx");
-
-        assertThat(fileDiff.patch()).isEmpty();
-        assertThat(fileDiff.additions()).isZero();
-        verify(blobStorageService, never()).getObject(any());
-    }
-
-    @Test
-    void getFileDiff_pathNotInPersistedPatch_returnsEmptyPatch() {
-        persistedBlob(
-                "diff --git a/src/Other.tsx b/src/Other.tsx\n--- a/src/Other.tsx\n+++ b/src/Other.tsx\n+changed\n");
+    void getFileDiff_pathNotInManifest_returnsEmptyPatch() {
+        givenSnapshot("[" + manifestEntry("src/Other.tsx", 1, 0, "other") + "]");
 
         DiffFileDto fileDiff = service.getFileDiff(userId, chatId, executionId, "src/App.tsx");
 
         assertThat(fileDiff.path()).isEqualTo("src/App.tsx");
         assertThat(fileDiff.patch()).isEmpty();
+        verify(blobStorageService, never()).getObjectBytes(any());
     }
 
     @Test
-    void exportPatch_readsStoredBlobDirectly() {
-        when(diffSnapshotRepository.findByExecutionId(executionId)).thenReturn(Optional.of(snapshot("[]")));
-        String fullPatch = "diff --git a/file.txt b/file.txt\n+hello";
-        persistedBlob(fullPatch);
+    void getFileDiff_withoutSnapshot_returnsEmptyPatch() {
+        when(diffSnapshotRepository.findByExecutionId(executionId)).thenReturn(Optional.empty());
 
-        String patch = service.exportPatch(userId, chatId, executionId);
-
-        assertThat(patch).isEqualTo(fullPatch);
+        assertThat(service.getFileDiff(userId, chatId, executionId, "src/App.tsx")
+                        .patch())
+                .isEmpty();
     }
 
     @Test
-    void exportPatch_missingBlob_returnsEmptyString() {
-        when(diffSnapshotRepository.findByExecutionId(executionId)).thenReturn(Optional.of(snapshot("[]")));
-        when(blobStorageService.exists("diffs/" + executionId + ".patch")).thenReturn(false);
+    void getFileDiff_missingSection_failsLoudly() {
+        givenSnapshot("[" + manifestEntry("src/App.tsx", 1, 0, "gone") + "]");
+
+        assertThatThrownBy(() -> service.getFileDiff(userId, chatId, executionId, "src/App.tsx"))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("missing");
+    }
+
+    @Test
+    void exportPatch_concatenatesSectionsInManifestOrder() {
+        givenSnapshot("[" + manifestEntry("a.txt", 1, 0, "sha-a") + "," + manifestEntry("b.txt", 1, 0, "sha-b") + "]");
+        storedSection("sha-a", "diff --git a/a.txt b/a.txt\n+a\n");
+        storedSection("sha-b", "diff --git a/b.txt b/b.txt\n+b\n");
+
+        assertThat(service.exportPatch(userId, chatId, executionId))
+                .isEqualTo("diff --git a/a.txt b/a.txt\n+a\ndiff --git a/b.txt b/b.txt\n+b\n");
+    }
+
+    @Test
+    void exportPatch_withoutSnapshot_returnsEmptyString() {
+        when(diffSnapshotRepository.findByExecutionId(executionId)).thenReturn(Optional.empty());
 
         assertThat(service.exportPatch(userId, chatId, executionId)).isEmpty();
     }

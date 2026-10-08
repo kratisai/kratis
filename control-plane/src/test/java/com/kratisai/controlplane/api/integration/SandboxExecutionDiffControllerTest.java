@@ -161,20 +161,20 @@ class SandboxExecutionDiffControllerTest {
                 .build();
     }
 
-    private void seedDiffSnapshot(int additions, int deletions, String summaryJson, String fullPatch) {
-        String patchPath = "diffs/" + execution.getId() + ".patch";
-        blobStorageService.putObject(patchPath, fullPatch.getBytes(StandardCharsets.UTF_8), "text/plain");
+    private void seedDiffSnapshot(int additions, int deletions, String section) {
+        String sha = "sha-" + UUID.randomUUID();
+        blobStorageService.putObject(
+                "diffs/" + execution.getId() + "/" + sha, section.getBytes(StandardCharsets.UTF_8), "text/plain");
+        String manifestJson = "[{\"path\":\"src/Test.java\",\"status\":\"MODIFIED\",\"additions\":" + additions
+                + ",\"deletions\":" + deletions + ",\"isCollapsedByDefault\":false,\"sha\":\"" + sha
+                + "\",\"size\":" + section.length() + "}]";
         executionDiffSnapshotRepository.save(new ExecutionDiffSnapshot(
-                execution.getId(), "1111111", "2222222", additions, deletions, summaryJson, patchPath));
+                execution.getId(), "1111111", "2222222", additions, deletions, manifestJson, "digest-" + sha));
     }
 
     @Test
     void getDiffSummary_servesPersistedCopyEvenWhileConnected() throws Exception {
-        seedDiffSnapshot(
-                15,
-                3,
-                "[{\"path\":\"src/Test.java\",\"status\":\"MODIFIED\",\"additions\":15,\"deletions\":3,\"isCollapsedByDefault\":false}]",
-                "diff --git a/src/Test.java b/src/Test.java\n+new");
+        seedDiffSnapshot(15, 3, "diff --git a/src/Test.java b/src/Test.java\n+new");
 
         mockMvc.perform(get(
                                 "/api/v1/chats/{chatId}/executions/{executionId}/diff/summary",
@@ -192,11 +192,7 @@ class SandboxExecutionDiffControllerTest {
 
     @Test
     void getDiffSummary_whenEnvironmentSleeping_servesPersistedCopy() throws Exception {
-        seedDiffSnapshot(
-                15,
-                3,
-                "[{\"path\":\"src/Test.java\",\"status\":\"MODIFIED\",\"additions\":15,\"deletions\":3,\"isCollapsedByDefault\":false}]",
-                "diff --git a/src/Test.java b/src/Test.java\n+new");
+        seedDiffSnapshot(15, 3, "diff --git a/src/Test.java b/src/Test.java\n+new");
         environment.setStatus(EnvironmentStatus.SLEEPING);
         executionEnvironmentRepository.save(environment);
 
@@ -224,12 +220,8 @@ class SandboxExecutionDiffControllerTest {
     }
 
     @Test
-    void getFileDiff_extractsFileFromPersistedBlob() throws Exception {
-        seedDiffSnapshot(
-                15,
-                3,
-                "[{\"path\":\"src/Test.java\",\"status\":\"MODIFIED\",\"additions\":15,\"deletions\":3,\"isCollapsedByDefault\":false}]",
-                """
+    void getFileDiff_returnsStoredSection() throws Exception {
+        seedDiffSnapshot(2, 1, """
                         diff --git a/src/Test.java b/src/Test.java
                         --- a/src/Test.java
                         +++ b/src/Test.java

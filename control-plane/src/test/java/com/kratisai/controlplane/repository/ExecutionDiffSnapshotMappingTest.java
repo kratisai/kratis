@@ -73,13 +73,7 @@ class ExecutionDiffSnapshotMappingTest {
                 "{\"files\":[{\"path\":\"README.md\",\"status\":\"MODIFIED\",\"additions\":5,\"deletions\":1}]}";
 
         ExecutionDiffSnapshot snapshot = new ExecutionDiffSnapshot(
-                execution.getId(),
-                "base-sha-123",
-                "head-sha-456",
-                5,
-                1,
-                summaryJson,
-                "diffs/" + execution.getId() + ".patch");
+                execution.getId(), "base-sha-123", "head-sha-456", 5, 1, summaryJson, "digest-1");
         diffSnapshotRepository.save(snapshot);
         entityManager.flush();
         entityManager.clear();
@@ -91,7 +85,7 @@ class ExecutionDiffSnapshotMappingTest {
         assertThat(retrieved.get().getTotalAdditions()).isEqualTo(5);
         assertThat(retrieved.get().getTotalDeletions()).isEqualTo(1);
         assertThat(retrieved.get().getSummaryJson()).contains("\"README.md\"");
-        assertThat(retrieved.get().getPatchStoragePath()).isEqualTo("diffs/" + execution.getId() + ".patch");
+        assertThat(retrieved.get().getManifestDigest()).isEqualTo("digest-1");
         assertThat(retrieved.get().getCreatedAt()).isNotNull();
         assertThat(retrieved.get().getUpdatedAt()).isNotNull();
     }
@@ -100,13 +94,11 @@ class ExecutionDiffSnapshotMappingTest {
     void uniqueConstraint_duplicateExecutionId_throwsException() {
         SandboxExecution execution = createExecution();
 
-        ExecutionDiffSnapshot s1 =
-                new ExecutionDiffSnapshot(execution.getId(), "b1", "h1", 1, 0, "{}", "diffs/1.patch");
+        ExecutionDiffSnapshot s1 = new ExecutionDiffSnapshot(execution.getId(), "b1", "h1", 1, 0, "{}", "digest-1");
         diffSnapshotRepository.save(s1);
         entityManager.flush();
 
-        ExecutionDiffSnapshot s2 =
-                new ExecutionDiffSnapshot(execution.getId(), "b2", "h2", 2, 0, "{}", "diffs/2.patch");
+        ExecutionDiffSnapshot s2 = new ExecutionDiffSnapshot(execution.getId(), "b2", "h2", 2, 0, "{}", "digest-2");
         diffSnapshotRepository.save(s2);
 
         assertThatThrownBy(() -> entityManager.flush())
@@ -119,7 +111,7 @@ class ExecutionDiffSnapshotMappingTest {
     void deleteByExecutionId_removesSnapshot() {
         SandboxExecution execution = createExecution();
         ExecutionDiffSnapshot snapshot =
-                new ExecutionDiffSnapshot(execution.getId(), "b1", "h1", 1, 0, "{}", "diffs/1.patch");
+                new ExecutionDiffSnapshot(execution.getId(), "b1", "h1", 1, 0, "{}", "digest-1");
         diffSnapshotRepository.save(snapshot);
         entityManager.flush();
 
@@ -133,7 +125,7 @@ class ExecutionDiffSnapshotMappingTest {
     void cascadeDelete_whenExecutionDeleted_snapshotRemoved() {
         SandboxExecution execution = createExecution();
         ExecutionDiffSnapshot snapshot =
-                new ExecutionDiffSnapshot(execution.getId(), "b1", "h1", 1, 0, "{}", "diffs/1.patch");
+                new ExecutionDiffSnapshot(execution.getId(), "b1", "h1", 1, 0, "{}", "digest-1");
         diffSnapshotRepository.save(snapshot);
         entityManager.flush();
 

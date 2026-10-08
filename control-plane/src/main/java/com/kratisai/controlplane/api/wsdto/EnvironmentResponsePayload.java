@@ -12,7 +12,6 @@ import java.util.Objects;
 public sealed interface EnvironmentResponsePayload
         permits EnvironmentResponsePayload.EnvironmentRegisterResult,
                 EnvironmentResponsePayload.EnvironmentHeartbeatResult,
-                EnvironmentResponsePayload.EnvironmentDiffChangedResult,
                 EnvironmentResponsePayload.DiffManifestResult,
                 EnvironmentResponsePayload.DiffSectionsResult,
                 EnvironmentResponsePayload.HitlResult,
@@ -77,19 +76,6 @@ public sealed interface EnvironmentResponsePayload
     record GitTokenResult(@JsonProperty("token") String token) implements EnvironmentResponsePayload {
         public GitTokenResult {
             Objects.requireNonNull(token, "token is required");
-        }
-    }
-
-    /** Acknowledgment of {@link EnvironmentRpcPayload.DiffChanged} — the diff copy is persisted. */
-    record EnvironmentDiffChangedResult(EnvironmentResultType type, EnvironmentDiffChangedStatus status)
-            implements EnvironmentResponsePayload {
-        public EnvironmentDiffChangedResult {
-            Objects.requireNonNull(type, "type is required");
-            Objects.requireNonNull(status, "status is required");
-        }
-
-        public EnvironmentDiffChangedResult() {
-            this(EnvironmentResultType.ENV_DIFF_CHANGED, EnvironmentDiffChangedStatus.PERSISTED);
         }
     }
 

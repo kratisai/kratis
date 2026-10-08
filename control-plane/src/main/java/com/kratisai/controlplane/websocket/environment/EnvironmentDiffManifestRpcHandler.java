@@ -16,8 +16,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,8 +24,6 @@ import reactor.core.publisher.Flux;
 @Component
 public class EnvironmentDiffManifestRpcHandler
         implements EnvironmentRpcHandler<EnvironmentRpcPayload.DiffManifest, EnvironmentResponsePayload> {
-
-    private static final Logger logger = LoggerFactory.getLogger(EnvironmentDiffManifestRpcHandler.class);
 
     private final EnvironmentExecutionGuard executionGuard;
     private final ExecutionDiffSnapshotRepository diffSnapshotRepository;
@@ -87,27 +83,23 @@ public class EnvironmentDiffManifestRpcHandler
         try {
             summaryJson = objectMapper.writeValueAsString(params.files());
         } catch (JsonProcessingException e) {
-            logger.error("Failed to serialize diff manifest files for execution {}", execId, e);
-            summaryJson = "[]";
+            throw new IllegalStateException("Failed to serialize diff manifest for execution " + execId, e);
         }
 
-        String legacyPatchPath = "diffs/" + execId + ".patch";
-        String finalSummary = summaryJson;
         ExecutionDiffSnapshot snapshot = existing.orElseGet(() -> new ExecutionDiffSnapshot(
                 execId,
                 params.baseCommit(),
                 params.headCommit(),
                 params.totalAdditions(),
                 params.totalDeletions(),
-                finalSummary,
-                legacyPatchPath));
+                summaryJson,
+                params.manifestDigest()));
 
         snapshot.setBaseCommit(params.baseCommit());
         snapshot.setHeadCommit(params.headCommit());
         snapshot.setTotalAdditions(params.totalAdditions());
         snapshot.setTotalDeletions(params.totalDeletions());
         snapshot.setSummaryJson(summaryJson);
-        snapshot.setPatchStoragePath(legacyPatchPath);
         snapshot.setManifestDigest(params.manifestDigest());
         diffSnapshotRepository.save(snapshot);
 

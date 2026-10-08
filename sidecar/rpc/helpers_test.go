@@ -35,16 +35,14 @@ func TestMain(m *testing.M) {
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
 
-// ackDiffChanged answers env.diff_changed, env.diff_manifest, and env.diff_sections requests
+// ackDiffSync answers env.diff_manifest and env.diff_sections requests
 // with appropriate acknowledgments so tests never block.
-func ackDiffChanged(conn *websocket.Conn, req JsonRpcRequest) {
+func ackDiffSync(conn *websocket.Conn, req JsonRpcRequest) {
 	if req.ID == nil {
 		return
 	}
 	var raw json.RawMessage
 	switch req.Method {
-	case "env.diff_changed":
-		raw = json.RawMessage(`{"type":"env_diff_changed","status":"persisted"}`)
 	case "env.diff_manifest":
 		raw = json.RawMessage(`{"type":"env_diff_manifest","status":"committed","missing":[]}`)
 	case "env.diff_sections":

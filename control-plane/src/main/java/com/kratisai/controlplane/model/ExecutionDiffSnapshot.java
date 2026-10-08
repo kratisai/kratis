@@ -39,14 +39,12 @@ public class ExecutionDiffSnapshot {
     @Column(name = "total_deletions", nullable = false)
     private int totalDeletions;
 
+    /** JSON array of manifest entries (path, status, counts, section sha, size). */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "summary_json", columnDefinition = "jsonb", nullable = false)
     private String summaryJson;
 
-    @Column(name = "patch_storage_path", nullable = false, length = 255)
-    private String patchStoragePath;
-
-    @Column(name = "manifest_digest", length = 64)
+    @Column(name = "manifest_digest", nullable = false, length = 64)
     private String manifestDigest;
 
     @Column(name = "created_at", nullable = false)
@@ -64,14 +62,14 @@ public class ExecutionDiffSnapshot {
             int totalAdditions,
             int totalDeletions,
             String summaryJson,
-            String patchStoragePath) {
+            String manifestDigest) {
         this.executionId = executionId;
         this.baseCommit = baseCommit;
         this.headCommit = headCommit;
         this.totalAdditions = totalAdditions;
         this.totalDeletions = totalDeletions;
         this.summaryJson = summaryJson;
-        this.patchStoragePath = patchStoragePath;
+        this.manifestDigest = manifestDigest;
     }
 
     @PrePersist
@@ -144,14 +142,6 @@ public class ExecutionDiffSnapshot {
 
     public void setSummaryJson(String summaryJson) {
         this.summaryJson = summaryJson;
-    }
-
-    public String getPatchStoragePath() {
-        return patchStoragePath;
-    }
-
-    public void setPatchStoragePath(String patchStoragePath) {
-        this.patchStoragePath = patchStoragePath;
     }
 
     public String getManifestDigest() {

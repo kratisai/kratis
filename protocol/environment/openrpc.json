@@ -99,28 +99,6 @@
       ]
     },
     {
-      "name": "env.diff_changed",
-      "summary": "Acknowledge the persisted workspace git diff state of an execution",
-      "description": "The sidecar sends the full current diff (summary manifest plus unified patch) and the control plane stores it as the durable copy: patch into blob storage, manifest into execution_diff_snapshots. A request, not a notification, so the sidecar re-pushes until the persistence is acknowledged and the control-plane copy never silently diverges.",
-      "x-kratis-direction": "connector-to-control-plane",
-      "x-kratis-message-kind": "request",
-      "params": [
-        {
-          "name": "params",
-          "required": true,
-          "schema": {
-            "$ref": "./schemas/requests/diff_changed.schema.json"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "schema": {
-          "$ref": "./schemas/results/diff_changed.schema.json"
-        }
-      }
-    },
-    {
       "name": "env.diff_manifest",
       "summary": "Submit a git diff manifest with per-file SHA hashes and check for missing sections",
       "description": "The sidecar sends the manifest containing all changed files and their section SHAs. The control plane returns whether it is already committed or incomplete with a list of missing section SHAs.",
