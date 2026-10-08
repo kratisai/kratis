@@ -218,6 +218,7 @@ class SandboxExecutionDiffServiceTest {
 
     @Test
     void exportPatch_readsStoredBlobDirectly() {
+        when(diffSnapshotRepository.findByExecutionId(executionId)).thenReturn(Optional.of(snapshot("[]")));
         String fullPatch = "diff --git a/file.txt b/file.txt\n+hello";
         persistedBlob(fullPatch);
 
@@ -228,6 +229,7 @@ class SandboxExecutionDiffServiceTest {
 
     @Test
     void exportPatch_missingBlob_returnsEmptyString() {
+        when(diffSnapshotRepository.findByExecutionId(executionId)).thenReturn(Optional.of(snapshot("[]")));
         when(blobStorageService.exists("diffs/" + executionId + ".patch")).thenReturn(false);
 
         assertThat(service.exportPatch(userId, chatId, executionId)).isEmpty();

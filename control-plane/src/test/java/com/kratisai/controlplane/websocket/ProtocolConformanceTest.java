@@ -789,6 +789,8 @@ class ProtocolConformanceTest {
             case "env.register" -> EnvironmentResponsePayload.EnvironmentRegisterResult.class;
             case "env.heartbeat" -> EnvironmentResponsePayload.EnvironmentHeartbeatResult.class;
             case "env.diff_changed" -> EnvironmentResponsePayload.EnvironmentDiffChangedResult.class;
+            case "env.diff_manifest" -> EnvironmentResponsePayload.DiffManifestResult.class;
+            case "env.diff_sections" -> EnvironmentResponsePayload.DiffSectionsResult.class;
             case "env.hitl_request" -> EnvironmentResponsePayload.HitlResult.class;
             case "env.git_token" -> EnvironmentResponsePayload.GitTokenResult.class;
             case "env.exec" -> EnvironmentConnectorResult.Exec.class;
@@ -810,6 +812,8 @@ class ProtocolConformanceTest {
             case "register" -> EnvironmentResponsePayload.EnvironmentRegisterResult.class;
             case "heartbeat" -> EnvironmentResponsePayload.EnvironmentHeartbeatResult.class;
             case "diff_changed" -> EnvironmentResponsePayload.EnvironmentDiffChangedResult.class;
+            case "diff_manifest" -> EnvironmentResponsePayload.DiffManifestResult.class;
+            case "diff_sections" -> EnvironmentResponsePayload.DiffSectionsResult.class;
             case "hitl_request" -> EnvironmentResponsePayload.HitlResult.class;
             case "git_token" -> EnvironmentResponsePayload.GitTokenResult.class;
             case "exec" -> EnvironmentConnectorResult.Exec.class;

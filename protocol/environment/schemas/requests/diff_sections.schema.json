@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DiffSectionsParams",
+  "type": "object",
+  "required": [
+    "executionId",
+    "manifestDigest",
+    "parts"
+  ],
+  "properties": {
+    "executionId": {
+      "type": "string"
+    },
+    "manifestDigest": {
+      "type": "string"
+    },
+    "parts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "sha",
+          "partIndex",
+          "partCount",
+          "data"
+        ],
+        "properties": {
+          "sha": {
+            "type": "string"
+          },
+          "partIndex": {
+            "type": "integer"
+          },
+          "partCount": {
+            "type": "integer"
+          },
+          "data": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

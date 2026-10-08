@@ -308,6 +308,32 @@ func TestBuildGitFullDiff_SynthesizesUntrackedFiles(t *testing.T) {
 // TestRegister_RepushesCurrentDiffStateAfterReconnect locks in the convergence
 // guarantee: after a (re)registration the sidecar re-pushes the current diff so
 // the control-plane copy heals pushes lost while disconnected.
+func TestBuildDiffSections_ManifestAndSections(t *testing.T) {
+	dir := setupTestGitRepo(t)
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	client := &Client{workspace: dir}
+
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Updated README\n"), 0600); err != nil {
+		t.Fatalf("Failed to write README: %v", err)
+	}
+
+	summary, manifest, sections, err := client.buildDiffSections("HEAD")
+	if err != nil {
+		t.Fatalf("buildDiffSections failed: %v", err)
+	}
+
+	if len(summary.Files) != 1 {
+		t.Fatalf("expected 1 file in summary, got %d", len(summary.Files))
+	}
+	if manifest.ManifestDigest == "" {
+		t.Errorf("expected non-empty manifestDigest")
+	}
+	if len(sections) == 0 {
+		t.Errorf("expected sections map to contain diffs")
+	}
+}
+
 func TestRegister_RepushesCurrentDiffStateAfterReconnect(t *testing.T) {
 	dir := setupTestGitRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
@@ -497,7 +523,7 @@ func TestDiffPush_NewerStateSupersedesRetriedState(t *testing.T) {
 	go client.readLoop(errChan)
 
 	// The old state is never acknowledged, so its first attempt will fail.
-	client.queueDiffPush(DiffChangedParams{ExecutionID: "exec-old"})
+	client.queueDiffPush(DiffChangedParams{ExecutionID: "exec-old"}, DiffManifestParams{ExecutionID: "exec-old"}, nil)
 
 	// As soon as the old attempt reaches the server, a newer full state is
 	// queued while the old is still in flight: it must supersede the retry.
@@ -506,7 +532,7 @@ func TestDiffPush_NewerStateSupersedesRetriedState(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected the older diff state attempt to reach the server")
 	}
-	client.queueDiffPush(DiffChangedParams{ExecutionID: "exec-new"})
+	client.queueDiffPush(DiffChangedParams{ExecutionID: "exec-new"}, DiffManifestParams{ExecutionID: "exec-new"}, nil)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {

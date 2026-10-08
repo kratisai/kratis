@@ -461,6 +461,74 @@ type DiffChangedResult struct {
 	Status DiffChangedStatus     `json:"status"`
 }
 
+// GitDiffManifestFile represents one file's summary and its diff section digest.
+type GitDiffManifestFile struct {
+	Path                 string        `json:"path"`
+	Status               GitDiffStatus `json:"status"`
+	Additions            int           `json:"additions"`
+	Deletions            int           `json:"deletions"`
+	IsCollapsedByDefault bool          `json:"isCollapsedByDefault"`
+	Sha                  string        `json:"sha"`
+	Size                 int           `json:"size"`
+}
+
+// DiffManifestParams is the parameters payload for env.diff_manifest.
+type DiffManifestParams struct {
+	ExecutionID    string                `json:"executionId"`
+	BaseCommit     string                `json:"baseCommit"`
+	HeadCommit     string                `json:"headCommit"`
+	TotalAdditions int                   `json:"totalAdditions"`
+	TotalDeletions int                   `json:"totalDeletions"`
+	ManifestDigest string                `json:"manifestDigest"`
+	Files          []GitDiffManifestFile `json:"files"`
+}
+
+type DiffManifestResultType string
+
+const DiffManifestResultTypeEnvDiffManifest DiffManifestResultType = "env_diff_manifest"
+
+type DiffManifestStatus string
+
+const (
+	DiffManifestStatusCommitted  DiffManifestStatus = "committed"
+	DiffManifestStatusIncomplete DiffManifestStatus = "incomplete"
+)
+
+type DiffManifestResult struct {
+	Type    DiffManifestResultType `json:"type"`
+	Status  DiffManifestStatus     `json:"status"`
+	Missing []string               `json:"missing"`
+}
+
+// DiffSectionPart represents a chunk of a single file's unified diff.
+type DiffSectionPart struct {
+	Sha       string `json:"sha"`
+	PartIndex int    `json:"partIndex"`
+	PartCount int    `json:"partCount"`
+	Data      string `json:"data"`
+}
+
+// DiffSectionsParams is the parameters payload for env.diff_sections.
+type DiffSectionsParams struct {
+	ExecutionID    string            `json:"executionId"`
+	ManifestDigest string            `json:"manifestDigest"`
+	Parts          []DiffSectionPart `json:"parts"`
+}
+
+type DiffSectionsResultType string
+
+const DiffSectionsResultTypeEnvDiffSections DiffSectionsResultType = "env_diff_sections"
+
+type DiffSectionsStatus string
+
+const DiffSectionsStatusStored DiffSectionsStatus = "stored"
+
+type DiffSectionsResult struct {
+	Type    DiffSectionsResultType `json:"type"`
+	Status  DiffSectionsStatus     `json:"status"`
+	Missing []string               `json:"missing"`
+}
+
 // ReadFileSliceParams is the parameters payload for env.read_file_slice.
 type ReadFileSliceParams struct {
 	Path        string `json:"path"`

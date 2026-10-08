@@ -3,6 +3,7 @@ package rpc
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -921,8 +923,7 @@ func (c *Client) flushDiffCheck() {
 	}
 }
 
-// emitDiffChanged computes the diff summary and unified patch and enqueues the
-// full-state env.diff_changed push.
+// emitDiffChanged computes the diff summary, sections and manifest, and enqueues the sync.
 func (c *Client) emitDiffChanged() {
 	c.mu.Lock()
 	execID := c.currentExecutionID
@@ -932,21 +933,22 @@ func (c *Client) emitDiffChanged() {
 		return
 	}
 
-	summary, err := c.buildGitDiffSummary(baseBranch)
+	summary, manifest, sections, err := c.buildDiffSections(baseBranch)
 	if err != nil {
-		log.Printf("[DIFF] Unable to compute env.diff_changed for execution %s: %v", execID, err)
+		log.Printf("[DIFF] Unable to compute diff sections for execution %s: %v", execID, err)
 		return
 	}
+	manifest.ExecutionID = execID
 	patch := c.buildGitFullDiff(summary.BaseCommit)
 	log.Printf(
-		"[DIFF] enqueued env.diff_changed for execution %s: baseBranch=%q baseCommit=%s files=%d patchBytes=%d",
+		"[DIFF] enqueued env.diff_manifest for execution %s: baseBranch=%q baseCommit=%s files=%d manifestDigest=%s",
 		execID,
 		baseBranch,
 		summary.BaseCommit,
 		len(summary.Files),
-		len(patch))
+		manifest.ManifestDigest)
 
-	c.queueDiffPush(DiffChangedParams{
+	params := DiffChangedParams{
 		ExecutionID:    execID,
 		BaseCommit:     summary.BaseCommit,
 		HeadCommit:     summary.HeadCommit,
@@ -954,7 +956,9 @@ func (c *Client) emitDiffChanged() {
 		TotalDeletions: summary.TotalDeletions,
 		Files:          summary.Files,
 		Patch:          patch,
-	})
+	}
+
+	c.queueDiffPush(params, manifest, sections)
 }
 
 // flushDiffOnRegister re-pushes the current diff state after a (re)registration.
@@ -968,23 +972,226 @@ func (c *Client) flushDiffOnRegister() {
 	c.emitDiffChanged()
 }
 
-// diffPushState is one full-state diff push awaiting control-plane acknowledgment.
+// buildDiffSections splits the git diff across files, produces individual file sections,
+// computes their sha256 digests, and generates the manifest digest.
+func (c *Client) buildDiffSections(baseBranch string) (GitDiffSummaryResult, DiffManifestParams, map[string]string, error) {
+	summary, err := c.buildGitDiffSummary(baseBranch)
+	if err != nil {
+		return GitDiffSummaryResult{}, DiffManifestParams{}, nil, err
+	}
+
+	workspace := c.resolveWorkspace()
+	sections := make(map[string]string) // filePath -> diff section text
+
+	if summary.BaseCommit != "" {
+		diffCmd := exec.Command("git", "diff", "-U3", summary.BaseCommit) //nolint:gosec
+		diffCmd.Dir = workspace
+		if out, err := diffCmd.Output(); err == nil && len(out) > 0 {
+			// Split diff output on "diff --git "
+			raw := string(out)
+			chunks := strings.Split(raw, "diff --git ")
+			for _, chunk := range chunks {
+				if strings.TrimSpace(chunk) == "" {
+					continue
+				}
+				sectionText := "diff --git " + chunk
+				if !strings.HasSuffix(sectionText, "\n") {
+					sectionText += "\n"
+				}
+				// extract file path from header: "a/<path> b/<path>"
+				lines := strings.SplitN(sectionText, "\n", 2)
+				fields := strings.Fields(lines[0])
+				if len(fields) >= 4 {
+					dstPath := strings.TrimPrefix(fields[3], "b/")
+					sections[dstPath] = sectionText
+				}
+			}
+		}
+	}
+
+	porcelainCmd := exec.Command("git", "status", "--porcelain", "-uall") //nolint:gosec
+	porcelainCmd.Dir = workspace
+	if pOut, err := porcelainCmd.Output(); err == nil {
+		for _, line := range strings.Split(string(pOut), "\n") {
+			if strings.HasPrefix(line, "??") {
+				filePath := strings.TrimSpace(line[2:])
+				if filePath == "" || isKratisPlatformPath(filePath) {
+					continue
+				}
+				fullPath := filepath.Join(workspace, filePath)
+				content, err := os.ReadFile(fullPath) //nolint:gosec
+				if err != nil {
+					continue
+				}
+				var sb strings.Builder
+				fmt.Fprintf(&sb, "diff --git a/%s b/%s\n", filePath, filePath)
+				sb.WriteString("new file mode 100644\n")
+				sb.WriteString("--- /dev/null\n")
+				fmt.Fprintf(&sb, "+++ b/%s\n", filePath)
+				sb.WriteString(syntheticNewFilePatch(content))
+				if !strings.HasSuffix(sb.String(), "\n") {
+					sb.WriteString("\n")
+				}
+				sections[filePath] = sb.String()
+			}
+		}
+	}
+
+	var manifestFiles []GitDiffManifestFile
+	shaToSection := make(map[string]string)
+
+	for _, file := range summary.Files {
+		secText := sections[file.Path]
+		secBytes := []byte(secText)
+		h := sha256.Sum256(secBytes)
+		secSha := hex.EncodeToString(h[:])
+		shaToSection[secSha] = secText
+
+		manifestFiles = append(manifestFiles, GitDiffManifestFile{
+			Path:                 file.Path,
+			Status:               file.Status,
+			Additions:            file.Additions,
+			Deletions:            file.Deletions,
+			IsCollapsedByDefault: file.IsCollapsedByDefault,
+			Sha:                  secSha,
+			Size:                 len(secBytes),
+		})
+	}
+
+	// Sort manifestFiles by Path for stable manifestDigest calculation
+	sort.Slice(manifestFiles, func(i, j int) bool {
+		return manifestFiles[i].Path < manifestFiles[j].Path
+	})
+
+	var mdBuilder strings.Builder
+	mdBuilder.WriteString(summary.BaseCommit)
+	mdBuilder.WriteString("\n")
+	for _, f := range manifestFiles {
+		mdBuilder.WriteString(f.Path)
+		mdBuilder.WriteString("\x00")
+		mdBuilder.WriteString(string(f.Status))
+		mdBuilder.WriteString("\x00")
+		mdBuilder.WriteString(f.Sha)
+		mdBuilder.WriteString("\n")
+	}
+	mHash := sha256.Sum256([]byte(mdBuilder.String()))
+	manifestDigest := hex.EncodeToString(mHash[:])
+
+	manifestParams := DiffManifestParams{
+		BaseCommit:     summary.BaseCommit,
+		HeadCommit:     summary.HeadCommit,
+		TotalAdditions: summary.TotalAdditions,
+		TotalDeletions: summary.TotalDeletions,
+		ManifestDigest: manifestDigest,
+		Files:          manifestFiles,
+	}
+
+	return summary, manifestParams, shaToSection, nil
+}
+
 type diffPushState struct {
-	params DiffChangedParams
-	seq    uint64
+	params   DiffChangedParams
+	manifest DiffManifestParams
+	sections map[string]string // sha -> section data
+	seq      uint64
 }
 
 // queueDiffPush serializes diff pushes so the latest full workspace state is
 // always the one being sent.
-func (c *Client) queueDiffPush(params DiffChangedParams) {
+func (c *Client) queueDiffPush(params DiffChangedParams, manifest DiffManifestParams, sections map[string]string) {
 	c.diffMu.Lock()
 	c.diffSeq++
-	c.pendingDiff = &diffPushState{params: params, seq: c.diffSeq}
+	c.pendingDiff = &diffPushState{params: params, manifest: manifest, sections: sections, seq: c.diffSeq}
 	if !c.pushingDiff {
 		c.pushingDiff = true
 		go c.diffPushLoop()
 	}
 	c.diffMu.Unlock()
+}
+
+// syncDiffSections performs the incremental manifest-driven diff upload.
+func (c *Client) syncDiffSections(manifest DiffManifestParams, sections map[string]string) error {
+	resp, err := c.sendRequest("env.diff_manifest", manifest)
+	if err != nil {
+		return err
+	}
+	if resp.Error != nil {
+		return fmt.Errorf("control plane rejected diff_manifest: code=%d message=%q", resp.Error.Code, resp.Error.Message)
+	}
+
+	var mResult DiffManifestResult
+	if err := json.Unmarshal(resp.Result, &mResult); err != nil {
+		return fmt.Errorf("unmarshal diff_manifest result: %w", err)
+	}
+
+	if mResult.Status == DiffManifestStatusCommitted {
+		return nil
+	}
+
+	// Send missing sections in chunks
+	var partsToSend []DiffSectionPart
+	for _, sha := range mResult.Missing {
+		data, ok := sections[sha]
+		if !ok {
+			continue
+		}
+		chunks := chunkString(data, maxOutputChunkBytes)
+		for idx, chunk := range chunks {
+			partsToSend = append(partsToSend, DiffSectionPart{
+				Sha:       sha,
+				PartIndex: idx,
+				PartCount: len(chunks),
+				Data:      chunk,
+			})
+		}
+	}
+
+	// Batch parts so no single frame exceeds 4MB
+	batchBytes := 0
+	var currentBatch []DiffSectionPart
+	for _, part := range partsToSend {
+		partLen := len(part.Data)
+		if len(currentBatch) > 0 && batchBytes+partLen > maxOutputChunkBytes {
+			pResp, pErr := c.sendRequest("env.diff_sections", DiffSectionsParams{
+				ExecutionID:    manifest.ExecutionID,
+				ManifestDigest: manifest.ManifestDigest,
+				Parts:          currentBatch,
+			})
+			if pErr != nil {
+				return pErr
+			}
+			if pResp.Error != nil {
+				return fmt.Errorf("diff_sections rejected: %d %s", pResp.Error.Code, pResp.Error.Message)
+			}
+			currentBatch = nil
+			batchBytes = 0
+		}
+		currentBatch = append(currentBatch, part)
+		batchBytes += partLen
+	}
+	if len(currentBatch) > 0 {
+		pResp, pErr := c.sendRequest("env.diff_sections", DiffSectionsParams{
+			ExecutionID:    manifest.ExecutionID,
+			ManifestDigest: manifest.ManifestDigest,
+			Parts:          currentBatch,
+		})
+		if pErr != nil {
+			return pErr
+		}
+		if pResp.Error != nil {
+			return fmt.Errorf("diff_sections rejected: %d %s", pResp.Error.Code, pResp.Error.Message)
+		}
+	}
+
+	// Re-check manifest to commit
+	finalResp, finalErr := c.sendRequest("env.diff_manifest", manifest)
+	if finalErr != nil {
+		return finalErr
+	}
+	if finalResp.Error != nil {
+		return fmt.Errorf("control plane rejected second diff_manifest: code=%d message=%q", finalResp.Error.Code, finalResp.Error.Message)
+	}
+	return nil
 }
 
 // diffPushLoop drains the pending diff slot, retrying with backoff until the
@@ -1007,13 +1214,20 @@ func (c *Client) diffPushLoop() {
 			return
 		}
 
-		if err := c.sendDiffAcked(state.params); err != nil {
+		// First send legacy env.diff_changed for backwards compatibility with tests and older control planes,
+		// and also execute incremental diff_manifest sync if supported.
+		err := c.sendDiffAcked(state.params)
+		if err == nil && state.manifest.ManifestDigest != "" {
+			_ = c.syncDiffSections(state.manifest, state.sections)
+		}
+
+		if err != nil {
 			var fte *frameTooLargeError
 			if errors.As(err, &fte) {
 				log.Printf("[DIFF] dropped env.diff_changed push: %v", err)
 				continue
 			}
-			log.Printf("[DIFF] env.diff_changed push failed, will retry: %v", err)
+			log.Printf("[DIFF] diff push failed, will retry: %v", err)
 			c.diffMu.Lock()
 			// Only put the failed state back if nothing newer was queued while
 			// it was in flight; a newer full-state emit supersedes it.
@@ -1062,11 +1276,12 @@ func (c *Client) emitDiffChangedSync() {
 		return
 	}
 
-	summary, err := c.buildGitDiffSummary(baseBranch)
+	summary, manifest, sections, err := c.buildDiffSections(baseBranch)
 	if err != nil {
 		log.Printf("[DIFF] Unable to compute terminal env.diff_changed for execution %s: %v", execID, err)
 		return
 	}
+	manifest.ExecutionID = execID
 	params := DiffChangedParams{
 		ExecutionID:    execID,
 		BaseCommit:     summary.BaseCommit,
@@ -1076,9 +1291,14 @@ func (c *Client) emitDiffChangedSync() {
 		Files:          summary.Files,
 		Patch:          c.buildGitFullDiff(summary.BaseCommit),
 	}
-	if err := c.sendDiffAcked(params); err != nil {
-		log.Printf("[DIFF] terminal env.diff_changed push failed, queued for retry: %v", err)
-		c.queueDiffPush(params)
+
+	syncErr := c.sendDiffAcked(params)
+	if syncErr == nil && manifest.ManifestDigest != "" {
+		_ = c.syncDiffSections(manifest, sections)
+	}
+	if syncErr != nil {
+		log.Printf("[DIFF] terminal diff push failed, queued for retry: %v", syncErr)
+		c.queueDiffPush(params, manifest, sections)
 	}
 }
 

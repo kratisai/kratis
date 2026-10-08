@@ -34,16 +34,26 @@ func TestMain(m *testing.M) {
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
 
-// ackDiffChanged answers env.diff_changed requests with the control-plane
-// persistence acknowledgment so acked diff pushes never block on the request
-// timeout in tests that only capture frames. No-op for other frames.
+// ackDiffChanged answers env.diff_changed, env.diff_manifest, and env.diff_sections requests
+// with appropriate acknowledgments so tests never block.
 func ackDiffChanged(conn *websocket.Conn, req JsonRpcRequest) {
-	if req.Method != "env.diff_changed" || req.ID == nil {
+	if req.ID == nil {
+		return
+	}
+	var raw json.RawMessage
+	switch req.Method {
+	case "env.diff_changed":
+		raw = json.RawMessage(`{"type":"env_diff_changed","status":"persisted"}`)
+	case "env.diff_manifest":
+		raw = json.RawMessage(`{"type":"env_diff_manifest","status":"committed","missing":[]}`)
+	case "env.diff_sections":
+		raw = json.RawMessage(`{"type":"env_diff_sections","status":"stored","missing":[]}`)
+	default:
 		return
 	}
 	data, err := json.Marshal(JsonRpcResponse{
 		JsonRPC: "2.0",
-		Result:  json.RawMessage(`{"type":"env_diff_changed","status":"persisted"}`),
+		Result:  raw,
 		ID:      req.ID,
 	})
 	if err != nil {
