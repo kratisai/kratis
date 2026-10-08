@@ -3871,3 +3871,67 @@ func TestWaitForQuiet_ZeroPeriodReturnsImmediately(t *testing.T) {
 		t.Errorf("expected zero quiet period to return immediately, took %v", elapsed)
 	}
 }
+
+func TestDiffCheckAfterQuiet_EmitsWhenActivityOccurred(t *testing.T) {
+	dir := setupTestGitRepo(t)
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	client, received := connectedGitClient(t, dir)
+	client.currentExecutionID = "exec-quiet-check"
+	client.Timeouts.DiffDebouncePeriod = 10 * time.Millisecond
+
+	// Baseline check on the clean workspace: records the pre-write hash.
+	client.TriggerDiffCheck()
+	first := captureNextResponse(t, received)
+	var baseline struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal(first, &baseline); err != nil || baseline.Method != "env.diff_changed" {
+		t.Fatalf("Expected baseline env.diff_changed, got %s", baseline.Method)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Late quiet-window write\n"), 0600); err != nil {
+		t.Fatalf("Failed to write README: %v", err)
+	}
+
+	before := client.lastActivityNanos.Load()
+	client.markActivity() // agent activity lands during the quiet wait
+	client.diffCheckAfterQuiet(before)
+
+	params := captureDiffChangedNotification(t, received)
+	if !strings.Contains(params.Patch, "Late quiet-window write") {
+		t.Errorf("Expected the post-quiet check to include the late write, got: %s", params.Patch)
+	}
+}
+
+func TestDiffCheckAfterQuiet_SkipsWithoutActivity(t *testing.T) {
+	dir := setupTestGitRepo(t)
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	client, received := connectedGitClient(t, dir)
+	client.currentExecutionID = "exec-quiet-skip"
+	client.Timeouts.DiffDebouncePeriod = 10 * time.Millisecond
+
+	client.TriggerDiffCheck()
+	first := captureNextResponse(t, received)
+	var baseline struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal(first, &baseline); err != nil || baseline.Method != "env.diff_changed" {
+		t.Fatalf("Expected baseline env.diff_changed, got %s", baseline.Method)
+	}
+
+	before := client.lastActivityNanos.Load()
+	client.diffCheckAfterQuiet(before)
+
+	select {
+	case data := <-received:
+		var envelope struct {
+			Method string `json:"method"`
+		}
+		if err := json.Unmarshal(data, &envelope); err == nil && envelope.Method == "env.diff_changed" {
+			t.Error("Expected no env.diff_changed when no activity occurred during the quiet wait")
+		}
+	case <-time.After(50 * time.Millisecond):
+	}
+}

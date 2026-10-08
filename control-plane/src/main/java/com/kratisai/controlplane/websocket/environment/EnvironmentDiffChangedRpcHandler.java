@@ -63,6 +63,9 @@ public class EnvironmentDiffChangedRpcHandler
 
         String patchStoragePath = "diffs/" + execId + ".patch";
         byte[] patchBytes = params.patch().getBytes(StandardCharsets.UTF_8);
+        // Must not be caught: the patch is the only diff copy surviving sandbox
+        // teardown. Startup validation (BlobStorageValidator) guarantees the store
+        // is writable; a failure here fails the stream so the sidecar retries.
         blobStorageService.putObject(
                 patchStoragePath, new ByteArrayInputStream(patchBytes), patchBytes.length, "text/plain");
 

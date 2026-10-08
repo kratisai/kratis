@@ -5,21 +5,19 @@ import type { SteerExecutionRequest } from '@/types/diff-types'
 import { fetchDiffSummary, fetchFileDiff, steerExecution } from '@/lib/diff-api'
 
 export const DIFF_QUERY_KEYS = {
+  /** Prefix matching every cached diff query, for change-driven invalidation. */
+  all: ['execution-diff'] as const,
+  /** Prefix matching every diff query of one execution. */
+  execution: (chatId: string, executionId: string) => ['execution-diff', chatId, executionId],
   file: (chatId: string, executionId: string, path: string) => [
-    'execution-diff-file',
-    chatId,
-    executionId,
+    ...DIFF_QUERY_KEYS.execution(chatId, executionId),
+    'file',
     path,
   ],
-  slice: (chatId: string, executionId: string, path: string, start: number, end: number) => [
-    'execution-diff-slice',
-    chatId,
-    executionId,
-    path,
-    start,
-    end,
+  summary: (chatId: string, executionId: string) => [
+    ...DIFF_QUERY_KEYS.execution(chatId, executionId),
+    'summary',
   ],
-  summary: (chatId: string, executionId: string) => ['execution-diff-summary', chatId, executionId],
 }
 
 export function useDiffSummary(

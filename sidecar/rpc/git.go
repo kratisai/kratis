@@ -184,11 +184,14 @@ func (c *Client) writeGlobalGitConfig(helperScript string) {
 // ExecuteCheckout handles git checkout/clone operations. Auth is a prerequisite.
 func (c *Client) ExecuteCheckout(params CheckoutParams, _ interface{}) {
 	log.Printf("Executing repository checkout: url=%s, branch=%s, executionId=%s", params.URL, params.Branch, params.ExecutionID)
+	c.mu.Lock()
 	if params.ExecutionID != "" {
-		c.mu.Lock()
 		c.currentExecutionID = params.ExecutionID
-		c.mu.Unlock()
 	}
+	// Record the checked-out branch as the diff base for later workspace
+	// change notifications, which carry no explicit branch.
+	c.baseBranch = strings.TrimSpace(params.Branch)
+	c.mu.Unlock()
 
 	cmdEnv := os.Environ()
 
@@ -488,13 +491,15 @@ func mergeBaseWithHead(workspace string, ref string) (string, error) {
 
 // resolveDiffBase uses the merge-base of origin/<branch> and HEAD, or the root commit
 // when the origin remote or branch is absent so unpublished commits stay in the diff.
+// An empty branch takes the same root-commit fallback instead of erroring, so
+// workspace change notifications on an origin-remote workspace can still emit.
 func resolveDiffBase(workspace, baseBranch string) (string, error) {
 	if !hasOriginRemote(workspace) {
 		return rootCommit(workspace)
 	}
 	branch := strings.TrimSpace(baseBranch)
 	if branch == "" {
-		return "", fmt.Errorf("base branch is required")
+		return rootCommit(workspace)
 	}
 	checkRemote := exec.Command("git", "rev-parse", "--verify", "origin/"+branch) //nolint:gosec
 	checkRemote.Dir = workspace
@@ -840,15 +845,11 @@ func (c *Client) TriggerDiffCheck() {
 		return
 	}
 
-	cmd := exec.Command("git", "status", "--porcelain", "-uall") //nolint:gosec
-	cmd.Dir = workspace
-	out, err := cmd.Output()
+	hashStr, err := c.workspaceStatusHash(workspace)
 	if err != nil {
+		log.Printf("[DIFF] git status check failed in %s: %v", workspace, err)
 		return
 	}
-
-	hash := sha256.Sum256(out)
-	hashStr := hex.EncodeToString(hash[:])
 
 	c.diffMu.Lock()
 	defer c.diffMu.Unlock()
@@ -857,6 +858,7 @@ func (c *Client) TriggerDiffCheck() {
 		return
 	}
 	c.lastDiffHash = hashStr
+	log.Printf("[DIFF] workspace changed, scheduling emit for execution %s", c.currentExecutionID)
 
 	debouncePeriod := c.Timeouts.DiffDebouncePeriod
 	if debouncePeriod <= 0 {
@@ -868,24 +870,80 @@ func (c *Client) TriggerDiffCheck() {
 		c.diffDebounceTimer.Stop()
 	}
 	c.diffDebounceTimer = time.AfterFunc(debouncePeriod, func() {
+		c.diffMu.Lock()
+		c.diffDebounceTimer = nil
+		c.diffMu.Unlock()
 		c.emitDiffChanged()
 	})
+}
+
+// workspaceStatusHash hashes `git status --porcelain -uall` so diff triggers
+// can cheaply detect whether the workspace changed since the last check.
+func (c *Client) workspaceStatusHash(workspace string) (string, error) {
+	cmd := exec.Command("git", "status", "--porcelain", "-uall") //nolint:gosec
+	cmd.Dir = workspace
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(out)
+	return hex.EncodeToString(hash[:]), nil
+}
+
+// flushDiffCheck synchronously emits env.diff_changed when the workspace
+// changed since the last check or a debounced emit is still pending. Called
+// from SendComplete so the persisted diff snapshot reflects the terminal
+// workspace state regardless of which mid-run trigger fired last.
+func (c *Client) flushDiffCheck() {
+	workspace := c.resolveWorkspace()
+	if _, err := os.Stat(filepath.Join(workspace, ".git")); err != nil {
+		return
+	}
+
+	hashStr, err := c.workspaceStatusHash(workspace)
+	if err != nil {
+		return
+	}
+
+	c.diffMu.Lock()
+	shouldEmit := hashStr != c.lastDiffHash || c.diffDebounceTimer != nil
+	if hashStr != c.lastDiffHash {
+		c.lastDiffHash = hashStr
+	}
+	if c.diffDebounceTimer != nil {
+		c.diffDebounceTimer.Stop()
+		c.diffDebounceTimer = nil
+	}
+	c.diffMu.Unlock()
+
+	if shouldEmit {
+		c.emitDiffChanged()
+	}
 }
 
 // emitDiffChanged computes the diff summary and unified patch and sends env.diff_changed.
 func (c *Client) emitDiffChanged() {
 	c.mu.Lock()
 	execID := c.currentExecutionID
+	baseBranch := c.baseBranch
 	c.mu.Unlock()
 	if execID == "" {
 		return
 	}
 
-	summary, err := c.buildGitDiffSummary("")
+	summary, err := c.buildGitDiffSummary(baseBranch)
 	if err != nil {
+		log.Printf("[DIFF] Unable to emit env.diff_changed for execution %s: %v", execID, err)
 		return
 	}
 	patch := c.buildGitFullDiff(summary.BaseCommit)
+	log.Printf(
+		"[DIFF] emitted env.diff_changed for execution %s: baseBranch=%q baseCommit=%s files=%d patchBytes=%d",
+		execID,
+		baseBranch,
+		summary.BaseCommit,
+		len(summary.Files),
+		len(patch))
 
 	_ = c.sendNotification("env.diff_changed", DiffChangedParams{
 		ExecutionID:    execID,

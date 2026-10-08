@@ -222,7 +222,11 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 	if promptErr == nil && stopReason != "" && ValidStopReasons[stopReason] {
 		c.TriggerDiffCheck()
 		// Some harnesses keep working after signalling end_turn; wait for quiet.
+		activityBeforeQuiet := c.lastActivityNanos.Load()
 		c.waitForQuiet(c.Timeouts.PromptQuietPeriod)
+		// Writes landing during the quiet window were invisible to the pre-quiet
+		// check; re-check so they reach the diff before the turn is reported.
+		c.diffCheckAfterQuiet(activityBeforeQuiet)
 		completionParams := AcpPromptCompleteParams{
 			SessionID:   session.SessionID,
 			StopReason:  stopReason,

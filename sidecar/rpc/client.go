@@ -138,6 +138,10 @@ type Client struct {
 	// Current active execution ID
 	currentExecutionID string
 
+	// Checked-out target branch recorded from env.checkout; the diff base for
+	// workspace change notifications emitted without an explicit branch.
+	baseBranch string
+
 	lastActivityNanos atomic.Int64
 
 	// Timeouts for client operations
@@ -514,6 +518,15 @@ func (c *Client) waitForQuiet(period time.Duration) {
 	}
 }
 
+// diffCheckAfterQuiet re-checks the workspace when activity was observed
+// during the quiet wait, so writes that landed after the pre-quiet diff check
+// still reach the diff before the turn boundary is reported.
+func (c *Client) diffCheckAfterQuiet(activityNanosBefore int64) {
+	if c.lastActivityNanos.Load() != activityNanosBefore {
+		c.TriggerDiffCheck()
+	}
+}
+
 func convertDiff(diff *acp.ActivityDiff) *ActivityDiff {
 	if diff == nil {
 		return nil
@@ -547,6 +560,11 @@ func convertHitl(hitl *acp.ActivityHitl) *ActivityHitl {
 }
 
 func (c *Client) SendComplete(info runner.CompletionInfo) {
+	// Flush a terminal diff emit before env.complete so the persisted diff
+	// snapshot always reflects the session's final workspace state, even if no
+	// mid-run trigger saw the last writes.
+	c.flushDiffCheck()
+
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	c.mu.Unlock()

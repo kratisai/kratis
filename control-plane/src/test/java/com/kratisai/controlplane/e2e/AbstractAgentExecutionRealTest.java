@@ -230,6 +230,9 @@ public abstract class AbstractAgentExecutionRealTest {
     private SandboxExecutionRepository sandboxExecutionRepository;
 
     @Autowired
+    private ExecutionDiffSnapshotRepository executionDiffSnapshotRepository;
+
+    @Autowired
     private LocalDockerSandboxProvider localDockerSandboxProvider;
 
     @Autowired
@@ -267,6 +270,9 @@ public abstract class AbstractAgentExecutionRealTest {
     private final AtomicInteger hitlRequestCount = new AtomicInteger(0);
     private final AtomicReference<ClientPayload.ExecutionAcpInitializedResult> acpInitialized = new AtomicReference<>();
     private final Set<ActivityType> receivedActivityTypes = ConcurrentHashMap.newKeySet();
+    private final AtomicInteger diffChangedEventCount = new AtomicInteger(0);
+    private final List<String> activityTimeline = Collections.synchronizedList(new ArrayList<>());
+    private final List<String> diffEventTimeline = Collections.synchronizedList(new ArrayList<>());
 
     private final AtomicInteger conformanceToolEmissionsWithoutId = new AtomicInteger();
     private final Set<String> conformanceToolActionIds = ConcurrentHashMap.newKeySet();
@@ -486,6 +492,9 @@ public abstract class AbstractAgentExecutionRealTest {
         hitlRequestCount.set(0);
         acpInitialized.set(null);
         receivedActivityTypes.clear();
+        diffChangedEventCount.set(0);
+        activityTimeline.clear();
+        diffEventTimeline.clear();
         conformanceToolEmissionsWithoutId.set(0);
         conformanceToolActionIds.clear();
         conformanceToolTitlesByActionId.clear();
@@ -547,6 +556,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 })
                 .whenType(ClientPayload.ExecutionActivityResult.class, (wsSession, msg) -> {
                     receivedActivityTypes.add(msg.activityType());
+                    activityTimeline.add(msg.activityType() + ":" + msg.status());
                     captureAcpConformance(msg);
                     captureCommandOutput(msg);
                     logger.debug("[execution][activity] {} — {}", msg.activityType(), msg.description());
@@ -558,6 +568,26 @@ public abstract class AbstractAgentExecutionRealTest {
                             msg.sessionId(),
                             msg.agentName(),
                             msg.agentVersion());
+                })
+                .whenType(ClientPayload.ExecutionDiffChangedResult.class, (wsSession, msg) -> {
+                    int n = diffChangedEventCount.incrementAndGet();
+                    int activityCount;
+                    String recent;
+                    synchronized (activityTimeline) {
+                        activityCount = activityTimeline.size();
+                        int from = Math.max(0, activityCount - 5);
+                        recent = String.join(", ", activityTimeline.subList(from, activityCount));
+                    }
+                    diffEventTimeline.add("#" + n + " after " + activityCount + " activities");
+                    logger.info(
+                            "[diff-behavior] harness={} execution_diff_changed #{} executionId={} chatId={} "
+                                    + "after {} activities; recent=[{}]",
+                            getHarness().getName(),
+                            n,
+                            msg.executionId(),
+                            msg.chatId(),
+                            activityCount,
+                            recent);
                 })
                 // Auto-approve all HITL permission requests so agent execution proceeds without
                 // blocking
@@ -650,8 +680,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 conformanceStatusSequences
                         .computeIfAbsent(actionId, k -> Collections.synchronizedList(new ArrayList<>()))
                         .add(title + " → " + msg.status());
-                if (previous != null
-                        && (previous == ActivityStatus.COMPLETED || previous == ActivityStatus.FAILED)
+                if ((previous == ActivityStatus.COMPLETED || previous == ActivityStatus.FAILED)
                         && (msg.status() == ActivityStatus.PENDING || msg.status() == ActivityStatus.IN_PROGRESS)) {
                     conformanceResurrectedActionIds.add(actionId);
                 }
@@ -732,8 +761,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 refinedTitles.put(actionId, titles);
             }
         });
-        Map<String, List<String>> sequences = new TreeMap<>();
-        conformanceStatusSequences.forEach(sequences::put);
+        Map<String, List<String>> sequences = new TreeMap<>(conformanceStatusSequences);
         logger.info(
                 """
                 [conformance-matrix] harness={}
@@ -1172,6 +1200,8 @@ public abstract class AbstractAgentExecutionRealTest {
                             .contains(expectedAgentOutput));
         }
 
+        observeDiffBehavior(env, expectedFiles);
+
         String expectedToolOutput = getExpectedToolOutputSubstring();
         if (expectedToolOutput != null) {
             logger.info(
@@ -1282,5 +1312,85 @@ public abstract class AbstractAgentExecutionRealTest {
                                     getHarness().getName())
                             .isIn(SandboxExecutionStatus.COMPLETED, SandboxExecutionStatus.FAILED);
                 });
+    }
+
+    /**
+     * Validates the observed diff-sync behaviour for this harness: at least one
+     * {@code execution_diff_changed} event must have reached the UI and the
+     * persisted diff snapshot must already contain the expected files — before
+     * the execution is terminated, since the instance view relies on the
+     * pushed event and the snapshot is the fallback after a disconnect.
+     */
+    private void observeDiffBehavior(ExecutionEnvironment env, List<ExpectedFile> expectedFiles) {
+        List<SandboxExecution> executions = sandboxExecutionRepository.findAll().stream()
+                .filter(e -> e.getEnvironment().getId().equals(env.getId()))
+                .toList();
+        assertThat(executions)
+                .as("%s must have a sandbox execution row", getHarness().getName())
+                .isNotEmpty();
+        SandboxExecution execution = executions.getFirst();
+
+        List<String> expectedNames =
+                expectedFiles.stream().map(f -> fileName(f.path())).toList();
+        try {
+            Awaitility.await("diff snapshot with expected files for "
+                            + getHarness().getName())
+                    .atMost(20, TimeUnit.SECONDS)
+                    .pollInterval(Duration.ofMillis(500))
+                    .ignoreExceptions()
+                    .untilAsserted(() -> {
+                        String json = readSnapshotSummary(execution.getId());
+                        for (String name : expectedNames) {
+                            assertThat(json).contains(name);
+                        }
+                    });
+        } catch (ConditionTimeoutException e) {
+            // Fall through to the hard assertions below, which report the miss.
+        }
+
+        String summaryJson = readSnapshotSummary(execution.getId());
+        String workspaceRemotes;
+        try {
+            var remote = createDockerVerifier().executeInContainer("git", "-C", "/kratis/workspace", "remote", "-v");
+            workspaceRemotes = new String(remote.output()).trim();
+        } catch (Exception e) {
+            workspaceRemotes = "unavailable: " + e.getMessage();
+        }
+        assertThat(diffChangedEventCount.get())
+                .as(
+                        "%s must push execution_diff_changed events while the sandbox is connected",
+                        getHarness().getName())
+                .isGreaterThanOrEqualTo(1);
+        assertThat(summaryJson)
+                .as("%s must persist a diff snapshot", getHarness().getName())
+                .isNotEmpty();
+        for (String name : expectedNames) {
+            assertThat(summaryJson)
+                    .as(
+                            "%s diff snapshot must contain expected file %s",
+                            getHarness().getName(), name)
+                    .contains(name);
+        }
+        logger.info(
+                "[diff-behavior] SUMMARY harness={} diffChangedEvents={} activityCount={} "
+                        + "workspaceRemotes=[{}] diffTimeline={} activityTimeline={}",
+                getHarness().getName(),
+                diffChangedEventCount.get(),
+                activityTimeline.size(),
+                workspaceRemotes,
+                diffEventTimeline,
+                new ArrayList<>(activityTimeline));
+    }
+
+    private String readSnapshotSummary(UUID executionId) {
+        return executionDiffSnapshotRepository
+                .findByExecutionId(executionId)
+                .map(ExecutionDiffSnapshot::getSummaryJson)
+                .orElse("");
+    }
+
+    private static String fileName(String path) {
+        int idx = path.lastIndexOf('/');
+        return idx >= 0 ? path.substring(idx + 1) : path;
     }
 }

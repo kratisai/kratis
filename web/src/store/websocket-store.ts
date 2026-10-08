@@ -630,10 +630,7 @@ export function handleExecutionCompleteResult(result: ExecutionCompleteResult): 
 export function handleExecutionDiffChangedResult(result: ExecutionDiffChangedResult): void {
   if (result.teamId !== useAuthStore.getState().currentTeamId) return
   void queryClient.invalidateQueries({
-    queryKey: DIFF_QUERY_KEYS.summary(result.chatId, result.executionId),
-  })
-  void queryClient.invalidateQueries({
-    queryKey: ['execution-diff-file', result.chatId, result.executionId],
+    queryKey: DIFF_QUERY_KEYS.execution(result.chatId, result.executionId),
   })
 }
 
