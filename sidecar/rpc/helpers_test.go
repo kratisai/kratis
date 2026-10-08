@@ -26,6 +26,7 @@ func TestMain(m *testing.M) {
 		panic("failed to create temp credentials dir: " + err.Error())
 	}
 	defaultCredentialsDir = credentialsDir
+	defaultTerminalLogFile = filepath.Join(credentialsDir, "logs", "terminal.log")
 
 	code := m.Run()
 	_ = os.RemoveAll(credentialsDir)

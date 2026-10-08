@@ -103,6 +103,7 @@ export interface ClientRpcMethods {
   'chat.send': ChatSendParams
   'chat.subscribe': ChatSubscribeParams
   'chat.unsubscribe': ChatUnsubscribeParams
+  'execution.get_logs': ExecutionGetLogsParams
   'execution.replay_activities': ExecutionReplayActivitiesParams
   ping: Record<string, never> | void
   subscribe: SubscribeParams
@@ -122,6 +123,13 @@ export interface CompleteResult {
   messageId?: string
   type: 'complete'
 }
+
+export type EnvironmentStatus =
+  | 'CONNECTED'
+  | 'DISCONNECTED'
+  | 'PENDING_RECONNECT'
+  | 'SLEEPING'
+  | 'TERMINATED'
 
 export interface ExecutionActivityResult {
   actionId?: string
@@ -146,6 +154,11 @@ export interface ExecutionDiffChangedResult {
   executionId: string
   teamId: string
   type: 'execution_diff_changed'
+}
+
+export interface ExecutionGetLogsParams {
+  executionId: string
+  tailLines?: number
 }
 
 export interface ExecutionHitlRequiredResult {
@@ -175,6 +188,14 @@ export interface ExecutionHitlResolvedResult {
   resolvedByUserId?: null | string
   response: HitlResponse
   type: 'execution_hitl_resolved'
+}
+
+export interface ExecutionLogsResult {
+  environmentId: string
+  executionId: string
+  lines: string[]
+  status: EnvironmentStatus
+  type: 'execution_logs'
 }
 
 export interface ExecutionOutputResult {
@@ -251,6 +272,7 @@ export type JsonRpcResult =
   | ExecutionDiffChangedResult
   | ExecutionHitlRequiredResult
   | ExecutionHitlResolvedResult
+  | ExecutionLogsResult
   | ExecutionOutputResult
   | ExecutionReplayCompleteResult
   | ExecutionStatusChangedResult

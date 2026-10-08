@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionLogsResult",
+  "type": "object",
+  "required": [
+    "type",
+    "executionId",
+    "environmentId",
+    "status",
+    "lines"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "execution_logs",
+      "enum": [
+        "execution_logs"
+      ]
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environmentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "CONNECTED",
+        "DISCONNECTED",
+        "PENDING_RECONNECT",
+        "SLEEPING",
+        "TERMINATED"
+      ]
+    },
+    "lines": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

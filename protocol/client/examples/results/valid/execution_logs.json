@@ -1,0 +1,10 @@
+{
+  "type": "execution_logs",
+  "executionId": "00000000-0000-0000-0000-000000000007",
+  "environmentId": "00000000-0000-0000-0000-000000000008",
+  "status": "CONNECTED",
+  "lines": [
+    "npm install",
+    "added 120 packages in 4s"
+  ]
+}

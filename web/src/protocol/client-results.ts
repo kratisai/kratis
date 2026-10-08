@@ -229,6 +229,15 @@ export const CLIENT_RESULTS = {
       type: z.literal('execution_hitl_resolved'),
     })
     .strict(),
+  execution_logs: z
+    .object({
+      environmentId: uuid,
+      executionId: uuid,
+      lines: z.array(z.string()),
+      status: z.enum(['CONNECTED', 'DISCONNECTED', 'PENDING_RECONNECT', 'SLEEPING', 'TERMINATED']),
+      type: z.literal('execution_logs'),
+    })
+    .strict(),
   execution_output: z
     .object({
       executionId: uuid,

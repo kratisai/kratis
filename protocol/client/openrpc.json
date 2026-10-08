@@ -210,6 +210,27 @@
           ]
         }
       }
+    },
+    {
+      "name": "execution.get_logs",
+      "summary": "Fetch the trailing terminal log lines for an execution's environment; the reply goes only to the requesting session",
+      "x-kratis-direction": "web-to-control-plane",
+      "x-kratis-message-kind": "request",
+      "params": [
+        {
+          "name": "params",
+          "required": true,
+          "schema": {
+            "$ref": "./schemas/requests/execution_get_logs.schema.json"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/execution_logs.schema.json"
+        }
+      }
     }
   ],
   "x-kratis-notifications": [

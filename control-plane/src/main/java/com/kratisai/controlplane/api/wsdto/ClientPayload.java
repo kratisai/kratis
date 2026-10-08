@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.api.wsdto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.model.event.UserEntityType;
@@ -404,6 +405,23 @@ public sealed interface ClientPayload {
 
         public ExecutionReplayCompleteResult(UUID executionId, int activityCount) {
             this(ClientPayloadType.EXECUTION_REPLAY_COMPLETE, executionId, activityCount);
+        }
+    }
+
+    record ExecutionLogsResult(
+            ClientPayloadType type, UUID executionId, UUID environmentId, EnvironmentStatus status, List<String> lines)
+            implements ClientPayload {
+        public ExecutionLogsResult {
+            Objects.requireNonNull(type, "type is required");
+            Objects.requireNonNull(executionId, "executionId is required");
+            Objects.requireNonNull(environmentId, "environmentId is required");
+            Objects.requireNonNull(status, "status is required");
+            Objects.requireNonNull(lines, "lines is required");
+            lines = List.copyOf(lines);
+        }
+
+        public ExecutionLogsResult(UUID executionId, UUID environmentId, EnvironmentStatus status, List<String> lines) {
+            this(ClientPayloadType.EXECUTION_LOGS, executionId, environmentId, status, lines);
         }
     }
 

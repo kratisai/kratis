@@ -1,6 +1,10 @@
 import { create } from 'zustand'
 
-import type { ExecutionReplayCompleteResult } from '@/types/websocket-types'
+import type {
+  EnvironmentStatus,
+  ExecutionLogsResult,
+  ExecutionReplayCompleteResult,
+} from '@/types/websocket-types'
 
 import { useActivityStore } from '@/store/activity-store'
 import { useWebSocketStore } from '@/store/websocket-store'
@@ -8,10 +12,14 @@ import { useWebSocketStore } from '@/store/websocket-store'
 interface ExecutionState {
   addLog: (executionId: string, log: string) => void
   clearLogs: (executionId: string) => void
+  handleLogsResult: (result: ExecutionLogsResult) => void
   handleReplayComplete: (result: ExecutionReplayCompleteResult) => void
+  logEnvironmentId: Record<string, string>
   logs: Record<string, string[]>
+  logStatus: Record<string, EnvironmentStatus>
   replayActivities: (executionId: string) => void
   replayingExecutionId: null | string
+  requestLogs: (executionId: string) => void
   setTerminalFullscreen: (fullscreen: boolean) => void
   setTerminalHeight: (height: number) => void
   setTerminalOpen: (open: boolean) => void
@@ -19,6 +27,10 @@ interface ExecutionState {
   terminalHeight: number
   terminalOpen: boolean
 }
+
+// Live line count at request time, so lines streamed while catch-up is in flight
+// are appended after the history instead of being overwritten by it.
+const logBaselines = new Map<string, number>()
 
 export const useExecutionStore = create<ExecutionState>((set, get) => ({
   addLog: (executionId, log) =>
@@ -32,18 +44,44 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       const { [executionId]: _removed, ...rest } = state.logs
       return { logs: rest }
     }),
+  handleLogsResult: (result) =>
+    set((state) => {
+      const logStatus = { ...state.logStatus, [result.executionId]: result.status }
+      const logEnvironmentId = {
+        ...state.logEnvironmentId,
+        [result.executionId]: result.environmentId,
+      }
+      if (result.status !== 'CONNECTED' || result.lines.length === 0) {
+        logBaselines.delete(result.executionId)
+        return { logEnvironmentId, logStatus }
+      }
+      const current = state.logs[result.executionId] ?? []
+      const liveSinceRequest = current.slice(logBaselines.get(result.executionId) ?? current.length)
+      logBaselines.delete(result.executionId)
+      return {
+        logEnvironmentId,
+        logs: { ...state.logs, [result.executionId]: [...result.lines, ...liveSinceRequest] },
+        logStatus,
+      }
+    }),
   handleReplayComplete: (result) => {
     if (get().replayingExecutionId === result.executionId) {
       set({ replayingExecutionId: null })
     }
   },
+  logEnvironmentId: {},
   logs: {},
+  logStatus: {},
   replayActivities: (executionId) => {
     useActivityStore.getState().clearActivities(executionId)
     set({ replayingExecutionId: executionId })
     useWebSocketStore.getState().send('execution.replay_activities', { executionId })
   },
   replayingExecutionId: null,
+  requestLogs: (executionId) => {
+    logBaselines.set(executionId, (get().logs[executionId] ?? []).length)
+    useWebSocketStore.getState().send('execution.get_logs', { executionId })
+  },
   setTerminalFullscreen: (terminalFullscreen) => set({ terminalFullscreen }),
   setTerminalHeight: (terminalHeight) => set({ terminalHeight }),
   setTerminalOpen: (open) => set({ terminalOpen: open }),

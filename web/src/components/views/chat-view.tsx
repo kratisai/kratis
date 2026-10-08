@@ -4,6 +4,7 @@ import { Maximize2, Minimize2, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { useResumeEnvironment } from '@/hooks/use-environments'
 import { useChatExecutions } from '@/hooks/use-executions'
 import { cn } from '@/lib/utils'
 import { useCanvasStore } from '@/store/canvas-store'
@@ -13,6 +14,7 @@ import { useExecutionStore } from '@/store/execution-store'
 import { DesignStageView } from '../topic/design-stage-view'
 import { ExecutionStageView } from '../topic/execution-stage-view'
 import { TopicStageNav } from '../topic/topic-stage-nav'
+import { TerminalLogNotice } from './terminal-log-notice'
 
 const MIN_TERMINAL_HEIGHT = 128
 const MAX_TERMINAL_HEIGHT_RATIO = 0.85
@@ -31,7 +33,10 @@ export function ChatView() {
   const terminalEndRef = useRef<HTMLDivElement>(null)
 
   const {
+    logEnvironmentId,
     logs,
+    logStatus,
+    requestLogs,
     setTerminalFullscreen,
     setTerminalHeight,
     setTerminalOpen,
@@ -48,6 +53,9 @@ export function ChatView() {
   const activeExecutionId = routeExecutionId ?? latestRunning?.id ?? null
   const activeLogs = activeExecutionId ? (logs[activeExecutionId] ?? []) : []
   const showTerminal = terminalOpen && activeExecutionId !== null
+  const activeEnvironmentId = activeExecutionId ? logEnvironmentId[activeExecutionId] : undefined
+  const activeLogStatus = activeExecutionId ? logStatus[activeExecutionId] : undefined
+  const resumeEnvironment = useResumeEnvironment()
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- canvases[chatId] can be undefined at runtime despite the Record type
   const chatCanvases = chatId ? canvases[chatId] || [] : []
@@ -61,6 +69,20 @@ export function ChatView() {
       void queryClient.invalidateQueries({ queryKey: [CHAT_EXECUTIONS_QUERY_KEY, chatId] })
     }
   }, [chatId, queryClient, subscribeChat])
+
+  // Catch up on history each time the drawer opens or the target execution changes.
+  useEffect(() => {
+    if (showTerminal && activeExecutionId) {
+      requestLogs(activeExecutionId)
+    }
+  }, [showTerminal, activeExecutionId, requestLogs])
+
+  const handleWake = () => {
+    if (!activeEnvironmentId || !activeExecutionId) return
+    resumeEnvironment.mutate(activeEnvironmentId, {
+      onSuccess: () => requestLogs(activeExecutionId),
+    })
+  }
 
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
@@ -182,6 +204,11 @@ export function ChatView() {
             </div>
           </div>
           <div className="flex-1 space-y-1 overflow-y-auto p-4 select-text">
+            <TerminalLogNotice
+              isWaking={resumeEnvironment.isPending}
+              onWake={activeEnvironmentId ? handleWake : null}
+              status={activeLogStatus}
+            />
             {activeLogs.length === 0 ? (
               <div className="text-zinc-600 italic">
                 No output. Choose an execution target and click 'Run' above.

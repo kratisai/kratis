@@ -544,6 +544,16 @@ type ReadFileSliceResult struct {
 	Lines     []string `json:"lines"`
 }
 
+// GetLogsParams is the parameters payload for env.get_logs.
+type GetLogsParams struct {
+	TailLines int `json:"tailLines"`
+}
+
+// GetLogsResult is the success response payload for env.get_logs.
+type GetLogsResult struct {
+	Lines []string `json:"lines"`
+}
+
 // GitPushParams is the parameters payload for env.git_push.
 type GitPushParams struct {
 	BranchName    string `json:"branchName"`

@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.get_logs",
+  "params": {
+    "tailLines": 200
+  },
+  "id": 14
+}

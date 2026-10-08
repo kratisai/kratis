@@ -75,6 +75,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
                         case RegisterGitIdentity ignored -> EnvironmentConnectorResult.RegisterGitIdentity.class;
                         case GitDiffSummary ignored -> EnvironmentConnectorResult.GitDiffSummary.class;
                         case ReadFileSlice ignored -> EnvironmentConnectorResult.ReadFileSlice.class;
+                        case GetLogs ignored -> EnvironmentConnectorResult.GetLogs.class;
                         case GitPush ignored -> EnvironmentConnectorResult.GitPush.class;
                         case GitSetRemote ignored -> EnvironmentConnectorResult.GitSetRemote.class;
                     };
@@ -597,6 +598,23 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
 
         public ReadFileSlice {
             Objects.requireNonNull(path, "path is required");
+        }
+    }
+
+    /** Read the trailing lines of the sandbox terminal log. */
+    record GetLogs(@JsonProperty("tailLines") int tailLines)
+            implements OutboundRequestPayload<EnvironmentConnectorResult.GetLogs> {
+        public static final String METHOD = "env.get_logs";
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+
+        public GetLogs {
+            if (tailLines < 1) {
+                throw new IllegalArgumentException("tailLines must be at least 1");
+            }
         }
     }
 
