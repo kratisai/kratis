@@ -6,10 +6,11 @@ import {
   FileText,
   GitCompare,
   MessageSquare,
+  Moon,
 } from 'lucide-react'
 import { useEffect } from 'react'
 
-import type { ExecutionStatus } from '@/lib/execution-api'
+import type { ExecutionDisplayStatus } from '@/lib/execution-api'
 import type { CanvasDocument } from '@/types/canvas-types'
 
 import { AgentBrandIcon } from '@/components/session/agent-brand-icon'
@@ -24,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useChatExecutions } from '@/hooks/use-executions'
+import { executionDisplayStatus } from '@/lib/execution-api'
 import { cn } from '@/lib/utils'
 import { useCanvasStore } from '@/store/canvas-store'
 
@@ -182,7 +184,7 @@ export function MobileTopicSelector() {
                   <div className="py-1" key={exec.id}>
                     <div className="text-muted-foreground flex items-center justify-between px-2 py-0.5 text-[11px] font-medium">
                       <span className="flex items-center gap-1.5">
-                        <ExecutionStatusDot status={exec.status} />
+                        <ExecutionStatusDot status={executionDisplayStatus(exec)} />
                         Run {exec.runNumber}
                       </span>
                       <span className="flex items-center gap-1 font-mono text-[10px] opacity-80">
@@ -223,7 +225,16 @@ export function MobileTopicSelector() {
   )
 }
 
-function ExecutionStatusDot({ status }: { status: ExecutionStatus }) {
+function ExecutionStatusDot({ status }: { status: ExecutionDisplayStatus }) {
+  if (status === 'SLEEPING') {
+    return (
+      <Moon
+        aria-label="Asleep"
+        className="h-3 w-3 shrink-0 text-indigo-500"
+        data-testid="mobile-execution-sleeping-icon"
+      />
+    )
+  }
   const dotColor =
     status === 'RUNNING'
       ? 'bg-emerald-500 animate-pulse'

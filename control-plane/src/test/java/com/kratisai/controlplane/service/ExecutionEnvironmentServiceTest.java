@@ -189,6 +189,31 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
+    void sleepEnvironment_recordsSleepActivityAndPublishesStatusChange() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        SandboxExecution execution = createRunningExecution(env);
+        when(sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(eq(ENV_ID), any()))
+                .thenReturn(List.of());
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
+                .thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
+        when(activityRepository.nextSequence(EXECUTION_ID)).thenReturn(1L);
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+
+        executionEnvironmentService.sleepEnvironmentInternal(env);
+
+        ArgumentCaptor<SandboxExecutionActivity> activityCaptor =
+                ArgumentCaptor.forClass(SandboxExecutionActivity.class);
+        verify(activityRepository).save(activityCaptor.capture());
+        assertThat(activityCaptor.getValue().getDescription()).isEqualTo("Agent has gone to sleep");
+
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, atLeastOnce()).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getAllValues()).anyMatch(ExecutionStatusChangedEvent.class::isInstance);
+    }
+
+    @Test
     void sleepEnvironment_withSuspendedProviderFailure_returns500AndKeepsEnvironment() {
         ExecutionEnvironment env = createSandboxEnvironment();
         when(sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(eq(ENV_ID), any()))
@@ -246,6 +271,28 @@ class ExecutionEnvironmentServiceTest {
         verify(sandboxProvider).initializeWorkspace("resumed-container-id");
         verify(executionEnvironmentRepository).save(env);
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+    }
+
+    @Test
+    void resumeEnvironment_publishesExecutionStatusChangeForLatestExecution() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setContainerId(null);
+        env.setAuthToken("test-token");
+        SandboxExecution execution = createRunningExecution(env);
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        when(sandboxProvider.resume(ENV_ID.toString(), env, "test-token")).thenReturn("resumed-container-id");
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
+                .thenReturn(Optional.of(execution));
+
+        executionEnvironmentService.resumeEnvironment(USER_ID, TEAM_ID, ENV_ID);
+
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, atLeastOnce()).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getAllValues()).anyMatch(ExecutionStatusChangedEvent.class::isInstance);
     }
 
     @Test

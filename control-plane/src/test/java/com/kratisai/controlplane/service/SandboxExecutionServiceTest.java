@@ -260,6 +260,7 @@ class SandboxExecutionServiceTest {
 
         ExecutionEnvironment environment = new ExecutionEnvironment();
         environment.setId(ENVIRONMENT_ID);
+        environment.setStatus(EnvironmentStatus.CONNECTED);
 
         SandboxExecution execution = new SandboxExecution();
         execution.setId(EXECUTION_ID);
@@ -1560,6 +1561,8 @@ class SandboxExecutionServiceTest {
         assertThat(dto.id()).isEqualTo(execution.getId());
         assertThat(dto.chatId()).isEqualTo(CHAT_ID);
         assertThat(dto.status()).isEqualTo(SandboxExecutionStatus.RUNNING);
+        assertThat(dto.environmentId()).isEqualTo(ENVIRONMENT_ID);
+        assertThat(dto.environmentStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
     }
 
     @Test
@@ -1645,6 +1648,20 @@ class SandboxExecutionServiceTest {
             assertThat(prompt.isSteering()).isEqualTo(Boolean.TRUE);
             assertThat(prompt.taskPrompt()).isEqualTo("Also fix lint");
         });
+    }
+
+    @Test
+    void steerExecution_whenEnvironmentSleeping_isRejected() {
+        SandboxExecution execution = createTestExecution();
+        execution.getEnvironment().setStatus(EnvironmentStatus.SLEEPING);
+        when(chatRepository.findById(CHAT_ID)).thenReturn(Optional.of(execution.getChat()));
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        assertThatThrownBy(() -> sandboxExecutionService.steerExecution(
+                        USER_ID, CHAT_ID, execution.getId(), new SteerExecutionRequest("nope", List.of())))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Environment is not awake");
     }
 
     @Test

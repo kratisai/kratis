@@ -496,6 +496,10 @@ public class SandboxExecutionService {
         if (environment == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution has no associated environment");
         }
+        if (environment.getStatus() != EnvironmentStatus.CONNECTED) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT, "Environment is not awake; resume it before steering");
+        }
 
         boolean recovering = execution.getStatus() == SandboxExecutionStatus.FAILED;
         touchExecutionGraph(execution);
@@ -708,7 +712,9 @@ public class SandboxExecutionService {
                 execution.getPromptTokens(),
                 execution.getCompletionTokens(),
                 execution.getTotalSpend(),
-                execution.getUsage().getUsageLastUpdatedAt());
+                execution.getUsage().getUsageLastUpdatedAt(),
+                execution.getEnvironment() != null ? execution.getEnvironment().getId() : null,
+                execution.getEnvironment() != null ? execution.getEnvironment().getStatus() : null);
     }
 
     /** Drops prompt-id correlation once an execution is terminal so the map stays bounded. */

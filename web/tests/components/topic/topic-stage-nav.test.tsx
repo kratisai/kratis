@@ -216,6 +216,50 @@ describe('TopicStageNav', () => {
     expect(changesZone.textContent).toContain('2')
   })
 
+  it('shows the sleeping icon for a run whose environment is asleep', () => {
+    render(
+      <TopicStageNav
+        canvasCount={0}
+        chatId="chat-1"
+        currentStage="execution"
+        executions={[
+          {
+            chatId: 'chat-1',
+            environmentStatus: 'SLEEPING',
+            harness: 'PI',
+            id: 'exec-sleep',
+            startedAt: new Date(Date.now() - 20000).toISOString(),
+            status: 'FAILED',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.getByTestId('execution-sleeping-icon')).toBeInTheDocument()
+  })
+
+  it('keeps the completed icon when a completed run environment is asleep', () => {
+    render(
+      <TopicStageNav
+        canvasCount={0}
+        chatId="chat-1"
+        currentStage="execution"
+        executions={[
+          {
+            chatId: 'chat-1',
+            environmentStatus: 'SLEEPING',
+            harness: 'PI',
+            id: 'exec-sleep',
+            startedAt: new Date(Date.now() - 20000).toISOString(),
+            status: 'COMPLETED',
+          },
+        ]}
+      />,
+    )
+
+    expect(screen.queryByTestId('execution-sleeping-icon')).not.toBeInTheDocument()
+  })
+
   describe('design card docs dropdown', () => {
     it('renders inline Chat highlight and docs dropdown when canvases exist', () => {
       render(

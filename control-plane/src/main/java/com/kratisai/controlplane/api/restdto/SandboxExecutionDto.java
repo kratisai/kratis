@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.api.restdto;
 
 import com.kratisai.controlplane.model.AgentHarness;
+import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import java.time.Instant;
 import java.util.UUID;
@@ -19,4 +20,6 @@ public record SandboxExecutionDto(
         Long promptTokens,
         Long completionTokens,
         Double totalSpend,
-        Instant usageLastUpdatedAt) {}
+        Instant usageLastUpdatedAt,
+        UUID environmentId,
+        EnvironmentStatus environmentStatus) {}

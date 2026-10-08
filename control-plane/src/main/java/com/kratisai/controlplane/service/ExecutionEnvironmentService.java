@@ -350,6 +350,15 @@ public class ExecutionEnvironmentService {
         env.setStatus(EnvironmentStatus.SLEEPING);
         env.setContainerId(null);
         executionEnvironmentRepository.save(env);
+
+        sandboxExecutionRepository
+                .findFirstByEnvironmentIdOrderByStartedAtDesc(envId)
+                .ifPresent(execution -> {
+                    executionActivityPersistenceService.recordHarnessSleep(execution.getId());
+                    eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
+                            teamId, execution.getChat().getId(), execution.getId()));
+                });
+
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
         return toDto(env);
     }
@@ -389,6 +398,11 @@ public class ExecutionEnvironmentService {
         env.setStatus(EnvironmentStatus.CONNECTED);
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
+
+        sandboxExecutionRepository
+                .findFirstByEnvironmentIdOrderByStartedAtDesc(envId)
+                .ifPresent(execution -> eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
+                        teamId, execution.getChat().getId(), execution.getId())));
 
         SandboxProvider sandboxProvider =
                 sandboxOrchestratorService.getProvider(env.getProvider().getType());

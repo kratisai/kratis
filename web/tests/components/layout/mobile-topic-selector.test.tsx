@@ -243,4 +243,28 @@ describe('MobileTopicSelector', () => {
 
     expect(screen.queryByTestId('mobile-canvas-pulse-indicator')).not.toBeInTheDocument()
   })
+
+  it('shows the sleeping icon for a run whose environment is asleep', async () => {
+    vi.mocked(executionApi.listChatExecutions).mockResolvedValue([
+      {
+        chatId: 'chat-1',
+        environmentStatus: 'SLEEPING',
+        harness: 'claude-code',
+        id: 'exec-1',
+        startedAt: '2026-08-30T10:00:00Z',
+        status: 'FAILED',
+      },
+    ])
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MobileTopicSelector />
+      </QueryClientProvider>,
+    )
+
+    const trigger = screen.getByRole('button', { name: /topic navigation menu/i })
+    fireEvent.pointerDown(trigger, { pointerType: 'mouse' })
+
+    expect(await screen.findByTestId('mobile-execution-sleeping-icon')).toBeInTheDocument()
+  })
 })

@@ -1,5 +1,5 @@
 import { useSearch } from '@tanstack/react-router'
-import { Download, MoreHorizontal, Square, Terminal } from 'lucide-react'
+import { Download, Loader2, Moon, MoreHorizontal, Play, Square, Terminal } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -17,6 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { useResumeEnvironment } from '@/hooks/use-environments'
 import { useChatExecutions } from '@/hooks/use-executions'
 import { useIsMobile } from '@/hooks/use-is-mobile'
 import { downloadActivityLog } from '@/lib/activity-log-export'
@@ -46,11 +47,24 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
   const diffViewMode = useDiffReviewStore((state) => state.diffViewMode)
   const { data: executions = [] } = useChatExecutions(chatId)
   const execution = executions.find((e) => e.id === executionId)
+  const resumeEnvironment = useResumeEnvironment()
+  const environmentId = execution?.environmentId ?? null
+  const environmentStatus = execution?.environmentStatus
+  const isEnvironmentSleeping = environmentStatus === 'SLEEPING'
 
   const terminalOpen = useExecutionStore((state) => state.terminalOpen)
   const setTerminalOpen = useExecutionStore((state) => state.setTerminalOpen)
+  const requestLogs = useExecutionStore((state) => state.requestLogs)
   const replayingExecutionId = useExecutionStore((state) => state.replayingExecutionId)
   const replayActivities = useExecutionStore((state) => state.replayActivities)
+
+  const handleResume = () => {
+    if (!environmentId) return
+    // Refresh the console once the sandbox is awake so any sleeping notice clears.
+    resumeEnvironment.mutate(environmentId, {
+      onSuccess: () => requestLogs(executionId),
+    })
+  }
 
   const activities = useActivityStore((state) =>
     executionId ? (state.activitiesByExecution[executionId] ?? EMPTY_ACTIVITIES) : EMPTY_ACTIVITIES,
@@ -123,6 +137,9 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
   }
 
   const hasActiveExecution = execution?.status === 'RUNNING' || execution?.status === 'IDLE'
+  // The console is viewable for any execution with an environment, including one whose
+  // sandbox went to sleep or was resumed afterwards, not only while the agent is live.
+  const canViewTerminal = hasActiveExecution || Boolean(environmentId)
 
   return (
     <div
@@ -135,7 +152,7 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
             <ExecutionUsageSummary chatId={chatId} executionId={executionId} />
           </div>
 
-          {hasActiveExecution && (
+          {canViewTerminal && (
             <Button
               aria-label={terminalOpen ? 'Hide terminal' : 'Show terminal'}
               className="text-muted-foreground hover:text-foreground h-7 w-7"
@@ -159,10 +176,16 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
-              {hasActiveExecution && (
+              {canViewTerminal && (
                 <DropdownMenuItem onClick={() => setTerminalOpen(!terminalOpen)}>
                   <Terminal className="mr-2 h-3.5 w-3.5" />
                   {terminalOpen ? 'Hide terminal' : 'Show terminal'}
+                </DropdownMenuItem>
+              )}
+              {isEnvironmentSleeping && (
+                <DropdownMenuItem disabled={resumeEnvironment.isPending} onClick={handleResume}>
+                  <Play className="mr-2 h-3.5 w-3.5 fill-current" />
+                  Resume environment
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem
@@ -196,6 +219,34 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
           </DropdownMenu>
         </div>
       </div>
+
+      {isEnvironmentSleeping && (
+        <div
+          className="border-border/60 flex items-center justify-between gap-3 border-b bg-indigo-500/10 px-3 py-2 text-xs text-indigo-700 dark:text-indigo-300"
+          data-testid="execution-sleeping-banner"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <Moon className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              Environment is asleep. Resume it to steer the agent or publish changes.
+            </span>
+          </span>
+          <Button
+            className="h-7 shrink-0 text-xs"
+            disabled={resumeEnvironment.isPending || !environmentId}
+            onClick={handleResume}
+            size="sm"
+            variant="secondary"
+          >
+            {resumeEnvironment.isPending ? (
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="mr-1 h-3.5 w-3.5 fill-current" />
+            )}
+            Resume environment
+          </Button>
+        </div>
+      )}
 
       {/* Main Tab Content */}
       <div className="relative flex min-h-0 flex-1 overflow-visible md:overflow-hidden">
@@ -239,6 +290,7 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
         {/* Continuous Steering & Publish Bar */}
         <SteeringPublishBar
           chatId={chatId}
+          environmentStatus={environmentStatus}
           executionId={executionId}
           executionStatus={execution?.status}
           isAutoHidden={isAutoHidden}

@@ -142,4 +142,21 @@ describe('SteeringPublishBar', () => {
       })
     })
   })
+
+  it('renders nothing while the environment is asleep', () => {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SteeringPublishBar
+          chatId="chat-1"
+          environmentStatus="SLEEPING"
+          executionId="exec-1"
+          executionStatus="FAILED"
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByTestId('steering-publish-bar')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Steering guidance input')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Publish/i })).not.toBeInTheDocument()
+  })
 })
