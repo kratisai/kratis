@@ -6,8 +6,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.api.restdto.ExecutionEnvironmentDto;
 import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.*;
+import com.kratisai.controlplane.model.event.EnvironmentDisconnectedEvent;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
@@ -146,6 +148,157 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
+    void sleepEnvironment_suspendsProviderAndMarksSleeping() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        when(sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(eq(ENV_ID), any()))
+                .thenReturn(List.of());
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+
+        executionEnvironmentService.sleepEnvironmentInternal(env);
+
+        verify(sandboxProvider).suspend(ENV_ID.toString());
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
+        assertThat(env.getContainerId()).isNull();
+        verify(executionEnvironmentRepository).save(env);
+        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+    }
+
+    @Test
+    void sleepEnvironment_terminatesRunningExecutionBeforeSuspend() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        SandboxExecution running = createRunningExecution(env);
+        when(sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(eq(ENV_ID), any()))
+                .thenReturn(List.of(running));
+        when(sessionRegistry.getSessionForEnvironment(ENV_ID)).thenReturn(webSocketSession);
+        when(webSocketSession.isOpen()).thenReturn(true);
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        doNothing().when(sandboxExecutionService).terminateExecution(EXECUTION_ID);
+        SandboxExecution completed = createRunningExecution(env);
+        completed.setStatus(SandboxExecutionStatus.COMPLETED);
+        completed.setCompletedAt(Instant.now());
+        when(sandboxExecutionRepository.findById(EXECUTION_ID))
+                .thenReturn(Optional.of(running), Optional.of(completed));
+
+        executionEnvironmentService.sleepEnvironmentInternal(env);
+
+        verify(sandboxExecutionService).terminateExecution(EXECUTION_ID);
+        verify(sandboxProvider).suspend(ENV_ID.toString());
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
+    }
+
+    @Test
+    void sleepEnvironment_withSuspendedProviderFailure_returns500AndKeepsEnvironment() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        when(sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(eq(ENV_ID), any()))
+                .thenReturn(List.of());
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        doThrow(new IllegalStateException("No runner container found"))
+                .when(sandboxProvider)
+                .suspend(ENV_ID.toString());
+
+        assertThatThrownBy(() -> executionEnvironmentService.sleepEnvironmentInternal(env))
+                .isInstanceOfSatisfying(
+                        org.springframework.web.server.ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode().value()).isEqualTo(500));
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+        assertThat(env.getContainerId()).isEqualTo("test-container-123");
+    }
+
+    @Test
+    void sleepEnvironment_withAlreadySleepingEnvironment_returns400() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+
+        assertThatThrownBy(() -> executionEnvironmentService.sleepEnvironmentInternal(env))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        verifyNoInteractions(sandboxOrchestratorService);
+    }
+
+    @Test
+    void sleepEnvironment_withConnectorEnvironment_returns400() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setType(ExecutionEnvironmentType.CONNECTOR);
+
+        assertThatThrownBy(() -> executionEnvironmentService.sleepEnvironmentInternal(env))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        verifyNoInteractions(sandboxOrchestratorService);
+    }
+
+    @Test
+    void resumeEnvironment_resumesFromSnapshotAndInitializesWorkspace() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setContainerId(null);
+        env.setAuthToken("test-token");
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        when(sandboxProvider.resume(ENV_ID.toString(), env, "test-token")).thenReturn("resumed-container-id");
+
+        ExecutionEnvironmentDto dto = executionEnvironmentService.resumeEnvironment(USER_ID, TEAM_ID, ENV_ID);
+
+        assertThat(dto.status()).isEqualTo(EnvironmentStatus.CONNECTED);
+        assertThat(dto.containerId()).isEqualTo("resumed-container-id");
+        verify(sandboxProvider).initializeWorkspace("resumed-container-id");
+        verify(executionEnvironmentRepository).save(env);
+        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+    }
+
+    @Test
+    void resumeEnvironment_fromTerminatedEnvironment_returns410() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.TERMINATED);
+        env.setContainerId(null);
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
+
+        assertThatThrownBy(() -> executionEnvironmentService.resumeEnvironment(USER_ID, TEAM_ID, ENV_ID))
+                .isInstanceOfSatisfying(
+                        org.springframework.web.server.ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode().value()).isEqualTo(410));
+        verifyNoInteractions(sandboxProvider);
+    }
+
+    @Test
+    void resumeEnvironment_fromConnectedEnvironment_returns400() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
+
+        assertThatThrownBy(() -> executionEnvironmentService.resumeEnvironment(USER_ID, TEAM_ID, ENV_ID))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        verifyNoInteractions(sandboxProvider);
+    }
+
+    @Test
+    void handleEnvironmentDisconnected_keepsSleepingStatus() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setContainerId(null);
+        when(executionEnvironmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
+
+        executionEnvironmentService.handleEnvironmentDisconnected(new EnvironmentDisconnectedEvent(ENV_ID));
+
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
+        verify(executionEnvironmentRepository, never()).save(any(ExecutionEnvironment.class));
+    }
+
+    @Test
+    void handleEnvironmentDisconnected_downgradesConnectedEnvironment() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        when(executionEnvironmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
+
+        executionEnvironmentService.handleEnvironmentDisconnected(new EnvironmentDisconnectedEvent(ENV_ID));
+
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.DISCONNECTED);
+        verify(executionEnvironmentRepository).save(env);
+    }
+
+    @Test
     void terminateEnvironment_withNoRunningExecution_terminatesSandboxDirectly() {
         ExecutionEnvironment env = createSandboxEnvironment();
         when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
@@ -157,7 +310,7 @@ class ExecutionEnvironmentServiceTest {
 
         executionEnvironmentService.terminateEnvironment(USER_ID, TEAM_ID, ENV_ID);
 
-        verify(sandboxProvider).terminateSandbox("test-container-123");
+        verify(sandboxProvider).destroy(ENV_ID.toString());
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.DISCONNECTED);
         assertThat(env.getContainerId()).isNull();
         verify(executionEnvironmentRepository).save(env);
@@ -189,7 +342,7 @@ class ExecutionEnvironmentServiceTest {
         executionEnvironmentService.terminateEnvironment(USER_ID, TEAM_ID, ENV_ID);
 
         verify(sandboxExecutionService).terminateExecution(EXECUTION_ID);
-        verify(sandboxProvider).terminateSandbox("test-container-123");
+        verify(sandboxProvider).destroy(ENV_ID.toString());
         verify(virtualKeyService, never()).revokeKey(any());
     }
 
@@ -214,7 +367,7 @@ class ExecutionEnvironmentServiceTest {
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
         assertThat(execution.getCompletedAt()).isNotNull();
         verify(sandboxExecutionRepository).save(execution);
-        verify(sandboxProvider).terminateSandbox("test-container-123");
+        verify(sandboxProvider).destroy(ENV_ID.toString());
     }
 
     @Test
@@ -244,7 +397,7 @@ class ExecutionEnvironmentServiceTest {
         verify(sandboxExecutionService).terminateExecution(EXECUTION_ID);
         verify(virtualKeyService).revokeKey(stillRunning.getVirtualKey());
         assertThat(stillRunning.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
-        verify(sandboxProvider).terminateSandbox("test-container-123");
+        verify(sandboxProvider).destroy(ENV_ID.toString());
     }
 
     @Test
@@ -341,7 +494,7 @@ class ExecutionEnvironmentServiceTest {
 
         verify(sandboxExecutionService).terminateExecution(EXECUTION_ID);
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
-        verify(sandboxProvider).terminateSandbox("test-container-123");
+        verify(sandboxProvider).destroy(ENV_ID.toString());
     }
 
     @Test
@@ -367,7 +520,7 @@ class ExecutionEnvironmentServiceTest {
         executionEnvironmentService.terminateEnvironment(USER_ID, TEAM_ID, ENV_ID);
 
         verify(virtualKeyService).revokeKey(execution.getVirtualKey());
-        verify(sandboxProvider).terminateSandbox("test-container-123");
+        verify(sandboxProvider).destroy(ENV_ID.toString());
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
     }
 

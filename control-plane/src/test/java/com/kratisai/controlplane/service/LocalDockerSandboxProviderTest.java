@@ -799,4 +799,176 @@ class LocalDockerSandboxProviderTest {
                         any(),
                         any());
     }
+
+    @Test
+    void testSuspendCommitsSnapshotAndTearsDownSandbox() throws Exception {
+        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        ExecutionEnvironment envRow = new ExecutionEnvironment();
+        envRow.setContainerId("runner-container-id");
+        when(mockEnvRepository.findById(envUuid)).thenReturn(java.util.Optional.of(envRow));
+
+        java.util.concurrent.atomic.AtomicInteger imageLookups = new java.util.concurrent.atomic.AtomicInteger();
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("images")) {
+                return imageLookups.getAndIncrement() == 0
+                        ? new ProcessExecutor.ProcessResult(0, "old-image-id".getBytes())
+                        : new ProcessExecutor.ProcessResult(0, "new-image-id".getBytes());
+            }
+            if (cmd.contains("inspect")) {
+                return new ProcessExecutor.ProcessResult(0, "runner-container-id".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        });
+
+        provider.suspend(envUuid.toString());
+
+        String snapshotRef = "kratis-snapshot-" + envUuid + ":latest";
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "commit", "runner-container-id", snapshotRef)), any(), any());
+        verify(mockProcessExecutor).execute(eq(List.of("docker", "rmi", "-f", "old-image-id")), any(), any());
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "runner-container-id")), any(), any());
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-dind-" + envUuid)), any(), any());
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-" + envUuid)), any(), any());
+    }
+
+    @Test
+    void testSuspendFailsWhenNoRunnerContainerExists() throws Exception {
+        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        when(mockEnvRepository.findById(envUuid)).thenReturn(java.util.Optional.empty());
+        when(mockProcessExecutor.execute(any(), any(), any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(1, "".getBytes()));
+
+        assertThatThrownBy(() -> provider.suspend(envUuid.toString())).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void testSuspendFallsBackToLabelLookupWhenDbContainerIdIsStale() throws Exception {
+        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        ExecutionEnvironment envRow = new ExecutionEnvironment();
+        envRow.setContainerId("stale-container-id");
+        when(mockEnvRepository.findById(envUuid)).thenReturn(java.util.Optional.of(envRow));
+
+        java.util.concurrent.atomic.AtomicInteger imageLookups = new java.util.concurrent.atomic.AtomicInteger();
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("images")) {
+                return imageLookups.getAndIncrement() == 0
+                        ? new ProcessExecutor.ProcessResult(0, "old-image-id".getBytes())
+                        : new ProcessExecutor.ProcessResult(0, "new-image-id".getBytes());
+            }
+            if (cmd.contains("inspect")) {
+                return cmd.stream().anyMatch(arg -> arg.contains("label="))
+                        ? new ProcessExecutor.ProcessResult(0, "".getBytes())
+                        : new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
+            if (cmd.contains("ps")) {
+                return new ProcessExecutor.ProcessResult(0, "live-runner-id".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        });
+
+        provider.suspend(envUuid.toString());
+
+        verify(mockProcessExecutor)
+                .execute(argThat(cmd -> cmd.contains("commit") && cmd.contains("live-runner-id")), any(), any());
+    }
+
+    @Test
+    void testResumeStartsRunnerFromSnapshotImage() throws Exception {
+        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        ExecutionEnvironment env = new ExecutionEnvironment();
+        env.setId(envUuid);
+        env.setProvider(null);
+        env.setStatus(EnvironmentStatus.SLEEPING);
+
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("images")) {
+                return new ProcessExecutor.ProcessResult(0, "snapshot-image-id".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes());
+        });
+
+        String containerId = provider.resume(envUuid.toString(), env, "test-token");
+
+        assertThat(containerId).isEqualTo("mock-container-id");
+
+        verify(mockProcessExecutor, atLeastOnce())
+                .execute(
+                        argThat(cmd -> cmd.contains("kratis-snapshot-" + envUuid + ":latest")
+                                && cmd.contains("kratis.role=runner")
+                                && cmd.stream().noneMatch(arg -> arg.equals("kratis-runner-base:latest"))),
+                        any(),
+                        any());
+        verify(mockProcessExecutor, atLeastOnce())
+                .execute(argThat(cmd -> cmd.contains("network") && cmd.contains("create")), any(), any());
+        verify(mockProcessExecutor, atLeastOnce())
+                .execute(argThat(cmd -> cmd.contains("docker:dind-rootless")), any(), any());
+    }
+
+    @Test
+    void testResumeFailsWhenSnapshotIsMissing() throws Exception {
+        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        when(mockProcessExecutor.execute(any(), any(), any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
+        ExecutionEnvironment env = new ExecutionEnvironment();
+        env.setId(envUuid);
+
+        assertThatThrownBy(() -> provider.resume(envUuid.toString(), env, "test-token"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("No suspended snapshot");
+
+        verify(mockProcessExecutor, never())
+                .execute(argThat(cmd -> cmd.contains("network") && cmd.contains("create")), any(), any());
+    }
+
+    @Test
+    void testDestroyRemovesSnapshotImageForSleepingEnvironment() throws Exception {
+        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        when(mockProcessExecutor.execute(any(), any(), any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
+
+        provider.destroy(envUuid.toString());
+
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "rmi", "-f", "kratis-snapshot-" + envUuid + ":latest")), any(), any());
+    }
+
+    @Test
+    void testDestroyTerminatesRunningResourcesAndRemovesSnapshot() throws Exception {
+        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        ExecutionEnvironment envRow = new ExecutionEnvironment();
+        envRow.setContainerId("runner-container-id");
+        when(mockEnvRepository.findById(envUuid)).thenReturn(java.util.Optional.of(envRow));
+
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("inspect")) {
+                return new ProcessExecutor.ProcessResult(0, "runner-container-id".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        });
+
+        provider.destroy(envUuid.toString());
+
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "runner-container-id")), any(), any());
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "rmi", "-f", "kratis-snapshot-" + envUuid + ":latest")), any(), any());
+    }
+
+    @Test
+    void testDestroyIsTolerantOfMissingSnapshotAndContainer() throws Exception {
+        java.util.UUID envUuid = java.util.UUID.randomUUID();
+        when(mockEnvRepository.findById(envUuid)).thenReturn(java.util.Optional.empty());
+        when(mockProcessExecutor.execute(any(), any(), any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(1, "No such image".getBytes()));
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> provider.destroy(envUuid.toString()))
+                .doesNotThrowAnyException();
+    }
 }

@@ -16,6 +16,7 @@ import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.EnvironmentProvider;
+import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionEnvironmentType;
 import com.kratisai.controlplane.model.SandboxExecution;
@@ -28,9 +29,15 @@ import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
+import com.kratisai.controlplane.service.ExecutionEnvironmentService;
 import com.kratisai.controlplane.service.JwtService;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +46,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
+import org.testcontainers.containers.GenericContainer;
 
 @SpringIntegrationTest
 class ExecutionEnvironmentControllerTest {
@@ -73,8 +81,14 @@ class ExecutionEnvironmentControllerTest {
     @Autowired
     private DatabaseCleaner databaseCleaner;
 
+    @Autowired
+    private ExecutionEnvironmentService executionEnvironmentService;
+
     private User user;
     private String authToken;
+    private UUID runnerEnvId;
+    private final List<GenericContainer<?>> runnerContainers = new ArrayList<>();
+
     private UUID teamId;
     private UUID defaultEnvId;
 
@@ -298,6 +312,153 @@ class ExecutionEnvironmentControllerTest {
                 executionEnvironmentRepository.findById(sandboxEnv.getId()).orElseThrow();
         assertThat(updatedEnv.getContainerId()).isNull();
         assertThat(updatedEnv.getStatus()).isEqualTo(com.kratisai.controlplane.model.EnvironmentStatus.DISCONNECTED);
+    }
+
+    private GenericContainer<?> suspendedRunner(EnvironmentProvider provider) {
+        ExecutionEnvironment env = new ExecutionEnvironment();
+        env.setTeam(teamRepository.findById(teamId).orElseThrow());
+        env.setProvider(provider);
+        env.setName("Sleeping Sandbox");
+        env.setType(ExecutionEnvironmentType.SANDBOX);
+        env.setStatus(EnvironmentStatus.CONNECTED);
+        env.setAuthToken("test-token");
+        env = executionEnvironmentRepository.save(env);
+        runnerEnvId = env.getId();
+
+        GenericContainer<?> runner = new GenericContainer<>("alpine:3.20")
+                .withCommand("sleep", "infinity")
+                .withLabels(Map.of("kratis.sandbox.id", runnerEnvId.toString(), "kratis.role", "runner"));
+        runner.start();
+        runnerContainers.add(runner);
+        runDocker(
+                "exec",
+                runner.getContainerId(),
+                "sh",
+                "-c",
+                "mkdir -p /kratis/workspace /kratis/logs && chown -R 1000:1000 /kratis");
+        env.setContainerId(runner.getContainerId());
+        executionEnvironmentRepository.save(env);
+        return runner;
+    }
+
+    private String runDocker(String... args) {
+        List<String> command = new ArrayList<>();
+        command.add("docker");
+        command.addAll(List.of(args));
+        try {
+            Process process =
+                    new ProcessBuilder(command).redirectErrorStream(true).start();
+            String output = new String(process.getInputStream().readAllBytes()).trim();
+            process.waitFor(60, TimeUnit.SECONDS);
+            return output;
+        } catch (Exception e) {
+            throw new IllegalStateException("docker CLI failed: " + String.join(" ", args), e);
+        }
+    }
+
+    private String dockerCli(String... args) {
+        return runDocker(args);
+    }
+
+    @AfterEach
+    void stopRunnerContainers() {
+        runnerContainers.forEach(container -> {
+            try {
+                container.stop();
+            } catch (Exception ignored) {
+                // Container may already be gone after suspend/delete.
+            }
+        });
+        runnerContainers.clear();
+        if (runnerEnvId != null) {
+            runDocker("rmi", "-f", "kratis-snapshot-" + runnerEnvId + ":latest");
+        }
+    }
+
+    @Test
+    void sleepEnvironment_suspendsAndMarksSleeping() throws Exception {
+        EnvironmentProvider provider = new EnvironmentProvider();
+        provider.setTeam(teamRepository.findById(teamId).orElseThrow());
+        provider.setName("Sleep Provider");
+        provider.setDockerImage("alpine-unused-image:latest");
+        provider = environmentProviderRepository.save(provider);
+
+        GenericContainer<?> runner = suspendedRunner(provider);
+        try {
+            executionEnvironmentService.sleepEnvironmentInternal(
+                    executionEnvironmentRepository.findById(runnerEnvId).orElseThrow());
+
+            ExecutionEnvironment updated =
+                    executionEnvironmentRepository.findById(runnerEnvId).orElseThrow();
+            assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
+            assertThat(updated.getContainerId()).isNull();
+            assertThat(dockerCli("ps", "-a", "--filter", "name=kratis-sandbox-" + runnerEnvId, "-q"))
+                    .isEmpty();
+        } finally {
+            runner.stop();
+        }
+    }
+
+    @Test
+    void sleepAndResume_roundTrip_restoresContainerFromSnapshot() throws Exception {
+        EnvironmentProvider provider = new EnvironmentProvider();
+        provider.setTeam(teamRepository.findById(teamId).orElseThrow());
+        provider.setName("Round Trip Provider");
+        provider.setDockerImage("alpine-unused-image:latest");
+        provider = environmentProviderRepository.save(provider);
+
+        GenericContainer<?> runner = suspendedRunner(provider);
+        try {
+            executionEnvironmentService.sleepEnvironmentInternal(
+                    executionEnvironmentRepository.findById(runnerEnvId).orElseThrow());
+
+            mockMvc.perform(post("/api/v1/teams/{teamId}/environments/{envId}/resume", teamId, runnerEnvId)
+                            .header("Authorization", "Bearer " + authToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("CONNECTED"))
+                    .andExpect(jsonPath("$.containerId").isNotEmpty());
+
+            ExecutionEnvironment updated =
+                    executionEnvironmentRepository.findById(runnerEnvId).orElseThrow();
+            assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+            assertThat(updated.getContainerId()).isNotBlank();
+
+            mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", teamId, runnerEnvId)
+                            .header("Authorization", "Bearer " + authToken))
+                    .andExpect(status().isNoContent());
+            assertThat(dockerCli("images", "-q", "kratis-snapshot-" + runnerEnvId + ":latest"))
+                    .isEmpty();
+        } finally {
+            runner.stop();
+        }
+    }
+
+    @Test
+    void resumeEnvironment_notSleeping_shouldReturn400() throws Exception {
+        ExecutionEnvironment env = new ExecutionEnvironment();
+        env.setTeam(teamRepository.findById(teamId).orElseThrow());
+        env.setName("Connector Env");
+        env.setType(ExecutionEnvironmentType.CONNECTOR);
+        env.setStatus(EnvironmentStatus.CONNECTED);
+        executionEnvironmentRepository.save(env);
+
+        mockMvc.perform(post("/api/v1/teams/{teamId}/environments/{envId}/resume", teamId, env.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void resumeEnvironment_terminatedEnvironment_shouldReturn410() throws Exception {
+        ExecutionEnvironment env = new ExecutionEnvironment();
+        env.setTeam(teamRepository.findById(teamId).orElseThrow());
+        env.setName("Expired Sandbox");
+        env.setType(ExecutionEnvironmentType.SANDBOX);
+        env.setStatus(EnvironmentStatus.TERMINATED);
+        executionEnvironmentRepository.save(env);
+
+        mockMvc.perform(post("/api/v1/teams/{teamId}/environments/{envId}/resume", teamId, env.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isGone());
     }
 
     @Test

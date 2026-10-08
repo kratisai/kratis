@@ -109,10 +109,169 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         try {
             createSandboxNetwork(envId, networkName);
             spawnDindSibling(envId, networkName, dindName);
-            return spawnRunnerContainer(environment, envId, networkName, dindName, runnerName);
+            return spawnRunnerContainer(environment, envId, networkName, dindName, runnerName, null);
         } catch (RuntimeException e) {
             terminateSandboxResources(envId, runnerName);
             throw e;
+        }
+    }
+
+    @Override
+    public void suspend(String envId) {
+        if (envId == null || envId.isBlank()) {
+            throw new IllegalArgumentException("Environment id is required to suspend a sandbox");
+        }
+        logger.info("Suspending sandbox environment {}", envId);
+        String runnerContainerId = resolveRunnerContainerId(envId);
+        if (runnerContainerId == null) {
+            throw new IllegalStateException("No runner container found for environment " + envId);
+        }
+        commitSnapshot(envId, runnerContainerId);
+        terminateSandboxResources(envId, runnerContainerId);
+    }
+
+    @Override
+    public String resume(String envId, ExecutionEnvironment environment, String token) {
+        if (envId == null || envId.isBlank()) {
+            throw new IllegalArgumentException("Environment id is required to resume a sandbox");
+        }
+        String snapshotRef = snapshotRef(envId);
+        if (imageIdOf(snapshotRef) == null) {
+            throw new IllegalStateException("No suspended snapshot exists for environment " + envId);
+        }
+        String networkName = "kratis-net-" + envId;
+        String dindName = "kratis-dind-" + envId;
+        String runnerName = "kratis-sandbox-" + envId;
+
+        try {
+            createSandboxNetwork(envId, networkName);
+            spawnDindSibling(envId, networkName, dindName);
+            return spawnRunnerContainer(environment, envId, networkName, dindName, runnerName, snapshotRef);
+        } catch (RuntimeException e) {
+            terminateSandboxResources(envId, runnerName);
+            throw e;
+        }
+    }
+
+    @Override
+    public void destroy(String envId) {
+        if (envId == null || envId.isBlank()) {
+            return;
+        }
+        String runnerContainerId = resolveRunnerContainerId(envId);
+        if (runnerContainerId != null) {
+            try {
+                terminateSandboxResources(envId, runnerContainerId);
+            } catch (RuntimeException e) {
+                logger.warn("Failed to terminate sandbox resources for environment {}: {}", envId, e.getMessage());
+            }
+        }
+        try {
+            removeSnapshot(envId);
+        } catch (Exception e) {
+            logger.warn("Failed to remove suspend snapshot for environment {}: {}", envId, e.getMessage());
+        }
+    }
+
+    private void removeSnapshot(String envId) {
+        String snapshotRef = snapshotRef(envId);
+        logger.info("Removing sandbox snapshot image {}", snapshotRef);
+        try {
+            ProcessExecutor.ProcessResult result =
+                    processExecutor.execute(List.of("docker", "rmi", "-f", snapshotRef), null, null);
+            if (result.exitCode() != 0) {
+                logger.debug("Snapshot image {} already absent", snapshotRef);
+            }
+        } catch (IOException | InterruptedException e) {
+            logger.warn("Failed to remove sandbox snapshot image {}: {}", snapshotRef, e.getMessage());
+        }
+    }
+
+    // The committed image tag subsumes any prior version, so the mapping envId -> image is
+    // deterministic and survives control-plane restarts without provider-side in-memory state.
+    private static String snapshotRef(String envId) {
+        return "kratis-snapshot-" + envId + ":latest";
+    }
+
+    private String resolveRunnerContainerId(String envId) {
+        String containerId = null;
+        try {
+            containerId = executionEnvironmentRepository
+                    .findById(UUID.fromString(envId))
+                    .map(ExecutionEnvironment::getContainerId)
+                    .filter(id -> id != null && !id.isBlank())
+                    .orElse(null);
+        } catch (IllegalArgumentException e) {
+            logger.debug("Environment id {} is not a UUID; falling back to label lookup", envId);
+        }
+        if (containerId != null && containerExists(containerId)) {
+            return containerId;
+        }
+        return findRunnerContainerByLabel(envId);
+    }
+
+    private boolean containerExists(String containerId) {
+        try {
+            ProcessExecutor.ProcessResult result = processExecutor.execute(
+                    List.of("docker", "inspect", "--format", "{{.Id}}", containerId), null, null);
+            return result.exitCode() == 0;
+        } catch (IOException | InterruptedException e) {
+            return false;
+        }
+    }
+
+    private String findRunnerContainerByLabel(String envId) {
+        List<String> command = List.of(
+                "docker",
+                "ps",
+                "-a",
+                "--filter",
+                "label=kratis.sandbox.id=" + envId,
+                "--filter",
+                "label=kratis.role=runner",
+                "--no-trunc",
+                "-q");
+        try {
+            ProcessExecutor.ProcessResult result = processExecutor.execute(command, null, null);
+            if (result.exitCode() != 0) {
+                return null;
+            }
+            String output = new String(result.output()).trim();
+            return output.isBlank() ? null : output.split("\\s+")[0];
+        } catch (IOException | InterruptedException e) {
+            logger.warn("Failed to locate runner container for environment {}: {}", envId, e.getMessage());
+            return null;
+        }
+    }
+
+    private void commitSnapshot(String envId, String runnerContainerId) {
+        String snapshotRef = snapshotRef(envId);
+        String previousImageId = imageIdOf(snapshotRef);
+        executeCommand(
+                "Committing sandbox suspend snapshot", List.of("docker", "commit", runnerContainerId, snapshotRef));
+        String committedImageId = imageIdOf(snapshotRef);
+        // Retagging leaves the previous image untagged; remove it so sleep cycles do not leak layers.
+        if (previousImageId != null && !previousImageId.equals(committedImageId)) {
+            try {
+                processExecutor.execute(List.of("docker", "rmi", "-f", previousImageId), null, null);
+            } catch (IOException | InterruptedException e) {
+                logger.warn("Failed to remove superseded snapshot image {}: {}", previousImageId, e.getMessage());
+            }
+        }
+    }
+
+    private String imageIdOf(String imageRef) {
+        try {
+            ProcessExecutor.ProcessResult result =
+                    processExecutor.execute(List.of("docker", "images", "-q", imageRef), null, null);
+            if (result.exitCode() != 0) {
+                return null;
+            }
+            String output = new String(result.output()).trim();
+            return output.isBlank() ? null : output;
+        } catch (IOException | InterruptedException e) {
+            logger.warn("Failed to inspect image {}: {}", imageRef, e.getMessage());
+            return null;
         }
     }
 
@@ -265,10 +424,18 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
     }
 
     private String spawnRunnerContainer(
-            ExecutionEnvironment environment, String envId, String networkName, String dindName, String runnerName) {
-        String image = runnerImage;
-        if (environment.getProvider() != null && environment.getProvider().getDockerImage() != null) {
-            image = environment.getProvider().getDockerImage();
+            ExecutionEnvironment environment,
+            String envId,
+            String networkName,
+            String dindName,
+            String runnerName,
+            String imageOverride) {
+        String image = imageOverride;
+        if (image == null) {
+            image = runnerImage;
+            if (environment.getProvider() != null && environment.getProvider().getDockerImage() != null) {
+                image = environment.getProvider().getDockerImage();
+            }
         }
 
         List<String> command = new ArrayList<>(List.of(
