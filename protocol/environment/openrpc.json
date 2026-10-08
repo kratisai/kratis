@@ -100,9 +100,10 @@
     },
     {
       "name": "env.diff_changed",
-      "summary": "Notify control plane of workspace git diff update",
+      "summary": "Acknowledge the persisted workspace git diff state of an execution",
+      "description": "The sidecar sends the full current diff (summary manifest plus unified patch) and the control plane stores it as the durable copy: patch into blob storage, manifest into execution_diff_snapshots. A request, not a notification, so the sidecar re-pushes until the persistence is acknowledged and the control-plane copy never silently diverges.",
       "x-kratis-direction": "connector-to-control-plane",
-      "x-kratis-message-kind": "notification",
+      "x-kratis-message-kind": "request",
       "params": [
         {
           "name": "params",
@@ -111,7 +112,13 @@
             "$ref": "./schemas/requests/diff_changed.schema.json"
           }
         }
-      ]
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "./schemas/results/diff_changed.schema.json"
+        }
+      }
     },
     {
       "name": "env.complete",
@@ -346,27 +353,6 @@
         "name": "result",
         "schema": {
           "$ref": "./schemas/results/git_diff_summary.schema.json"
-        }
-      }
-    },
-    {
-      "name": "env.git_file_diff",
-      "summary": "Retrieve git unified diff patch for a single file",
-      "x-kratis-direction": "control-plane-to-connector",
-      "x-kratis-message-kind": "request",
-      "params": [
-        {
-          "name": "params",
-          "required": true,
-          "schema": {
-            "$ref": "./schemas/requests/git_file_diff.schema.json"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "schema": {
-          "$ref": "./schemas/results/git_file_diff.schema.json"
         }
       }
     },

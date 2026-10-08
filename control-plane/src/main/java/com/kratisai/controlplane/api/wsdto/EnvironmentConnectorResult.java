@@ -136,20 +136,6 @@ public sealed interface EnvironmentConnectorResult {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record GitFileDiff(
-            @JsonProperty("path") String path,
-            @JsonProperty("patch") String patch,
-            @JsonProperty("additions") int additions,
-            @JsonProperty("deletions") int deletions,
-            @JsonProperty("totalLines") int totalLines)
-            implements EnvironmentConnectorResult {
-        public GitFileDiff {
-            Objects.requireNonNull(path, "path is required");
-            Objects.requireNonNull(patch, "patch is required");
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
     record ReadFileSlice(
             @JsonProperty("path") String path,
             @JsonProperty("startLine") int startLine,

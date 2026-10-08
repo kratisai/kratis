@@ -64,20 +64,24 @@ type disconnectReport struct {
 var defaultCredentialsDir = "/kratis"
 
 type ClientTimeouts struct {
-	ReconnectDelay     time.Duration
-	HeartbeatInterval  time.Duration
-	PermissionTimeout  time.Duration
-	PromptQuietPeriod  time.Duration
-	DiffDebouncePeriod time.Duration
+	ReconnectDelay        time.Duration
+	HeartbeatInterval     time.Duration
+	PermissionTimeout     time.Duration
+	PromptQuietPeriod     time.Duration
+	DiffDebouncePeriod    time.Duration
+	DiffRetryInitialDelay time.Duration
+	DiffRetryMaxDelay     time.Duration
 }
 
 func DefaultClientTimeouts() ClientTimeouts {
 	return ClientTimeouts{
-		ReconnectDelay:     DefaultReconnectDelay,
-		HeartbeatInterval:  DefaultHeartbeatInterval,
-		PermissionTimeout:  DefaultPermissionTimeout,
-		PromptQuietPeriod:  DefaultPromptQuietPeriod,
-		DiffDebouncePeriod: 500 * time.Millisecond,
+		ReconnectDelay:        DefaultReconnectDelay,
+		HeartbeatInterval:     DefaultHeartbeatInterval,
+		PermissionTimeout:     DefaultPermissionTimeout,
+		PromptQuietPeriod:     DefaultPromptQuietPeriod,
+		DiffDebouncePeriod:    500 * time.Millisecond,
+		DiffRetryInitialDelay: 500 * time.Millisecond,
+		DiffRetryMaxDelay:     10 * time.Second,
 	}
 }
 
@@ -154,6 +158,9 @@ type Client struct {
 	diffMu            sync.Mutex
 	lastDiffHash      string
 	diffDebounceTimer *time.Timer
+	pendingDiff       *diffPushState
+	pushingDiff       bool
+	diffSeq           uint64
 
 	// debug gates sidecar-internal diagnostics out of env.output (they always
 	// remain in the Go log)
@@ -838,6 +845,12 @@ func (c *Client) register() error {
 		}
 	}
 
+	// Re-push the current diff state so the control-plane copy converges even
+	// when a previous env.diff_changed push was lost during disconnection. The
+	// control plane treats the push as an idempotent upsert, so an unchanged
+	// workspace just refreshes the same snapshot.
+	c.flushDiffOnRegister()
+
 	return nil
 }
 
@@ -977,19 +990,6 @@ func (c *Client) handleServerRequest(req JsonRpcRequest) {
 			}
 		}
 		go c.ExecuteGitDiffSummary(params, req.ID)
-
-	case "env.git_file_diff":
-		var params GitFileDiffParams
-		rawBytes, err := json.Marshal(req.Params)
-		if err != nil {
-			c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
-			return
-		}
-		if err := json.Unmarshal(rawBytes, &params); err != nil {
-			c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
-			return
-		}
-		go c.ExecuteGitFileDiff(params, req.ID)
 
 	case "env.read_file_slice":
 		var params ReadFileSliceParams

@@ -63,11 +63,17 @@ func connectedGitClientWith(t *testing.T, workspace string) (*Client, chan []byt
 			if err != nil {
 				return
 			}
+			var req JsonRpcRequest
+			if json.Unmarshal(data, &req) == nil {
+				ackDiffChanged(conn, req)
+			}
 			received <- data
 		}
 	})
 	client := connectClient(t, wsURL(srv), "tok")
 	client.workspace = workspace
+	errChan := make(chan error, 1)
+	go client.readLoop(errChan)
 	return client, received
 }
 
@@ -127,14 +133,14 @@ func TestExecuteGitDiffSummary_DiffsAgainstMergeBase(t *testing.T) {
 	}
 }
 
-func TestExecuteGitFileDiff_ExcludesUpstreamChanges(t *testing.T) {
+func TestBuildGitFullDiff_ExcludesUpstreamChanges(t *testing.T) {
 	bareDir, workDir := setupTestGitRepoWithRemote(t)
 	defer func() {
 		_ = os.RemoveAll(bareDir)
 		_ = os.RemoveAll(workDir)
 	}()
 
-	client, received := connectedGitClient(t, workDir)
+	client := &Client{workspace: workDir}
 
 	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Agent change\n"), 0600); err != nil {
 		t.Fatalf("Failed to write README: %v", err)
@@ -142,19 +148,14 @@ func TestExecuteGitFileDiff_ExcludesUpstreamChanges(t *testing.T) {
 	commitToBareMain(t, bareDir, "upstream.txt", "upstream\n")
 	runGitCmd(t, workDir, "fetch", "origin")
 
-	client.ExecuteGitFileDiff(GitFileDiffParams{Path: "upstream.txt", BaseBranch: "main"}, "req-file")
+	base := gitOutput(t, workDir, "merge-base", "origin/main", "HEAD")
+	patch := client.buildGitFullDiff(base)
 
-	var envelope struct {
-		Result GitFileDiffResult `json:"result"`
+	if strings.Contains(patch, "upstream.txt") {
+		t.Errorf("Expected upstream-only changes to be excluded from the full patch, got: %s", patch)
 	}
-	if err := json.Unmarshal(captureNextResponse(t, received), &envelope); err != nil {
-		t.Fatalf("Failed to unmarshal file diff: %v", err)
-	}
-	if envelope.Result.Patch != "" {
-		t.Errorf("Expected empty patch for upstream-only file, got %q", envelope.Result.Patch)
-	}
-	if envelope.Result.Additions != 0 || envelope.Result.Deletions != 0 {
-		t.Errorf("Expected zero additions/deletions for upstream-only file, got +%d/-%d", envelope.Result.Additions, envelope.Result.Deletions)
+	if !strings.Contains(patch, "README.md") || !strings.Contains(patch, "Agent change") {
+		t.Errorf("Expected the agent change in the full patch, got: %s", patch)
 	}
 }
 

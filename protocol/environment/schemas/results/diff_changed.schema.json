@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DiffChangedResult",
+  "type": "object",
+  "required": ["type", "status"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["env_diff_changed"],
+      "const": "env_diff_changed"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["persisted"]
+    }
+  },
+  "additionalProperties": false
+}

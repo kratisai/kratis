@@ -26,7 +26,7 @@ public class FileSystemBlobStorageService implements BlobStorageService {
     private final Path rootDirectory;
 
     @Autowired
-    public FileSystemBlobStorageService(@Value("${kratis.storage.local-path:/data/blobs}") String rootPath) {
+    public FileSystemBlobStorageService(@Value("${kratis.storage.local-path}") String rootPath) {
         this(Path.of(Objects.requireNonNull(rootPath, "rootPath must not be null")));
     }
 

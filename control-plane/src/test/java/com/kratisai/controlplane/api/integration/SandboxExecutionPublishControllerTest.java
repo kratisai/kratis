@@ -208,15 +208,6 @@ class SandboxExecutionPublishControllerTest {
                                 file.put("isCollapsedByDefault", false);
                                 environmentRpcClient.completeResponse(response);
                             }
-                            case "env.git_file_diff" -> {
-                                ObjectNode result = response.putObject("result");
-                                result.put("path", "src/App.java");
-                                result.put("patch", "@@ -1,3 +1,5 @@\n+line1\n+line2");
-                                result.put("additions", 2);
-                                result.put("deletions", 0);
-                                result.put("totalLines", 50);
-                                environmentRpcClient.completeResponse(response);
-                            }
                             default -> {
                                 // ignore
                             }

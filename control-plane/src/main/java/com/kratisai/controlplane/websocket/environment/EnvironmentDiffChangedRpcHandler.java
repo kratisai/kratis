@@ -3,6 +3,7 @@ package com.kratisai.controlplane.websocket.environment;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload;
+import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.EnvironmentDiffChangedResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
 import com.kratisai.controlplane.model.SandboxExecution;
@@ -101,6 +102,6 @@ public class EnvironmentDiffChangedRpcHandler
         UUID chatId = execution.getChat().getId();
         eventPublisher.publishEvent(new SandboxExecutionDiffChangedEvent(teamId, chatId, execId));
 
-        return Flux.empty();
+        return Flux.just(new EnvironmentDiffChangedResult());
     }
 }

@@ -442,20 +442,23 @@ type DiffChangedParams struct {
 	Patch          string               `json:"patch"`
 }
 
-// GitFileDiffParams is the parameters payload for env.git_file_diff.
-type GitFileDiffParams struct {
-	Path        string `json:"path"`
-	BaseBranch  string `json:"baseBranch,omitempty"`
-	ExecutionID string `json:"executionId,omitempty"`
-}
+// DiffChangedResultType is the discriminator for the env.diff_changed result payload.
+type DiffChangedResultType string
 
-// GitFileDiffResult is the success response payload for env.git_file_diff.
-type GitFileDiffResult struct {
-	Path       string `json:"path"`
-	Patch      string `json:"patch"`
-	Additions  int    `json:"additions"`
-	Deletions  int    `json:"deletions"`
-	TotalLines int    `json:"totalLines"`
+const DiffChangedResultTypeEnvDiffChanged DiffChangedResultType = "env_diff_changed"
+
+// DiffChangedStatus is the only valid env.diff_changed result status: the
+// control plane persisted the diff copy.
+type DiffChangedStatus string
+
+const DiffChangedStatusPersisted DiffChangedStatus = "persisted"
+
+// DiffChangedResult is the acknowledgment payload for env.diff_changed. The
+// control plane answers only after the patch blob and manifest row are written,
+// so the sidecar can retry until its copy is durable.
+type DiffChangedResult struct {
+	Type   DiffChangedResultType `json:"type"`
+	Status DiffChangedStatus     `json:"status"`
 }
 
 // ReadFileSliceParams is the parameters payload for env.read_file_slice.

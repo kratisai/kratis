@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"encoding/json"
 	"kratis-connector/runner"
 	"net/http"
 	"net/http/httptest"
@@ -32,6 +33,24 @@ func TestMain(m *testing.M) {
 }
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
+
+// ackDiffChanged answers env.diff_changed requests with the control-plane
+// persistence acknowledgment so acked diff pushes never block on the request
+// timeout in tests that only capture frames. No-op for other frames.
+func ackDiffChanged(conn *websocket.Conn, req JsonRpcRequest) {
+	if req.Method != "env.diff_changed" || req.ID == nil {
+		return
+	}
+	data, err := json.Marshal(JsonRpcResponse{
+		JsonRPC: "2.0",
+		Result:  json.RawMessage(`{"type":"env_diff_changed","status":"persisted"}`),
+		ID:      req.ID,
+	})
+	if err != nil {
+		return
+	}
+	_ = conn.WriteMessage(websocket.TextMessage, data)
+}
 
 // newTestServer spins up an httptest server that upgrades every connection to
 // WebSocket and hands the gorilla.Conn to the provided handler goroutine.
@@ -76,9 +95,12 @@ func connectClient(t *testing.T, url, token string) *Client {
 // This must be called before Start() for reconnect/heartbeat tests.
 func setTestClientTimeouts(c *Client) {
 	c.Timeouts = ClientTimeouts{
-		ReconnectDelay:    100 * time.Millisecond,
-		HeartbeatInterval: 200 * time.Millisecond,
-		PermissionTimeout: 2 * time.Second,
+		ReconnectDelay:        100 * time.Millisecond,
+		HeartbeatInterval:     200 * time.Millisecond,
+		PermissionTimeout:     2 * time.Second,
+		DiffDebouncePeriod:    10 * time.Millisecond,
+		DiffRetryInitialDelay: 5 * time.Millisecond,
+		DiffRetryMaxDelay:     50 * time.Millisecond,
 	}
 	c.supervisorTimeouts = runner.SupervisorTimeouts{
 		CancelDelay:       10 * time.Millisecond,

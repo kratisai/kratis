@@ -60,6 +60,7 @@ sleep 30
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			// If it has ID and no method, it's a response
 			if req.ID != nil && req.Method == "" {
@@ -245,6 +246,7 @@ sleep 30
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -453,6 +455,7 @@ sleep 30
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.Method == "env.acp_prompt_complete" {
 				var p AcpPromptCompleteParams
@@ -606,6 +609,7 @@ sleep 60
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -743,6 +747,7 @@ func TestExecuteAcpPrompt_NoSession(t *testing.T) {
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				responseChan <- msg
@@ -800,6 +805,7 @@ func TestExecuteTerminate_NoSession(t *testing.T) {
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				responseChan <- msg
@@ -865,6 +871,7 @@ func TestExecuteLaunchAcpAgent_AgentStartFailure(t *testing.T) {
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -961,6 +968,7 @@ sleep 30
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -1061,6 +1069,7 @@ sleep 30
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -1163,6 +1172,7 @@ sleep 30
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -1316,6 +1326,7 @@ done
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -1427,6 +1438,7 @@ func TestHandleServerRequest_ValidDispatch(t *testing.T) {
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			// Approve HITL approval requests for ExecuteCommand
 			if req.Method == "env.hitl_request" {
@@ -1527,6 +1539,7 @@ func TestRequestPermission_ErrorResponse(t *testing.T) {
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 			if req.Method == "env.hitl_request" {
 				_ = conn.WriteJSON(JsonRpcResponse{
 					JsonRPC: "2.0",
@@ -1592,6 +1605,7 @@ func TestRequestPermission_SynthesizesHitlIDWhenActionIDEmpty(t *testing.T) {
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 			if req.Method != "env.hitl_request" {
 				continue
 			}
@@ -1647,6 +1661,7 @@ func TestCreateElicitation_Success(t *testing.T) {
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 			if req.Method == "env.hitl_request" {
 				raw, _ := json.Marshal(HitlResult{
 					Response: HitlAnswered,
@@ -1691,6 +1706,7 @@ func TestCreateElicitation_ErrorResponse(t *testing.T) {
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 			if req.Method == "env.hitl_request" {
 				_ = conn.WriteJSON(JsonRpcResponse{
 					JsonRPC: "2.0",
@@ -1885,6 +1901,7 @@ sleep 30
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -2046,6 +2063,7 @@ done
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -2136,6 +2154,7 @@ func TestExecuteRegisterGitAuth_GithubToken(t *testing.T) {
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				responseChan <- msg
@@ -2210,6 +2229,7 @@ func TestExecuteCheckout_NonEmptyNonGitDir(t *testing.T) {
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				select {
@@ -2294,6 +2314,7 @@ sleep 30
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -2375,6 +2396,7 @@ func TestHandleServerRequest_LaunchAcpAgent_ValidParams(t *testing.T) {
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -2470,6 +2492,7 @@ sleep 30
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -2584,6 +2607,7 @@ exit 1
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -2740,6 +2764,7 @@ exit 42
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -2889,6 +2914,7 @@ sleep 30
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -3021,6 +3047,7 @@ exit 42
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -3149,6 +3176,7 @@ sleep 60
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -3249,6 +3277,7 @@ exit 0
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				select {
@@ -3360,6 +3389,7 @@ sleep 30
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil && req.Method == "" {
 				mu.Lock()
@@ -3520,6 +3550,7 @@ sleep 10
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.ID != nil {
 				idNum := uint64(req.ID.(float64))
@@ -3655,6 +3686,7 @@ done
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 
 			if req.Method == "env.acp_initialized" {
 				var p AcpInitializedParams
@@ -3783,6 +3815,7 @@ func TestExecuteAcpPrompt_RelaunchWithoutRecordedCommand(t *testing.T) {
 			if json.Unmarshal(msg, &req) != nil {
 				continue
 			}
+			ackDiffChanged(conn, req)
 			if req.ID != nil && req.Method == "" {
 				select {
 				case responseChan <- msg:

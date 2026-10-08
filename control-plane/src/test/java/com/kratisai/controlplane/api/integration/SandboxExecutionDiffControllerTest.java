@@ -16,16 +16,20 @@ import com.kratisai.controlplane.api.restdto.SteerCommentDto;
 import com.kratisai.controlplane.api.restdto.SteerExecutionRequest;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.EnvironmentStatus;
+import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionEnvironmentType;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.repository.ChatRepository;
+import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
+import com.kratisai.controlplane.service.BlobStorageService;
 import com.kratisai.controlplane.service.EnvironmentRpcClient;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
 import com.kratisai.controlplane.service.JwtService;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -73,11 +77,16 @@ class SandboxExecutionDiffControllerTest {
     @Autowired
     private EnvironmentRpcClient environmentRpcClient;
 
+    @Autowired
+    private ExecutionDiffSnapshotRepository executionDiffSnapshotRepository;
+
+    @Autowired
+    private BlobStorageService blobStorageService;
+
     private String authToken;
     private ChatEntity chat;
     private ExecutionEnvironment environment;
     private SandboxExecution execution;
-    private WebSocketSession mockSession;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -101,7 +110,7 @@ class SandboxExecutionDiffControllerTest {
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         execution = sandboxExecutionRepository.save(execution);
 
-        mockSession = Mockito.mock(WebSocketSession.class);
+        WebSocketSession mockSession = Mockito.mock(WebSocketSession.class);
         Mockito.when(mockSession.getId()).thenReturn("mock-diff-session-" + UUID.randomUUID());
         Mockito.when(mockSession.isOpen()).thenReturn(true);
 
@@ -115,32 +124,6 @@ class SandboxExecutionDiffControllerTest {
                         response.set("id", envelope.get("id"));
 
                         switch (method) {
-                            case "env.git_diff_summary" -> {
-                                ObjectNode result = response.putObject("result");
-                                result.put("baseCommit", "1111111");
-                                result.put("headCommit", "2222222");
-                                result.put("totalAdditions", 15);
-                                result.put("totalDeletions", 3);
-                                ArrayNode files = result.putArray("files");
-                                ObjectNode f = files.addObject();
-                                f.put("path", "src/Test.java");
-                                f.put("status", "MODIFIED");
-                                f.put("additions", 15);
-                                f.put("deletions", 3);
-                                f.put("isCollapsedByDefault", false);
-                                environmentRpcClient.completeResponse(response);
-                            }
-                            case "env.git_file_diff" -> {
-                                ObjectNode result = response.putObject("result");
-                                result.put(
-                                        "path",
-                                        envelope.path("params").path("path").asText("src/Test.java"));
-                                result.put("patch", "@@ -1,3 +1,5 @@\n+line1\n+line2");
-                                result.put("additions", 2);
-                                result.put("deletions", 0);
-                                result.put("totalLines", 45);
-                                environmentRpcClient.completeResponse(response);
-                            }
                             case "env.read_file_slice" -> {
                                 ObjectNode result = response.putObject("result");
                                 result.put(
@@ -178,8 +161,21 @@ class SandboxExecutionDiffControllerTest {
                 .build();
     }
 
+    private void seedDiffSnapshot(int additions, int deletions, String summaryJson, String fullPatch) {
+        String patchPath = "diffs/" + execution.getId() + ".patch";
+        blobStorageService.putObject(patchPath, fullPatch.getBytes(StandardCharsets.UTF_8), "text/plain");
+        executionDiffSnapshotRepository.save(new ExecutionDiffSnapshot(
+                execution.getId(), "1111111", "2222222", additions, deletions, summaryJson, patchPath));
+    }
+
     @Test
-    void getDiffSummary_returnsSummary() throws Exception {
+    void getDiffSummary_servesPersistedCopyEvenWhileConnected() throws Exception {
+        seedDiffSnapshot(
+                15,
+                3,
+                "[{\"path\":\"src/Test.java\",\"status\":\"MODIFIED\",\"additions\":15,\"deletions\":3,\"isCollapsedByDefault\":false}]",
+                "diff --git a/src/Test.java b/src/Test.java\n+new");
+
         mockMvc.perform(get(
                                 "/api/v1/chats/{chatId}/executions/{executionId}/diff/summary",
                                 chat.getId(),
@@ -195,7 +191,54 @@ class SandboxExecutionDiffControllerTest {
     }
 
     @Test
-    void getFileDiff_returnsFilePatch() throws Exception {
+    void getDiffSummary_whenEnvironmentSleeping_servesPersistedCopy() throws Exception {
+        seedDiffSnapshot(
+                15,
+                3,
+                "[{\"path\":\"src/Test.java\",\"status\":\"MODIFIED\",\"additions\":15,\"deletions\":3,\"isCollapsedByDefault\":false}]",
+                "diff --git a/src/Test.java b/src/Test.java\n+new");
+        environment.setStatus(EnvironmentStatus.SLEEPING);
+        executionEnvironmentRepository.save(environment);
+
+        mockMvc.perform(get(
+                                "/api/v1/chats/{chatId}/executions/{executionId}/diff/summary",
+                                chat.getId(),
+                                execution.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.baseCommit").value("1111111"))
+                .andExpect(jsonPath("$.files[0].path").value("src/Test.java"));
+    }
+
+    @Test
+    void getDiffSummary_withoutPersistedCopy_returnsEmptySummary() throws Exception {
+        mockMvc.perform(get(
+                                "/api/v1/chats/{chatId}/executions/{executionId}/diff/summary",
+                                chat.getId(),
+                                execution.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.baseCommit").value(""))
+                .andExpect(jsonPath("$.totalAdditions").value(0))
+                .andExpect(jsonPath("$.files.length()").value(0));
+    }
+
+    @Test
+    void getFileDiff_extractsFileFromPersistedBlob() throws Exception {
+        seedDiffSnapshot(
+                15,
+                3,
+                "[{\"path\":\"src/Test.java\",\"status\":\"MODIFIED\",\"additions\":15,\"deletions\":3,\"isCollapsedByDefault\":false}]",
+                """
+                        diff --git a/src/Test.java b/src/Test.java
+                        --- a/src/Test.java
+                        +++ b/src/Test.java
+                        @@ -1,3 +1,5 @@
+                        -old line
+                        +line1
+                        +line2
+                        """);
+
         mockMvc.perform(get(
                                 "/api/v1/chats/{chatId}/executions/{executionId}/diff/file",
                                 chat.getId(),
@@ -205,7 +248,7 @@ class SandboxExecutionDiffControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.path").value("src/Test.java"))
                 .andExpect(jsonPath("$.additions").value(2))
-                .andExpect(jsonPath("$.totalLines").value(45))
+                .andExpect(jsonPath("$.deletions").value(1))
                 .andExpect(jsonPath("$.patch").isNotEmpty());
     }
 

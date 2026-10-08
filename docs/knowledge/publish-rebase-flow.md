@@ -28,7 +28,23 @@ The sidecar treats a missing `origin` as a new repository.
 `resolveDiffBase` then returns `git rev-list --max-parents=0 HEAD`.
 Never treat a repository with a remote as new.
 If the target branch is missing, `resolveBaseRef` returns an error.
-`env.git_diff_summary` and `env.git_file_diff` do not fall back to `HEAD` or `HEAD~1`.
+`env.git_diff_summary` and the diff push never fall back to `HEAD` or `HEAD~1`.
+
+## Diff storage and the read path
+
+The sidecar pushes the full diff state (`env.diff_changed`, acknowledged as a
+request) after each workspace change, before execution completion, and after
+every (re)registration; the control plane persists the patch in blob storage
+and the manifest in `execution_diff_snapshots`.
+
+The diff view (`/diff/summary`, `/diff/file`, `/diff/export`) is served only
+from that persisted copy and never calls the connector — diffs stay viewable
+while the sandbox sleeps, disconnects, or terminates. Only hunk context
+expansion (`/diff/context`) reads live file content from a connected sandbox.
+
+The publish flow (`SandboxExecutionPublishService`) still pulls a fresh summary
+via `env.git_diff_summary` because it must stage and commit the sandbox's
+current working tree at publish time.
 
 ## New repository publish
 
