@@ -11,6 +11,7 @@ import com.kratisai.controlplane.api.restdto.SteerExecutionRequest;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
+import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.PromptStatus;
@@ -665,35 +666,36 @@ public class SandboxExecutionService {
     }
 
     public void cancelPendingPermissions(SandboxExecution execution, String reason) {
-        PendingHitlRegistry.PendingHitl pendingHitl = pendingHitlRegistry.remove(execution.getId());
-        if (pendingHitl == null) {
+        List<PendingHitlRegistry.PendingHitl> pendingHitls = pendingHitlRegistry.removeAll(execution.getId());
+        if (pendingHitls.isEmpty()) {
             return;
         }
-        logger.info(
-                "Removed pending HITL request for execution {} (kind={}): {}",
-                execution.getId(),
-                pendingHitl.request().kind(),
-                reason);
-        UUID teamId = pendingHitl.teamId();
-        transactionTemplate.executeWithoutResult(
-                status -> eventPublisher.publishEvent(new SandboxExecutionHitlResolvedEvent(
-                        teamId,
-                        new HitlResolution(
-                                execution.getId(),
-                                pendingHitl.request().hitlId(),
-                                pendingHitl.request().kind(),
-                                HitlResponse.CANCELLED,
-                                null,
-                                null,
-                                null,
-                                null))));
-        try {
-            environmentRpcClient.replyError(
-                    execution.getEnvironment().getId(),
-                    pendingHitl.requestId(),
-                    new JsonRpcError(-32000, "HITL request cancelled: " + reason, null));
-        } catch (Exception e) {
-            logger.error("Failed to send cancellation error to environment", e);
+        for (PendingHitlRegistry.PendingHitl pendingHitl : pendingHitls) {
+            logger.info(
+                    "Removed pending HITL request for execution {} (kind={}): {}",
+                    execution.getId(),
+                    pendingHitl.request().kind(),
+                    reason);
+            UUID teamId = pendingHitl.teamId();
+            transactionTemplate.executeWithoutResult(
+                    status -> eventPublisher.publishEvent(new SandboxExecutionHitlResolvedEvent(
+                            teamId,
+                            new HitlResolution(
+                                    execution.getId(),
+                                    pendingHitl.request().actionId(),
+                                    pendingHitl.request().kind(),
+                                    HitlResponse.CANCELLED,
+                                    null,
+                                    null,
+                                    HitlResolver.system()))));
+            try {
+                environmentRpcClient.replyError(
+                        execution.getEnvironment().getId(),
+                        pendingHitl.requestId(),
+                        new JsonRpcError(-32000, "HITL request cancelled: " + reason, null));
+            } catch (Exception e) {
+                logger.error("Failed to send cancellation error to environment", e);
+            }
         }
     }
 

@@ -11,7 +11,7 @@ import java.util.UUID;
 
 public record ResolveHitlRequest(
         @NotNull UUID executionId,
-        @NotBlank String hitlId,
+        @NotBlank String actionId,
         @NotNull HitlResponse response,
         String optionId,
         Map<String, Object> content,
@@ -31,17 +31,17 @@ public record ResolveHitlRequest(
     }
 
     public ResolveHitlRequest(
-            UUID executionId, String hitlId, HitlResponse response, String optionId, Map<String, Object> content) {
-        this(executionId, hitlId, response, optionId, content, null);
+            UUID executionId, String actionId, HitlResponse response, String optionId, Map<String, Object> content) {
+        this(executionId, actionId, response, optionId, content, null);
     }
 
     public ResolveHitlRequest(
             UUID executionId,
-            String hitlId,
+            String actionId,
             HitlResponse response,
             String optionId,
             Map<String, Object> content,
             List<CreateHitlRuleRequest> rules) {
-        this(executionId, hitlId, response, optionId, content, rules, null);
+        this(executionId, actionId, response, optionId, content, rules, null);
     }
 }

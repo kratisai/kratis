@@ -550,7 +550,6 @@ describe('ActivityApproval', () => {
             detail: {
               hitl: {
                 commandSegments: [{ suggestedRoot: 'make lint', text: 'make lint' }],
-                hitlId: 'tc-1',
                 kind: 'approval',
                 message: 'Approve',
                 options: [ALLOW_ONCE, REJECT_ONCE],

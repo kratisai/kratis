@@ -196,7 +196,7 @@ class SandboxExecutionWebSocketIntegrationTest {
             JsonRpcInboundRequest secondPermRequest = new JsonRpcInboundRequest(
                     EnvironmentRpcPayload.HitlActivity.METHOD,
                     objectMapper.valueToTree(Map.of(
-                            "hitlId", "tool-call-101",
+                            "actionId", "tool-call-101",
                             "message", "Approve rm -rf /",
                             "kind", "approval",
                             "executionId", executionId.toString(),

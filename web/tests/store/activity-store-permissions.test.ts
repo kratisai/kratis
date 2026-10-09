@@ -41,8 +41,8 @@ describe('activity-store - HITL REST calls', () => {
     expect(init.method).toBe('POST')
     expect(init.headers).toMatchObject({ Authorization: 'Bearer test-access-token' })
     expect(JSON.parse(String(init.body))).toEqual({
+      actionId: 'tc-1',
       executionId: 'exec-1',
-      hitlId: 'tc-1',
       optionId: 'allow-once',
       response: 'approved',
     })
@@ -64,8 +64,8 @@ describe('activity-store - HITL REST calls', () => {
     expect(init.method).toBe('POST')
     expect(init.headers).toMatchObject({ Authorization: 'Bearer test-access-token' })
     expect(JSON.parse(String(init.body))).toEqual({
+      actionId: 'tc-1',
       executionId: 'exec-1',
-      hitlId: 'tc-1',
       response: 'declined',
     })
   })
@@ -84,9 +84,9 @@ describe('activity-store - HITL REST calls', () => {
 
     expect(capturedRequests).toHaveLength(1)
     expect(JSON.parse(String(capturedRequests[0].init.body))).toEqual({
+      actionId: 'tc-1',
       executionId: 'exec-1',
       feedback: 'use pnpm instead',
-      hitlId: 'tc-1',
       optionId: 'reject-once',
       response: 'declined',
     })
@@ -105,8 +105,8 @@ describe('activity-store - HITL REST calls', () => {
     expect(capturedRequests).toHaveLength(1)
     const body = JSON.parse(String(capturedRequests[0].init.body)) as Record<string, unknown>
     expect(body).toEqual({
+      actionId: 'tc-1',
       executionId: 'exec-1',
-      hitlId: 'tc-1',
       optionId: 'reject-once',
       response: 'declined',
     })
@@ -131,9 +131,9 @@ describe('activity-store - HITL REST calls', () => {
     expect(init.method).toBe('POST')
     expect(init.headers).toMatchObject({ Authorization: 'Bearer test-access-token' })
     expect(JSON.parse(String(init.body))).toEqual({
+      actionId: 'el-1',
       content: { target: 'staging' },
       executionId: 'exec-1',
-      hitlId: 'el-1',
       response: 'answered',
     })
   })
@@ -162,9 +162,9 @@ describe('activity-store - HITL REST calls', () => {
     expect(init.method).toBe('POST')
     expect(init.headers).toMatchObject({ Authorization: 'Bearer test-access-token' })
     expect(JSON.parse(String(init.body))).toEqual({
+      actionId: 'tc-1',
       content: null,
       executionId: 'exec-1',
-      hitlId: 'tc-1',
       optionId: null,
       response: 'cancelled',
     })

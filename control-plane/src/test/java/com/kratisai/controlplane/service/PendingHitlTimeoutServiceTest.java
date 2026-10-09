@@ -7,10 +7,11 @@ import static org.mockito.Mockito.when;
 
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
+import com.kratisai.controlplane.api.wsdto.HitlResolverKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import java.time.Instant;
-import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,10 +51,23 @@ class PendingHitlTimeoutServiceTest {
                 pendingHitlRegistry, eventPublisher, environmentListeners, sandboxExecutionService);
     }
 
-    private PendingHitlRegistry.PendingHitl pending(UUID teamId, HitlKind kind, String hitlId, String command) {
+    private PendingHitlRegistry.PendingHitl pending(
+            UUID executionId, UUID teamId, HitlKind kind, String actionId, String command) {
         return new PendingHitlRegistry.PendingHitl(
                 new HitlRequestSnapshot(
-                        UUID.randomUUID(), hitlId, kind, "message", command, null, null, null, null, null, null),
+                        executionId,
+                        actionId,
+                        kind,
+                        "message",
+                        command,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
                 session,
                 7,
                 Instant.now(),
@@ -64,8 +78,9 @@ class PendingHitlTimeoutServiceTest {
     void cleanupExpiredHitl_approvalPublishesTimeoutAndRepliesAfterCommit() {
         UUID executionId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
-        PendingHitlRegistry.PendingHitl hitl = pending(teamId, HitlKind.APPROVAL, "tool-call-42", "rm -rf /");
-        when(pendingHitlRegistry.removeExpired()).thenReturn(Map.of(executionId, hitl));
+        PendingHitlRegistry.PendingHitl hitl =
+                pending(executionId, teamId, HitlKind.APPROVAL, "tool-call-42", "rm -rf /");
+        when(pendingHitlRegistry.removeExpired()).thenReturn(List.of(hitl));
 
         TransactionSynchronizationManager.initSynchronization();
         try {
@@ -75,10 +90,10 @@ class PendingHitlTimeoutServiceTest {
             verify(eventPublisher).publishEvent(eventCaptor.capture());
             SandboxExecutionHitlResolvedEvent event = (SandboxExecutionHitlResolvedEvent) eventCaptor.getValue();
             Assertions.assertThat(event.result().executionId()).isEqualTo(executionId);
-            Assertions.assertThat(event.result().hitlId()).isEqualTo("tool-call-42");
+            Assertions.assertThat(event.result().actionId()).isEqualTo("tool-call-42");
             Assertions.assertThat(event.result().kind()).isEqualTo(HitlKind.APPROVAL);
             Assertions.assertThat(event.result().response()).isEqualTo(HitlResponse.CANCELLED);
-            Assertions.assertThat(event.result().resolvedByDisplayName()).isEqualTo("System (timeout)");
+            Assertions.assertThat(event.result().resolvedBy().kind()).isEqualTo(HitlResolverKind.TIMEOUT);
 
             for (TransactionSynchronization sync : TransactionSynchronizationManager.getSynchronizations()) {
                 sync.afterCommit();
@@ -100,8 +115,8 @@ class PendingHitlTimeoutServiceTest {
     void cleanupExpiredHitl_questionPublishesTimeoutAndRepliesAfterCommit() {
         UUID executionId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
-        PendingHitlRegistry.PendingHitl hitl = pending(teamId, HitlKind.QUESTION, "el-1", null);
-        when(pendingHitlRegistry.removeExpired()).thenReturn(Map.of(executionId, hitl));
+        PendingHitlRegistry.PendingHitl hitl = pending(executionId, teamId, HitlKind.QUESTION, "el-1", null);
+        when(pendingHitlRegistry.removeExpired()).thenReturn(List.of(hitl));
 
         TransactionSynchronizationManager.initSynchronization();
         try {
@@ -111,10 +126,10 @@ class PendingHitlTimeoutServiceTest {
             verify(eventPublisher).publishEvent(eventCaptor.capture());
             SandboxExecutionHitlResolvedEvent event = (SandboxExecutionHitlResolvedEvent) eventCaptor.getValue();
             Assertions.assertThat(event.result().executionId()).isEqualTo(executionId);
-            Assertions.assertThat(event.result().hitlId()).isEqualTo("el-1");
+            Assertions.assertThat(event.result().actionId()).isEqualTo("el-1");
             Assertions.assertThat(event.result().kind()).isEqualTo(HitlKind.QUESTION);
             Assertions.assertThat(event.result().response()).isEqualTo(HitlResponse.CANCELLED);
-            Assertions.assertThat(event.result().resolvedByDisplayName()).isEqualTo("System (timeout)");
+            Assertions.assertThat(event.result().resolvedBy().kind()).isEqualTo(HitlResolverKind.TIMEOUT);
 
             for (TransactionSynchronization sync : TransactionSynchronizationManager.getSynchronizations()) {
                 sync.afterCommit();
@@ -129,7 +144,7 @@ class PendingHitlTimeoutServiceTest {
 
     @Test
     void cleanupExpiredHitl_noExpiredEntriesDoesNothing() {
-        when(pendingHitlRegistry.removeExpired()).thenReturn(Map.of());
+        when(pendingHitlRegistry.removeExpired()).thenReturn(List.of());
         service.cleanupExpiredHitl();
         verify(eventPublisher, org.mockito.Mockito.never()).publishEvent(org.mockito.ArgumentMatchers.any());
     }
@@ -137,7 +152,20 @@ class PendingHitlTimeoutServiceTest {
     @Test
     void timeoutPrompt_mentionsRequestMessageAndNoResponseGuidance() {
         PendingHitlRegistry.PendingHitl hitl = new PendingHitlRegistry.PendingHitl(
-                new HitlRequestSnapshot(UUID.randomUUID(), "tool-call-42", HitlKind.APPROVAL, "Remove build artifacts"),
+                new HitlRequestSnapshot(
+                        UUID.randomUUID(),
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        "Remove build artifacts",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
                 session,
                 7,
                 Instant.now(),
@@ -156,7 +184,20 @@ class PendingHitlTimeoutServiceTest {
     @Test
     void timeoutPrompt_abbreviatesLongRequestMessages() {
         PendingHitlRegistry.PendingHitl hitl = new PendingHitlRegistry.PendingHitl(
-                new HitlRequestSnapshot(UUID.randomUUID(), "t-1", HitlKind.QUESTION, "x".repeat(500)),
+                new HitlRequestSnapshot(
+                        UUID.randomUUID(),
+                        "t-1",
+                        HitlKind.QUESTION,
+                        "x".repeat(500),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
                 session,
                 7,
                 Instant.now(),

@@ -545,7 +545,7 @@ func TestRequestPermission_MissingToolCallIDWarnsLoudly(t *testing.T) {
 				warnLine = line
 			}
 		case "env.hitl_activity":
-			hitlID, _ = params["hitlId"].(string)
+			hitlID, _ = params["actionId"].(string)
 		}
 	}
 	if warnLine == "" {

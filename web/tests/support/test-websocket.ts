@@ -189,12 +189,11 @@ export function triggerMockPermissionRequired(
     { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
     { kind: 'reject_once', name: 'Reject', optionId: 'reject-once' },
   ],
-  hitlId = command,
+  actionId = command,
 ) {
-  triggerMockExecutionActivity(ws, executionId, 'COMMAND', command, 'pending', hitlId, {
+  triggerMockExecutionActivity(ws, executionId, 'COMMAND', command, 'pending', actionId, {
     hitl: {
       command,
-      hitlId,
       kind: 'approval',
       message: `Allow ${command}?`,
       options,
@@ -211,26 +210,30 @@ export function triggerMockPermissionResolved(
   approved: boolean,
   resolvedByUserId: null | string,
   resolvedByDisplayName: string,
-  hitlId = command,
+  actionId = command,
   optionId = approved ? 'allow-once' : 'reject-once',
   response: 'approved' | 'cancelled' | 'declined' = approved ? 'approved' : 'declined',
 ) {
+  const resolvedBy =
+    resolvedByDisplayName === 'System (timeout)'
+      ? { kind: 'timeout' as const }
+      : resolvedByUserId
+        ? { displayName: resolvedByDisplayName, kind: 'user' as const, userId: resolvedByUserId }
+        : { displayName: resolvedByDisplayName, kind: 'system' as const }
   triggerMockExecutionActivity(
     ws,
     executionId,
     'COMMAND',
     command,
     response === 'approved' ? 'in_progress' : 'failed',
-    hitlId,
+    actionId,
     {
       hitl: {
         command,
-        hitlId,
         kind: 'approval',
         message: `Allow ${command}?`,
         ...(response === 'cancelled' ? {} : { optionId }),
-        resolvedBy: resolvedByDisplayName,
-        ...(resolvedByUserId === null ? {} : { resolvedByUserId }),
+        resolvedBy,
         response,
         state: 'resolved',
       },

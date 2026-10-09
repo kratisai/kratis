@@ -254,7 +254,7 @@ describe('Execution Activity Log', () => {
       detail: {
         hitl: {
           command: 'systemctl restart app',
-          hitlId: 'tc-approve-scroll',
+
           kind: 'approval',
           message: 'Allow systemctl restart app?',
           state: 'awaiting_human',
@@ -287,7 +287,7 @@ describe('Execution Activity Log', () => {
       detail: {
         hitl: {
           form: { properties: { target: { type: 'string' } }, type: 'object' },
-          hitlId: 'el-scroll',
+
           kind: 'question',
           message: 'Choose a deployment target',
           state: 'awaiting_human',
@@ -320,7 +320,7 @@ describe('Execution Activity Log', () => {
       detail: {
         hitl: {
           form: { properties: { target: { type: 'string' } }, type: 'object' },
-          hitlId: 'el-follow',
+
           kind: 'question',
           message: 'Choose a deployment target',
           state: 'awaiting_human',
@@ -437,9 +437,9 @@ describe('Execution Activity Log', () => {
       expect(captured).toHaveLength(1)
     })
     expect(captured[0]).toEqual({
+      actionId: 'npm run build',
       executionId: EXECUTION_ID,
       feedback: 'use pnpm instead of npm',
-      hitlId: 'npm run build',
       optionId: 'reject-once',
       response: 'declined',
     })
@@ -454,7 +454,7 @@ describe('Execution Activity Log', () => {
       detail: {
         hitl: {
           form: { properties: { target: { type: 'string' } }, type: 'object' },
-          hitlId: 'el-feedback',
+
           kind: 'question',
           message: 'Choose a deployment target',
           state: 'awaiting_human',
@@ -491,9 +491,9 @@ describe('Execution Activity Log', () => {
       expect(captured).toHaveLength(1)
     })
     expect(captured[0]).toEqual({
+      actionId: 'el-feedback',
       executionId: EXECUTION_ID,
       feedback: 'staging is offline, use preview',
-      hitlId: 'el-feedback',
       response: 'declined',
     })
   })

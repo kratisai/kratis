@@ -6,19 +6,19 @@ import java.util.UUID;
 
 public record HitlResolution(
         UUID executionId,
-        String hitlId,
+        String actionId,
         HitlKind kind,
         HitlResponse response,
         String optionId,
         Map<String, Object> content,
-        UUID resolvedByUserId,
-        String resolvedByDisplayName) {
+        HitlResolver resolvedBy) {
 
     public HitlResolution {
         Objects.requireNonNull(executionId, "executionId is required");
-        Objects.requireNonNull(hitlId, "hitlId is required");
+        Objects.requireNonNull(actionId, "actionId is required");
         Objects.requireNonNull(kind, "kind is required");
         Objects.requireNonNull(response, "response is required");
+        Objects.requireNonNull(resolvedBy, "resolvedBy is required");
         content = content != null ? Map.copyOf(content) : null;
     }
 }

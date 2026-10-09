@@ -29,13 +29,14 @@ public class EnvironmentRealtimeEventListeners {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onSandboxExecutionHitlResolvedEvent(SandboxExecutionHitlResolvedEvent event) {
         HitlResolution result = event.result();
-        PendingHitlRegistry.PendingHitl pending = pendingHitlRegistry.remove(result.executionId());
+        PendingHitlRegistry.PendingHitl pending = pendingHitlRegistry.remove(result.executionId(), result.actionId());
         if (pending != null) {
             replyToSidecar(pending, result.executionId(), result.response(), result.optionId(), result.content());
         } else {
             logger.debug(
-                    "No pending HITL request in registry for execution {} (already claimed or timed out)",
-                    result.executionId());
+                    "No pending HITL request in registry for execution {} actionId='{}' (already claimed or timed out)",
+                    result.executionId(),
+                    result.actionId());
         }
     }
 

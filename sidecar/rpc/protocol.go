@@ -234,17 +234,19 @@ const (
 // the user to authorize a command; kind=question asks a structured question
 // with a form schema.
 type HitlActivityParams struct {
-	HitlID      string   `json:"hitlId"`
+	ActionID    string   `json:"actionId"`
 	Message     string   `json:"message"`
 	Kind        HitlKind `json:"kind"`
 	ExecutionID string   `json:"executionId"`
 
 	// kind=approval
-	Command  string             `json:"command,omitempty"`
-	Title    string             `json:"title,omitempty"`
-	ToolKind string             `json:"toolKind,omitempty"`
-	Options  []PermissionOption `json:"options,omitempty"`
-	Diff     *ActivityDiff      `json:"diff,omitempty"`
+	Command   string             `json:"command,omitempty"`
+	Title     string             `json:"title,omitempty"`
+	ToolKind  string             `json:"toolKind,omitempty"`
+	Options   []PermissionOption `json:"options,omitempty"`
+	Diff      *ActivityDiff      `json:"diff,omitempty"`
+	Locations []ActivityLocation `json:"locations,omitempty"`
+	Input     map[string]any     `json:"input,omitempty"`
 
 	// kind=question
 	Form map[string]any `json:"form,omitempty"`

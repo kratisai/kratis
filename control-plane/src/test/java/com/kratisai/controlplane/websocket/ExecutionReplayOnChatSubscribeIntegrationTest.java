@@ -215,7 +215,7 @@ class ExecutionReplayOnChatSubscribeIntegrationTest {
                     JsonRpcInboundRequest permRequest = new JsonRpcInboundRequest(
                             EnvironmentRpcPayload.HitlActivity.METHOD,
                             objectMapper.valueToTree(Map.of(
-                                    "hitlId", "tool-call-100",
+                                    "actionId", "tool-call-100",
                                     "message", "Approve rm -rf /",
                                     "kind", "approval",
                                     "executionId", executionId.toString(),

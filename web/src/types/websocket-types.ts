@@ -36,13 +36,11 @@ export interface ActivityHitl {
   content?: Record<string, unknown>
   diff?: ActivityDiff
   form?: Record<string, unknown>
-  hitlId: string
   kind: HitlKind
   message: string
   optionId?: string
   options?: PermissionOption[]
-  resolvedBy?: string
-  resolvedByUserId?: string
+  resolvedBy?: HitlResolver
   response?: HitlResponse
   state?: HitlState
   title?: string
@@ -198,11 +196,17 @@ export interface ExecutionStatusChangedResult {
 
 export type HitlKind = 'approval' | 'question'
 
+export interface HitlResolver {
+  displayName?: string
+  kind: HitlResolverKind
+  userId?: string
+}
+
+export type HitlResolverKind = 'rule' | 'system' | 'timeout' | 'user'
+
 export type HitlResponse = 'answered' | 'approved' | 'cancelled' | 'declined'
 
 export type HitlState = 'awaiting_human' | 'resolved'
-
-export const SYSTEM_TIMEOUT_RESOLVED_BY = 'System (timeout)'
 
 export interface IngestionEventPayload {
   batchId: string

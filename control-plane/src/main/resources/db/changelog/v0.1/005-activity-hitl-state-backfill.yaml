@@ -1,0 +1,34 @@
+databaseChangeLog:
+- changeSet:
+    id: 005-activity-hitl-state-backfill-001
+    author: kratis
+    comment: >-
+      backfill old DBs before hitl.state was introduced
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: true
+        stripComments: true
+        sql: >-
+          UPDATE sandbox_execution_activities
+          SET detail = jsonb_set(detail, '{hitl,state}', '"resolved"'::jsonb, true)
+          WHERE jsonb_exists(detail, 'hitl')
+          AND jsonb_exists(detail->'hitl', 'response')
+          AND NOT jsonb_exists(detail->'hitl', 'state');
+- changeSet:
+    id: 005-activity-hitl-state-backfill-002
+    author: kratis
+    comment: Resolutions now carry a structured resolvedBy; drop the superseded string/id fields.
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: true
+        stripComments: true
+        sql: >-
+          UPDATE sandbox_execution_activities
+          SET detail = detail #- '{hitl,resolvedByUserId}'
+          WHERE jsonb_exists(detail, 'hitl') AND jsonb_exists(detail->'hitl', 'resolvedByUserId');
+
+          UPDATE sandbox_execution_activities
+          SET detail = detail #- '{hitl,resolvedBy}'
+          WHERE jsonb_exists(detail, 'hitl') AND jsonb_typeof(detail->'hitl'->'resolvedBy') = 'string';

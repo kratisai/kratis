@@ -544,6 +544,22 @@ func convertDiff(diff *acp.ActivityDiff) *ActivityDiff {
 	return &ActivityDiff{OldText: diff.OldText, NewText: diff.NewText, Path: diff.Path}
 }
 
+func convertLocations(locations []acp.ToolLocation) []ActivityLocation {
+	if len(locations) == 0 {
+		return nil
+	}
+	converted := make([]ActivityLocation, 0, len(locations))
+	for _, location := range locations {
+		entry := ActivityLocation{Path: location.Path}
+		if location.Line > 0 {
+			line := location.Line
+			entry.Line = &line
+		}
+		converted = append(converted, entry)
+	}
+	return converted
+}
+
 func (c *Client) SendComplete(info runner.CompletionInfo) {
 	// Flush a terminal diff emit before env.complete so the persisted diff
 	// snapshot always reflects the session's final workspace state, even if no
@@ -1072,13 +1088,13 @@ func (c *Client) RequestPermission(req acp.PermissionRequest) (string, error) {
 	if message == "" {
 		message = req.Command
 	}
-	hitlID := req.ActionID
-	if hitlID == "" {
+	actionID := req.ActionID
+	if actionID == "" {
 		// Some agents omit the required toolCallId; synthesise an id so the
 		// request still resolves, and report it loudly.
-		hitlID = newHitlID()
-		msg := fmt.Sprintf("[WARN] ACP violation: session/request_permission without toolCallId (command=%q title=%q) — synthesised hitlId=%q, approval will not attach to a tool activity",
-			req.Command, req.Title, hitlID)
+		actionID = newHitlID()
+		msg := fmt.Sprintf("[WARN] ACP violation: session/request_permission without toolCallId (command=%q title=%q) — synthesised actionId=%q, approval will not attach to a tool activity",
+			req.Command, req.Title, actionID)
 		log.Printf("%s", msg)
 		c.SendOutput(msg, "stderr")
 	}
@@ -1086,7 +1102,7 @@ func (c *Client) RequestPermission(req acp.PermissionRequest) (string, error) {
 	execID := c.currentExecutionID
 	c.mu.Unlock()
 	result, err := c.requestHitl(HitlActivityParams{
-		HitlID:      hitlID,
+		ActionID:    actionID,
 		Message:     message,
 		Kind:        HitlApproval,
 		ExecutionID: execID,
@@ -1095,6 +1111,8 @@ func (c *Client) RequestPermission(req acp.PermissionRequest) (string, error) {
 		ToolKind:    req.Kind,
 		Options:     convertPermissionOptions(req.Options),
 		Diff:        convertDiff(req.Diff),
+		Locations:   convertLocations(req.Locations),
+		Input:       req.Input,
 	})
 	if err != nil {
 		return "", err
@@ -1127,7 +1145,7 @@ func (c *Client) CreateElicitation(req acp.ElicitationRequest) (acp.ElicitationR
 	execID := c.currentExecutionID
 	c.mu.Unlock()
 	result, err := c.requestHitl(HitlActivityParams{
-		HitlID:      req.ElicitationID,
+		ActionID:    req.ElicitationID,
 		Message:     req.Message,
 		Kind:        HitlQuestion,
 		ExecutionID: execID,
@@ -1171,7 +1189,7 @@ func (c *Client) requestHitl(req HitlActivityParams) (HitlActivityResult, error)
 		ID:      id,
 	}
 
-	hitlDebug("[HITL] requestHitl: sending env.hitl_activity to control plane, id=%d, kind=%q, hitlId=%q", id, req.Kind, req.HitlID)
+	hitlDebug("[HITL] requestHitl: sending env.hitl_activity to control plane, id=%d, kind=%q, actionId=%q", id, req.Kind, req.ActionID)
 	if err := c.writeJSON(reqMsg); err != nil {
 		hitlDebug("[HITL] requestHitl: failed to send request to control plane: %v", err)
 		c.mu.Lock()

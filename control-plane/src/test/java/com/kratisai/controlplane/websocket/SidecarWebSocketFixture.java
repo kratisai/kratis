@@ -141,7 +141,7 @@ public class SidecarWebSocketFixture extends WebSocketFixture<SidecarWebSocketFi
             JsonRpcInboundRequest hitlRequest = new JsonRpcInboundRequest(
                     EnvironmentRpcPayload.HitlActivity.METHOD,
                     objectMapper.valueToTree(Map.of(
-                            "hitlId",
+                            "actionId",
                             "tool-call-100",
                             "message",
                             "Approve " + command,

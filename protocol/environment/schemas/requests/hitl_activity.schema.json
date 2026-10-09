@@ -2,11 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "HitlActivityParams",
   "type": "object",
-  "required": ["hitlId", "message", "kind"],
+  "required": ["actionId", "message", "kind"],
   "properties": {
-    "hitlId": {
+    "actionId": {
       "type": "string",
-      "description": "Correlation ID of the HITL request (ACP toolCallId for approvals, question id for questions)."
+      "description": "The id of the activity this HITL request applies to: the ACP toolCallId for approvals, or the question id for questions. Identical to the activity's actionId."
     },
     "message": {
       "type": "string",
@@ -56,6 +56,21 @@
         "path": { "type": "string" }
       },
       "additionalProperties": false
+    },
+    "locations": {
+      "type": "array",
+      "description": "File locations the action references (kind=approval). Used to build the activity row when the agent never announced a tool_call.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "line": { "type": "integer" }
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "description": "Agent-defined input bag of the action (kind=approval). Used to build the activity row when the agent never announced a tool_call."
     },
     "form": {
       "type": "object",

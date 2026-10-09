@@ -9,6 +9,7 @@ import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
+import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
@@ -143,7 +144,7 @@ public class EnvironmentHitlActivityRpcHandler
 
         HitlRequestSnapshot payload = new HitlRequestSnapshot(
                 execution.getId(),
-                params.hitlId(),
+                params.actionId(),
                 HitlKind.APPROVAL,
                 params.message(),
                 command,
@@ -152,7 +153,9 @@ public class EnvironmentHitlActivityRpcHandler
                 toolKind,
                 sanitizeOptions(params.options()),
                 params.diff(),
-                null);
+                null,
+                params.locations(),
+                params.input());
 
         if (autoResolution.isPresent()) {
             if (autoResolution.get() == HitlResponse.DECLINED) {
@@ -170,7 +173,7 @@ public class EnvironmentHitlActivityRpcHandler
             return Flux.just(HitlActivityResult.approved(allowOptionId));
         }
 
-        pendingHitlRegistry.register(execution.getId(), payload, sessionId, requestId, teamId);
+        pendingHitlRegistry.register(payload, sessionId, requestId, teamId);
         eventPublisher.publishEvent(new SandboxExecutionHitlRequiredEvent(teamId, payload));
         logger.info(
                 "Deferred command '{}' to HITL for execution {} and team {} — response sent when user resolves",
@@ -189,14 +192,14 @@ public class EnvironmentHitlActivityRpcHandler
                     "Execution {} not found for environment {} — cancelling question '{}'",
                     execId,
                     envId,
-                    params.hitlId());
+                    params.actionId());
             return Flux.just(HitlActivityResult.cancelled());
         }
         executionGuard.verifyExecutionInEnvironment(execution, envId);
 
         HitlRequestSnapshot payload = new HitlRequestSnapshot(
                 execution.getId(),
-                params.hitlId(),
+                params.actionId(),
                 HitlKind.QUESTION,
                 params.message(),
                 null,
@@ -205,13 +208,15 @@ public class EnvironmentHitlActivityRpcHandler
                 null,
                 null,
                 null,
-                params.form());
+                params.form(),
+                null,
+                null);
 
-        pendingHitlRegistry.register(execution.getId(), payload, sessionId, requestId, teamId);
+        pendingHitlRegistry.register(payload, sessionId, requestId, teamId);
         eventPublisher.publishEvent(new SandboxExecutionHitlRequiredEvent(teamId, payload));
         logger.info(
                 "Deferred question '{}' to HITL for execution {} and team {} — response sent when user answers",
-                params.hitlId(),
+                params.actionId(),
                 execution.getId(),
                 teamId);
         return Flux.empty();
@@ -225,13 +230,12 @@ public class EnvironmentHitlActivityRpcHandler
                 request,
                 new HitlResolution(
                         request.executionId(),
-                        request.hitlId(),
+                        request.actionId(),
                         HitlKind.APPROVAL,
                         response,
                         optionId,
                         null,
-                        null,
-                        RULE_RESOLVER));
+                        HitlResolver.rule(RULE_RESOLVER)));
     }
 
     /** Unknown tool kinds get no segments, so nothing unrememberable can be persisted. */

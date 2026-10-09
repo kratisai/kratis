@@ -33,6 +33,15 @@ const hitlKind = z.enum(['approval', 'question'])
 const hitlResponse = z.enum(['approved', 'answered', 'declined', 'cancelled'])
 const hitlState = z.enum(['awaiting_human', 'resolved'])
 
+const hitlResolver = z
+  .object({
+    displayName: z.string().optional(),
+    kind: z.enum(['user', 'rule', 'timeout', 'system']),
+    userId: uuid.optional(),
+  })
+  .strict()
+  .optional()
+
 const planEntryPriority = z.enum(['high', 'medium', 'low'])
 const planEntryStatus = z.enum(['pending', 'in_progress', 'completed'])
 
@@ -51,13 +60,11 @@ const hitlSchema = z
     content: z.record(z.string(), z.unknown()).optional(),
     diff: permissionDiffSchema,
     form: z.record(z.string(), z.unknown()).optional(),
-    hitlId: z.string(),
     kind: hitlKind,
     message: z.string(),
     optionId: z.string().optional(),
     options: z.array(permissionOption).optional(),
-    resolvedBy: z.string().optional(),
-    resolvedByUserId: uuid.optional(),
+    resolvedBy: hitlResolver,
     response: hitlResponse.optional(),
     state: hitlState.optional(),
     title: z.string().optional(),

@@ -1589,10 +1589,10 @@ func TestRequestPermission_WriteError(t *testing.T) {
 	}
 }
 
-// TestRequestPermission_SynthesizesHitlIDWhenActionIDEmpty verifies that a
+// TestRequestPermission_SynthesizesActionIDWhenActionIDEmpty verifies that a
 // permission request without an agent toolCallId (e.g. Goose) still sends a
-// non-blank hitlId so the control plane can register and resolve the HITL.
-func TestRequestPermission_SynthesizesHitlIDWhenActionIDEmpty(t *testing.T) {
+// non-blank actionId so the control plane can register and resolve the HITL.
+func TestRequestPermission_SynthesizesActionIDWhenActionIDEmpty(t *testing.T) {
 	received := make(chan string, 1)
 	srv := newTestServer(t, func(conn *websocket.Conn) {
 		defer func() { _ = conn.Close() }()
@@ -1617,7 +1617,7 @@ func TestRequestPermission_SynthesizesHitlIDWhenActionIDEmpty(t *testing.T) {
 			if json.Unmarshal(paramsJSON, &params) != nil {
 				continue
 			}
-			received <- params.HitlID
+			received <- params.ActionID
 			_ = conn.WriteJSON(JsonRpcResponse{
 				JsonRPC: "2.0",
 				Result:  json.RawMessage(`{"response":"approved","optionId":"allow"}`),
@@ -1641,7 +1641,7 @@ func TestRequestPermission_SynthesizesHitlIDWhenActionIDEmpty(t *testing.T) {
 	select {
 	case hitlID := <-received:
 		if strings.TrimSpace(hitlID) == "" {
-			t.Error("expected a synthesized non-blank hitlId for an agent without toolCallId")
+			t.Error("expected a synthesized non-blank actionId for an agent without toolCallId")
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for env.hitl_activity on the wire")

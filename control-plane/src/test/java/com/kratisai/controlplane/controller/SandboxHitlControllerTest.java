@@ -149,47 +149,47 @@ class SandboxHitlControllerTest {
     }
 
     private void registerPendingApproval() {
-        pendingHitlRegistry.register(
-                executionId,
-                new PendingHitlRegistry.PendingHitl(
-                        new HitlRequestSnapshot(
-                                executionId,
-                                "tool-call-42",
-                                HitlKind.APPROVAL,
-                                "Remove",
-                                "rm -rf /",
-                                null,
-                                "Remove",
-                                "execute",
-                                OPTIONS,
-                                null,
-                                null),
-                        Mockito.mock(WebSocketSession.class),
-                        "req-1",
-                        Instant.now(),
-                        teamId));
+        pendingHitlRegistry.register(new PendingHitlRegistry.PendingHitl(
+                new HitlRequestSnapshot(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        "Remove",
+                        "rm -rf /",
+                        null,
+                        "Remove",
+                        "execute",
+                        OPTIONS,
+                        null,
+                        null,
+                        null,
+                        null),
+                Mockito.mock(WebSocketSession.class),
+                "req-1",
+                Instant.now(),
+                teamId));
     }
 
     private void registerPendingQuestion() {
-        pendingHitlRegistry.register(
-                executionId,
-                new PendingHitlRegistry.PendingHitl(
-                        new HitlRequestSnapshot(
-                                executionId,
-                                "el-1",
-                                HitlKind.QUESTION,
-                                "Choose a deployment target",
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                Map.of("type", "object")),
-                        Mockito.mock(WebSocketSession.class),
-                        "req-1",
-                        Instant.now(),
-                        teamId));
+        pendingHitlRegistry.register(new PendingHitlRegistry.PendingHitl(
+                new HitlRequestSnapshot(
+                        executionId,
+                        "el-1",
+                        HitlKind.QUESTION,
+                        "Choose a deployment target",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Map.of("type", "object"),
+                        null,
+                        null),
+                Mockito.mock(WebSocketSession.class),
+                "req-1",
+                Instant.now(),
+                teamId));
     }
 
     @Test
@@ -500,7 +500,7 @@ class SandboxHitlControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isNoContent());
 
-        assertThat(pendingHitlRegistry.getPending()).isEmpty();
+        assertThat(pendingHitlRegistry.find(executionId, "el-1")).isNull();
     }
 
     @Test
@@ -582,7 +582,7 @@ class SandboxHitlControllerTest {
 
     @Test
     void resolveQuestion_invalidRequest_returns400() throws Exception {
-        String invalidBody = "{\"hitlId\":\"el-1\"}";
+        String invalidBody = "{\"actionId\":\"el-1\"}";
 
         mockMvc.perform(post("/api/v1/hitl/resolve")
                         .header("Authorization", "Bearer " + userAuthToken)

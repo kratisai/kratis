@@ -42,9 +42,8 @@
         "rawUpdate": { "type": "object" },
         "hitl": {
           "type": "object",
-          "description": "HITL state for approval/question activities.",
+          "description": "HITL state for approval/question activities; the child is keyed by the parent activity's actionId.",
           "properties": {
-            "hitlId": { "type": "string" },
             "kind": { "type": "string", "enum": ["approval", "question"] },
             "state": { "type": "string", "enum": ["awaiting_human", "resolved"] },
             "message": { "type": "string" },
@@ -64,8 +63,17 @@
             "response": { "type": "string", "enum": ["approved", "answered", "declined", "cancelled"] },
             "optionId": { "type": "string" },
             "content": { "type": "object" },
-            "resolvedBy": { "type": "string" },
-            "resolvedByUserId": { "type": "string", "format": "uuid" }
+            "resolvedBy": {
+              "type": "object",
+              "description": "Who or what resolved the request.",
+              "required": ["kind"],
+              "properties": {
+                "kind": { "type": "string", "enum": ["user", "rule", "timeout", "system"] },
+                "userId": { "type": "string", "format": "uuid" },
+                "displayName": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
           },
           "additionalProperties": true
         }

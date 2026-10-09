@@ -25,7 +25,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { activityCommand, useActivityStore } from '@/store/activity-store'
-import { SYSTEM_TIMEOUT_RESOLVED_BY } from '@/types/websocket-types'
 
 interface ActivityApprovalProps {
   activity: ApprovalActivity
@@ -63,7 +62,7 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
     return initial
   })
   const diff = activity.permissionDiff ?? activity.detail?.diff
-  const hitlId = activity.actionId ?? command
+  const actionId = activity.actionId ?? command
 
   const allowOption =
     options.find((o) => o.kind === 'allow_once') ?? options.find((o) => o.kind.startsWith('allow'))
@@ -103,7 +102,7 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
   ) => {
     setIsSubmitting(true)
     try {
-      await resolveHitl(executionId, hitlId, response, optionId, undefined, rules, feedback)
+      await resolveHitl(executionId, actionId, response, optionId, undefined, rules, feedback)
     } catch {
       // handled via websocket resolution
     } finally {
@@ -134,8 +133,7 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
   if (isResolved) {
     const resolution: HitlResponse =
       activity.hitlResponse ?? (activity.approved === true ? 'approved' : 'declined')
-    const timedOut =
-      resolution === 'cancelled' && activity.resolvedBy === SYSTEM_TIMEOUT_RESOLVED_BY
+    const timedOut = resolution === 'cancelled' && activity.resolvedBy?.kind === 'timeout'
     return (
       <Card className="border-border/50 bg-muted/30 min-w-0 p-0">
         <CardContent className="flex min-w-0 items-center gap-2">
@@ -212,7 +210,7 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
                 {segments.map((segment, index) => (
                   <div
                     className="flex items-center gap-1.5 py-0.5"
-                    key={`${hitlId}-segment-${index}`}
+                    key={`${actionId}-segment-${index}`}
                   >
                     <Input
                       aria-label={`Command root: ${segment.suggestedRoot}`}
@@ -265,7 +263,7 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
 
         <HitlFeedbackField
           disabled={isSubmitting}
-          id={`${hitlId}-feedback`}
+          id={`${actionId}-feedback`}
           onChange={setFeedback}
           placeholder="Guidance sent with your response, e.g. use pnpm instead of npm"
           value={feedback}

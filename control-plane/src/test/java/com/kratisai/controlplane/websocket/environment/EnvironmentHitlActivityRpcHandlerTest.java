@@ -124,13 +124,13 @@ class EnvironmentHitlActivityRpcHandlerTest {
         return executionId;
     }
 
-    private EnvironmentRpcPayload.HitlActivity approvalParams(String command, String hitlId) {
-        return approvalParams(command, hitlId, stubbedExecutionId());
+    private EnvironmentRpcPayload.HitlActivity approvalParams(String command, String actionId) {
+        return approvalParams(command, actionId, stubbedExecutionId());
     }
 
-    private EnvironmentRpcPayload.HitlActivity approvalParams(String command, String hitlId, UUID executionId) {
+    private EnvironmentRpcPayload.HitlActivity approvalParams(String command, String actionId, UUID executionId) {
         return new EnvironmentRpcPayload.HitlActivity(
-                hitlId,
+                actionId,
                 "Approve " + command,
                 HitlKind.APPROVAL,
                 executionId.toString(),
@@ -189,7 +189,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
 
         assertThat(response).isInstanceOf(HitlActivityResult.class);
         assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.APPROVED);
-        verify(pendingHitlRegistry, never()).register(any(), any(HitlRequestSnapshot.class), any(), any(), any());
+        verify(pendingHitlRegistry, never()).register(any(HitlRequestSnapshot.class), any(), any(), any());
         verify(eventPublisher, never()).publishEvent(any());
 
         ArgumentCaptor<HitlResolution> resolution = ArgumentCaptor.forClass(HitlResolution.class);
@@ -218,7 +218,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
 
         assertThat(response).isInstanceOf(HitlActivityResult.class);
         assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.DECLINED);
-        verify(pendingHitlRegistry, never()).register(any(), any(HitlRequestSnapshot.class), any(), any(), any());
+        verify(pendingHitlRegistry, never()).register(any(HitlRequestSnapshot.class), any(), any(), any());
         verify(eventPublisher, never()).publishEvent(any());
 
         ArgumentCaptor<HitlResolution> resolution = ArgumentCaptor.forClass(HitlResolution.class);
@@ -252,7 +252,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
 
         assertThat(response).isInstanceOf(HitlActivityResult.class);
         assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.DECLINED);
-        verify(pendingHitlRegistry, never()).register(any(), any(HitlRequestSnapshot.class), any(), any(), any());
+        verify(pendingHitlRegistry, never()).register(any(HitlRequestSnapshot.class), any(), any(), any());
         verify(eventPublisher, never()).publishEvent(any());
     }
 
@@ -317,7 +317,6 @@ class EnvironmentHitlActivityRpcHandlerTest {
                 new PermissionOption("reject", "Reject", ApprovalOptionKind.REJECT_ONCE));
         verify(pendingHitlRegistry)
                 .register(
-                        eq(execution.getId()),
                         eq(new HitlRequestSnapshot(
                                 execution.getId(),
                                 "tool-call-42",
@@ -329,6 +328,8 @@ class EnvironmentHitlActivityRpcHandlerTest {
                                 "execute",
                                 sanitizedOptions,
                                 null,
+                                null,
+                                null,
                                 null)),
                         any(String.class),
                         eq(request),
@@ -337,7 +338,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
                 ArgumentCaptor.forClass(SandboxExecutionHitlRequiredEvent.class);
         verify(eventPublisher).publishEvent(captor.capture());
         assertThat(captor.getValue().result().command()).isEqualTo("rm -rf /");
-        assertThat(captor.getValue().result().hitlId()).isEqualTo("tool-call-42");
+        assertThat(captor.getValue().result().actionId()).isEqualTo("tool-call-42");
         assertThat(captor.getValue().result().kind()).isEqualTo(HitlKind.APPROVAL);
         assertThat(captor.getValue().result().commandSegments())
                 .containsExactly(new CommandSegment("rm -rf /", "rm -rf", HitlRuleType.PREFIX_WILD));
@@ -412,7 +413,6 @@ class EnvironmentHitlActivityRpcHandlerTest {
         assertThat(response).isNull();
         verify(pendingHitlRegistry)
                 .register(
-                        eq(execution.getId()),
                         eq(new HitlRequestSnapshot(
                                 execution.getId(),
                                 "el-1",
@@ -424,14 +424,16 @@ class EnvironmentHitlActivityRpcHandlerTest {
                                 null,
                                 null,
                                 null,
-                                Map.of("type", "object", "properties", Map.of("target", Map.of("type", "string"))))),
+                                Map.of("type", "object", "properties", Map.of("target", Map.of("type", "string"))),
+                                null,
+                                null)),
                         any(String.class),
                         eq(request),
                         eq(teamId));
         ArgumentCaptor<SandboxExecutionHitlRequiredEvent> captor =
                 ArgumentCaptor.forClass(SandboxExecutionHitlRequiredEvent.class);
         verify(eventPublisher).publishEvent(captor.capture());
-        assertThat(captor.getValue().result().hitlId()).isEqualTo("el-1");
+        assertThat(captor.getValue().result().actionId()).isEqualTo("el-1");
         assertThat(captor.getValue().result().kind()).isEqualTo(HitlKind.QUESTION);
         assertThat(captor.getValue().result().form())
                 .isEqualTo(Map.of("type", "object", "properties", Map.of("target", Map.of("type", "string"))));
@@ -489,7 +491,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
                 .isInstanceOf(RpcErrorException.class)
                 .satisfies(
                         e -> assertThat(((RpcErrorException) e).error().code()).isEqualTo(-32002));
-        verify(pendingHitlRegistry, never()).register(any(), any(HitlRequestSnapshot.class), any(), any(), any());
+        verify(pendingHitlRegistry, never()).register(any(HitlRequestSnapshot.class), any(), any(), any());
     }
 
     @Test
@@ -517,7 +519,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
                 .isInstanceOf(RpcErrorException.class)
                 .satisfies(
                         e -> assertThat(((RpcErrorException) e).error().code()).isEqualTo(-32002));
-        verify(pendingHitlRegistry, never()).register(any(), any(HitlRequestSnapshot.class), any(), any(), any());
+        verify(pendingHitlRegistry, never()).register(any(HitlRequestSnapshot.class), any(), any(), any());
     }
 
     @Test
@@ -563,7 +565,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
                 handler.handle(sessionId, request, params).blockLast();
 
         assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.APPROVED);
-        verify(pendingHitlRegistry, never()).register(any(), any(HitlRequestSnapshot.class), any(), any(), any());
+        verify(pendingHitlRegistry, never()).register(any(HitlRequestSnapshot.class), any(), any(), any());
     }
 
     @Test
@@ -645,8 +647,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
                 handler.handle(sessionId, request, params).blockLast();
 
         assertThat(response).isNull();
-        verify(pendingHitlRegistry)
-                .register(eq(execution.getId()), any(HitlRequestSnapshot.class), any(), any(), any());
+        verify(pendingHitlRegistry).register(any(HitlRequestSnapshot.class), any(), any(), any());
     }
 
     @Test
@@ -665,7 +666,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
         handler.handle(sessionId, request, params).blockLast();
 
         ArgumentCaptor<HitlRequestSnapshot> payloadCaptor = ArgumentCaptor.forClass(HitlRequestSnapshot.class);
-        verify(pendingHitlRegistry).register(eq(execution.getId()), payloadCaptor.capture(), any(), any(), any());
+        verify(pendingHitlRegistry).register(payloadCaptor.capture(), any(), any(), any());
         assertThat(payloadCaptor.getValue().commandSegments())
                 .containsExactly(new CommandSegment("edit", "edit", HitlRuleType.TOOL_KIND));
     }
@@ -706,7 +707,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
         handler.handle(sessionId, request, params).blockLast();
 
         ArgumentCaptor<HitlRequestSnapshot> payloadCaptor = ArgumentCaptor.forClass(HitlRequestSnapshot.class);
-        verify(pendingHitlRegistry).register(eq(execution.getId()), payloadCaptor.capture(), any(), any(), any());
+        verify(pendingHitlRegistry).register(payloadCaptor.capture(), any(), any(), any());
 
         List<CommandSegment> segments = payloadCaptor.getValue().commandSegments();
         assertThat(segments).hasSize(2);
@@ -734,7 +735,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
         handler.handle(sessionId, request, params).blockLast();
 
         ArgumentCaptor<HitlRequestSnapshot> payloadCaptor = ArgumentCaptor.forClass(HitlRequestSnapshot.class);
-        verify(pendingHitlRegistry).register(eq(execution.getId()), payloadCaptor.capture(), any(), any(), any());
+        verify(pendingHitlRegistry).register(payloadCaptor.capture(), any(), any(), any());
 
         List<CommandSegment> segments = payloadCaptor.getValue().commandSegments();
         assertThat(segments)
@@ -760,9 +761,9 @@ class EnvironmentHitlActivityRpcHandlerTest {
     }
 
     /** Mirrors the sidecar's synthesized edit request: title and command both carry the path. */
-    private EnvironmentRpcPayload.HitlActivity editParams(String path, String hitlId, UUID executionId) {
+    private EnvironmentRpcPayload.HitlActivity editParams(String path, String actionId, UUID executionId) {
         return new EnvironmentRpcPayload.HitlActivity(
-                hitlId,
+                actionId,
                 path,
                 HitlKind.APPROVAL,
                 executionId.toString(),

@@ -57,7 +57,7 @@ export function ActivityElicitation({ activity, executionId }: ActivityElicitati
       const content = response === 'answered' ? values : undefined
       await resolveHitl(
         executionId,
-        activity.hitlId,
+        activity.actionId ?? '',
         response,
         undefined,
         content,
@@ -115,7 +115,7 @@ export function ActivityElicitation({ activity, executionId }: ActivityElicitati
 
         <HitlFeedbackField
           disabled={isSubmitting}
-          id={`${activity.hitlId}-feedback`}
+          id={`${activity.actionId ?? ''}-feedback`}
           onChange={setFeedback}
           placeholder="Guidance sent with your response, e.g. staging is offline, try preview"
           value={feedback}
