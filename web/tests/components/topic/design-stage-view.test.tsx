@@ -491,6 +491,19 @@ describe('DesignStageView', () => {
       expect(screen.queryByTestId('plan-shortcut')).not.toBeInTheDocument()
     })
 
+    it('shows a working spinner in the composer while a chat send is still in flight', () => {
+      setLastMessage(agentRespondedMessage())
+      useChatStore.setState({ sendingChatIds: new Set(['chat-1']) })
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      expect(screen.getByLabelText('Agent working')).toBeInTheDocument()
+    })
+
     it('is hidden when the chat contains an executable plan canvas', () => {
       setLastMessage(agentRespondedMessage())
       useCanvasStore.setState({ canvases: { 'chat-1': [canvasDoc({ canvasType: 'SPEC' })] } })

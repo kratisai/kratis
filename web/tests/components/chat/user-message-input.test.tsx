@@ -116,6 +116,21 @@ describe('UserMessageInput', () => {
     expect(getSendButton()).toBeDisabled()
   })
 
+  it('shows a working spinner and blocks send when isWorking', async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    render(<UserMessageInput isWorking onSend={onSend} />)
+
+    expect(screen.getByLabelText('Agent working')).toBeInTheDocument()
+
+    const textarea = screen.getByPlaceholderText(/type a message/i)
+    await user.type(textarea, 'Hello world')
+
+    expect(getSendButton()).toBeDisabled()
+    await user.click(getSendButton())
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
   it('renders textarea with minimum rows', () => {
     render(<UserMessageInput onSend={vi.fn()} />)
     const textarea = screen.getByPlaceholderText(/type a message/i)

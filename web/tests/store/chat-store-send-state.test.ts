@@ -48,6 +48,28 @@ describe('chat-store send-in-flight state', () => {
     expect(useChatStore.getState().sendingChatIds.has('session-1')).toBe(true)
   })
 
+  it('markSending marks the chat as sending for a new chat', () => {
+    useChatStore.getState().markSending('new-chat-1')
+
+    expect(useChatStore.getState().sendingChatIds.has('new-chat-1')).toBe(true)
+  })
+
+  it('complete result clears a markSending state', async () => {
+    const ws = setupConnected()
+
+    useChatStore.getState().markSending('new-chat-1')
+    emitFrame(ws, {
+      chatId: 'new-chat-1',
+      messageCount: 1,
+      messageId: 'assistant-1',
+      type: 'complete',
+    })
+
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(useChatStore.getState().sendingChatIds.has('new-chat-1')).toBe(false)
+  })
+
   it('complete result clears the sending state and leaves the assistant response in place', async () => {
     const ws = setupConnected()
 

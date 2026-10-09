@@ -1,4 +1,4 @@
-import { Send } from 'lucide-react'
+import { Loader2, Send } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ModelSelectorDropdown } from '@/components/chat/model-selector-dropdown'
@@ -9,6 +9,7 @@ import { useUIStore } from '@/store/ui-store'
 interface UserMessageInputProps {
   disabled?: boolean
   initialValue?: string
+  isWorking?: boolean
   onSend: (message: string) => void
   placeholder?: string
 }
@@ -21,6 +22,7 @@ const MAX_ROWS = 15
 export function UserMessageInput({
   disabled = false,
   initialValue = '',
+  isWorking = false,
   onSend,
   placeholder = 'Type a message...',
 }: UserMessageInputProps) {
@@ -59,7 +61,7 @@ export function UserMessageInput({
   }, [resizeTextarea])
 
   const handleSend = () => {
-    if (!input.trim() || disabled || !isModelSelected) return
+    if (!input.trim() || disabled || isWorking || !isModelSelected) return
     onSend(input.trim())
     setInput('')
   }
@@ -98,14 +100,14 @@ export function UserMessageInput({
 
       {/* Send Button - outside wrapper */}
       <Button
-        aria-label="Send"
+        aria-label={isWorking ? 'Agent working' : 'Send'}
         className="mb-5 h-10 w-10 flex-shrink-0 self-end"
-        disabled={!input.trim() || disabled || !isModelSelected}
+        disabled={!input.trim() || disabled || isWorking || !isModelSelected}
         onClick={handleSend}
         size="icon"
         type="button"
       >
-        <Send className="h-4 w-4" />
+        {isWorking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
       </Button>
     </div>
   )
