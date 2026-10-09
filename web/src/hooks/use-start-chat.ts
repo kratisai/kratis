@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 
 import { useCreateChat } from '@/hooks/use-chats'
 import { useAuthStore } from '@/store/auth-store'
+import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 
 export function useStartChat() {
@@ -40,6 +41,7 @@ export function useStartChat() {
           toast.error(err.message || 'Failed to start chat')
         },
         onSuccess: (data) => {
+          useChatStore.getState().markSending(data.id)
           void navigate({ params: { id: data.id } as never, to: '/chats/$id' })
         },
       },

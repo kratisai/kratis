@@ -58,6 +58,7 @@ interface ChatState {
   handleMessageChunkResult: (messageChunkResult: MessageChunkResult) => void
   handleMessageResult: (messageResult: MessageResult) => void
   handleTelemetryEvent: (chatId: string, telemetryResult: TelemetryResult) => void
+  markSending: (chatId: string) => void
   messages: Record<string, ChatMessage[]>
   // Chats with a chat.send round-trip in flight (until a complete/chat_error result).
   sendingChatIds: Set<string>
@@ -539,6 +540,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
       }
     })
+  },
+
+  markSending: (chatId: string) => {
+    set((state) => ({
+      sendingChatIds: state.sendingChatIds.has(chatId)
+        ? state.sendingChatIds
+        : new Set(state.sendingChatIds).add(chatId),
+    }))
   },
 
   messages: {},

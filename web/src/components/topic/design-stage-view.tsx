@@ -231,6 +231,7 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
               )}
               <UserMessageInput
                 disabled={!isConnected}
+                isWorking={isAgentResponding}
                 onSend={handleSendMessage}
                 placeholder={
                   isConnected ? 'Type a message... (Ctrl+Enter for new line)' : 'Connecting...'
