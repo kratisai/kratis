@@ -37,7 +37,7 @@ export function RepositoryDrilldownView() {
   const { repoId } = useParams({ from: '/repos/$repoId' })
   const navigate = useNavigate()
   const triggerIngestionMutation = useTriggerIngestion()
-  const { startChat } = useStartChat()
+  const { isCreating, startChat } = useStartChat()
 
   const { data: repositories } = useRepositories()
   const repo = repositories?.find((r) => r.id === repoId)
@@ -178,12 +178,17 @@ export function RepositoryDrilldownView() {
                 Ingest Now
               </Button>
               <Button
+                disabled={isCreating}
                 onClick={() => {
                   startChat(`Tell me about repository "${repo.name}".`)
                 }}
                 variant="outline"
               >
-                <MessageSquare className="mr-2 h-4 w-4" />
+                {isCreating ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                )}
                 Ask Kratis
               </Button>
               <Button onClick={() => window.open(repo.url, '_blank')} variant="outline">

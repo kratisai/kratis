@@ -1,5 +1,13 @@
 import { useNavigate } from '@tanstack/react-router'
-import { BookOpen, ExternalLink, GitCommit, MessageSquare, Settings, Trash2 } from 'lucide-react'
+import {
+  BookOpen,
+  ExternalLink,
+  GitCommit,
+  Loader2,
+  MessageSquare,
+  Settings,
+  Trash2,
+} from 'lucide-react'
 
 import type { RepositoryDto } from '@/types/auth-types'
 
@@ -29,7 +37,7 @@ export function RepositoryCard({
   repo: RepositoryDto
 }) {
   const navigate = useNavigate()
-  const { startChat } = useStartChat()
+  const { isCreating, startChat } = useStartChat()
   const provider = getProviderDetails(repo.url)
 
   return (
@@ -63,6 +71,7 @@ export function RepositoryCard({
             </Button>
             <Button
               aria-label="Ask Kratis"
+              disabled={isCreating}
               onClick={(e) => {
                 e.stopPropagation()
                 startChat(`Tell me about repository "${repo.name}".`)
@@ -70,7 +79,11 @@ export function RepositoryCard({
               size="icon"
               variant="ghost"
             >
-              <MessageSquare className="h-4 w-4" />
+              {isCreating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <MessageSquare className="h-4 w-4" />
+              )}
             </Button>
             <Button
               onClick={(e) => {

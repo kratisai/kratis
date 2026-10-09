@@ -131,13 +131,15 @@ public class PlanningAgentService {
         return sink.asFlux();
     }
 
-    /**
-     * Generate the initial title for a new chat from its first user prompt. Runs synchronously
-     * before the chat is persisted so the topic history shows a summary rather than the raw prompt.
-     */
-    public String generateInitialTitle(UUID teamId, UUID providerId, String modelName, String userQuery) {
+    public String initialPlaceholderTitle(String userQuery) {
+        return chatTitleService.initialPlaceholderTitle(userQuery);
+    }
+
+    public void evaluateInitialTitleAsync(
+            UUID teamId, UUID providerId, String modelName, UUID chatId, String userQuery) {
         ModelProvider modelProvider = resolveProvider(teamId, providerId);
-        return chatTitleService.generateInitialTitle(modelProvider, modelName, userQuery);
+        agentTaskExecutor.execute(
+                () -> chatTitleService.evaluateInitialTitle(modelProvider, modelName, teamId, chatId, userQuery));
     }
 
     private ModelProvider resolveProvider(UUID teamId, UUID modelProviderId) {

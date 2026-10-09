@@ -2,6 +2,7 @@ package com.kratisai.controlplane.api.integration;
 
 import static com.kratisai.controlplane.TestDataFactory.DUMMY_PASSWORD;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -17,6 +18,7 @@ import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.JwtService;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -130,8 +132,7 @@ class ChatControllerTest {
 
         CreateChatResponse createChatResponse =
                 objectMapper.readValue(result.getResponse().getContentAsString(), CreateChatResponse.class);
-        ChatEntity chat = chatRepository.findById(createChatResponse.id()).orElseThrow();
-        assertThat(chat.getTitle()).isEqualTo("Debug and fix the flaky test suite now");
+        awaitTitle(createChatResponse.id(), "Debug and fix the flaky test suite now");
     }
 
     @Test
@@ -158,6 +159,23 @@ class ChatControllerTest {
                 objectMapper.readValue(result.getResponse().getContentAsString(), CreateChatResponse.class);
         ChatEntity chat = chatRepository.findById(createChatResponse.id()).orElseThrow();
         assertThat(chat.getTitle()).isEqualTo(userPrompt);
+    }
+
+    private void awaitTitle(UUID chatId, String expectedTitle) {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < deadline) {
+            Optional<ChatEntity> found = chatRepository.findById(chatId);
+            if (found.isPresent() && expectedTitle.equals(found.get().getTitle())) {
+                return;
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                fail("Interrupted while awaiting chat title");
+            }
+        }
+        fail("Chat %s title was not updated to '%s'".formatted(chatId, expectedTitle));
     }
 
     @Test

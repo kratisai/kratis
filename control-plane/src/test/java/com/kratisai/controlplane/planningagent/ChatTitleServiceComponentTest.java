@@ -125,6 +125,19 @@ class ChatTitleServiceComponentTest {
     }
 
     @Test
+    void evaluateInitialTitle_updatesChatTitleAgainstDatabase() {
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains("Output only the title")
+                .response("Debug and fix the flaky test suite now")
+                .build());
+
+        chatTitleService.evaluateInitialTitle(
+                provider, "gpt-4o", team.getId(), chat.getId(), "Debug the flaky test suite");
+
+        assertThat(titleOf(chat.getId())).isEqualTo("Debug and fix the flaky test suite now");
+    }
+
+    @Test
     void promptEnforcesSte100AndWordConstraints() {
         seedMessages();
         fakeChatModel.addMatcher(PromptMatcher.builder()
