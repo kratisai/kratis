@@ -435,4 +435,52 @@ class ChatTitleServiceTest {
 
         assertThat(fakeChatModel.getInvocations()).isEmpty();
     }
+
+    @Test
+    void initialPlaceholderTitle_returnsTrimmedAndTruncatedPrompt() {
+        assertThat(service.initialPlaceholderTitle(null)).isNull();
+        assertThat(service.initialPlaceholderTitle("   ")).isEqualTo("   ");
+        assertThat(service.initialPlaceholderTitle("  Debug tests  ")).isEqualTo("Debug tests");
+
+        String longPrompt = "a".repeat(600);
+        assertThat(service.initialPlaceholderTitle(longPrompt)).hasSize(500);
+    }
+
+    @Test
+    void evaluateInitialTitle_updatesChatTitleWhenLlmReturnsNewSummary() {
+        UUID chatId = UUID.randomUUID();
+        when(chatService.findTitle(chatId)).thenReturn(Optional.of("Debug the flaky test suite"));
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains("Debug the flaky test suite")
+                .response("Fix Flaky Tests Now")
+                .build());
+
+        service.evaluateInitialTitle(provider, "gpt-4o", teamId, chatId, "Debug the flaky test suite");
+
+        verify(chatService).updateTitle(chatId, teamId, "Fix Flaky Tests Now");
+    }
+
+    @Test
+    void evaluateInitialTitle_skipsUpdateWhenSummaryMatchesCurrentTitle() {
+        UUID chatId = UUID.randomUUID();
+        when(chatService.findTitle(chatId)).thenReturn(Optional.of("Debug the flaky test suite"));
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains("Debug the flaky test suite")
+                .response("Debug the flaky test suite")
+                .build());
+
+        service.evaluateInitialTitle(provider, "gpt-4o", teamId, chatId, "Debug the flaky test suite");
+
+        verify(chatService, never()).updateTitle(eq(chatId), eq(teamId), any());
+    }
+
+    @Test
+    void evaluateInitialTitle_withNullOrBlankArguments_doesNothing() {
+        UUID chatId = UUID.randomUUID();
+        service.evaluateInitialTitle(null, "gpt-4o", teamId, chatId, "   ");
+        service.evaluateInitialTitle(provider, null, null, chatId, "Debug");
+        service.evaluateInitialTitle(provider, "gpt-4o", teamId, null, "Debug");
+
+        verify(chatService, never()).updateTitle(any(), any(), any());
+    }
 }

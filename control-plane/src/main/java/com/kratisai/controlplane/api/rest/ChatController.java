@@ -88,8 +88,7 @@ public class ChatController {
     public ResponseEntity<CreateChatResponse> createChat(@RequestBody CreateChatRequest request) {
         UUID userId = SecurityUtil.getCurrentUserId();
         String message = request.message();
-        String title = planningAgentService.generateInitialTitle(
-                request.teamId(), request.providerId(), request.modelName(), message);
+        String title = planningAgentService.initialPlaceholderTitle(message);
 
         ChatEntity chat = chatService.createChat(request.teamId(), userId, title);
 
@@ -97,6 +96,9 @@ public class ChatController {
         var streamFlux = planningAgentService.streamMessage(
                 request.teamId(), request.providerId(), request.modelName(), chat.getId(), message);
         chatFluxRegistry.register(chat.getId(), streamFlux);
+
+        planningAgentService.evaluateInitialTitleAsync(
+                request.teamId(), request.providerId(), request.modelName(), chat.getId(), message);
 
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(new CreateChatResponse(chat.getId(), chat.getCreatedAt().toString()));

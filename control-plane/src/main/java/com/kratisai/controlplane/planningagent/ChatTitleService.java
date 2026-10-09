@@ -109,12 +109,34 @@ public class ChatTitleService {
         }
     }
 
+    public String initialPlaceholderTitle(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return prompt;
+        }
+        return truncateToDbLength(prompt.trim());
+    }
+
     /**
-     * Generate the initial title from the very first user prompt. The model's summary is preferred
-     * over the raw prompt: any non-empty summary is accepted, output longer than twice the
-     * configured maximum word count is trimmed to that limit, and only a genuine failure (empty
-     * output, LLM error, or missing provider/model) falls back to the prompt. Never throws.
+     * Evaluate the initial title asynchronously in parallel with streaming.
      */
+    public void evaluateInitialTitle(
+            ModelProvider provider, String modelName, UUID teamId, UUID chatId, String prompt) {
+        if (prompt == null || prompt.isBlank() || teamId == null || chatId == null) {
+            return;
+        }
+        String evaluatedTitle = generateInitialTitle(provider, modelName, prompt);
+        if (evaluatedTitle == null || evaluatedTitle.isBlank()) {
+            return;
+        }
+        Optional<String> currentTitle = chatService.findTitle(chatId);
+        if (currentTitle.isPresent() && evaluatedTitle.equals(currentTitle.get())) {
+            return;
+        }
+        if (chatService.updateTitle(chatId, teamId, evaluatedTitle)) {
+            logger.info("Updated initial title for chat {} to '{}'", chatId, evaluatedTitle);
+        }
+    }
+
     public String generateInitialTitle(ModelProvider provider, String modelName, String prompt) {
         if (prompt == null || prompt.isBlank()) {
             return prompt;
