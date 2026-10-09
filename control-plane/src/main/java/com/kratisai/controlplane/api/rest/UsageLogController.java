@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.api.rest;
 
+import com.kratisai.controlplane.api.restdto.PageResponseDto;
 import com.kratisai.controlplane.api.restdto.UsageLogEntryDto;
 import com.kratisai.controlplane.api.restdto.UsageSummaryDto;
 import com.kratisai.controlplane.config.SecurityUtil;
@@ -47,7 +48,7 @@ public class UsageLogController {
                         content = @Content(schema = @Schema(implementation = UsageLogEntryDto.class))),
                 @ApiResponse(responseCode = "403", description = "Not a member of this team", content = @Content)
             })
-    public ResponseEntity<Page<UsageLogEntryDto>> getUsageLogs(
+    public ResponseEntity<PageResponseDto<UsageLogEntryDto>> getUsageLogs(
             @PathVariable UUID teamId,
             @RequestParam(required = false) String timeframe,
             @RequestParam(required = false) Instant startDate,
@@ -60,7 +61,7 @@ public class UsageLogController {
         UUID userId = SecurityUtil.getCurrentUserId();
         Page<UsageLogEntryDto> logs = usageService.getUsageLogs(
                 userId, teamId, timeframe, startDate, endDate, usageType, model, agent, PageRequest.of(page, size));
-        return ResponseEntity.ok(logs);
+        return ResponseEntity.ok(PageResponseDto.from(logs));
     }
 
     @GetMapping("/usage-summary")
