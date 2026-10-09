@@ -139,7 +139,7 @@ public class SidecarWebSocketFixture extends WebSocketFixture<SidecarWebSocketFi
             updateExecutionId(payload);
             sendAcpPromptResult(session, payload);
             JsonRpcInboundRequest hitlRequest = new JsonRpcInboundRequest(
-                    EnvironmentRpcPayload.HitlRequest.METHOD,
+                    EnvironmentRpcPayload.HitlActivity.METHOD,
                     objectMapper.valueToTree(Map.of(
                             "hitlId",
                             "tool-call-100",

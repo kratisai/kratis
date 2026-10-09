@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import type { PlanActivity } from '@/types/execution-activity-types'
 import type {
+  ActivityHitl,
   ExecutionActivityResult,
-  ExecutionHitlRequiredResult,
-  ExecutionHitlResolvedResult,
+  WireActivityStatus,
 } from '@/types/websocket-types'
 
 import { activityTitle, useActivityStore } from '@/store/activity-store'
@@ -23,58 +23,52 @@ function activityResult(
   }
 }
 
-function hitlApprovalRequired(
-  overrides: Partial<ExecutionHitlRequiredResult> = {},
-): ExecutionHitlRequiredResult {
-  return {
-    command: 'chmod +x script.sh',
-    executionId: 'exec-1',
-    hitlId: 'tc-1',
-    kind: 'approval',
-    message: 'Allow chmod +x script.sh?',
-    type: 'execution_hitl_required',
-    ...overrides,
-  }
+function approvalActivity(
+  options: {
+    actionId?: string
+    activityType?: 'COMMAND' | 'EDITED'
+    hitl?: Partial<ActivityHitl>
+    status?: WireActivityStatus
+  } = {},
+): ExecutionActivityResult {
+  const hitlId = options.actionId ?? 'tc-1'
+  return activityResult({
+    actionId: hitlId,
+    activityType: options.activityType ?? 'COMMAND',
+    description: 'chmod +x script.sh',
+    detail: {
+      hitl: {
+        command: 'chmod +x script.sh',
+        hitlId,
+        kind: 'approval',
+        message: 'Allow chmod +x script.sh?',
+        state: 'awaiting_human',
+        ...options.hitl,
+      },
+    },
+    status: options.status ?? 'pending',
+  })
 }
 
-function hitlApprovalResolved(
-  overrides: Partial<ExecutionHitlResolvedResult> = {},
-): ExecutionHitlResolvedResult {
-  return {
-    executionId: 'exec-1',
-    hitlId: 'tc-1',
-    kind: 'approval',
-    response: 'approved',
-    type: 'execution_hitl_resolved',
-    ...overrides,
-  }
-}
-
-function hitlQuestionRequired(
-  overrides: Partial<ExecutionHitlRequiredResult> = {},
-): ExecutionHitlRequiredResult {
-  return {
-    executionId: 'exec-1',
-    form: { properties: { target: { type: 'string' } }, type: 'object' },
-    hitlId: 'el-1',
-    kind: 'question',
-    message: 'Choose a deployment target',
-    type: 'execution_hitl_required',
-    ...overrides,
-  }
-}
-
-function hitlQuestionResolved(
-  overrides: Partial<ExecutionHitlResolvedResult> = {},
-): ExecutionHitlResolvedResult {
-  return {
-    executionId: 'exec-1',
-    hitlId: 'el-1',
-    kind: 'question',
-    response: 'answered',
-    type: 'execution_hitl_resolved',
-    ...overrides,
-  }
+function questionActivity(
+  options: { hitl?: Partial<ActivityHitl>; status?: WireActivityStatus } = {},
+): ExecutionActivityResult {
+  return activityResult({
+    actionId: 'el-1',
+    activityType: 'ELICITATION',
+    description: 'Choose a deployment target',
+    detail: {
+      hitl: {
+        form: { properties: { target: { type: 'string' } }, type: 'object' },
+        hitlId: 'el-1',
+        kind: 'question',
+        message: 'Choose a deployment target',
+        state: 'awaiting_human',
+        ...options.hitl,
+      },
+    },
+    status: options.status ?? 'pending',
+  })
 }
 
 describe('activity-store', () => {
@@ -430,49 +424,85 @@ describe('activity-store', () => {
   })
 
   describe('HITL approval correlation by actionId', () => {
-    it('merges the HITL approval into the command activity of the same action', () => {
+    it('shows a prompt only for the control plane awaiting_human state', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        approvalActivity({ actionId: 'tc-req', hitl: { state: undefined } }),
+      )
+
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0]).toMatchObject({
+        approvalRequired: false,
+        state: 'active',
+      })
+
+      store.handleActivityEvent(approvalActivity({ actionId: 'tc-req' }))
+
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0]).toMatchObject({
+        approvalRequired: true,
+        state: 'pending_approval',
+      })
+    })
+
+    it('keeps the prompt when a sidecar lifecycle frame without approval state arrives', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(approvalActivity({ actionId: 'tc-keep' }))
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'tc-keep',
+          activityType: 'COMMAND',
+          description: 'chmod +x script.sh',
+          status: 'in_progress',
+        }),
+      )
+
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0]).toMatchObject({
+        approvalRequired: true,
+        state: 'pending_approval',
+      })
+    })
+
+    it('never prompts for an approval the control plane resolved by itself', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
-          actionId: 'tc-4',
+          actionId: 'tc-auto',
           activityType: 'COMMAND',
           description: 'chmod +x script.sh',
-          detail: { hitl: { hitlId: 'tc-4', kind: 'approval', message: 'Allow chmod?' } },
           status: 'pending',
         }),
       )
-      store.handleHitlRequired(hitlApprovalRequired({ hitlId: 'tc-4' }))
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0].state).toBe('active')
+
       store.handleActivityEvent(
-        activityResult({
-          actionId: 'tc-4',
-          activityType: 'COMMAND',
-          description: 'chmod +x script.sh',
-          detail: { hitl: { hitlId: 'tc-4', kind: 'approval', message: 'Allow chmod?' } },
-          status: 'pending',
+        approvalActivity({
+          actionId: 'tc-auto',
+          hitl: { resolvedBy: 'Remembered rule', response: 'approved', state: 'resolved' },
+          status: 'in_progress',
         }),
       )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities).toHaveLength(1)
       expect(activities[0]).toMatchObject({
-        actionId: 'tc-4',
         approvalRequired: true,
-        command: 'chmod +x script.sh',
-        state: 'pending_approval',
-        type: 'command_execution',
+        approved: true,
+        hitlResponse: 'approved',
+        resolvedBy: 'Remembered rule',
+        state: 'active',
       })
     })
 
-    it('merges into an existing command activity when the tool_call arrives first', () => {
+    it('merges the awaiting approval into a command whose tool_call arrived first', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
           actionId: 'tc-5',
           activityType: 'COMMAND',
           description: 'Run: chmod +x script.sh',
+          status: 'pending',
         }),
       )
-      store.handleHitlRequired(hitlApprovalRequired({ hitlId: 'tc-5' }))
+      store.handleActivityEvent(approvalActivity({ actionId: 'tc-5' }))
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities).toHaveLength(1)
@@ -485,37 +515,53 @@ describe('activity-store', () => {
       })
     })
 
-    it('creates a placeholder when the approval arrives before the activity', () => {
+    it('resolves a pending approval from a resolved frame', () => {
       const store = useActivityStore.getState()
-      store.handleHitlRequired(hitlApprovalRequired({ hitlId: 'tc-6' }))
+      store.handleActivityEvent(approvalActivity({ actionId: 'tc-6' }))
       store.handleActivityEvent(
-        activityResult({
+        approvalActivity({
           actionId: 'tc-6',
-          activityType: 'COMMAND',
-          description: 'chmod +x script.sh',
+          hitl: { resolvedBy: 'Alice', response: 'approved', state: 'resolved' },
+          status: 'in_progress',
         }),
       )
-      store.handleHitlResolved(hitlApprovalResolved({ hitlId: 'tc-6', response: 'approved' }))
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities).toHaveLength(1)
       expect(activities[0]).toMatchObject({
         approved: true,
-        command: 'chmod +x script.sh',
+        hitlResponse: 'approved',
+        resolvedBy: 'Alice',
         state: 'active',
         type: 'command_execution',
       })
     })
 
-    it('creates a tool placeholder for an edit approval with no activity row', () => {
+    it.each(['declined', 'cancelled'] as const)('marks a %s approval as an error', (response) => {
       const store = useActivityStore.getState()
-      store.handleHitlRequired(
-        hitlApprovalRequired({
-          command: '/kratis/workspace/web/src/router.tsx',
-          hitlId: 'tc-edit-1',
-          message: 'Allow edit /kratis/workspace/web/src/router.tsx?',
-          title: '/kratis/workspace/web/src/router.tsx',
-          toolKind: 'edit',
+      store.handleActivityEvent(approvalActivity({ actionId: 'tc-deny' }))
+      store.handleActivityEvent(
+        approvalActivity({
+          actionId: 'tc-deny',
+          hitl: { response, state: 'resolved' },
+          status: 'failed',
+        }),
+      )
+
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0]).toMatchObject({
+        approved: false,
+        hitlResponse: response,
+        state: 'error',
+      })
+    })
+
+    it('creates a tool activity for an edit approval', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        approvalActivity({
+          actionId: 'tc-edit-1',
+          activityType: 'EDITED',
+          hitl: { toolKind: 'edit' },
         }),
       )
 
@@ -529,38 +575,9 @@ describe('activity-store', () => {
       })
     })
 
-    it('carries the write toolKind onto the placeholder detail', () => {
+    it('keeps approvals for different actions as separate records', () => {
       const store = useActivityStore.getState()
-      store.handleHitlRequired(
-        hitlApprovalRequired({
-          hitlId: 'tc-write-1',
-          message: 'Allow write /kratis/workspace/main.go?',
-          title: '/kratis/workspace/main.go',
-          toolKind: 'write',
-        }),
-      )
-
-      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities).toHaveLength(1)
-      expect(activities[0]).toMatchObject({
-        detail: { kind: 'write' },
-        type: 'tool_execution',
-      })
-    })
-
-    it('degrades an unknown toolKind to other', () => {
-      const store = useActivityStore.getState()
-      store.handleHitlRequired(
-        hitlApprovalRequired({ hitlId: 'tc-unknown-1', toolKind: 'notebook_edit' }),
-      )
-
-      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities[0]).toMatchObject({ detail: { kind: 'other' } })
-    })
-
-    it('creates a placeholder for an approval whose hitlId matches no record yet', () => {
-      const store = useActivityStore.getState()
-      store.handleHitlRequired(hitlApprovalRequired({ hitlId: 'other' }))
+      store.handleActivityEvent(approvalActivity({ actionId: 'other' }))
       store.handleActivityEvent(
         activityResult({
           actionId: 'tc-7',
@@ -578,24 +595,17 @@ describe('activity-store', () => {
     it('stores the offered permission options on the pending activity', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
-        activityResult({
+        approvalActivity({
           actionId: 'tc-8',
-          activityType: 'COMMAND',
-          description: 'rm -rf tmp',
-          detail: { hitl: { hitlId: 'tc-8', kind: 'approval', message: 'Remove temp dir' } },
-          status: 'pending',
-        }),
-      )
-      store.handleHitlRequired(
-        hitlApprovalRequired({
-          diff: { newText: 'new', oldText: 'old', path: 'a.ts' },
-          hitlId: 'tc-8',
-          options: [
-            { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
-            { kind: 'reject_once', name: 'Reject', optionId: 'reject-once' },
-          ],
-          title: 'Remove temp dir',
-          toolKind: 'execute',
+          hitl: {
+            diff: { newText: 'new', oldText: 'old', path: 'a.ts' },
+            options: [
+              { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
+              { kind: 'reject_once', name: 'Reject', optionId: 'reject-once' },
+            ],
+            title: 'Remove temp dir',
+            toolKind: 'execute',
+          },
         }),
       )
 
@@ -612,31 +622,6 @@ describe('activity-store', () => {
         type: 'command_execution',
       })
       expect(activities[0].permissionDiff).toEqual({ newText: 'new', oldText: 'old', path: 'a.ts' })
-    })
-
-    it('ignores a resolution whose hitlId matches no record', () => {
-      const store = useActivityStore.getState()
-      store.handleActivityEvent(
-        activityResult({
-          actionId: 'tc-9',
-          activityType: 'COMMAND',
-          description: 'chmod +x script.sh',
-          detail: { hitl: { hitlId: 'tc-9', kind: 'approval', message: 'Allow chmod?' } },
-          status: 'pending',
-        }),
-      )
-
-      store.handleHitlResolved(hitlApprovalResolved({ hitlId: 'unknown', response: 'approved' }))
-      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0]).toMatchObject({
-        state: 'pending_approval',
-      })
-
-      store.handleHitlResolved(hitlApprovalResolved({ hitlId: 'tc-9', response: 'approved' }))
-      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0]).toMatchObject({
-        approved: true,
-        state: 'active',
-        type: 'command_execution',
-      })
     })
 
     it('produces two records for a message and a thought sharing one messageId', () => {
@@ -697,10 +682,10 @@ describe('activity-store', () => {
   })
 
   describe('HITL question (form) activities', () => {
-    it('handleHitlRequired creates a question activity with form', () => {
+    it('creates a question activity with form from an awaiting frame', () => {
       const store = useActivityStore.getState()
-      store.handleHitlRequired(
-        hitlQuestionRequired({ form: { properties: { target: { type: 'string' } } } }),
+      store.handleActivityEvent(
+        questionActivity({ hitl: { form: { properties: { target: { type: 'string' } } } } }),
       )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
@@ -714,35 +699,39 @@ describe('activity-store', () => {
       })
     })
 
-    it('handleHitlRequired does not duplicate the same hitlId', () => {
+    it('does not duplicate the same hitlId', () => {
       const store = useActivityStore.getState()
-      store.handleHitlRequired(hitlQuestionRequired())
-      store.handleHitlRequired(hitlQuestionRequired())
+      store.handleActivityEvent(questionActivity())
+      store.handleActivityEvent(questionActivity())
 
-      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities).toHaveLength(1)
+      expect(useActivityStore.getState().activitiesByExecution['exec-1']).toHaveLength(1)
     })
 
-    it('handleHitlResolved answered marks the question completed', () => {
+    it('marks an answered question completed', () => {
       const store = useActivityStore.getState()
-      store.handleHitlRequired(hitlQuestionRequired())
-      store.handleHitlResolved(hitlQuestionResolved())
+      store.handleActivityEvent(questionActivity())
+      store.handleActivityEvent(
+        questionActivity({
+          hitl: { response: 'answered', state: 'resolved' },
+          status: 'completed',
+        }),
+      )
 
-      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities[0]).toMatchObject({
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0]).toMatchObject({
         response: 'answered',
         state: 'completed',
         type: 'elicitation',
       })
     })
 
-    it('handleHitlResolved declined marks the question error', () => {
+    it('marks a declined question error', () => {
       const store = useActivityStore.getState()
-      store.handleHitlRequired(hitlQuestionRequired())
-      store.handleHitlResolved(hitlQuestionResolved({ response: 'declined' }))
+      store.handleActivityEvent(questionActivity())
+      store.handleActivityEvent(
+        questionActivity({ hitl: { response: 'declined', state: 'resolved' }, status: 'failed' }),
+      )
 
-      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities[0]).toMatchObject({
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0]).toMatchObject({
         response: 'declined',
         state: 'error',
         type: 'elicitation',
@@ -803,7 +792,7 @@ describe('activity-store', () => {
 
     it('activityTitle returns the question message', () => {
       const store = useActivityStore.getState()
-      store.handleHitlRequired(hitlQuestionRequired())
+      store.handleActivityEvent(questionActivity())
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activityTitle(activities[0])).toBe('Choose a deployment target')
     })
@@ -901,7 +890,14 @@ describe('activity-store', () => {
           actionId: 'tc-approve',
           activityType: 'COMMAND',
           description: 'git push',
-          detail: { hitl: { hitlId: 'tc-approve', kind: 'approval', message: 'Allow git push?' } },
+          detail: {
+            hitl: {
+              hitlId: 'tc-approve',
+              kind: 'approval',
+              message: 'Allow git push?',
+              state: 'awaiting_human',
+            },
+          },
           status: 'pending',
         }),
       )
@@ -921,7 +917,14 @@ describe('activity-store', () => {
           actionId: 'tc-approve2',
           activityType: 'COMMAND',
           description: 'git push',
-          detail: { hitl: { hitlId: 'tc-approve2', kind: 'approval', message: 'Allow git push?' } },
+          detail: {
+            hitl: {
+              hitlId: 'tc-approve2',
+              kind: 'approval',
+              message: 'Allow git push?',
+              state: 'awaiting_human',
+            },
+          },
           status: 'pending',
         }),
       )
@@ -937,6 +940,7 @@ describe('activity-store', () => {
               message: 'Allow git push?',
               optionId: 'once',
               response: 'approved',
+              state: 'resolved',
             },
           },
           status: 'in_progress',
@@ -1694,7 +1698,14 @@ describe('activity-store', () => {
           actionId: 'tc-approve',
           activityType: 'COMMAND',
           description: 'chmod +x script.sh',
-          detail: { hitl: { hitlId: 'tc-approve', kind: 'approval', message: 'Allow?' } },
+          detail: {
+            hitl: {
+              hitlId: 'tc-approve',
+              kind: 'approval',
+              message: 'Allow?',
+              state: 'awaiting_human',
+            },
+          },
           status: 'pending',
         }),
       )

@@ -5,8 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -35,8 +35,8 @@ class PendingHitlRegistryTest {
         return session;
     }
 
-    private ExecutionHitlRequiredResult sampleRequest(UUID forExecutionId, String hitlId, HitlKind kind) {
-        return new ExecutionHitlRequiredResult(
+    private HitlRequestSnapshot sampleRequest(UUID forExecutionId, String hitlId, HitlKind kind) {
+        return new HitlRequestSnapshot(
                 forExecutionId,
                 hitlId,
                 kind,

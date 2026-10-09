@@ -3,6 +3,7 @@ package com.kratisai.controlplane.websocket;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.api.wsdto.ClientRpcPayload;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlState;
 import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import java.util.List;
@@ -41,9 +42,7 @@ public class ClientWebSocketFixture extends WebSocketFixture<ClientWebSocketFixt
                         2);
                 session.sendMessage(new TextMessage(objectMapper.writeValueAsString(subRequest)));
             });
-            whenType(ClientPayload.SubscriptionResult.class, (session, msg) -> {
-                subscribedLatch.countDown();
-            });
+            whenType(ClientPayload.SubscriptionResult.class, (session, msg) -> subscribedLatch.countDown());
         } else {
             subscribedLatch.countDown();
         }
@@ -55,7 +54,7 @@ public class ClientWebSocketFixture extends WebSocketFixture<ClientWebSocketFixt
 
     /**
      * Registers a handler that automatically approves all permission requests received via
-     * WebSocket. When an {@code execution_hitl_required} notification is received, the
+     * WebSocket. When an {@code execution_activity} awaiting a human approval is received, the
      * provided approver callback is invoked with the execution ID, command, and the offered
      * options (so the callback can resolve with a real optionId).
      *
@@ -67,14 +66,18 @@ public class ClientWebSocketFixture extends WebSocketFixture<ClientWebSocketFixt
      */
     public ClientWebSocketFixture autoApprovePermissions(PermissionApprover approver) {
         whenType(
-                ClientPayload.ExecutionHitlRequiredResult.class,
-                msg -> msg.kind() == HitlKind.APPROVAL,
+                ClientPayload.ExecutionActivityResult.class,
+                msg -> msg.detail() != null
+                        && msg.detail().hitl() != null
+                        && msg.detail().hitl().state() == HitlState.AWAITING_HUMAN
+                        && msg.detail().hitl().kind() == HitlKind.APPROVAL,
                 (session, msg) -> {
+                    var hitl = msg.detail().hitl();
                     logger.info(
                             "[auto-approve] Auto-approving permission for execution={}, command='{}'",
                             msg.executionId(),
-                            msg.command());
-                    approver.approve(msg.executionId(), msg.hitlId(), msg.command(), msg.options());
+                            hitl.command());
+                    approver.approve(msg.executionId(), hitl.hitlId(), hitl.command(), hitl.options());
                 });
         return this;
     }

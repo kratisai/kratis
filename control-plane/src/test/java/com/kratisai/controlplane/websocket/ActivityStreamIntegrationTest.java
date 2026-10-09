@@ -51,10 +51,10 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
  *   <li>Setup: Create environment, execution, connect UI client + sidecar
  *   <li>Sidecar sends env.activity events (thinking, tool_execution)
  *   <li>Assert UI client receives execution_activity broadcasts
- *   <li>Sidecar sends env.hitl_request (command requiring HITL)
- *   <li>Assert UI client receives execution_hitl_required
+ *   <li>Sidecar sends env.hitl_activity (command requiring HITL)
+ *   <li>Assert UI client receives an execution_activity in the awaiting_human state
  *   <li>REST approve the permission
- *   <li>Assert UI client receives execution_hitl_resolved
+ *   <li>Assert UI client receives an execution_activity in the resolved state
  *   <li>Sidecar sends more env.activity events
  *   <li>Assert UI client receives continued activity stream
  *   <li>Sidecar sends env.complete
@@ -189,8 +189,8 @@ class ActivityStreamIntegrationTest {
         //    (3rd activity event verified via awaitMessageContaining after permission flow)
         ClientWebSocketFixture clientFixture = new ClientWebSocketFixture(userAuthToken, team.getId())
                 .expectTrigger("execution_activity", 2)
-                .expectTrigger("execution_hitl_required", 1)
-                .expectTrigger("execution_hitl_resolved", 1)
+                .expectTrigger("awaiting_human", 1)
+                .expectTrigger("\"state\":\"resolved\"", 1)
                 .expectTrigger("execution_complete", 1);
 
         StandardWebSocketClient client = new StandardWebSocketClient();
@@ -265,9 +265,9 @@ class ActivityStreamIntegrationTest {
                 .as("Activity events should contain the correct executionId")
                 .isTrue();
 
-        // 9. Sidecar sends env.hitl_request for a destructive command
+        // 9. Sidecar sends env.hitl_activity for a destructive command
         JsonRpcInboundRequest permRequest = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD,
+                EnvironmentRpcPayload.HitlActivity.METHOD,
                 objectMapper.valueToTree(Map.of(
                         "hitlId", "tool-call-100",
                         "message", "Approve rm -rf /tmp/build",
@@ -284,15 +284,15 @@ class ActivityStreamIntegrationTest {
                 .as("Sidecar should NOT receive an immediate response for HITL command")
                 .isFalse();
 
-        // 11. Assert UI client receives execution_hitl_required
-        boolean permRequired = clientFixture.awaitTrigger("execution_hitl_required", 5, TimeUnit.SECONDS);
+        // 11. Assert UI client receives execution_activity with awaiting_human
+        boolean permRequired = clientFixture.awaitTrigger("awaiting_human", 5, TimeUnit.SECONDS);
         assertThat(permRequired)
-                .as("UI client should receive execution_hitl_required")
+                .as("UI client should receive execution_activity with awaiting_human")
                 .isTrue();
-        assertThat(clientFixture.hasReceivedMessageContaining("execution_hitl_required", "rm -rf /tmp/build"))
+        assertThat(clientFixture.hasReceivedMessageContaining("execution_activity", "rm -rf /tmp/build"))
                 .as("Permission required event should contain the command")
                 .isTrue();
-        assertThat(clientFixture.hasReceivedMessageContaining("execution_hitl_required", executionId.toString()))
+        assertThat(clientFixture.hasReceivedMessageContaining("execution_activity", executionId.toString()))
                 .as("Permission required event should contain the correct executionId")
                 .isTrue();
 
@@ -313,15 +313,15 @@ class ActivityStreamIntegrationTest {
                 .as("Sidecar should receive selectedOptionId after REST approval")
                 .isTrue();
 
-        // 14. Assert UI client receives execution_hitl_resolved
-        boolean permResolved = clientFixture.awaitTrigger("execution_hitl_resolved", 5, TimeUnit.SECONDS);
+        // 14. Assert UI client receives execution_activity with resolved
+        boolean permResolved = clientFixture.awaitTrigger("\"state\":\"resolved\"", 5, TimeUnit.SECONDS);
         assertThat(permResolved)
-                .as("UI client should receive execution_hitl_resolved")
+                .as("UI client should receive execution_activity with resolved")
                 .isTrue();
-        assertThat(clientFixture.hasReceivedMessageContaining("execution_hitl_resolved", "\"response\":\"approved\""))
+        assertThat(clientFixture.hasReceivedMessageContaining("execution_activity", "\"response\":\"approved\""))
                 .as("Resolved event should indicate approval")
                 .isTrue();
-        assertThat(clientFixture.hasReceivedMessageContaining("resolvedByDisplayName", "Stream User"))
+        assertThat(clientFixture.hasReceivedMessageContaining("resolvedBy", "Stream User"))
                 .as("Resolved event should contain the resolving user's display name")
                 .isTrue();
 

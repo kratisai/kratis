@@ -180,7 +180,7 @@ export function triggerMockMessageEcho(
   })
 }
 
-/** Emit an `execution_hitl_required` frame (kind=approval). */
+/** Emit the `execution_activity` the control plane publishes when an approval needs a human. */
 export function triggerMockPermissionRequired(
   ws: MockWebSocket,
   executionId: string,
@@ -192,25 +192,18 @@ export function triggerMockPermissionRequired(
   hitlId = command,
 ) {
   triggerMockExecutionActivity(ws, executionId, 'COMMAND', command, 'pending', hitlId, {
-    hitl: { hitlId, kind: 'approval', message: `Allow ${command}?`, options },
-  })
-  ws.onmessage?.({
-    data: JSON.stringify({
-      jsonrpc: '2.0',
-      result: {
-        command,
-        executionId,
-        hitlId,
-        kind: 'approval',
-        message: `Allow ${command}?`,
-        options,
-        type: 'execution_hitl_required',
-      },
-    }),
+    hitl: {
+      command,
+      hitlId,
+      kind: 'approval',
+      message: `Allow ${command}?`,
+      options,
+      state: 'awaiting_human',
+    },
   })
 }
 
-/** Emit an `execution_hitl_resolved` frame (kind=approval). */
+/** Emit the `execution_activity` the control plane publishes once an approval is resolved. */
 export function triggerMockPermissionResolved(
   ws: MockWebSocket,
   executionId: string,
@@ -222,22 +215,27 @@ export function triggerMockPermissionResolved(
   optionId = approved ? 'allow-once' : 'reject-once',
   response: 'approved' | 'cancelled' | 'declined' = approved ? 'approved' : 'declined',
 ) {
-  ws.onmessage?.({
-    data: JSON.stringify({
-      jsonrpc: '2.0',
-      result: {
+  triggerMockExecutionActivity(
+    ws,
+    executionId,
+    'COMMAND',
+    command,
+    response === 'approved' ? 'in_progress' : 'failed',
+    hitlId,
+    {
+      hitl: {
         command,
-        executionId,
         hitlId,
         kind: 'approval',
-        optionId: response === 'cancelled' ? null : optionId,
-        resolvedByDisplayName,
-        resolvedByUserId,
+        message: `Allow ${command}?`,
+        ...(response === 'cancelled' ? {} : { optionId }),
+        resolvedBy: resolvedByDisplayName,
+        ...(resolvedByUserId === null ? {} : { resolvedByUserId }),
         response,
-        type: 'execution_hitl_resolved',
+        state: 'resolved',
       },
-    }),
-  })
+    },
+  )
 }
 
 /**

@@ -46,9 +46,9 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
  * team
  * <li>Connect sidecar and simulate agent requesting permission for a
  * destructive command
- * <li>Assert BOTH UI clients receive execution_hitl_required
+ * <li>Assert BOTH UI clients receive awaiting_human activity
  * <li>Client 1 calls POST /api/v1/hitl/resolve
- * <li>Assert BOTH UI clients receive execution_hitl_resolved
+ * <li>Assert BOTH UI clients receive resolved activity
  * <li>Assert sidecar receives the JSON-RPC approval response
  * <li>Verify the pending HITL request is cleared from PendingHitlRegistry
  * <li>Verify activity log permission events are consistent across both clients
@@ -185,16 +185,16 @@ class ActivityLogSyncIntegrationTest {
 
         // Client 1 - simulates User A's browser tab
         ClientWebSocketFixture client1Fixture = new ClientWebSocketFixture(userAuthToken, team.getId())
-                .expectTrigger("execution_hitl_required", 1)
-                .expectTrigger("execution_hitl_resolved", 1);
+                .expectTrigger("awaiting_human", 1)
+                .expectTrigger("\"state\":\"resolved\"", 1);
 
         WebSocketSession client1Session = client.execute(client1Fixture, "ws://localhost:" + port + "/ws/client")
                 .get(5, TimeUnit.SECONDS);
 
         // Client 2 - simulates User B's browser tab (same team subscription)
         ClientWebSocketFixture client2Fixture = new ClientWebSocketFixture(userAuthToken, team.getId())
-                .expectTrigger("execution_hitl_required", 1)
-                .expectTrigger("execution_hitl_resolved", 1);
+                .expectTrigger("awaiting_human", 1)
+                .expectTrigger("\"state\":\"resolved\"", 1);
 
         WebSocketSession client2Session = client.execute(client2Fixture, "ws://localhost:" + port + "/ws/client")
                 .get(5, TimeUnit.SECONDS);
@@ -224,20 +224,20 @@ class ActivityLogSyncIntegrationTest {
                 .as("HITL command should not receive an immediate response")
                 .isFalse();
 
-        // 7. Assert BOTH UI clients received execution_hitl_required broadcast
-        boolean client1Required = client1Fixture.awaitTrigger("execution_hitl_required", 5, TimeUnit.SECONDS);
+        // 7. Assert BOTH UI clients received awaiting_human activity broadcast
+        boolean client1Required = client1Fixture.awaitTrigger("awaiting_human", 5, TimeUnit.SECONDS);
         assertThat(client1Required)
-                .as("Client 1 should receive execution_hitl_required")
+                .as("Client 1 should receive awaiting_human activity")
                 .isTrue();
-        assertThat(client1Fixture.hasReceivedMessageContaining("execution_hitl_required", "rm -rf /"))
+        assertThat(client1Fixture.hasReceivedMessageContaining("awaiting_human", "rm -rf /"))
                 .as("Client 1 permission_required should contain the command")
                 .isTrue();
 
-        boolean client2Required = client2Fixture.awaitTrigger("execution_hitl_required", 5, TimeUnit.SECONDS);
+        boolean client2Required = client2Fixture.awaitTrigger("awaiting_human", 5, TimeUnit.SECONDS);
         assertThat(client2Required)
-                .as("Client 2 should receive execution_hitl_required")
+                .as("Client 2 should receive awaiting_human activity")
                 .isTrue();
-        assertThat(client2Fixture.hasReceivedMessageContaining("execution_hitl_required", "rm -rf /"))
+        assertThat(client2Fixture.hasReceivedMessageContaining("awaiting_human", "rm -rf /"))
                 .as("Client 2 permission_required should contain the command")
                 .isTrue();
 
@@ -265,26 +265,26 @@ class ActivityLogSyncIntegrationTest {
                 .as("Sidecar approval should be for request ID 100")
                 .isTrue();
 
-        // 11. Assert BOTH UI clients received execution_hitl_resolved broadcast
-        boolean client1Resolved = client1Fixture.awaitTrigger("execution_hitl_resolved", 5, TimeUnit.SECONDS);
+        // 11. Assert BOTH UI clients received resolved activity broadcast
+        boolean client1Resolved = client1Fixture.awaitTrigger("\"state\":\"resolved\"", 5, TimeUnit.SECONDS);
         assertThat(client1Resolved)
-                .as("Client 1 should receive execution_hitl_resolved")
+                .as("Client 1 should receive resolved activity")
                 .isTrue();
-        assertThat(client1Fixture.hasReceivedMessageContaining("execution_hitl_resolved", "\"response\":\"approved\""))
+        assertThat(client1Fixture.hasReceivedMessageContaining("\"state\":\"resolved\"", "\"response\":\"approved\""))
                 .as("Client 1 resolved event should indicate approval")
                 .isTrue();
-        assertThat(client1Fixture.hasReceivedMessageContaining("resolvedByDisplayName", "Sync User"))
+        assertThat(client1Fixture.hasReceivedMessageContaining("resolvedBy", "Sync User"))
                 .as("Client 1 resolved event should contain the resolving user's display name")
                 .isTrue();
 
-        boolean client2Resolved = client2Fixture.awaitTrigger("execution_hitl_resolved", 5, TimeUnit.SECONDS);
+        boolean client2Resolved = client2Fixture.awaitTrigger("\"state\":\"resolved\"", 5, TimeUnit.SECONDS);
         assertThat(client2Resolved)
-                .as("Client 2 should receive execution_hitl_resolved")
+                .as("Client 2 should receive resolved activity")
                 .isTrue();
-        assertThat(client2Fixture.hasReceivedMessageContaining("execution_hitl_resolved", "\"response\":\"approved\""))
+        assertThat(client2Fixture.hasReceivedMessageContaining("\"state\":\"resolved\"", "\"response\":\"approved\""))
                 .as("Client 2 resolved event should indicate approval")
                 .isTrue();
-        assertThat(client2Fixture.hasReceivedMessageContaining("resolvedByDisplayName", "Sync User"))
+        assertThat(client2Fixture.hasReceivedMessageContaining("resolvedBy", "Sync User"))
                 .as("Client 2 resolved event should contain the resolving user's display name")
                 .isTrue();
 
@@ -296,14 +296,14 @@ class ActivityLogSyncIntegrationTest {
         // 13. Verify activity log consistency: both clients received the same
         // permission events Both clients should have received:
         // permission_required and permission_resolved
-        assertThat(client1Fixture.hasReceivedMessageContaining("execution_hitl_required"))
+        assertThat(client1Fixture.hasReceivedMessageContaining("awaiting_human"))
                 .isTrue();
-        assertThat(client1Fixture.hasReceivedMessageContaining("execution_hitl_resolved"))
+        assertThat(client1Fixture.hasReceivedMessageContaining("\"state\":\"resolved\""))
                 .isTrue();
 
-        assertThat(client2Fixture.hasReceivedMessageContaining("execution_hitl_required"))
+        assertThat(client2Fixture.hasReceivedMessageContaining("awaiting_human"))
                 .isTrue();
-        assertThat(client2Fixture.hasReceivedMessageContaining("execution_hitl_resolved"))
+        assertThat(client2Fixture.hasReceivedMessageContaining("\"state\":\"resolved\""))
                 .isTrue();
 
         // 14. Verify both clients received the same executionId in permission events
@@ -322,7 +322,7 @@ class ActivityLogSyncIntegrationTest {
 
     @Test
     void testMultiClientPermissionRequiredBroadcastContainsExecutionId() throws Exception {
-        // This test verifies that the execution_hitl_required broadcast contains
+        // This test verifies that the awaiting_human activity broadcast contains
         // the correct executionId, enabling UI clients to correlate the permission
         // request with the correct execution's activity log.
 
@@ -351,13 +351,13 @@ class ActivityLogSyncIntegrationTest {
         StandardWebSocketClient client = new StandardWebSocketClient();
 
         ClientWebSocketFixture client1Fixture =
-                new ClientWebSocketFixture(userAuthToken, team.getId()).expectTrigger("execution_hitl_required", 1);
+                new ClientWebSocketFixture(userAuthToken, team.getId()).expectTrigger("awaiting_human", 1);
 
         WebSocketSession client1Session = client.execute(client1Fixture, "ws://localhost:" + port + "/ws/client")
                 .get(5, TimeUnit.SECONDS);
 
         ClientWebSocketFixture client2Fixture =
-                new ClientWebSocketFixture(userAuthToken, team.getId()).expectTrigger("execution_hitl_required", 1);
+                new ClientWebSocketFixture(userAuthToken, team.getId()).expectTrigger("awaiting_human", 1);
 
         WebSocketSession client2Session = client.execute(client2Fixture, "ws://localhost:" + port + "/ws/client")
                 .get(5, TimeUnit.SECONDS);
@@ -373,15 +373,15 @@ class ActivityLogSyncIntegrationTest {
 
         // 5. Both clients should receive permission_required with the correct
         // executionId
-        boolean client1Received = client1Fixture.awaitTrigger("execution_hitl_required", 5, TimeUnit.SECONDS);
+        boolean client1Received = client1Fixture.awaitTrigger("awaiting_human", 5, TimeUnit.SECONDS);
         assertThat(client1Received).isTrue();
-        assertThat(client1Fixture.hasReceivedMessageContaining("execution_hitl_required", executionId.toString()))
+        assertThat(client1Fixture.hasReceivedMessageContaining("awaiting_human", executionId.toString()))
                 .as("Client 1 should receive permission_required with correct executionId")
                 .isTrue();
 
-        boolean client2Received = client2Fixture.awaitTrigger("execution_hitl_required", 5, TimeUnit.SECONDS);
+        boolean client2Received = client2Fixture.awaitTrigger("awaiting_human", 5, TimeUnit.SECONDS);
         assertThat(client2Received).isTrue();
-        assertThat(client2Fixture.hasReceivedMessageContaining("execution_hitl_required", executionId.toString()))
+        assertThat(client2Fixture.hasReceivedMessageContaining("awaiting_human", executionId.toString()))
                 .as("Client 2 should receive permission_required with correct executionId")
                 .isTrue();
 

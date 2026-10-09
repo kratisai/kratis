@@ -229,11 +229,11 @@ const (
 	HitlQuestion HitlKind = "question"
 )
 
-// HitlRequest is the unified human-in-the-loop request from the sidecar
+// HitlActivityParams is the unified human-in-the-loop request from the sidecar
 // (was env.request_permission and env.create_elicitation). kind=approval asks
 // the user to authorize a command; kind=question asks a structured question
 // with a form schema.
-type HitlRequest struct {
+type HitlActivityParams struct {
 	HitlID      string   `json:"hitlId"`
 	Message     string   `json:"message"`
 	Kind        HitlKind `json:"kind"`
@@ -260,10 +260,10 @@ const (
 	HitlCancelled HitlResponse = "cancelled"
 )
 
-// HitlResult is the user's response to a HITL request: response=approved
+// HitlActivityResult is the user's response to a HITL request: response=approved
 // carries the selected optionId; response=answered carries the submitted form
 // content.
-type HitlResult struct {
+type HitlActivityResult struct {
 	Response HitlResponse   `json:"response"`
 	OptionID string         `json:"optionId,omitempty"`
 	Content  map[string]any `json:"content,omitempty"`
@@ -625,7 +625,6 @@ type ActivityDetail struct {
 	ExitCode  *int               `json:"exitCode,omitempty"`
 	Truncated bool               `json:"truncated,omitempty"`
 	Meta      map[string]any     `json:"meta,omitempty"`
-	Hitl      *ActivityHitl      `json:"hitl,omitempty"`
 	MessageID string             `json:"messageId,omitempty"`
 	Role      string             `json:"role,omitempty"`
 	Plan      []PlanEntry        `json:"plan,omitempty"`
@@ -668,23 +667,4 @@ type ActivityDiff struct {
 	OldText string `json:"oldText,omitempty"`
 	NewText string `json:"newText,omitempty"`
 	Path    string `json:"path,omitempty"`
-}
-
-// ActivityHitl is the HITL request/response state attached to a tool activity,
-// mirroring the control plane's ActivityHitl record.
-type ActivityHitl struct {
-	HitlID    string             `json:"hitlId,omitempty"`
-	Kind      string             `json:"kind,omitempty"`
-	Message   string             `json:"message,omitempty"`
-	Command   string             `json:"command,omitempty"`
-	Title     string             `json:"title,omitempty"`
-	ToolKind  string             `json:"toolKind,omitempty"`
-	Options   []PermissionOption `json:"options,omitempty"`
-	Diff      *ActivityDiff      `json:"diff,omitempty"`
-	Form      map[string]any     `json:"form,omitempty"`
-	Response  string             `json:"response,omitempty"`
-	OptionID  string             `json:"optionId,omitempty"`
-	Content   map[string]any     `json:"content,omitempty"`
-	Approved  bool               `json:"approved,omitempty"`
-	Cancelled bool               `json:"cancelled,omitempty"`
 }

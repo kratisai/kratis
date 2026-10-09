@@ -141,7 +141,6 @@ type ToolCallInfo struct {
 	ExitSignal     *string
 	ExitCode       *int
 	Truncated      bool
-	Hitl           *ActivityHitl
 	// Insertion order; Go map iteration is unordered.
 	RecordedSeq uint64
 }
@@ -296,10 +295,7 @@ func (h *Handler) HandlePermissionRequest(transport *AcpTransport, params map[st
 
 	// Authorisation is part of the tool call's lifecycle.
 	p, _ := parseRequestPermissionParams(params)
-	info := h.beginPermission(actionID, cmdText, p.ToolCall.Title, p.ToolCall.Kind)
-	if info != nil {
-		h.emitToolActivity(info, ActivityPending)
-	}
+	h.beginPermission(actionID, cmdText, p.ToolCall.Title, p.ToolCall.Kind)
 
 	// The agent owns the option set; a non-empty one is guaranteed downstream
 	// so the UI always has something to present and the control plane always
@@ -426,7 +422,7 @@ func (h *Handler) HandleElicitationRequest(transport *AcpTransport, params map[s
 	}
 }
 
-// beginPermission attaches the HITL permission to a current tool call
+// beginPermission registers the tool call that a permission request gates.
 func (h *Handler) beginPermission(toolCallID string, command string, title string, kind string) *ToolCallInfo {
 	if toolCallID == "" {
 		return nil
@@ -448,13 +444,13 @@ func (h *Handler) beginPermission(toolCallID string, command string, title strin
 	if info.Kind == "" {
 		info.Kind = kind
 	}
-	info.Hitl = &ActivityHitl{HitlID: toolCallID, Kind: "approval"}
 	return info
 }
 
-// resolvePermission records the HITL decision on the tool call and emits the
-// resolution transition: in_progress on approval, failed on rejection.
-func (h *Handler) resolvePermission(toolCallID string, approved bool, optionID string, _ ApprovalOptionKind, cancelled bool) {
+// resolvePermission emits the tool call transition for a permission outcome:
+// in_progress on approval, failed on rejection. Approval state itself is the
+// control plane's to publish.
+func (h *Handler) resolvePermission(toolCallID string, approved bool, _ string, _ ApprovalOptionKind, _ bool) {
 	if toolCallID == "" {
 		return
 	}
@@ -464,14 +460,6 @@ func (h *Handler) resolvePermission(toolCallID string, approved bool, optionID s
 	if info == nil {
 		return
 	}
-	if info.Hitl == nil {
-		info.Hitl = &ActivityHitl{HitlID: toolCallID, Kind: "approval"}
-	}
-	info.Hitl.Approved = approved
-	info.Hitl.OptionID = optionID
-	info.Hitl.Cancelled = cancelled
-	info.Hitl.Response = hitlResponse(approved, cancelled)
-
 	status := ActivityInProgress
 	if !approved {
 		status = ActivityFailed
@@ -481,32 +469,6 @@ func (h *Handler) resolvePermission(toolCallID string, approved bool, optionID s
 	}
 	info.Status = status
 	h.sink.SendActivity(h.buildToolActivity(info, status))
-}
-
-// hitlResponse maps the resolved permission outcome to the wire HITL response
-// discriminator.
-func hitlResponse(approved bool, cancelled bool) string {
-	if cancelled {
-		return "cancelled"
-	}
-	if approved {
-		return "approved"
-	}
-	return "declined"
-}
-
-// emitToolActivity emits an activity from the accumulated state for the given
-// status transition, updating the recorded status.
-func (h *Handler) emitToolActivity(info *ToolCallInfo, status ActivityStatus) {
-	h.mu.Lock()
-	if info.Status == status || info.Status == ActivityCompleted || info.Status == ActivityFailed {
-		h.mu.Unlock()
-		return
-	}
-	info.Status = status
-	activity := h.buildToolActivity(info, status)
-	h.mu.Unlock()
-	h.sink.SendActivity(activity)
 }
 
 func (h *Handler) HandleTerminalCreate(transport *AcpTransport, params map[string]interface{}, id interface{}) {
@@ -526,10 +488,7 @@ func (h *Handler) HandleTerminalCreate(transport *AcpTransport, params map[strin
 	// with the accumulated tool call whose command matches so the approval
 	// lands on the tool activity (Slice 6).
 	toolCallID := h.findToolCallByCommand(command)
-	info := h.beginPermission(toolCallID, command, "", "")
-	if info != nil {
-		h.emitToolActivity(info, ActivityPending)
-	}
+	h.beginPermission(toolCallID, command, "", "")
 
 	// terminal/create carries no agent option set; synthesise the default pair
 	// so the UI and control plane see a uniform shape.
@@ -949,10 +908,7 @@ func (h *Handler) HandleFsWriteTextFile(transport *AcpTransport, params map[stri
 	// call for this path so the HITL approval attaches to the tool activity
 	// instead of synthesising an orphan hitlId downstream.
 	toolCallID := h.findToolCallByPath(path)
-	info := h.beginPermission(toolCallID, path, path, "write")
-	if info != nil {
-		h.emitToolActivity(info, ActivityPending)
-	}
+	h.beginPermission(toolCallID, path, path, "write")
 
 	// No agent option set; synthesise the default pair for a uniform shape.
 	req := PermissionRequest{

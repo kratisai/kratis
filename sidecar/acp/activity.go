@@ -101,7 +101,6 @@ type ActivityDetail struct {
 	ExitCode  *int               `json:"exitCode,omitempty"`
 	Truncated bool               `json:"truncated,omitempty"`
 	Meta      map[string]any     `json:"meta,omitempty"`
-	Hitl      *ActivityHitl      `json:"hitl,omitempty"`
 	MessageID string             `json:"messageId,omitempty"`
 	Role      string             `json:"role,omitempty"`
 	Plan      []PlanEntry        `json:"plan,omitempty"`
@@ -119,23 +118,4 @@ type ActivityDiff struct {
 	OldText string `json:"oldText,omitempty"`
 	NewText string `json:"newText,omitempty"`
 	Path    string `json:"path,omitempty"`
-}
-
-// ActivityHitl is the HITL request/response state attached to a tool activity,
-// mirroring the control plane's ActivityHitl record.
-type ActivityHitl struct {
-	HitlID    string             `json:"hitlId,omitempty"`
-	Kind      string             `json:"kind,omitempty"`
-	Message   string             `json:"message,omitempty"`
-	Command   string             `json:"command,omitempty"`
-	Title     string             `json:"title,omitempty"`
-	ToolKind  string             `json:"toolKind,omitempty"`
-	Options   []PermissionOption `json:"options,omitempty"`
-	Diff      *ActivityDiff      `json:"diff,omitempty"`
-	Form      map[string]any     `json:"form,omitempty"`
-	Response  string             `json:"response,omitempty"`
-	OptionID  string             `json:"optionId,omitempty"`
-	Content   map[string]any     `json:"content,omitempty"`
-	Approved  bool               `json:"approved,omitempty"`
-	Cancelled bool               `json:"cancelled,omitempty"`
 }

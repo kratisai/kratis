@@ -3,7 +3,7 @@ package com.kratisai.controlplane.api.wsdto;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
-/** The user's answer to a HITL request (env.hitl_request result). */
+/** The user's answer to a HITL request (env.hitl_activity result). */
 public enum HitlResponse {
     APPROVED("approved"),
     ANSWERED("answered"),

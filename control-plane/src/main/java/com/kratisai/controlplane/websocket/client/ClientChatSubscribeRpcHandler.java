@@ -21,7 +21,6 @@ import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
-import com.kratisai.controlplane.service.PendingHitlRegistry;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
@@ -40,7 +39,6 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
     private final CanvasService canvasService;
     private final ChatFluxRegistry chatFluxRegistry;
     private final SandboxExecutionRepository executionRepository;
-    private final PendingHitlRegistry pendingHitlRegistry;
     private final ExecutionActivityPersistenceService activityPersistenceService;
 
     public ClientChatSubscribeRpcHandler(
@@ -51,7 +49,6 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
             CanvasService canvasService,
             ChatFluxRegistry chatFluxRegistry,
             SandboxExecutionRepository executionRepository,
-            PendingHitlRegistry pendingHitlRegistry,
             ExecutionActivityPersistenceService activityPersistenceService) {
         this.chatService = chatService;
         this.chatMemoryRepository = chatMemoryRepository;
@@ -60,7 +57,6 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
         this.canvasService = canvasService;
         this.chatFluxRegistry = chatFluxRegistry;
         this.executionRepository = executionRepository;
-        this.pendingHitlRegistry = pendingHitlRegistry;
         this.activityPersistenceService = activityPersistenceService;
     }
 
@@ -147,16 +143,7 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
                             activity.getStatus(),
                             activityPersistenceService.detailOf(activity)));
 
-            Flux<ClientPayload> pendingHitl = Flux.defer(() -> {
-                PendingHitlRegistry.PendingHitl pending =
-                        pendingHitlRegistry.getPending().get(executionId);
-                if (pending != null) {
-                    return Flux.just(pending.request());
-                }
-                return Flux.empty();
-            });
-
-            return Flux.concat(activities, pendingHitl);
+            return activities;
         });
     }
 

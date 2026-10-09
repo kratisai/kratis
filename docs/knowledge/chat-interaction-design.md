@@ -19,7 +19,7 @@ The Kratis AI platform provides a real-time, deterministic, dual-transport (REST
   1. Assistant response text chunks (`message_chunk`)
   2. Agent thinking and tool-call lifecycle events (`telemetry`)
   3. Sandbox process lifecycle and output logs (`execution_activity`, `execution_output`, `execution_status_changed`, `execution_complete`)
-  4. Human-in-the-Loop permission requests and resolutions (`execution_hitl_required`, `execution_hitl_resolved`)
+  4. Human-in-the-Loop approvals and questions, carried as the `detail.hitl` state of an `execution_activity`
   5. Interactive canvas document creations and updates (`canvas`)
   6. Terminal chat failures (`chat_error`) emitted in-band when the agent loop fails, so every subscriber can close out the turn instead of leaving it dangling
 - **Automatic Lifecycle Cleanup**: The stream registry automatically removes the `chatId` entry when the reactive stream terminates (`onComplete`, `onError`, or `cancel`).
@@ -32,10 +32,8 @@ WebSocket JSON-RPC payloads strictly differentiate historical replays, live text
 | `message` | `MessageResult` | Represents a complete historical or replayed message (e.g., user prompt, system prompt, or completed assistant response). |
 | `message_chunk` | `MessageChunkResult` | Incremental streaming token or text fragment emitted live during assistant response generation. |
 | `telemetry` | `TelemetryResult` | Agent thinking thoughts (`status`) and tool execution lifecycle (`ToolStart`, `ToolComplete`, `ToolError`). |
-| `execution_activity` | `ExecutionActivityResult` | High-level execution lifecycle steps (e.g. sandbox spawn, git clone / git init, command launch). |
+| `execution_activity` | `ExecutionActivityResult` | One activity row. Covers execution lifecycle steps (e.g. sandbox spawn, git clone / git init, command launch) and Human-in-the-Loop state. The control plane is the only writer of `detail.hitl`. `detail.hitl.state` is `awaiting_human` when a person must decide, and `resolved` after a decision. A request that a team rule resolves goes straight to `resolved`, so the UI never shows a prompt for it. |
 | `execution_output` | `ExecutionOutputResult` | Real-time stdout / stderr log lines emitted during sandbox execution. |
-| `execution_hitl_required` | `ExecutionHitlRequiredResult` | **HITL Request**: Emitted when a command requires user approval before execution. |
-| `execution_hitl_resolved` | `ExecutionHitlResolvedResult` | **HITL Resolution**: Broadcast when an admin/user approves or denies an execution request. |
 | `execution_status_changed` | `ExecutionStatusChangedResult` | Execution state change (status transition, creation, or usage refresh) for a chat's executions. Receivers invalidate the `['chat-executions', chatId]` TanStack Query cache so the status badge, terminate menu, and usage summary refetch from the backend — the single source of truth. Usage refreshes are leading-edge throttled per execution (`kratis.litellm.usage-refresh-interval`, default 15s): the first agent activity/output event refreshes immediately, and activity during the trailing window sets a flag so one catch-up refresh runs at window end — continuous work yields periodic updates without a refresh per event; a final refresh is emitted at completion. Logs/activities are not part of this signal — they live only in the execution store, keyed by `executionId`. |
 | `execution_complete` | `ExecutionCompleteResult` | Signals completion and exit code of a sandbox execution run. |
 | `canvas` | `CanvasResult` | Document creation, updates, section edits, and soft-deletes in the chat canvas workspace. Create/Update events carry `canvasType` (`SPEC`/`DOCUMENT`), a display `repoLabel`, and `isNewRepo`; only `SPEC` canvases can be launched. A `Delete` event carries only `documentId` + `chatId` and is broadcast to team subscribers when a user soft-deletes a document via `DELETE /api/v1/chats/{chatId}/canvas/documents/{documentId}`; soft-deleted documents are excluded from `chat.subscribe` replay, agent canvas tools, and launch validation, and rewriting a deleted `documentId` is blocked. |
@@ -108,7 +106,7 @@ sequenceDiagram
     Agent->>WS: JsonRpcResponse {type: "telemetry", event: {toolName: "execute_command", status: "ToolStart"}}
     WS->>Client: Stream Tool Start Notification
     
-    Agent->>WS: JsonRpcResponse {type: "execution_hitl_required", command: "rm -rf /tmp/build"}
+    Agent->>WS: JsonRpcResponse {type: "execution_activity", detail: {hitl: {state: "awaiting_human", command: "rm -rf /tmp/build"}}}
     WS->>Client: Render HITL Permission Approval Dialog
     
     Client->>WS: REST POST /api/v1/hitl/resolve {executionId, hitlId, response}
@@ -155,7 +153,7 @@ sequenceDiagram
     rect rgb(60, 60, 60)
         Note over WS2,Tab2: Immediate Replay Buffer Delivery for Tab 2
         WS2->>Tab2: WS {type: "telemetry", event: {status: "Thinking..."}}
-        WS2->>Tab2: WS {type: "execution_hitl_required", command: "..."}
+        WS2->>Tab2: WS {type: "execution_activity", detail: {hitl: {state: "awaiting_human", command: "..."}}}
         WS2->>Tab2: WS {type: "message_chunk", content: "Token 1..."}
         WS2->>Tab2: WS {type: "message_chunk", content: "Token 2..."}
     end
@@ -188,24 +186,36 @@ sequenceDiagram
 }
 ```
 
-#### HITL Request (`type: "execution_hitl_required"`)
+#### HITL Approval (`type: "execution_activity"`, `detail.hitl.state: "awaiting_human"`)
 ```json
 {
   "jsonrpc": "2.0",
   "id": 4,
   "result": {
-    "type": "execution_hitl_required",
+    "type": "execution_activity",
     "executionId": "e1f2a3b4-5678-90ab-cdef-1234567890ab",
-    "hitlId": "tool-call-42",
-    "kind": "approval",
-    "message": "Allow docker run --rm -v /workspace:/app golangci-lint run?",
-    "command": "docker run --rm -v /workspace:/app golangci-lint run",
-    "commandSegments": [
-      { "text": "docker run --rm -v /workspace:/app golangci-lint run", "suggestedRoot": "docker run" }
-    ]
+    "actionId": "tool-call-42",
+    "activityType": "COMMAND",
+    "status": "pending",
+    "description": "docker run --rm -v /workspace:/app golangci-lint run",
+    "detail": {
+      "hitl": {
+        "hitlId": "tool-call-42",
+        "kind": "approval",
+        "state": "awaiting_human",
+        "message": "Allow docker run --rm -v /workspace:/app golangci-lint run?",
+        "command": "docker run --rm -v /workspace:/app golangci-lint run",
+        "commandSegments": [
+          { "text": "docker run --rm -v /workspace:/app golangci-lint run", "suggestedRoot": "docker run" }
+        ]
+      }
+    }
   }
 }
 ```
+
+After a decision, the control plane publishes the same activity with `detail.hitl.state` set to
+`resolved`, plus `response` and `resolvedBy`.
 
 `commandSegments` lists the root commands of a composite command. The control plane splits at
 `&&`, `||`, `;`, `|`, and newlines. Each segment carries a derived rule candidate. The UI uses

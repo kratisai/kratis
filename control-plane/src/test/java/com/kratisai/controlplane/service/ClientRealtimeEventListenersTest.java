@@ -15,15 +15,11 @@ import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionAcpInitialized
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionActivityResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionCompleteResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionDiffChangedResult;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionOutputResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionStatusChangedResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.IngestionResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.TeamEntityChangedResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.UserEntityChangedResult;
-import com.kratisai.controlplane.api.wsdto.HitlKind;
-import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.IngestionEvent;
 import com.kratisai.controlplane.api.wsdto.IngestionStatusEvent;
 import com.kratisai.controlplane.api.wsdto.OutputStream;
@@ -39,8 +35,6 @@ import com.kratisai.controlplane.model.event.SandboxExecutionAcpInitializedEvent
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionDiffChangedEvent;
-import com.kratisai.controlplane.model.event.SandboxExecutionHitlRequiredEvent;
-import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionOutputEvent;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityType;
@@ -169,111 +163,6 @@ class ClientRealtimeEventListenersTest {
         assertThat(result.activityType()).isEqualTo(ActivityType.COMMAND);
         assertThat(result.actionId()).isEqualTo("tool-call-7");
         assertThat(result.status()).isEqualTo(ActivityStatus.IN_PROGRESS);
-    }
-
-    @Test
-    void onSandboxExecutionHitlRequiredEvent_broadcastsApprovalRequired() {
-        UUID teamId = UUID.randomUUID();
-        UUID executionId = UUID.randomUUID();
-        listeners.onSandboxExecutionHitlRequiredEvent(new SandboxExecutionHitlRequiredEvent(
-                teamId,
-                new ExecutionHitlRequiredResult(
-                        executionId,
-                        "tool-call-42",
-                        HitlKind.APPROVAL,
-                        "Remove",
-                        "rm -rf /",
-                        null,
-                        "Remove",
-                        "execute",
-                        null,
-                        null,
-                        null)));
-
-        ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
-        verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
-        ExecutionHitlRequiredResult result = (ExecutionHitlRequiredResult) captor.getValue();
-        assertThat(result.hitlId()).isEqualTo("tool-call-42");
-        assertThat(result.command()).isEqualTo("rm -rf /");
-        assertThat(result.kind()).isEqualTo(HitlKind.APPROVAL);
-    }
-
-    @Test
-    void onSandboxExecutionHitlResolvedEvent_broadcastsApprovalResolved() {
-        UUID teamId = UUID.randomUUID();
-        UUID executionId = UUID.randomUUID();
-        UUID userId = UUID.randomUUID();
-        listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
-                teamId,
-                new ExecutionHitlResolvedResult(
-                        executionId,
-                        "tool-call-42",
-                        HitlKind.APPROVAL,
-                        HitlResponse.APPROVED,
-                        "allow-once",
-                        null,
-                        userId,
-                        "Alice")));
-
-        ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
-        verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
-        ExecutionHitlResolvedResult result = (ExecutionHitlResolvedResult) captor.getValue();
-        assertThat(result.response()).isEqualTo(HitlResponse.APPROVED);
-        assertThat(result.optionId()).isEqualTo("allow-once");
-        assertThat(result.resolvedByDisplayName()).isEqualTo("Alice");
-    }
-
-    @Test
-    void onSandboxExecutionHitlRequiredEvent_broadcastsQuestionRequired() {
-        UUID teamId = UUID.randomUUID();
-        UUID executionId = UUID.randomUUID();
-        listeners.onSandboxExecutionHitlRequiredEvent(new SandboxExecutionHitlRequiredEvent(
-                teamId,
-                new ExecutionHitlRequiredResult(
-                        executionId,
-                        "el-1",
-                        HitlKind.QUESTION,
-                        "Choose a target",
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        java.util.Map.of("type", "object"))));
-
-        ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
-        verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
-        ExecutionHitlRequiredResult result = (ExecutionHitlRequiredResult) captor.getValue();
-        assertThat(result.hitlId()).isEqualTo("el-1");
-        assertThat(result.message()).isEqualTo("Choose a target");
-        assertThat(result.kind()).isEqualTo(HitlKind.QUESTION);
-        assertThat(result.form()).isEqualTo(java.util.Map.of("type", "object"));
-    }
-
-    @Test
-    void onSandboxExecutionHitlResolvedEvent_broadcastsQuestionResolved() {
-        UUID teamId = UUID.randomUUID();
-        UUID executionId = UUID.randomUUID();
-        UUID userId = UUID.randomUUID();
-        listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
-                teamId,
-                new ExecutionHitlResolvedResult(
-                        executionId,
-                        "el-1",
-                        HitlKind.QUESTION,
-                        HitlResponse.ANSWERED,
-                        null,
-                        java.util.Map.of("target", "staging"),
-                        userId,
-                        "Alice")));
-
-        ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
-        verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
-        ExecutionHitlResolvedResult result = (ExecutionHitlResolvedResult) captor.getValue();
-        assertThat(result.response()).isEqualTo(HitlResponse.ANSWERED);
-        assertThat(result.content()).isEqualTo(java.util.Map.of("target", "staging"));
-        assertThat(result.resolvedByDisplayName()).isEqualTo("Alice");
     }
 
     @Test

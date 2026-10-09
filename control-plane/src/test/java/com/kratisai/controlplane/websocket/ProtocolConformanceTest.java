@@ -790,7 +790,7 @@ class ProtocolConformanceTest {
             case "env.heartbeat" -> EnvironmentResponsePayload.EnvironmentHeartbeatResult.class;
             case "env.diff_manifest" -> EnvironmentResponsePayload.DiffManifestResult.class;
             case "env.diff_sections" -> EnvironmentResponsePayload.DiffSectionsResult.class;
-            case "env.hitl_request" -> EnvironmentResponsePayload.HitlResult.class;
+            case "env.hitl_activity" -> EnvironmentResponsePayload.HitlActivityResult.class;
             case "env.git_token" -> EnvironmentResponsePayload.GitTokenResult.class;
             case "env.exec" -> EnvironmentConnectorResult.Exec.class;
             case "env.launch_acp_agent" -> EnvironmentConnectorResult.LaunchAcpAgent.class;
@@ -813,7 +813,7 @@ class ProtocolConformanceTest {
             case "heartbeat" -> EnvironmentResponsePayload.EnvironmentHeartbeatResult.class;
             case "diff_manifest" -> EnvironmentResponsePayload.DiffManifestResult.class;
             case "diff_sections" -> EnvironmentResponsePayload.DiffSectionsResult.class;
-            case "hitl_request" -> EnvironmentResponsePayload.HitlResult.class;
+            case "hitl_activity" -> EnvironmentResponsePayload.HitlActivityResult.class;
             case "git_token" -> EnvironmentResponsePayload.GitTokenResult.class;
             case "exec" -> EnvironmentConnectorResult.Exec.class;
             case "launch_acp_agent" -> EnvironmentConnectorResult.LaunchAcpAgent.class;
@@ -845,8 +845,6 @@ class ProtocolConformanceTest {
             case INGESTION -> ClientPayload.IngestionResult.class;
             case TEAM_ENTITY_CHANGED -> ClientPayload.TeamEntityChangedResult.class;
             case USER_ENTITY_CHANGED -> ClientPayload.UserEntityChangedResult.class;
-            case EXECUTION_HITL_REQUIRED -> ClientPayload.ExecutionHitlRequiredResult.class;
-            case EXECUTION_HITL_RESOLVED -> ClientPayload.ExecutionHitlResolvedResult.class;
             case EXECUTION_OUTPUT -> ClientPayload.ExecutionOutputResult.class;
             case EXECUTION_COMPLETE -> ClientPayload.ExecutionCompleteResult.class;
             case EXECUTION_STATUS_CHANGED -> ClientPayload.ExecutionStatusChangedResult.class;

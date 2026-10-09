@@ -5,8 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionActivityResult;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -98,52 +96,6 @@ class ClientPayloadSerializationTest {
                 ActivityStatus.IN_PROGRESS,
                 emptyPlan));
         assertThat(empty.path("detail").has("plan")).isFalse();
-    }
-
-    @Test
-    void executionHitlRequiredResult_omitsNullOptionalFields() {
-        JsonNode json = objectMapper.valueToTree(new ExecutionHitlRequiredResult(
-                UUID.randomUUID(), "tool-call-1", HitlKind.APPROVAL, "Allow rm -rf /?"));
-
-        assertThat(json.has("command")).isFalse();
-        assertThat(json.has("options")).isFalse();
-        assertThat(json.get("kind").asText()).isEqualTo("approval");
-    }
-
-    @Test
-    void executionHitlRequiredResult_serializesPresentCommandAndOptions() {
-        JsonNode json = objectMapper.valueToTree(new ExecutionHitlRequiredResult(
-                UUID.randomUUID(),
-                "tool-call-1",
-                HitlKind.APPROVAL,
-                "Allow rm -rf /?",
-                "rm -rf /",
-                "Remove",
-                "execute",
-                java.util.List.of(new PermissionOption("allow-once", "Allow once", ApprovalOptionKind.ALLOW_ONCE)),
-                null,
-                null));
-
-        assertThat(json.get("command").asText()).isEqualTo("rm -rf /");
-        assertThat(json.path("options").get(0).get("optionId").asText()).isEqualTo("allow-once");
-    }
-
-    @Test
-    void executionHitlResolvedResult_keepsNullFieldsForResolvedByMetadata() {
-        JsonNode json = objectMapper.valueToTree(new ExecutionHitlResolvedResult(
-                UUID.randomUUID(),
-                "tool-call-1",
-                HitlKind.APPROVAL,
-                HitlResponse.APPROVED,
-                "allow-once",
-                null,
-                null,
-                null));
-
-        assertThat(json.has("resolvedByUserId")).isTrue();
-        assertThat(json.get("resolvedByUserId").isNull()).isTrue();
-        assertThat(json.has("resolvedByDisplayName")).isTrue();
-        assertThat(json.get("resolvedByDisplayName").isNull()).isTrue();
     }
 
     @Test

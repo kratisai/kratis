@@ -1441,8 +1441,8 @@ func TestHandleServerRequest_ValidDispatch(t *testing.T) {
 			ackDiffSync(conn, req)
 
 			// Approve HITL approval requests for ExecuteCommand
-			if req.Method == "env.hitl_request" {
-				raw, _ := json.Marshal(HitlResult{Response: HitlApproved, OptionID: "allow"})
+			if req.Method == "env.hitl_activity" {
+				raw, _ := json.Marshal(HitlActivityResult{Response: HitlApproved, OptionID: "allow"})
 				_ = conn.WriteJSON(JsonRpcResponse{JsonRPC: "2.0", Result: raw, ID: req.ID})
 				continue
 			}
@@ -1540,7 +1540,7 @@ func TestRequestPermission_ErrorResponse(t *testing.T) {
 				continue
 			}
 			ackDiffSync(conn, req)
-			if req.Method == "env.hitl_request" {
+			if req.Method == "env.hitl_activity" {
 				_ = conn.WriteJSON(JsonRpcResponse{
 					JsonRPC: "2.0",
 					Error:   &JsonRpcError{Code: -32000, Message: "Permission denied by policy"},
@@ -1606,10 +1606,10 @@ func TestRequestPermission_SynthesizesHitlIDWhenActionIDEmpty(t *testing.T) {
 				continue
 			}
 			ackDiffSync(conn, req)
-			if req.Method != "env.hitl_request" {
+			if req.Method != "env.hitl_activity" {
 				continue
 			}
-			var params HitlRequest
+			var params HitlActivityParams
 			paramsJSON, marshalErr := json.Marshal(req.Params)
 			if marshalErr != nil {
 				continue
@@ -1644,7 +1644,7 @@ func TestRequestPermission_SynthesizesHitlIDWhenActionIDEmpty(t *testing.T) {
 			t.Error("expected a synthesized non-blank hitlId for an agent without toolCallId")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for env.hitl_request on the wire")
+		t.Fatal("timeout waiting for env.hitl_activity on the wire")
 	}
 }
 
@@ -1662,8 +1662,8 @@ func TestCreateElicitation_Success(t *testing.T) {
 				continue
 			}
 			ackDiffSync(conn, req)
-			if req.Method == "env.hitl_request" {
-				raw, _ := json.Marshal(HitlResult{
+			if req.Method == "env.hitl_activity" {
+				raw, _ := json.Marshal(HitlActivityResult{
 					Response: HitlAnswered,
 					Content:  map[string]any{"target": "staging"},
 				})
@@ -1707,7 +1707,7 @@ func TestCreateElicitation_ErrorResponse(t *testing.T) {
 				continue
 			}
 			ackDiffSync(conn, req)
-			if req.Method == "env.hitl_request" {
+			if req.Method == "env.hitl_activity" {
 				_ = conn.WriteJSON(JsonRpcResponse{
 					JsonRPC: "2.0",
 					Error:   &JsonRpcError{Code: -32000, Message: "Elicitation rejected"},
@@ -1939,7 +1939,7 @@ sleep 30
 					gotActivityResearch.Store(true)
 				}
 
-			case "env.hitl_request":
+			case "env.hitl_activity":
 				gotPermissionReq.Store(true)
 				// Send approved response
 				resp := JsonRpcResponse{
@@ -2944,7 +2944,7 @@ sleep 30
 			}
 
 			// Don't respond to HITL requests - let them be cancelled
-			if req.Method == "env.hitl_request" {
+			if req.Method == "env.hitl_activity" {
 				// Intentionally don't respond
 				continue
 			}

@@ -8,10 +8,11 @@ import com.kratisai.controlplane.api.wsdto.ActivityKind;
 import com.kratisai.controlplane.api.wsdto.ActivityLocation;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
+import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
+import com.kratisai.controlplane.api.wsdto.HitlState;
 import com.kratisai.controlplane.api.wsdto.StopReason;
 import com.kratisai.controlplane.model.AgentHarness;
 import com.kratisai.controlplane.model.SandboxExecution;
@@ -63,15 +64,16 @@ public class ExecutionActivityPersistenceService {
             String actionId,
             ActivityStatus status,
             ActivityDetail detail) {
+        ActivityDetail lifecycle = detail != null ? detail.withHitl(null) : null;
         if (actionId == null || actionId.isBlank()) {
-            insert(executionId, activityType, description, null, status, detail);
+            insert(executionId, activityType, description, null, status, lifecycle);
             return;
         }
         repository
                 .findByExecutionIdAndActionId(executionId, actionId)
                 .ifPresentOrElse(
-                        existing -> merge(existing, activityType, description, status, detail),
-                        () -> insert(executionId, activityType, description, actionId, status, detail));
+                        existing -> merge(existing, activityType, description, status, lifecycle),
+                        () -> insert(executionId, activityType, description, actionId, status, lifecycle));
     }
 
     public List<SandboxExecutionActivity> getActivities(UUID executionId) {
@@ -110,60 +112,58 @@ public class ExecutionActivityPersistenceService {
     }
 
     private void onApprovalRequired(SandboxExecutionHitlRequiredEvent event) {
-        ExecutionHitlRequiredResult request = event.result();
-        ActivityHitl hitl = ActivityHitl.from(request);
-        repository
+        HitlRequestSnapshot request = event.result();
+        applyApproval(
+                event.teamId(), request, ActivityHitl.from(request, HitlState.AWAITING_HUMAN), ActivityStatus.PENDING);
+    }
+
+    @Transactional
+    public void recordAutoResolved(UUID teamId, HitlRequestSnapshot request, HitlResolution resolution) {
+        ActivityStatus status =
+                resolution.response() == HitlResponse.APPROVED ? ActivityStatus.IN_PROGRESS : ActivityStatus.FAILED;
+        applyApproval(
+                teamId,
+                request,
+                ActivityHitl.from(request, HitlState.AWAITING_HUMAN).withResolution(resolution),
+                status);
+    }
+
+    private void applyApproval(UUID teamId, HitlRequestSnapshot request, ActivityHitl hitl, ActivityStatus status) {
+        SandboxExecutionActivity row = repository
                 .findByExecutionIdAndActionId(request.executionId(), request.hitlId())
-                .ifPresentOrElse(
-                        existing -> {
-                            ActivityDetail detail = detailOf(existing);
-                            ActivityDetail merged = detail != null
-                                    ? detail.withHitl(hitl)
-                                    : emptyDetail().withHitl(hitl);
-                            existing.setStatus(ActivityStatus.PENDING);
-                            existing.setDetail(toJson(merged));
-                            repository.save(existing);
-                        },
-                        () -> {
-                            logger.warn(
-                                    "Approval {} has no activity row for execution {}; inserting placeholder",
-                                    request.hitlId(),
-                                    request.executionId());
-                            ActivityDetail detail = placeholderDetail(request).withHitl(hitl);
-                            insert(
-                                    request.executionId(),
-                                    placeholderType(request.toolKind()),
-                                    request.command() != null ? request.command() : request.message(),
-                                    request.hitlId(),
-                                    ActivityStatus.PENDING,
-                                    detail);
-                        });
+                .map(existing -> {
+                    ActivityDetail detail = detailOf(existing);
+                    existing.setStatus(status);
+                    existing.setDetail(toJson((detail != null ? detail : emptyDetail()).withHitl(hitl)));
+                    repository.save(existing);
+                    return existing;
+                })
+                .orElseGet(() -> {
+                    logger.warn(
+                            "Approval {} has no activity row for execution {}; inserting placeholder",
+                            request.hitlId(),
+                            request.executionId());
+                    return insert(
+                            request.executionId(),
+                            placeholderType(request.toolKind()),
+                            request.command() != null ? request.command() : request.message(),
+                            request.hitlId(),
+                            status,
+                            placeholderDetail(request).withHitl(hitl));
+                });
+        publishActivity(teamId, row);
     }
 
     private void onQuestionRequired(SandboxExecutionHitlRequiredEvent event) {
-        ExecutionHitlRequiredResult request = event.result();
-        ActivityDetail detail = new ActivityDetail(
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                ActivityHitl.from(request));
-        recordActivity(
+        HitlRequestSnapshot request = event.result();
+        SandboxExecutionActivity row = insert(
                 request.executionId(),
                 ActivityType.ELICITATION,
                 request.message(),
                 request.hitlId(),
                 ActivityStatus.PENDING,
-                detail);
+                emptyDetail().withHitl(ActivityHitl.from(request, HitlState.AWAITING_HUMAN)));
+        publishActivity(event.teamId(), row);
     }
 
     @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
@@ -176,7 +176,7 @@ public class ExecutionActivityPersistenceService {
     }
 
     private void onApprovalResolved(SandboxExecutionHitlResolvedEvent event) {
-        ExecutionHitlResolvedResult resolution = event.result();
+        HitlResolution resolution = event.result();
         repository
                 .findByExecutionIdAndActionId(resolution.executionId(), resolution.hitlId())
                 .ifPresent(activity -> {
@@ -187,11 +187,12 @@ public class ExecutionActivityPersistenceService {
                         activity.setDetail(toJson(detail.withHitl(detail.hitl().withResolution(resolution))));
                     }
                     repository.save(activity);
+                    publishActivity(event.teamId(), activity);
                 });
     }
 
     private void onQuestionResolved(SandboxExecutionHitlResolvedEvent event) {
-        ExecutionHitlResolvedResult resolution = event.result();
+        HitlResolution resolution = event.result();
         repository
                 .findFirstByExecutionIdAndActionIdOrderBySequenceDesc(resolution.executionId(), resolution.hitlId())
                 .ifPresent(activity -> {
@@ -209,6 +210,7 @@ public class ExecutionActivityPersistenceService {
                                     ? ActivityStatus.COMPLETED
                                     : ActivityStatus.FAILED);
                     repository.save(activity);
+                    publishActivity(event.teamId(), activity);
                 });
     }
 
@@ -216,7 +218,7 @@ public class ExecutionActivityPersistenceService {
         return new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
-    private static ActivityDetail placeholderDetail(ExecutionHitlRequiredResult request) {
+    private static ActivityDetail placeholderDetail(HitlRequestSnapshot request) {
         ActivityKind kind = ActivityKind.fromWireValue(request.toolKind()).orElse(null);
         ActivityLocation location = request.diff() != null && request.diff().path() != null
                 ? new ActivityLocation(request.diff().path(), null)
@@ -300,21 +302,34 @@ public class ExecutionActivityPersistenceService {
         return trimmed.length() <= MAX_ERROR_DESCRIPTION ? trimmed : trimmed.substring(0, MAX_ERROR_DESCRIPTION);
     }
 
-    private void insert(
+    private SandboxExecutionActivity insert(
             UUID executionId,
             ActivityType activityType,
             String description,
             String actionId,
             ActivityStatus status,
             ActivityDetail detail) {
-        repository.save(new SandboxExecutionActivity(
+        SandboxExecutionActivity row = new SandboxExecutionActivity(
                 executionId,
                 repository.nextSequence(executionId),
                 actionId,
                 activityType,
                 status,
                 description,
-                toJson(detail)));
+                toJson(detail));
+        repository.save(row);
+        return row;
+    }
+
+    private void publishActivity(UUID teamId, SandboxExecutionActivity row) {
+        eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
+                teamId,
+                row.getExecutionId(),
+                row.getActivityType(),
+                row.getDescription(),
+                row.getActionId(),
+                row.getStatus(),
+                detailOf(row)));
     }
 
     private void merge(
@@ -327,7 +342,9 @@ public class ExecutionActivityPersistenceService {
         existing.setDescription(description);
         existing.setStatus(status);
         if (detail != null) {
-            existing.setDetail(toJson(detail));
+            ActivityDetail current = detailOf(existing);
+            boolean keepApproval = current != null && current.hitl() != null;
+            existing.setDetail(toJson(keepApproval ? detail.withHitl(current.hitl()) : detail));
         }
         repository.save(existing);
     }

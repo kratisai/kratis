@@ -5,8 +5,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import java.time.Instant;
@@ -52,7 +52,7 @@ class PendingHitlTimeoutServiceTest {
 
     private PendingHitlRegistry.PendingHitl pending(UUID teamId, HitlKind kind, String hitlId, String command) {
         return new PendingHitlRegistry.PendingHitl(
-                new ExecutionHitlRequiredResult(
+                new HitlRequestSnapshot(
                         UUID.randomUUID(), hitlId, kind, "message", command, null, null, null, null, null, null),
                 session,
                 7,
@@ -137,8 +137,7 @@ class PendingHitlTimeoutServiceTest {
     @Test
     void timeoutPrompt_mentionsRequestMessageAndNoResponseGuidance() {
         PendingHitlRegistry.PendingHitl hitl = new PendingHitlRegistry.PendingHitl(
-                new ExecutionHitlRequiredResult(
-                        UUID.randomUUID(), "tool-call-42", HitlKind.APPROVAL, "Remove build artifacts"),
+                new HitlRequestSnapshot(UUID.randomUUID(), "tool-call-42", HitlKind.APPROVAL, "Remove build artifacts"),
                 session,
                 7,
                 Instant.now(),
@@ -157,7 +156,7 @@ class PendingHitlTimeoutServiceTest {
     @Test
     void timeoutPrompt_abbreviatesLongRequestMessages() {
         PendingHitlRegistry.PendingHitl hitl = new PendingHitlRegistry.PendingHitl(
-                new ExecutionHitlRequiredResult(UUID.randomUUID(), "t-1", HitlKind.QUESTION, "x".repeat(500)),
+                new HitlRequestSnapshot(UUID.randomUUID(), "t-1", HitlKind.QUESTION, "x".repeat(500)),
                 session,
                 7,
                 Instant.now(),

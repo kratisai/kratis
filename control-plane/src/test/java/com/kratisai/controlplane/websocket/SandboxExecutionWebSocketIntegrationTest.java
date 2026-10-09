@@ -147,10 +147,9 @@ class SandboxExecutionWebSocketIntegrationTest {
                 port,
                 auth,
                 scenario,
-                client -> client.whenContains(
-                                "execution_hitl_required", (session, payload) -> hitlNotificationLatch.countDown())
+                client -> client.whenContains("awaiting_human", (session, payload) -> hitlNotificationLatch.countDown())
                         .whenContains(
-                                "execution_hitl_resolved", (session, payload) -> resolvedNotificationLatch.countDown()),
+                                "\"state\":\"resolved\"", (session, payload) -> resolvedNotificationLatch.countDown()),
                 sidecar -> sidecar.withAcpCommand("rm -rf /")
                         .expectTrigger("env.acp_prompt", 1)
                         .expectTrigger("\"optionId\":\"allow\"", 1)
@@ -164,7 +163,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                     .isFalse();
 
             assertThat(hitlNotificationLatch.await(5, TimeUnit.SECONDS)).isTrue();
-            assertThat(pair.client().hasReceivedMessageContaining("execution_hitl_required"))
+            assertThat(pair.client().hasReceivedMessageContaining("awaiting_human"))
                     .isTrue();
 
             MockMvc mockMvc = MockMvcBuilders.webAppContextSetup(wac)
@@ -189,13 +188,13 @@ class SandboxExecutionWebSocketIntegrationTest {
                     .isTrue();
 
             assertThat(resolvedNotificationLatch.await(5, TimeUnit.SECONDS)).isTrue();
-            assertThat(pair.client().hasReceivedMessageContaining("execution_hitl_resolved"))
+            assertThat(pair.client().hasReceivedMessageContaining("\"state\":\"resolved\""))
                     .isTrue();
             assertThat(pair.client().hasReceivedMessageContaining("\"response\":\"approved\""))
                     .isTrue();
 
             JsonRpcInboundRequest secondPermRequest = new JsonRpcInboundRequest(
-                    EnvironmentRpcPayload.HitlRequest.METHOD,
+                    EnvironmentRpcPayload.HitlActivity.METHOD,
                     objectMapper.valueToTree(Map.of(
                             "hitlId", "tool-call-101",
                             "message", "Approve rm -rf /",
@@ -226,10 +225,9 @@ class SandboxExecutionWebSocketIntegrationTest {
                 port,
                 auth,
                 scenario,
-                client -> client.whenContains(
-                                "execution_hitl_required", (session, payload) -> hitlNotificationLatch.countDown())
+                client -> client.whenContains("awaiting_human", (session, payload) -> hitlNotificationLatch.countDown())
                         .whenContains(
-                                "execution_hitl_resolved", (session, payload) -> resolvedNotificationLatch.countDown()),
+                                "\"state\":\"resolved\"", (session, payload) -> resolvedNotificationLatch.countDown()),
                 sidecar -> sidecar.withAcpCommand("rm -rf /")
                         .expectTrigger("env.acp_prompt", 1)
                         .expectTrigger("\"response\":\"cancelled\"", 1))) {
@@ -242,7 +240,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                     .isFalse();
 
             assertThat(hitlNotificationLatch.await(5, TimeUnit.SECONDS)).isTrue();
-            assertThat(pair.client().hasReceivedMessageContaining("execution_hitl_required"))
+            assertThat(pair.client().hasReceivedMessageContaining("awaiting_human"))
                     .isTrue();
 
             MockMvc mockMvc = MockMvcBuilders.webAppContextSetup(wac)
@@ -262,7 +260,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                     .isTrue();
 
             assertThat(resolvedNotificationLatch.await(5, TimeUnit.SECONDS)).isTrue();
-            assertThat(pair.client().hasReceivedMessageContaining("execution_hitl_resolved"))
+            assertThat(pair.client().hasReceivedMessageContaining("\"state\":\"resolved\""))
                     .isTrue();
             assertThat(pair.client().hasReceivedMessageContaining("\"response\":\"cancelled\""))
                     .isTrue();
@@ -279,8 +277,8 @@ class SandboxExecutionWebSocketIntegrationTest {
                 port,
                 auth,
                 scenario,
-                client -> client.expectTrigger("execution_hitl_required", 1)
-                        .expectTrigger("execution_hitl_resolved", 1)
+                client -> client.expectTrigger("awaiting_human", 1)
+                        .expectTrigger("\"state\":\"resolved\"", 1)
                         .expectTrigger("execution_complete", 1),
                 sidecar -> sidecar.withAcpCommand("rm -rf /")
                         .expectTrigger("env.acp_prompt", 1)
@@ -288,7 +286,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                         .expectTrigger("env.terminate", 1))) {
             assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 5, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.client().awaitTrigger("execution_hitl_required", 5, TimeUnit.SECONDS))
+            assertThat(pair.client().awaitTrigger("awaiting_human", 5, TimeUnit.SECONDS))
                     .isTrue();
 
             sandboxExecutionService.terminateExecution(executionId);
@@ -299,8 +297,8 @@ class SandboxExecutionWebSocketIntegrationTest {
             assertThat(pair.sidecar().awaitTrigger("env.terminate", 5, TimeUnit.SECONDS))
                     .as("Sidecar should receive env.terminate after pending permission cancellation")
                     .isTrue();
-            assertThat(pair.client().awaitTrigger("execution_hitl_resolved", 5, TimeUnit.SECONDS))
-                    .as("UI client should receive execution_hitl_resolved so the pending approval clears")
+            assertThat(pair.client().awaitTrigger("\"state\":\"resolved\"", 5, TimeUnit.SECONDS))
+                    .as("UI client should receive resolved state so the pending approval clears")
                     .isTrue();
             assertThat(pair.client().awaitTrigger("execution_complete", 5, TimeUnit.SECONDS))
                     .as("UI client should receive execution_complete after termination")

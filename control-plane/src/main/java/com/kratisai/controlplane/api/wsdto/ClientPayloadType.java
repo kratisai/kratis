@@ -23,8 +23,6 @@ public enum ClientPayloadType {
     INGESTION("ingestion"),
     TEAM_ENTITY_CHANGED("team_entity_changed"),
     USER_ENTITY_CHANGED("user_entity_changed"),
-    EXECUTION_HITL_REQUIRED("execution_hitl_required"),
-    EXECUTION_HITL_RESOLVED("execution_hitl_resolved"),
     EXECUTION_OUTPUT("execution_output"),
     EXECUTION_COMPLETE("execution_complete"),
     EXECUTION_STATUS_CHANGED("execution_status_changed"),

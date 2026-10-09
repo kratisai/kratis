@@ -1,6 +1,6 @@
 {
   "jsonrpc": "2.0",
-  "method": "env.hitl_request",
+  "method": "env.hitl_activity",
   "params": {
     "hitlId": "el-01",
     "message": "Choose a deployment target",

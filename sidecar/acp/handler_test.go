@@ -1659,18 +1659,12 @@ func TestHandlePermissionRequest_SelectedOptionOutcomes(t *testing.T) {
 			reader := runPermissionRequest(t, sink, params, float64(100))
 			reader.assertOutcome(t, tt.wantOutcome, tt.wantOptionID)
 
-			if len(sink.activities) < 2 {
-				t.Fatalf("expected pending + resolution activities, got %d", len(sink.activities))
+			if len(sink.activities) < 1 {
+				t.Fatalf("expected resolution activity, got %d", len(sink.activities))
 			}
 			resolution := sink.activities[len(sink.activities)-1]
 			if resolution.status != tt.wantStatus {
 				t.Errorf("expected resolution activity status %q, got %q", tt.wantStatus, resolution.status)
-			}
-			if resolution.detail.Hitl == nil {
-				t.Fatal("expected hitl detail on resolution activity")
-			}
-			if resolution.detail.Hitl.OptionID != tt.selectedOptionID {
-				t.Errorf("expected hitl optionId %q, got %q", tt.selectedOptionID, resolution.detail.Hitl.OptionID)
 			}
 		})
 	}
@@ -2137,15 +2131,6 @@ func TestHandleFsWriteTextFile_CorrelatesLiveToolCallByPath(t *testing.T) {
 	}
 	if got := sink.permRequests[0].actionID; got != "call-edit-1" {
 		t.Errorf("expected correlated actionID 'call-edit-1', got %q", got)
-	}
-	pending := false
-	for _, activity := range sink.activities {
-		if activity.actionID == "call-edit-1" && activity.status == string(ActivityPending) {
-			pending = true
-		}
-	}
-	if !pending {
-		t.Errorf("expected pending tool activity for call-edit-1, got %+v", sink.activities)
 	}
 }
 

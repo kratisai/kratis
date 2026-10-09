@@ -250,8 +250,6 @@ public abstract class WebSocketFixture<T extends WebSocketFixture<T>> extends Te
             case INGESTION -> ClientPayload.IngestionResult.class;
             case TEAM_ENTITY_CHANGED -> ClientPayload.TeamEntityChangedResult.class;
             case USER_ENTITY_CHANGED -> ClientPayload.UserEntityChangedResult.class;
-            case EXECUTION_HITL_REQUIRED -> ClientPayload.ExecutionHitlRequiredResult.class;
-            case EXECUTION_HITL_RESOLVED -> ClientPayload.ExecutionHitlResolvedResult.class;
             case EXECUTION_OUTPUT -> ClientPayload.ExecutionOutputResult.class;
             case EXECUTION_COMPLETE -> ClientPayload.ExecutionCompleteResult.class;
             case EXECUTION_STATUS_CHANGED -> ClientPayload.ExecutionStatusChangedResult.class;

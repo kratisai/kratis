@@ -41,7 +41,10 @@ export interface ActivityHitl {
   message: string
   optionId?: string
   options?: PermissionOption[]
+  resolvedBy?: string
+  resolvedByUserId?: string
   response?: HitlResponse
+  state?: HitlState
   title?: string
   toolKind?: string
 }
@@ -161,35 +164,6 @@ export interface ExecutionGetLogsParams {
   tailLines?: number
 }
 
-export interface ExecutionHitlRequiredResult {
-  command?: string
-  commandSegments?: CommandSegment[]
-  content?: Record<string, unknown>
-  diff?: ActivityDiff
-  executionId: string
-  form?: Record<string, unknown>
-  hitlId: string
-  kind: HitlKind
-  message: string
-  options?: PermissionOption[]
-  title?: string
-  toolKind?: string
-  type: 'execution_hitl_required'
-}
-
-export interface ExecutionHitlResolvedResult {
-  command?: string
-  content?: Record<string, unknown>
-  executionId: string
-  hitlId: string
-  kind: HitlKind
-  optionId?: null | string
-  resolvedByDisplayName?: null | string
-  resolvedByUserId?: null | string
-  response: HitlResponse
-  type: 'execution_hitl_resolved'
-}
-
 export interface ExecutionLogsResult {
   environmentId: string
   executionId: string
@@ -225,6 +199,8 @@ export interface ExecutionStatusChangedResult {
 export type HitlKind = 'approval' | 'question'
 
 export type HitlResponse = 'answered' | 'approved' | 'cancelled' | 'declined'
+
+export type HitlState = 'awaiting_human' | 'resolved'
 
 export const SYSTEM_TIMEOUT_RESOLVED_BY = 'System (timeout)'
 
@@ -270,8 +246,6 @@ export type JsonRpcResult =
   | ExecutionActivityResult
   | ExecutionCompleteResult
   | ExecutionDiffChangedResult
-  | ExecutionHitlRequiredResult
-  | ExecutionHitlResolvedResult
   | ExecutionLogsResult
   | ExecutionOutputResult
   | ExecutionReplayCompleteResult

@@ -158,7 +158,7 @@ The control plane owns permission policy:
 - The control plane strips agent-offered `allow_always` and `reject_always` options when a
   once-variant exists. Persistent memory is exclusively team HITL rules. Auto-approve picks
   `allow_once` first, so a rule match never seeds agent-side session memory.
-- The `execution_hitl_required` payload carries `commandSegments` (`text`, `suggestedRoot`,
+- The `detail.hitl` of an `execution_activity` carries `commandSegments` (`text`, `suggestedRoot`,
   `ruleType`). Command requests get one segment per root command with `ruleType=PREFIX_WILD`.
   Non-command requests get a single segment naming the tool kind with `ruleType=TOOL_KIND`.
   The UI uses them in the "Remember choices" panel. Resolving with `rules` persists the ticked

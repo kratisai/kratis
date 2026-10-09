@@ -8,7 +8,6 @@ import com.kratisai.controlplane.model.event.UserEntityType;
 import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -185,116 +184,6 @@ public sealed interface ClientPayload {
 
         public SubscriptionResult(String channel, String message) {
             this(ClientPayloadType.SUBSCRIPTION, channel, message);
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    record ExecutionHitlRequiredResult(
-            ClientPayloadType type,
-            UUID executionId,
-            String hitlId,
-            HitlKind kind,
-            String message,
-            String command,
-            List<CommandSegment> commandSegments,
-            String title,
-            String toolKind,
-            List<PermissionOption> options,
-            ActivityDiff diff,
-            Map<String, Object> form)
-            implements ClientPayload {
-        public ExecutionHitlRequiredResult {
-            Objects.requireNonNull(type, "type is required");
-            Objects.requireNonNull(executionId, "executionId is required");
-            Objects.requireNonNull(hitlId, "hitlId is required");
-            Objects.requireNonNull(kind, "kind is required");
-            Objects.requireNonNull(message, "message is required");
-        }
-
-        public ExecutionHitlRequiredResult(
-                UUID executionId,
-                String hitlId,
-                HitlKind kind,
-                String message,
-                String command,
-                List<CommandSegment> commandSegments,
-                String title,
-                String toolKind,
-                List<PermissionOption> options,
-                ActivityDiff diff,
-                Map<String, Object> form) {
-            this(
-                    ClientPayloadType.EXECUTION_HITL_REQUIRED,
-                    executionId,
-                    hitlId,
-                    kind,
-                    message,
-                    command,
-                    commandSegments,
-                    title,
-                    toolKind,
-                    options,
-                    diff,
-                    form);
-        }
-
-        public ExecutionHitlRequiredResult(
-                UUID executionId,
-                String hitlId,
-                HitlKind kind,
-                String message,
-                String command,
-                String title,
-                String toolKind,
-                List<PermissionOption> options,
-                ActivityDiff diff,
-                Map<String, Object> form) {
-            this(executionId, hitlId, kind, message, command, null, title, toolKind, options, diff, form);
-        }
-
-        public ExecutionHitlRequiredResult(UUID executionId, String hitlId, HitlKind kind, String message) {
-            this(executionId, hitlId, kind, message, null, null, null, null, null, null, null);
-        }
-    }
-
-    record ExecutionHitlResolvedResult(
-            ClientPayloadType type,
-            UUID executionId,
-            String hitlId,
-            HitlKind kind,
-            HitlResponse response,
-            String optionId,
-            Map<String, Object> content,
-            UUID resolvedByUserId,
-            String resolvedByDisplayName)
-            implements ClientPayload {
-        public ExecutionHitlResolvedResult {
-            Objects.requireNonNull(type, "type is required");
-            Objects.requireNonNull(executionId, "executionId is required");
-            Objects.requireNonNull(hitlId, "hitlId is required");
-            Objects.requireNonNull(kind, "kind is required");
-            Objects.requireNonNull(response, "response is required");
-        }
-
-        public ExecutionHitlResolvedResult(
-                UUID executionId,
-                String hitlId,
-                HitlKind kind,
-                HitlResponse response,
-                String optionId,
-                Map<String, Object> content,
-                UUID resolvedByUserId,
-                String resolvedByDisplayName) {
-            this(
-                    ClientPayloadType.EXECUTION_HITL_RESOLVED,
-                    executionId,
-                    hitlId,
-                    kind,
-                    response,
-                    optionId,
-                    content,
-                    resolvedByUserId,
-                    resolvedByDisplayName);
         }
     }
 

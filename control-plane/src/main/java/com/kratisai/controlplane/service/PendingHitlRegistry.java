@@ -1,6 +1,6 @@
 package com.kratisai.controlplane.service;
 
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
+import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -21,11 +21,7 @@ public class PendingHitlRegistry {
     private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(30);
 
     public record PendingHitl(
-            ExecutionHitlRequiredResult request,
-            WebSocketSession session,
-            Object requestId,
-            Instant createdAt,
-            UUID teamId) {}
+            HitlRequestSnapshot request, WebSocketSession session, Object requestId, Instant createdAt, UUID teamId) {}
 
     private final Map<UUID, PendingHitl> pending = new ConcurrentHashMap<>();
     private final EnvironmentSessionRegistry sessionRegistry;
@@ -46,7 +42,7 @@ public class PendingHitlRegistry {
     }
 
     public void register(
-            UUID executionId, ExecutionHitlRequiredResult request, String sessionId, Object requestId, UUID teamId) {
+            UUID executionId, HitlRequestSnapshot request, String sessionId, Object requestId, UUID teamId) {
         WebSocketSession session = sessionRegistry.getSession(sessionId);
         if (session == null) {
             throw new IllegalStateException("Unknown environment session " + sessionId);

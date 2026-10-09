@@ -1,7 +1,7 @@
 package com.kratisai.controlplane.service;
 
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
-import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlResult;
+import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlActivityResult;
+import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import java.util.Map;
@@ -28,7 +28,7 @@ public class EnvironmentRealtimeEventListeners {
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onSandboxExecutionHitlResolvedEvent(SandboxExecutionHitlResolvedEvent event) {
-        ExecutionHitlResolvedResult result = event.result();
+        HitlResolution result = event.result();
         PendingHitlRegistry.PendingHitl pending = pendingHitlRegistry.remove(result.executionId());
         if (pending != null) {
             replyToSidecar(pending, result.executionId(), result.response(), result.optionId(), result.content());
@@ -45,16 +45,16 @@ public class EnvironmentRealtimeEventListeners {
             HitlResponse response,
             String optionId,
             Map<String, Object> content) {
-        HitlResult result =
+        HitlActivityResult result =
                 switch (response) {
-                    case APPROVED -> HitlResult.approved(optionId);
-                    case ANSWERED -> HitlResult.answered(content);
-                    case DECLINED, CANCELLED -> HitlResult.cancelled();
+                    case APPROVED -> HitlActivityResult.approved(optionId);
+                    case ANSWERED -> HitlActivityResult.answered(content);
+                    case DECLINED, CANCELLED -> HitlActivityResult.cancelled();
                 };
         sendToSidecar(pending, executionId, result);
     }
 
-    private void sendToSidecar(PendingHitlRegistry.PendingHitl pending, UUID executionId, HitlResult result) {
+    private void sendToSidecar(PendingHitlRegistry.PendingHitl pending, UUID executionId, HitlActivityResult result) {
         if (pending == null || !pending.session().isOpen()) {
             logger.info("No open sidecar session for HITL reply on execution {}", executionId);
             return;

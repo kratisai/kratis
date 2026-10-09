@@ -8,10 +8,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
-import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlResult;
+import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlActivityResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
+import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import java.time.Instant;
@@ -47,7 +47,7 @@ class EnvironmentRealtimeEventListenersTest {
 
     private PendingHitlRegistry.PendingHitl pendingApproval(Object requestId) {
         return new PendingHitlRegistry.PendingHitl(
-                new ExecutionHitlRequiredResult(
+                new HitlRequestSnapshot(
                         UUID.randomUUID(),
                         "tool-call-1",
                         HitlKind.APPROVAL,
@@ -67,7 +67,7 @@ class EnvironmentRealtimeEventListenersTest {
 
     private PendingHitlRegistry.PendingHitl pendingQuestion(Object requestId) {
         return new PendingHitlRegistry.PendingHitl(
-                new ExecutionHitlRequiredResult(
+                new HitlRequestSnapshot(
                         UUID.randomUUID(),
                         "el-1",
                         HitlKind.QUESTION,
@@ -95,7 +95,7 @@ class EnvironmentRealtimeEventListenersTest {
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 teamId,
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         executionId,
                         "tool-call-1",
                         HitlKind.APPROVAL,
@@ -105,7 +105,7 @@ class EnvironmentRealtimeEventListenersTest {
                         UUID.randomUUID(),
                         "Bob")));
 
-        ArgumentCaptor<HitlResult> captor = ArgumentCaptor.forClass(HitlResult.class);
+        ArgumentCaptor<HitlActivityResult> captor = ArgumentCaptor.forClass(HitlActivityResult.class);
         verify(environmentRpcClient).reply(any(String.class), eq(42), captor.capture());
         assertThat(captor.getValue().response()).isEqualTo(HitlResponse.APPROVED);
         assertThat(captor.getValue().optionId()).isEqualTo("allow-once");
@@ -121,7 +121,7 @@ class EnvironmentRealtimeEventListenersTest {
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 teamId,
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         executionId,
                         "tool-call-1",
                         HitlKind.APPROVAL,
@@ -131,7 +131,7 @@ class EnvironmentRealtimeEventListenersTest {
                         null,
                         "System (timeout)")));
 
-        ArgumentCaptor<HitlResult> captor = ArgumentCaptor.forClass(HitlResult.class);
+        ArgumentCaptor<HitlActivityResult> captor = ArgumentCaptor.forClass(HitlActivityResult.class);
         verify(environmentRpcClient).reply(any(String.class), eq(42), captor.capture());
         assertThat(captor.getValue().response()).isEqualTo(HitlResponse.CANCELLED);
     }
@@ -143,7 +143,7 @@ class EnvironmentRealtimeEventListenersTest {
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         executionId,
                         "tool-call-1",
                         HitlKind.APPROVAL,
@@ -177,7 +177,7 @@ class EnvironmentRealtimeEventListenersTest {
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 teamId,
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         executionId,
                         "el-1",
                         HitlKind.QUESTION,
@@ -187,7 +187,7 @@ class EnvironmentRealtimeEventListenersTest {
                         UUID.randomUUID(),
                         "Alice")));
 
-        ArgumentCaptor<HitlResult> captor = ArgumentCaptor.forClass(HitlResult.class);
+        ArgumentCaptor<HitlActivityResult> captor = ArgumentCaptor.forClass(HitlActivityResult.class);
         verify(environmentRpcClient).reply(any(String.class), eq(7), captor.capture());
         assertThat(captor.getValue().response()).isEqualTo(HitlResponse.ANSWERED);
         assertThat(captor.getValue().content()).isEqualTo(Map.of("target", "staging"));
@@ -203,7 +203,7 @@ class EnvironmentRealtimeEventListenersTest {
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 teamId,
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         executionId,
                         "el-1",
                         HitlKind.QUESTION,
@@ -213,7 +213,7 @@ class EnvironmentRealtimeEventListenersTest {
                         null,
                         "System (timeout)")));
 
-        ArgumentCaptor<HitlResult> captor = ArgumentCaptor.forClass(HitlResult.class);
+        ArgumentCaptor<HitlActivityResult> captor = ArgumentCaptor.forClass(HitlActivityResult.class);
         verify(environmentRpcClient).reply(any(String.class), eq(7), captor.capture());
         assertThat(captor.getValue().response()).isEqualTo(HitlResponse.CANCELLED);
     }
@@ -225,7 +225,7 @@ class EnvironmentRealtimeEventListenersTest {
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         executionId,
                         "el-1",
                         HitlKind.QUESTION,

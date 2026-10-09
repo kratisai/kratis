@@ -17,14 +17,11 @@ import type { CreateHitlRuleRequest } from '@/types/hitl-rule-types'
 import type {
   ExecutionActivityResult,
   ExecutionCompleteResult,
-  ExecutionHitlRequiredResult,
-  ExecutionHitlResolvedResult,
   HitlResponse,
   WireActivityStatus,
 } from '@/types/websocket-types'
 
 import { useAuthStore } from '@/store/auth-store'
-import { toActivityKind } from '@/types/activity-kind'
 
 let activityIdCounter = 0
 
@@ -36,8 +33,6 @@ interface ExecutionActivityState {
   clearActivities: (executionId: string) => void
   handleActivityEvent: (result: ExecutionActivityResult) => void
   handleExecutionComplete: (result: ExecutionCompleteResult) => void
-  handleHitlRequired: (result: ExecutionHitlRequiredResult) => void
-  handleHitlResolved: (result: ExecutionHitlResolvedResult) => void
   resolveHitl: (
     executionId: string,
     hitlId: string,
@@ -100,14 +95,9 @@ function activityStateFrom(
   status: undefined | WireActivityStatus,
   detail?: ActivityDetail,
 ): ActivityState {
+  // Only the control plane's awaiting_human state means a person must act.
   const hitl = detail?.hitl
-  if (status === 'pending' && hitl && !hitl.response) {
-    if (hitl.kind === 'approval') return 'pending_approval'
-    return 'active'
-  }
-  if (status === 'pending' && hitl?.response) {
-    return hitl.response === 'approved' || hitl.response === 'answered' ? 'completed' : 'error'
-  }
+  if (hitl?.kind === 'approval' && hitl.state === 'awaiting_human') return 'pending_approval'
   if (status === 'completed') {
     return 'completed'
   }
@@ -132,6 +122,25 @@ function appendActivity(existing: Activity[], activity: Activity): Activity[] {
   }
   next.push(activity)
   return next
+}
+
+/** Approval fields projected from the control plane's `detail.hitl`; absent values keep the record's own. */
+function approvalFields(hitl: ActivityHitl | undefined) {
+  if (!hitl || hitl.kind !== 'approval') {
+    return {}
+  }
+  const fields = {
+    approvalRequired: hitl.state === 'awaiting_human' || hitl.response !== undefined,
+    approved: hitl.response === undefined ? undefined : hitl.response === 'approved',
+    hitlResponse: hitl.response,
+    permissionDiff: hitl.diff,
+    permissionKind: hitl.toolKind,
+    permissionOptions: hitl.options,
+    permissionSegments: hitl.commandSegments,
+    permissionTitle: hitl.title,
+    resolvedBy: hitl.resolvedBy,
+  }
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined))
 }
 
 function collapsedOnTransition(
@@ -210,11 +219,8 @@ function nextActivityState(
   detail?: ActivityDetail,
 ): ActivityState {
   const next = activityStateFrom(status, detail)
-  if (
-    current.state === 'pending_approval' &&
-    next === 'active' &&
-    detail?.hitl?.response === undefined
-  ) {
+  // Sidecar lifecycle frames carry no approval state, so they must not clear a pending prompt.
+  if (current.state === 'pending_approval' && next === 'active' && detail?.hitl === undefined) {
     return 'pending_approval'
   }
   return next
@@ -263,22 +269,6 @@ function toolTarget(detail: ActivityDetail | undefined): string | undefined {
     if (typeof candidate === 'string' && candidate !== '') return candidate
   }
   return undefined
-}
-
-function withHitlApproval<T extends { approvalRequired?: boolean; approved?: boolean }>(
-  activity: T,
-  hitl: ActivityHitl | undefined,
-): T {
-  if (!hitl || hitl.kind !== 'approval') {
-    return activity
-  }
-  const approved = hitl.response === 'approved'
-  const hasResponse = hitl.response !== undefined
-  return {
-    ...activity,
-    approvalRequired: hasResponse || (activity.approvalRequired ?? false),
-    approved: hasResponse ? approved : activity.approved,
-  }
 }
 
 export const useActivityStore = create<ExecutionActivityState>((set) => ({
@@ -454,7 +444,8 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
           const nextState = nextActivityState(current, status, detail)
           const updated = [...existing]
           updated[idx] = {
-            ...withHitlApproval(toolRecordFrom(current), detail?.hitl),
+            ...toolRecordFrom(current),
+            ...approvalFields(detail?.hitl),
             collapsed: collapsedOnTransition(current, nextState),
             detail,
             state: nextState,
@@ -469,8 +460,7 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
         }
         const activity: ToolExecutionActivity = {
           actionId,
-          approvalRequired: detail?.hitl?.kind === 'approval' && !detail.hitl.response,
-          approved: detail?.hitl?.response === 'approved',
+          ...approvalFields(detail?.hitl),
           collapsed: false,
           detail,
           executionId,
@@ -502,7 +492,8 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
           const nextState = nextActivityState(current, status, detail)
           const updated = [...existing]
           updated[idx] = {
-            ...withHitlApproval(commandRecordFrom(current, command), detail?.hitl),
+            ...commandRecordFrom(current, command),
+            ...approvalFields(detail?.hitl),
             collapsed: collapsedOnTransition(current, nextState),
             command,
             detail,
@@ -518,8 +509,8 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
         }
         const activity: CommandExecutionActivity = {
           actionId,
-          approvalRequired: detail?.hitl?.kind === 'approval' && !detail.hitl.response,
-          approved: detail?.hitl?.response === 'approved',
+          approvalRequired: false,
+          ...approvalFields(detail?.hitl),
           collapsed: false,
           command,
           detail,
@@ -645,227 +636,6 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
           activity.type === 'command_execution'
             ? { ...activity, collapsed, endedAt, exitCode: result.exitCode, state: nextState }
             : { ...activity, collapsed, endedAt, state: nextState }
-      }
-
-      return {
-        activitiesByExecution: {
-          ...state.activitiesByExecution,
-          [result.executionId]: updated,
-        },
-      }
-    })
-  },
-
-  handleHitlRequired: (result: ExecutionHitlRequiredResult) => {
-    if (result.kind === 'question') {
-      set((state) => {
-        const existing = state.activitiesByExecution[result.executionId] ?? []
-        const idx = existing.findIndex(
-          (a) => a.type === 'elicitation' && a.hitlId === result.hitlId,
-        )
-        if (idx >= 0) {
-          return state
-        }
-        const activity: ElicitationActivity = {
-          actionId: result.hitlId,
-          collapsed: false,
-          executionId: result.executionId,
-          form: result.form,
-          hitlId: result.hitlId,
-          id: nextActivityId(),
-          message: result.message,
-          startedAt: new Date().toISOString(),
-          state: 'active',
-          type: 'elicitation',
-        }
-        return {
-          activitiesByExecution: {
-            ...state.activitiesByExecution,
-            [result.executionId]: appendActivity(existing, activity),
-          },
-        }
-      })
-      return
-    }
-    set((state) => {
-      const existing = state.activitiesByExecution[result.executionId] ?? []
-      const permission = {
-        permissionDiff: result.diff,
-        permissionKind: result.toolKind,
-        permissionOptions: result.options,
-        permissionSegments: result.commandSegments,
-        permissionTitle: result.title,
-      }
-      const idx = findToolRecordIndex(existing, result.hitlId)
-      const current = idx >= 0 ? existing[idx] : undefined
-      if (current !== undefined && current.type === 'tool_execution') {
-        const updated = [...existing]
-        updated[idx] = {
-          ...current,
-          ...permission,
-          approvalRequired: true,
-          state: 'pending_approval' as const,
-        }
-        return {
-          activitiesByExecution: {
-            ...state.activitiesByExecution,
-            [result.executionId]: updated,
-          },
-        }
-      }
-      if (current !== undefined && current.type === 'command_execution') {
-        const updated = [...existing]
-        updated[idx] = {
-          ...current,
-          ...permission,
-          approvalRequired: true,
-          command: result.command ?? current.command,
-          state: 'pending_approval' as const,
-        }
-        return {
-          activitiesByExecution: {
-            ...state.activitiesByExecution,
-            [result.executionId]: updated,
-          },
-        }
-      }
-      const isCommandLike = !result.toolKind || result.toolKind === 'execute'
-      if (isCommandLike) {
-        const activity: CommandExecutionActivity = {
-          actionId: result.hitlId,
-          approvalRequired: true,
-          approved: false,
-          collapsed: false,
-          command: result.command ?? result.title ?? result.message,
-          detail: {
-            diff: result.diff,
-            hitl: {
-              command: result.command,
-              commandSegments: result.commandSegments,
-              hitlId: result.hitlId,
-              kind: 'approval',
-              message: result.message,
-              options: result.options,
-              title: result.title,
-              toolKind: result.toolKind,
-            },
-            title: result.title,
-          },
-          executionId: result.executionId,
-          id: nextActivityId(),
-          startedAt: new Date().toISOString(),
-          state: 'pending_approval',
-          type: 'command_execution',
-        }
-        return {
-          activitiesByExecution: {
-            ...state.activitiesByExecution,
-            [result.executionId]: appendActivity(existing, activity),
-          },
-        }
-      }
-      const activity: ToolExecutionActivity = {
-        actionId: result.hitlId,
-        approvalRequired: true,
-        approved: false,
-        collapsed: false,
-        detail: {
-          diff: result.diff,
-          hitl: {
-            command: result.command,
-            commandSegments: result.commandSegments,
-            hitlId: result.hitlId,
-            kind: 'approval',
-            message: result.message,
-            options: result.options,
-            title: result.title,
-            toolKind: result.toolKind,
-          },
-          kind: toActivityKind(result.toolKind),
-          title: result.title ?? result.command ?? result.message,
-        },
-        executionId: result.executionId,
-        id: nextActivityId(),
-        startedAt: new Date().toISOString(),
-        state: 'pending_approval',
-        taskId: '',
-        thought: '',
-        toolName: result.title ?? result.command ?? result.message,
-        type: 'tool_execution',
-      }
-      return {
-        activitiesByExecution: {
-          ...state.activitiesByExecution,
-          [result.executionId]: appendActivity(existing, activity),
-        },
-      }
-    })
-  },
-
-  handleHitlResolved: (result: ExecutionHitlResolvedResult) => {
-    if (result.kind === 'question') {
-      set((state) => {
-        const activities = state.activitiesByExecution[result.executionId] ?? []
-        if (activities.length === 0) {
-          return state
-        }
-
-        const updated = [...activities]
-        for (let i = updated.length - 1; i >= 0; i--) {
-          const activity = updated[i]
-          if (activity.type === 'elicitation' && activity.hitlId === result.hitlId) {
-            const nextState = result.response === 'answered' ? 'completed' : 'error'
-            updated[i] = {
-              ...activity,
-              collapsed: collapsedOnTransition(activity, nextState),
-              content: result.content ?? activity.content,
-              endedAt: new Date().toISOString(),
-              response: result.response,
-              state: nextState,
-            }
-            break
-          }
-        }
-
-        return {
-          activitiesByExecution: {
-            ...state.activitiesByExecution,
-            [result.executionId]: updated,
-          },
-        }
-      })
-      return
-    }
-    set((state) => {
-      const activities = state.activitiesByExecution[result.executionId] ?? []
-      if (activities.length === 0) {
-        return state
-      }
-
-      const updated = [...activities]
-      for (let i = updated.length - 1; i >= 0; i--) {
-        const activity = updated[i]
-        if (
-          (activity.type === 'command_execution' || activity.type === 'tool_execution') &&
-          result.hitlId &&
-          activity.actionId === result.hitlId
-        ) {
-          const nextState =
-            activity.state === 'pending_approval'
-              ? result.response === 'approved'
-                ? 'active'
-                : 'error'
-              : activity.state
-          updated[i] = {
-            ...activity,
-            approved: result.response === 'approved',
-            collapsed: collapsedOnTransition(activity, nextState),
-            hitlResponse: result.response,
-            resolvedBy: result.resolvedByDisplayName ?? undefined,
-            state: nextState,
-          }
-          break
-        }
       }
 
       return {
