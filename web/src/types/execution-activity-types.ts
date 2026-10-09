@@ -7,6 +7,8 @@ import type {
   ApprovalOptionKind,
   CommandSegment,
   HitlKind,
+  HitlResolver,
+  HitlResolverKind,
   HitlResponse,
   PermissionOption,
   PlanEntry,
@@ -21,6 +23,8 @@ export type {
   ApprovalOptionKind,
   CommandSegment,
   HitlKind,
+  HitlResolver,
+  HitlResolverKind,
   HitlResponse,
   PermissionOption,
   PlanEntry,
@@ -60,7 +64,7 @@ export interface BaseActivity {
   permissionOptions?: PermissionOption[]
   permissionSegments?: CommandSegment[]
   permissionTitle?: string
-  resolvedBy?: string
+  resolvedBy?: HitlResolver
   startedAt: string
   state: ActivityState
   type: ActivityType
@@ -79,7 +83,6 @@ export interface ElicitationActivity extends BaseActivity {
   content?: Record<string, unknown>
   detail?: ActivityDetail
   form?: Record<string, unknown>
-  hitlId: string
   message: string
   response?: HitlResponse
   type: 'elicitation'

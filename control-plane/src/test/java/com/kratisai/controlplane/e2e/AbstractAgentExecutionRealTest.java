@@ -284,7 +284,7 @@ public abstract class AbstractAgentExecutionRealTest {
     private final Set<String> conformanceLateKindActionIds = ConcurrentHashMap.newKeySet();
     private final AtomicInteger conformanceChunkEmissions = new AtomicInteger();
     private final AtomicInteger conformanceChunksWithMessageId = new AtomicInteger();
-    private final Set<String> conformanceHitlIds = ConcurrentHashMap.newKeySet();
+    private final Set<String> conformanceActionIds = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean conformanceSawPlanActivity = new AtomicBoolean(false);
     private final AtomicBoolean conformanceSawTodoToolCall = new AtomicBoolean(false);
     private final StringBuffer commandActivityOutputs = new StringBuffer();
@@ -505,7 +505,7 @@ public abstract class AbstractAgentExecutionRealTest {
         conformanceLateKindActionIds.clear();
         conformanceChunkEmissions.set(0);
         conformanceChunksWithMessageId.set(0);
-        conformanceHitlIds.clear();
+        conformanceActionIds.clear();
         conformanceSawPlanActivity.set(false);
         conformanceSawTodoToolCall.set(false);
         synchronized (commandActivityOutputs) {
@@ -591,12 +591,12 @@ public abstract class AbstractAgentExecutionRealTest {
                 })
                 // Auto-approve all HITL permission requests so agent execution proceeds without
                 // blocking
-                .autoApprovePermissions((executionId, hitlId, command, options) -> {
+                .autoApprovePermissions((executionId, actionId, command, options) -> {
                     try {
-                        conformanceHitlIds.add(hitlId);
+                        conformanceActionIds.add(actionId);
                         String optionId = firstAllowOptionId(options);
                         ResolveHitlRequest approveRequest =
-                                new ResolveHitlRequest(executionId, hitlId, HitlResponse.APPROVED, optionId, null);
+                                new ResolveHitlRequest(executionId, actionId, HitlResponse.APPROVED, optionId, null);
                         mockMvc.perform(post("/api/v1/hitl/resolve")
                                         .header("Authorization", "Bearer " + authToken)
                                         .contentType(MediaType.APPLICATION_JSON)
@@ -722,7 +722,7 @@ public abstract class AbstractAgentExecutionRealTest {
                                 .collect(Collectors.toMap(id -> id, conformanceStatusSequences::get)))
                 .isEmpty();
 
-        Set<String> unmatchedHitlIds = new TreeSet<>(conformanceHitlIds);
+        Set<String> unmatchedHitlIds = new TreeSet<>(conformanceActionIds);
         unmatchedHitlIds.removeAll(conformanceToolActionIds);
         Set<String> synthesisedHitlIds = unmatchedHitlIds.stream()
                 .filter(id -> id.startsWith("hitl-"))
@@ -731,7 +731,7 @@ public abstract class AbstractAgentExecutionRealTest {
         unexplainedHitlIds.removeAll(synthesisedHitlIds);
         assertThat(unexplainedHitlIds)
                 .as(
-                        "ACP conformance for harness '%s': permission hitlIds that match no tool "
+                        "ACP conformance for harness '%s': permission actionIds that match no tool "
                                 + "activity and are not sidecar-synthesised",
                         harness)
                 .isEmpty();
@@ -749,7 +749,7 @@ public abstract class AbstractAgentExecutionRealTest {
                             + "synthesised hitl ids this run: {}, matched real ids: {}",
                     harness,
                     synthesisedHitlIds,
-                    conformanceHitlIds.size() - synthesisedHitlIds.size());
+                    conformanceActionIds.size() - synthesisedHitlIds.size());
         }
 
         long kindOnFirst = conformanceKindOnFirstEmission.values().stream()
@@ -767,7 +767,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 [conformance-matrix] harness={}
                   1. tool emissions missing toolCallId: {} (asserted zero)
                   2. distinct tool actionIds: {}; reopened after terminal status: {} (asserted none)
-                  3. permission hitlIds: {}; matched tool actionIds: {}
+                  3. permission actionIds: {}; matched tool actionIds: {}
                   4. kind on first emission: {}/{} actionIds; late kind on: {}
                   5. chunk emissions: {}; with raw messageId: {}
                   6. plan activities seen: {}; todo-titled tool calls seen: {}
@@ -777,8 +777,8 @@ public abstract class AbstractAgentExecutionRealTest {
                 conformanceToolEmissionsWithoutId.get(),
                 conformanceToolActionIds.size(),
                 conformanceResurrectedActionIds.stream().sorted().toList(),
-                conformanceHitlIds.stream().sorted().toList(),
-                conformanceHitlIds.size(),
+                conformanceActionIds.stream().sorted().toList(),
+                conformanceActionIds.size(),
                 kindOnFirst,
                 conformanceKindOnFirstEmission.size(),
                 conformanceLateKindActionIds.stream().sorted().toList(),

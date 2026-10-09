@@ -12,11 +12,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.HarnessCatalogFixture;
 import com.kratisai.controlplane.api.wsdto.ActivityDetail;
 import com.kratisai.controlplane.api.wsdto.ActivityHitl;
+import com.kratisai.controlplane.api.wsdto.ActivityLocation;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
+import com.kratisai.controlplane.api.wsdto.HitlResolver;
+import com.kratisai.controlplane.api.wsdto.HitlResolverKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.HitlState;
 import com.kratisai.controlplane.api.wsdto.PlanEntry;
@@ -463,8 +466,7 @@ class ExecutionActivityPersistenceServiceTest {
                         HitlResponse.APPROVED,
                         "allow-once",
                         null,
-                        resolvedBy,
-                        "Alice")));
+                        HitlResolver.user(resolvedBy, "Alice"))));
 
         assertThat(row.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
         verify(repository).save(row);
@@ -487,8 +489,7 @@ class ExecutionActivityPersistenceServiceTest {
                         HitlResponse.DECLINED,
                         "reject-once",
                         null,
-                        null,
-                        "Bob")));
+                        HitlResolver.user(UUID.randomUUID(), "Bob"))));
 
         assertThat(row.getStatus()).isEqualTo(ActivityStatus.FAILED);
     }
@@ -508,8 +509,7 @@ class ExecutionActivityPersistenceServiceTest {
                         HitlResponse.APPROVED,
                         "allow-once",
                         null,
-                        null,
-                        "Alice")));
+                        HitlResolver.user(UUID.randomUUID(), "Alice"))));
 
         verify(repository, never()).save(any());
         verify(repository, never()).findFirstByExecutionIdAndActionIdOrderBySequenceDesc(any(), any());
@@ -536,10 +536,12 @@ class ExecutionActivityPersistenceServiceTest {
                         "edit",
                         null,
                         null,
+                        null,
+                        null,
                         null)));
 
         assertThat(existing.getStatus()).isEqualTo(ActivityStatus.PENDING);
-        assertThat(existing.getDetail()).contains("tool-call-42").contains("approval");
+        assertThat(existing.getDetail()).contains("approval").contains("awaiting_human");
         verify(repository).save(existing);
         verify(repository, never()).nextSequence(executionId);
     }
@@ -564,12 +566,44 @@ class ExecutionActivityPersistenceServiceTest {
                         "execute",
                         null,
                         null,
+                        null,
+                        null,
                         null)));
 
         SandboxExecutionActivity saved = capturedSave();
         assertInsertedRow(
                 saved, executionId, 2, "tool-call-42", ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
-        assertThat(saved.getDetail()).contains("tool-call-42").contains("approval");
+        assertThat(saved.getDetail()).contains("approval").contains("awaiting_human");
+    }
+
+    @Test
+    void onHitlRequired_approvalWithoutMatchingRow_carriesLocationsAndInput() {
+        UUID executionId = UUID.randomUUID();
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
+                .thenReturn(Optional.empty());
+        when(repository.nextSequence(executionId)).thenReturn(2L);
+
+        service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
+                UUID.randomUUID(),
+                new HitlRequestSnapshot(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        "Approve Write file",
+                        "Write file",
+                        null,
+                        "Write",
+                        "edit",
+                        null,
+                        null,
+                        null,
+                        List.of(new ActivityLocation("/kratis/workspace/foo.txt", null)),
+                        Map.of("path", "/kratis/workspace/foo.txt"))));
+
+        SandboxExecutionActivity saved = capturedSave();
+        assertThat(saved.getDetail())
+                .contains("/kratis/workspace/foo.txt")
+                .contains("\"input\":{\"path\":\"/kratis/workspace/foo.txt\"}");
     }
 
     @Test
@@ -592,12 +626,14 @@ class ExecutionActivityPersistenceServiceTest {
                         "edit",
                         null,
                         null,
+                        null,
+                        null,
                         null)));
 
         SandboxExecutionActivity saved = capturedSave();
         assertInsertedRow(
                 saved, executionId, 2, "tool-call-42", ActivityType.EDITED, ActivityStatus.PENDING, "Write file");
-        assertThat(saved.getDetail()).contains("tool-call-42").contains("approval");
+        assertThat(saved.getDetail()).contains("approval").contains("awaiting_human");
     }
 
     @Test
@@ -618,12 +654,14 @@ class ExecutionActivityPersistenceServiceTest {
                         null,
                         null,
                         null,
-                        Map.of("type", "object"))));
+                        Map.of("type", "object"),
+                        null,
+                        null)));
 
         SandboxExecutionActivity saved = capturedSave();
         assertInsertedRow(
                 saved, executionId, 3, "el-1", ActivityType.ELICITATION, ActivityStatus.PENDING, "Pick a target");
-        assertThat(saved.getDetail()).contains("el-1").contains("Pick a target");
+        assertThat(saved.getDetail()).contains("question").contains("Pick a target");
     }
 
     @Test
@@ -631,7 +669,7 @@ class ExecutionActivityPersistenceServiceTest {
         UUID executionId = UUID.randomUUID();
         SandboxExecutionActivity pending =
                 row(executionId, 1, "el-1", ActivityType.ELICITATION, ActivityStatus.PENDING, "Pick a target");
-        pending.setDetail("{\"hitl\":{\"hitlId\":\"el-1\",\"kind\":\"question\",\"message\":\"Pick a target\"}}");
+        pending.setDetail("{\"hitl\":{\"kind\":\"question\",\"message\":\"Pick a target\"}}");
         when(repository.findFirstByExecutionIdAndActionIdOrderBySequenceDesc(executionId, "el-1"))
                 .thenReturn(Optional.of(pending));
 
@@ -644,8 +682,7 @@ class ExecutionActivityPersistenceServiceTest {
                         HitlResponse.ANSWERED,
                         null,
                         Map.of("target", "staging"),
-                        null,
-                        "Alice")));
+                        HitlResolver.user(UUID.randomUUID(), "Alice"))));
 
         assertThat(pending.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
         assertThat(pending.getDetail()).contains("staging").contains("answered");
@@ -662,7 +699,13 @@ class ExecutionActivityPersistenceServiceTest {
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
                 new HitlResolution(
-                        executionId, "el-1", HitlKind.QUESTION, HitlResponse.DECLINED, null, null, null, "Alice")));
+                        executionId,
+                        "el-1",
+                        HitlKind.QUESTION,
+                        HitlResponse.DECLINED,
+                        null,
+                        null,
+                        HitlResolver.user(UUID.randomUUID(), "Alice"))));
 
         assertThat(pending.getStatus()).isEqualTo(ActivityStatus.FAILED);
         assertThat(pending.getDetail()).contains("declined");
@@ -677,7 +720,13 @@ class ExecutionActivityPersistenceServiceTest {
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
                 new HitlResolution(
-                        executionId, "el-1", HitlKind.QUESTION, HitlResponse.ANSWERED, null, null, null, "Alice")));
+                        executionId,
+                        "el-1",
+                        HitlKind.QUESTION,
+                        HitlResponse.ANSWERED,
+                        null,
+                        null,
+                        HitlResolver.user(UUID.randomUUID(), "Alice"))));
 
         verify(repository, never()).save(any());
     }
@@ -702,6 +751,8 @@ class ExecutionActivityPersistenceServiceTest {
                 null,
                 "Remove",
                 "execute",
+                null,
+                null,
                 null,
                 null,
                 null);
@@ -738,7 +789,21 @@ class ExecutionActivityPersistenceServiceTest {
         UUID teamId = UUID.randomUUID();
 
         service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
-                teamId, new HitlRequestSnapshot(executionId, "el-1", HitlKind.QUESTION, "Pick a target")));
+                teamId,
+                new HitlRequestSnapshot(
+                        executionId,
+                        "el-1",
+                        HitlKind.QUESTION,
+                        "Pick a target",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null)));
 
         SandboxExecutionActivityEvent event = publishedActivity();
         assertThat(event.activityType()).isEqualTo(ActivityType.ELICITATION);
@@ -765,14 +830,14 @@ class ExecutionActivityPersistenceServiceTest {
                         HitlResponse.APPROVED,
                         "allow-once",
                         null,
-                        null,
-                        "Alice")));
+                        HitlResolver.user(UUID.randomUUID(), "Alice"))));
 
         SandboxExecutionActivityEvent event = publishedActivity();
         assertThat(event.status()).isEqualTo(ActivityStatus.IN_PROGRESS);
         assertThat(event.detail().hitl().state()).isEqualTo(HitlState.RESOLVED);
         assertThat(event.detail().hitl().response()).isEqualTo(HitlResponse.APPROVED);
-        assertThat(event.detail().hitl().resolvedBy()).isEqualTo("Alice");
+        assertThat(event.detail().hitl().resolvedBy().kind()).isEqualTo(HitlResolverKind.USER);
+        assertThat(event.detail().hitl().resolvedBy().displayName()).isEqualTo("Alice");
     }
 
     @Test
@@ -794,13 +859,12 @@ class ExecutionActivityPersistenceServiceTest {
                         HitlResponse.APPROVED,
                         "allow",
                         null,
-                        null,
-                        "Remembered rule"));
+                        HitlResolver.rule("Remembered rule")));
 
         SandboxExecutionActivityEvent event = publishedActivity();
         assertThat(event.status()).isEqualTo(ActivityStatus.IN_PROGRESS);
         assertThat(event.detail().hitl().state()).isEqualTo(HitlState.RESOLVED);
-        assertThat(event.detail().hitl().resolvedBy()).isEqualTo("Remembered rule");
+        assertThat(event.detail().hitl().resolvedBy().kind()).isEqualTo(HitlResolverKind.RULE);
         assertThat(existing.getDetail()).doesNotContain("awaiting_human");
     }
 
@@ -821,8 +885,7 @@ class ExecutionActivityPersistenceServiceTest {
                         HitlResponse.DECLINED,
                         null,
                         null,
-                        null,
-                        "Remembered rule"));
+                        HitlResolver.rule("Remembered rule")));
 
         assertInsertedRow(
                 capturedSave(),

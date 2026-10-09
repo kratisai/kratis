@@ -2,9 +2,10 @@ package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
+import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
-import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,16 +40,15 @@ public class PendingHitlTimeoutService {
     @Scheduled(fixedRate = 60000)
     @Transactional
     public void cleanupExpiredHitl() {
-        Map<UUID, PendingHitlRegistry.PendingHitl> expired = pendingHitlRegistry.removeExpired();
+        List<PendingHitlRegistry.PendingHitl> expired = pendingHitlRegistry.removeExpired();
 
-        for (Map.Entry<UUID, PendingHitlRegistry.PendingHitl> entry : expired.entrySet()) {
-            UUID executionId = entry.getKey();
-            PendingHitlRegistry.PendingHitl request = entry.getValue();
+        for (PendingHitlRegistry.PendingHitl request : expired) {
+            UUID executionId = request.request().executionId();
 
             logger.info(
-                    "Timing out pending HITL request for execution {} (hitlId='{}', kind={}, team={})",
+                    "Timing out pending HITL request for execution {} (actionId='{}', kind={}, team={})",
                     executionId,
-                    request.request().hitlId(),
+                    request.request().actionId(),
                     request.request().kind(),
                     request.teamId());
 
@@ -56,13 +56,12 @@ public class PendingHitlTimeoutService {
                     request.teamId(),
                     new HitlResolution(
                             executionId,
-                            request.request().hitlId(),
+                            request.request().actionId(),
                             request.request().kind(),
                             HitlResponse.CANCELLED,
                             null,
                             null,
-                            null,
-                            "System (timeout)")));
+                            HitlResolver.timeout())));
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {

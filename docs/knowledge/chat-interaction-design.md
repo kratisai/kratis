@@ -109,7 +109,7 @@ sequenceDiagram
     Agent->>WS: JsonRpcResponse {type: "execution_activity", detail: {hitl: {state: "awaiting_human", command: "rm -rf /tmp/build"}}}
     WS->>Client: Render HITL Permission Approval Dialog
     
-    Client->>WS: REST POST /api/v1/hitl/resolve {executionId, hitlId, response}
+    Client->>WS: REST POST /api/v1/hitl/resolve {executionId, actionId, response}
     WS->>Agent: Resolve Permission Gate
     
     Agent->>WS: JsonRpcResponse {type: "execution_output", line: "Cleaning build directory..."}
@@ -200,7 +200,6 @@ sequenceDiagram
     "description": "docker run --rm -v /workspace:/app golangci-lint run",
     "detail": {
       "hitl": {
-        "hitlId": "tool-call-42",
         "kind": "approval",
         "state": "awaiting_human",
         "message": "Allow docker run --rm -v /workspace:/app golangci-lint run?",
@@ -214,8 +213,10 @@ sequenceDiagram
 }
 ```
 
-After a decision, the control plane publishes the same activity with `detail.hitl.state` set to
-`resolved`, plus `response` and `resolvedBy`.
+The HITL child is keyed by the parent activity's `actionId` (the ACP toolCallId for approvals, the
+question id for questions); there is no separate HITL id. After a decision, the control plane
+publishes the same activity with `detail.hitl.state` set to `resolved`, plus `response` and a
+structured `resolvedBy` (`{ "kind": "user" | "rule" | "timeout" | "system", "userId"?, "displayName"? }`).
 
 `commandSegments` lists the root commands of a composite command. The control plane splits at
 `&&`, `||`, `;`, `|`, and newlines. Each segment carries a derived rule candidate. The UI uses

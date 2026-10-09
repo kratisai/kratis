@@ -31,15 +31,15 @@ function approvalActivity(
     status?: WireActivityStatus
   } = {},
 ): ExecutionActivityResult {
-  const hitlId = options.actionId ?? 'tc-1'
+  const actionId = options.actionId ?? 'tc-1'
   return activityResult({
-    actionId: hitlId,
+    actionId,
     activityType: options.activityType ?? 'COMMAND',
     description: 'chmod +x script.sh',
     detail: {
       hitl: {
         command: 'chmod +x script.sh',
-        hitlId,
+
         kind: 'approval',
         message: 'Allow chmod +x script.sh?',
         state: 'awaiting_human',
@@ -60,7 +60,7 @@ function questionActivity(
     detail: {
       hitl: {
         form: { properties: { target: { type: 'string' } }, type: 'object' },
-        hitlId: 'el-1',
+
         kind: 'question',
         message: 'Choose a deployment target',
         state: 'awaiting_human',
@@ -476,7 +476,11 @@ describe('activity-store', () => {
       store.handleActivityEvent(
         approvalActivity({
           actionId: 'tc-auto',
-          hitl: { resolvedBy: 'Remembered rule', response: 'approved', state: 'resolved' },
+          hitl: {
+            resolvedBy: { displayName: 'Remembered rule', kind: 'rule' },
+            response: 'approved',
+            state: 'resolved',
+          },
           status: 'in_progress',
         }),
       )
@@ -487,7 +491,7 @@ describe('activity-store', () => {
         approvalRequired: true,
         approved: true,
         hitlResponse: 'approved',
-        resolvedBy: 'Remembered rule',
+        resolvedBy: { displayName: 'Remembered rule', kind: 'rule' },
         state: 'active',
       })
     })
@@ -521,7 +525,11 @@ describe('activity-store', () => {
       store.handleActivityEvent(
         approvalActivity({
           actionId: 'tc-6',
-          hitl: { resolvedBy: 'Alice', response: 'approved', state: 'resolved' },
+          hitl: {
+            resolvedBy: { displayName: 'Alice', kind: 'user', userId: 'u-1' },
+            response: 'approved',
+            state: 'resolved',
+          },
           status: 'in_progress',
         }),
       )
@@ -531,7 +539,7 @@ describe('activity-store', () => {
       expect(activities[0]).toMatchObject({
         approved: true,
         hitlResponse: 'approved',
-        resolvedBy: 'Alice',
+        resolvedBy: { displayName: 'Alice', kind: 'user', userId: 'u-1' },
         state: 'active',
         type: 'command_execution',
       })
@@ -691,15 +699,15 @@ describe('activity-store', () => {
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities).toHaveLength(1)
       expect(activities[0]).toMatchObject({
+        actionId: 'el-1',
         form: { properties: { target: { type: 'string' } } },
-        hitlId: 'el-1',
         message: 'Choose a deployment target',
         state: 'active',
         type: 'elicitation',
       })
     })
 
-    it('does not duplicate the same hitlId', () => {
+    it('does not duplicate the same actionId', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(questionActivity())
       store.handleActivityEvent(questionActivity())
@@ -746,7 +754,7 @@ describe('activity-store', () => {
           activityType: 'ELICITATION',
           description: 'Pick a target',
           detail: {
-            hitl: { hitlId: 'el-replay', kind: 'question', message: 'Pick a target' },
+            hitl: { kind: 'question', message: 'Pick a target' },
           },
           status: 'pending',
         }),
@@ -755,7 +763,7 @@ describe('activity-store', () => {
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities).toHaveLength(1)
       expect(activities[0]).toMatchObject({
-        hitlId: 'el-replay',
+        actionId: 'el-replay',
         message: 'Pick a target',
         state: 'active',
         type: 'elicitation',
@@ -772,7 +780,6 @@ describe('activity-store', () => {
           detail: {
             hitl: {
               content: { target: 'staging' },
-              hitlId: 'el-done',
               kind: 'question',
               message: 'Pick a target',
               response: 'answered',
@@ -892,7 +899,7 @@ describe('activity-store', () => {
           description: 'git push',
           detail: {
             hitl: {
-              hitlId: 'tc-approve',
+
               kind: 'approval',
               message: 'Allow git push?',
               state: 'awaiting_human',
@@ -919,7 +926,7 @@ describe('activity-store', () => {
           description: 'git push',
           detail: {
             hitl: {
-              hitlId: 'tc-approve2',
+
               kind: 'approval',
               message: 'Allow git push?',
               state: 'awaiting_human',
@@ -935,7 +942,7 @@ describe('activity-store', () => {
           description: 'git push',
           detail: {
             hitl: {
-              hitlId: 'tc-approve2',
+
               kind: 'approval',
               message: 'Allow git push?',
               optionId: 'once',
@@ -950,6 +957,32 @@ describe('activity-store', () => {
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities[0]).toMatchObject({
         approved: true,
+        state: 'active',
+        type: 'command_execution',
+      })
+    })
+
+    it('treats a resolved approval without state as a plain activity', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'tc-legacy',
+          activityType: 'COMMAND',
+          description: 'git push',
+          detail: {
+            hitl: {
+              kind: 'approval',
+              message: 'Allow git push?',
+              response: 'approved',
+            },
+          },
+          status: 'in_progress',
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities[0]).toMatchObject({
+        approvalRequired: false,
         state: 'active',
         type: 'command_execution',
       })
@@ -1700,7 +1733,7 @@ describe('activity-store', () => {
           description: 'chmod +x script.sh',
           detail: {
             hitl: {
-              hitlId: 'tc-approve',
+
               kind: 'approval',
               message: 'Allow?',
               state: 'awaiting_human',

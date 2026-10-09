@@ -1338,16 +1338,18 @@ class SandboxExecutionServiceTest {
                         null,
                         null,
                         null,
+                        null,
+                        null,
                         null),
                 webSocketSession,
                 "req-123",
                 Instant.now(),
                 UUID.randomUUID());
-        when(pendingHitlRegistry.remove(execution.getId())).thenReturn(pendingHitl);
+        when(pendingHitlRegistry.removeAll(execution.getId())).thenReturn(List.of(pendingHitl));
 
         sandboxExecutionService.terminateExecution(execution.getId());
 
-        verify(pendingHitlRegistry).remove(execution.getId());
+        verify(pendingHitlRegistry).removeAll(execution.getId());
         verify(environmentRpcClient).replyError(eq(ENVIRONMENT_ID), eq("req-123"), any(JsonRpcError.class));
 
         ArgumentCaptor<SandboxExecutionHitlResolvedEvent> hitlCaptor =
@@ -1363,17 +1365,72 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
+    void terminateExecution_cancelsEveryPendingHitl() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(sessionRegistry.getSessionForEnvironment(execution.getEnvironment().getId()))
+                .thenReturn(webSocketSession);
+        when(webSocketSession.isOpen()).thenReturn(true);
+
+        PendingHitlRegistry.PendingHitl first = new PendingHitlRegistry.PendingHitl(
+                new HitlRequestSnapshot(
+                        execution.getId(),
+                        "tool-call-1",
+                        HitlKind.APPROVAL,
+                        "Approve one",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
+                webSocketSession,
+                "req-1",
+                Instant.now(),
+                UUID.randomUUID());
+        PendingHitlRegistry.PendingHitl second = new PendingHitlRegistry.PendingHitl(
+                new HitlRequestSnapshot(
+                        execution.getId(),
+                        "tool-call-2",
+                        HitlKind.APPROVAL,
+                        "Approve two",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
+                webSocketSession,
+                "req-2",
+                Instant.now(),
+                UUID.randomUUID());
+        when(pendingHitlRegistry.removeAll(execution.getId())).thenReturn(List.of(first, second));
+
+        sandboxExecutionService.terminateExecution(execution.getId());
+
+        verify(environmentRpcClient).replyError(eq(ENVIRONMENT_ID), eq("req-1"), any(JsonRpcError.class));
+        verify(environmentRpcClient).replyError(eq(ENVIRONMENT_ID), eq("req-2"), any(JsonRpcError.class));
+        verify(eventPublisher, times(2)).publishEvent(any(SandboxExecutionHitlResolvedEvent.class));
+    }
+
+    @Test
     void terminateExecution_withoutPendingPermission_sendsOnlyTerminate() throws Exception {
         SandboxExecution execution = createTestExecution();
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sessionRegistry.getSessionForEnvironment(execution.getEnvironment().getId()))
                 .thenReturn(webSocketSession);
         when(webSocketSession.isOpen()).thenReturn(true);
-        when(pendingHitlRegistry.remove(execution.getId())).thenReturn(null);
+        when(pendingHitlRegistry.removeAll(execution.getId())).thenReturn(List.of());
 
         sandboxExecutionService.terminateExecution(execution.getId());
 
-        verify(pendingHitlRegistry).remove(execution.getId());
+        verify(pendingHitlRegistry).removeAll(execution.getId());
         verify(environmentRpcClient, never()).replyError(any(), any(), any());
         verify(environmentRpcClient)
                 .request(
@@ -1397,23 +1454,25 @@ class SandboxExecutionServiceTest {
                         null,
                         null,
                         null,
-                        Map.of("type", "object")),
+                        Map.of("type", "object"),
+                        null,
+                        null),
                 webSocketSession,
                 "req-456",
                 Instant.now(),
                 TEAM_ID);
-        when(pendingHitlRegistry.remove(execution.getId())).thenReturn(pendingHitl);
+        when(pendingHitlRegistry.removeAll(execution.getId())).thenReturn(List.of(pendingHitl));
 
         sandboxExecutionService.failExecution(execution.getId());
 
-        verify(pendingHitlRegistry).remove(execution.getId());
+        verify(pendingHitlRegistry).removeAll(execution.getId());
         verify(environmentRpcClient).replyError(eq(ENVIRONMENT_ID), eq("req-456"), any(JsonRpcError.class));
 
         ArgumentCaptor<SandboxExecutionHitlResolvedEvent> hitlCaptor =
                 ArgumentCaptor.forClass(SandboxExecutionHitlResolvedEvent.class);
         verify(eventPublisher).publishEvent(hitlCaptor.capture());
         assertThat(hitlCaptor.getValue().result().executionId()).isEqualTo(execution.getId());
-        assertThat(hitlCaptor.getValue().result().hitlId()).isEqualTo("hitl-789");
+        assertThat(hitlCaptor.getValue().result().actionId()).isEqualTo("hitl-789");
         assertThat(hitlCaptor.getValue().result().kind()).isEqualTo(HitlKind.QUESTION);
         assertThat(hitlCaptor.getValue().result().response()).isEqualTo(HitlResponse.CANCELLED);
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
@@ -1423,7 +1482,7 @@ class SandboxExecutionServiceTest {
     void failExecution_withoutPendingPermission_doesNotPublishHitlResolution() {
         SandboxExecution execution = createTestExecution();
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
-        when(pendingHitlRegistry.remove(execution.getId())).thenReturn(null);
+        when(pendingHitlRegistry.removeAll(execution.getId())).thenReturn(List.of());
 
         sandboxExecutionService.failExecution(execution.getId());
 

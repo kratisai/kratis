@@ -11,9 +11,9 @@ const resolveHitl = vi.fn()
 
 function pendingActivity(overrides: Partial<ElicitationActivity> = {}): ElicitationActivity {
   return {
+    actionId: 'el-1',
     collapsed: false,
     executionId: 'exec-1',
-    hitlId: 'el-1',
     id: 'act-1',
     message: 'Choose a deployment target',
     startedAt: '2026-01-01T00:00:00Z',

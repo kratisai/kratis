@@ -24,12 +24,14 @@ type EventSink interface {
 // Options are guaranteed non-empty (the handler synthesises a default allow
 // option when the agent sends none).
 type PermissionRequest struct {
-	Command  string
-	ActionID string
-	Title    string
-	Kind     string
-	Options  []PermissionOption
-	Diff     *ActivityDiff
+	Command   string
+	ActionID  string
+	Title     string
+	Kind      string
+	Options   []PermissionOption
+	Diff      *ActivityDiff
+	Locations []ToolLocation
+	Input     map[string]any
 }
 
 // ElicitationRequest is a structured question (elicitation/create) forwarded
@@ -306,12 +308,14 @@ func (h *Handler) HandlePermissionRequest(transport *AcpTransport, params map[st
 	}
 
 	req := PermissionRequest{
-		Command:  cmdText,
-		ActionID: actionID,
-		Title:    p.ToolCall.Title,
-		Kind:     p.ToolCall.Kind,
-		Options:  options,
-		Diff:     permissionDiff(p.ToolCall),
+		Command:   cmdText,
+		ActionID:  actionID,
+		Title:     p.ToolCall.Title,
+		Kind:      p.ToolCall.Kind,
+		Options:   options,
+		Diff:      permissionDiff(p.ToolCall),
+		Locations: p.ToolCall.Locations,
+		Input:     rawInputAsMap(p.ToolCall.RawInput),
 	}
 
 	selectedOptionID, err := h.sink.RequestPermission(req)
@@ -499,6 +503,7 @@ func (h *Handler) HandleTerminalCreate(transport *AcpTransport, params map[strin
 			{OptionID: "allow", Name: "Allow Once", Kind: string(ApprovalAllowOnce)},
 			{OptionID: "reject", Name: "Reject", Kind: string(ApprovalRejectOnce)},
 		},
+		Input: termInput(command, cwd),
 	}
 	selectedOptionID, err := h.sink.RequestPermission(req)
 	h.debugf("[ACP][TERM] HITL permission result: selectedOptionID=%q, err=%v", selectedOptionID, err)
@@ -906,7 +911,7 @@ func (h *Handler) HandleFsWriteTextFile(transport *AcpTransport, params map[stri
 	// fs/write_text_file carries no toolCallId per ACP spec (Goose bridges
 	// developer edit/write through the client). Correlate with the live tool
 	// call for this path so the HITL approval attaches to the tool activity
-	// instead of synthesising an orphan hitlId downstream.
+	// instead of synthesising an orphan actionId downstream.
 	toolCallID := h.findToolCallByPath(path)
 	h.beginPermission(toolCallID, path, path, "write")
 
@@ -920,7 +925,9 @@ func (h *Handler) HandleFsWriteTextFile(transport *AcpTransport, params map[stri
 			{OptionID: "allow", Name: "Allow Once", Kind: string(ApprovalAllowOnce)},
 			{OptionID: "reject", Name: "Reject", Kind: string(ApprovalRejectOnce)},
 		},
-		Diff: diff,
+		Diff:      diff,
+		Locations: []ToolLocation{{Path: path}},
+		Input:     map[string]any{"path": path},
 	}
 	selectedOptionID, err := h.sink.RequestPermission(req)
 	h.debugf("[ACP][FS] HITL permission result: selectedOptionID=%q, err=%v", selectedOptionID, err)
@@ -1121,6 +1128,17 @@ func optionKindForOptions(options []PermissionOption, optionID string) ApprovalO
 // isAllowKind reports whether an ACP option kind grants permission.
 func isAllowKind(kind ApprovalOptionKind) bool {
 	return kind == ApprovalAllowOnce || kind == ApprovalAllowAlways
+}
+
+// termInput builds the HITL request input for a terminal/create request so the
+// control-plane placeholder activity carries the command even when no tool_call
+// was announced.
+func termInput(command string, cwd string) map[string]any {
+	input := map[string]any{"command": command}
+	if cwd != "" {
+		input["cwd"] = cwd
+	}
+	return input
 }
 
 // permissionDiff extracts the edit diff of an edit-kind permission tool call

@@ -242,7 +242,7 @@ class ActivityLogSyncIntegrationTest {
                 .isTrue();
 
         // 8. Verify pending permission is registered before approval
-        assertThat(pendingHitlRegistry.getPending()).containsKey(executionId);
+        assertThat(pendingHitlRegistry.find(executionId, "tool-call-100")).isNotNull();
 
         // 9. Client 1 approves the permission via REST API
         MockMvc mockMvc =
@@ -289,9 +289,9 @@ class ActivityLogSyncIntegrationTest {
                 .isTrue();
 
         // 12. Verify pending permission is cleared from registry after approval
-        assertThat(pendingHitlRegistry.getPending())
+        assertThat(pendingHitlRegistry.find(executionId, "tool-call-100"))
                 .as("Pending permission should be removed from registry after approval")
-                .doesNotContainKey(executionId);
+                .isNull();
 
         // 13. Verify activity log consistency: both clients received the same
         // permission events Both clients should have received:

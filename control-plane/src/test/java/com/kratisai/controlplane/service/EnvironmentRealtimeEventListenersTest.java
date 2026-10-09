@@ -12,6 +12,7 @@ import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlActivi
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
+import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import java.time.Instant;
@@ -58,6 +59,8 @@ class EnvironmentRealtimeEventListenersTest {
                         null,
                         null,
                         null,
+                        null,
+                        null,
                         null),
                 session,
                 requestId,
@@ -78,7 +81,9 @@ class EnvironmentRealtimeEventListenersTest {
                         null,
                         null,
                         null,
-                        Map.of("type", "object")),
+                        Map.of("type", "object"),
+                        null,
+                        null),
                 session,
                 requestId,
                 Instant.now(),
@@ -90,7 +95,7 @@ class EnvironmentRealtimeEventListenersTest {
         UUID executionId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
         PendingHitlRegistry.PendingHitl pendingRequest = pendingApproval(42);
-        when(pendingHitlRegistry.remove(executionId)).thenReturn(pendingRequest);
+        when(pendingHitlRegistry.remove(executionId, "tool-call-1")).thenReturn(pendingRequest);
         when(session.isOpen()).thenReturn(true);
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
@@ -102,8 +107,7 @@ class EnvironmentRealtimeEventListenersTest {
                         HitlResponse.APPROVED,
                         "allow-once",
                         null,
-                        UUID.randomUUID(),
-                        "Bob")));
+                        HitlResolver.user(UUID.randomUUID(), "Bob"))));
 
         ArgumentCaptor<HitlActivityResult> captor = ArgumentCaptor.forClass(HitlActivityResult.class);
         verify(environmentRpcClient).reply(any(String.class), eq(42), captor.capture());
@@ -116,7 +120,7 @@ class EnvironmentRealtimeEventListenersTest {
         UUID executionId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
         PendingHitlRegistry.PendingHitl pendingRequest = pendingApproval(42);
-        when(pendingHitlRegistry.remove(executionId)).thenReturn(pendingRequest);
+        when(pendingHitlRegistry.remove(executionId, "tool-call-1")).thenReturn(pendingRequest);
         when(session.isOpen()).thenReturn(true);
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
@@ -128,8 +132,7 @@ class EnvironmentRealtimeEventListenersTest {
                         HitlResponse.CANCELLED,
                         null,
                         null,
-                        null,
-                        "System (timeout)")));
+                        HitlResolver.timeout())));
 
         ArgumentCaptor<HitlActivityResult> captor = ArgumentCaptor.forClass(HitlActivityResult.class);
         verify(environmentRpcClient).reply(any(String.class), eq(42), captor.capture());
@@ -139,7 +142,7 @@ class EnvironmentRealtimeEventListenersTest {
     @Test
     void onHitlResolved_skipsWhenNoPendingRequest() {
         UUID executionId = UUID.randomUUID();
-        when(pendingHitlRegistry.remove(executionId)).thenReturn(null);
+        when(pendingHitlRegistry.remove(executionId, "tool-call-1")).thenReturn(null);
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
@@ -150,8 +153,7 @@ class EnvironmentRealtimeEventListenersTest {
                         HitlResponse.CANCELLED,
                         null,
                         null,
-                        null,
-                        "System (timeout)")));
+                        HitlResolver.timeout())));
 
         verify(environmentRpcClient, never()).reply(any(), any(), any());
     }
@@ -172,7 +174,7 @@ class EnvironmentRealtimeEventListenersTest {
         UUID executionId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
         PendingHitlRegistry.PendingHitl pendingRequest = pendingQuestion(7);
-        when(pendingHitlRegistry.remove(executionId)).thenReturn(pendingRequest);
+        when(pendingHitlRegistry.remove(executionId, "el-1")).thenReturn(pendingRequest);
         when(session.isOpen()).thenReturn(true);
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
@@ -184,8 +186,7 @@ class EnvironmentRealtimeEventListenersTest {
                         HitlResponse.ANSWERED,
                         null,
                         Map.of("target", "staging"),
-                        UUID.randomUUID(),
-                        "Alice")));
+                        HitlResolver.user(UUID.randomUUID(), "Alice"))));
 
         ArgumentCaptor<HitlActivityResult> captor = ArgumentCaptor.forClass(HitlActivityResult.class);
         verify(environmentRpcClient).reply(any(String.class), eq(7), captor.capture());
@@ -198,7 +199,7 @@ class EnvironmentRealtimeEventListenersTest {
         UUID executionId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
         PendingHitlRegistry.PendingHitl pendingRequest = pendingQuestion(7);
-        when(pendingHitlRegistry.remove(executionId)).thenReturn(pendingRequest);
+        when(pendingHitlRegistry.remove(executionId, "el-1")).thenReturn(pendingRequest);
         when(session.isOpen()).thenReturn(true);
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
@@ -210,8 +211,7 @@ class EnvironmentRealtimeEventListenersTest {
                         HitlResponse.DECLINED,
                         null,
                         null,
-                        null,
-                        "System (timeout)")));
+                        HitlResolver.timeout())));
 
         ArgumentCaptor<HitlActivityResult> captor = ArgumentCaptor.forClass(HitlActivityResult.class);
         verify(environmentRpcClient).reply(any(String.class), eq(7), captor.capture());
@@ -221,7 +221,7 @@ class EnvironmentRealtimeEventListenersTest {
     @Test
     void onHitlResolved_skipsWhenNoPendingQuestion() {
         UUID executionId = UUID.randomUUID();
-        when(pendingHitlRegistry.remove(executionId)).thenReturn(null);
+        when(pendingHitlRegistry.remove(executionId, "el-1")).thenReturn(null);
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
@@ -232,8 +232,7 @@ class EnvironmentRealtimeEventListenersTest {
                         HitlResponse.CANCELLED,
                         null,
                         null,
-                        null,
-                        "System (timeout)")));
+                        HitlResolver.timeout())));
 
         verify(environmentRpcClient, never()).reply(any(), any(), any());
     }

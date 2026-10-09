@@ -142,7 +142,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
 
     /** Ask the control plane for a human decision: authorize a command or answer a structured question. */
     record HitlActivity(
-            @JsonProperty("hitlId") String hitlId,
+            @JsonProperty("actionId") String actionId,
             @JsonProperty("message") String message,
             @JsonProperty("kind") HitlKind kind,
             @JsonProperty("executionId") String executionId,
@@ -151,6 +151,8 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
             @JsonProperty("toolKind") String toolKind,
             @JsonProperty("options") List<PermissionOption> options,
             @JsonProperty("diff") ActivityDiff diff,
+            @JsonProperty("locations") List<ActivityLocation> locations,
+            @JsonProperty("input") Map<String, Object> input,
             @JsonProperty("form") Map<String, Object> form)
             implements InboundRequestPayload {
         public static final String METHOD = "env.hitl_activity";
@@ -161,7 +163,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         }
 
         public HitlActivity(
-                String hitlId,
+                String actionId,
                 String message,
                 HitlKind kind,
                 String executionId,
@@ -171,7 +173,23 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
                 List<PermissionOption> options,
                 ActivityDiff diff,
                 Map<String, Object> form) {
-            this.hitlId = Objects.requireNonNull(hitlId, "hitlId is required");
+            this(actionId, message, kind, executionId, command, title, toolKind, options, diff, null, null, form);
+        }
+
+        public HitlActivity(
+                String actionId,
+                String message,
+                HitlKind kind,
+                String executionId,
+                String command,
+                String title,
+                String toolKind,
+                List<PermissionOption> options,
+                ActivityDiff diff,
+                List<ActivityLocation> locations,
+                Map<String, Object> input,
+                Map<String, Object> form) {
+            this.actionId = Objects.requireNonNull(actionId, "actionId is required");
             this.message = Objects.requireNonNull(message, "message is required");
             this.kind = Objects.requireNonNull(kind, "kind is required");
             this.executionId = Objects.requireNonNull(executionId, "executionId is required");
@@ -180,6 +198,8 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
             this.toolKind = toolKind;
             this.options = options;
             this.diff = diff;
+            this.locations = locations;
+            this.input = input;
             this.form = form;
         }
     }

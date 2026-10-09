@@ -29,13 +29,13 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
 interface ExecutionActivityState {
   activitiesByExecution: Record<string, Activity[]>
-  cancelHitl: (executionId: string, hitlId: string) => Promise<void>
+  cancelHitl: (executionId: string, actionId: string) => Promise<void>
   clearActivities: (executionId: string) => void
   handleActivityEvent: (result: ExecutionActivityResult) => void
   handleExecutionComplete: (result: ExecutionCompleteResult) => void
   resolveHitl: (
     executionId: string,
-    hitlId: string,
+    actionId: string,
     response: HitlResponse,
     optionId?: string,
     content?: Record<string, unknown>,
@@ -130,7 +130,7 @@ function approvalFields(hitl: ActivityHitl | undefined) {
     return {}
   }
   const fields = {
-    approvalRequired: hitl.state === 'awaiting_human' || hitl.response !== undefined,
+    approvalRequired: hitl.state !== undefined,
     approved: hitl.response === undefined ? undefined : hitl.response === 'approved',
     hitlResponse: hitl.response,
     permissionDiff: hitl.diff,
@@ -273,12 +273,12 @@ function toolTarget(detail: ActivityDetail | undefined): string | undefined {
 
 export const useActivityStore = create<ExecutionActivityState>((set) => ({
   activitiesByExecution: {},
-  cancelHitl: async (executionId: string, hitlId: string) => {
+  cancelHitl: async (executionId: string, actionId: string) => {
     const response = await fetchWithAuth('/api/v1/hitl/resolve', {
       body: JSON.stringify({
+        actionId,
         content: null,
         executionId,
-        hitlId,
         optionId: null,
         response: 'cancelled',
       }),
@@ -561,9 +561,8 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
       set((state) => {
         const existing = state.activitiesByExecution[executionId] ?? []
         const hitl = detail?.hitl
-        const hitlId = actionId ?? hitl?.hitlId
-        const idx = hitlId
-          ? existing.findIndex((a) => a.type === 'elicitation' && a.hitlId === hitlId)
+        const idx = actionId
+          ? existing.findIndex((a) => a.type === 'elicitation' && a.actionId === actionId)
           : -1
         if (idx >= 0) {
           const updated = [...existing]
@@ -591,7 +590,6 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
           detail,
           executionId,
           form: hitl?.form,
-          hitlId: hitlId ?? '',
           id: nextActivityId(),
           message: hitl?.message ?? description,
           response: hitl?.response,
@@ -649,14 +647,14 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
 
   resolveHitl: async (
     executionId: string,
-    hitlId: string,
+    actionId: string,
     response: HitlResponse,
     optionId?: string,
     content?: Record<string, unknown>,
     rules?: CreateHitlRuleRequest[],
     feedback?: string,
   ) => {
-    const body: Record<string, unknown> = { executionId, hitlId, response }
+    const body: Record<string, unknown> = { actionId, executionId, response }
     if (optionId !== undefined) body.optionId = optionId
     if (content !== undefined) body.content = content
     if (rules !== undefined && rules.length > 0) body.rules = rules

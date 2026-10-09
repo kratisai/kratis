@@ -2,7 +2,7 @@
   "jsonrpc": "2.0",
   "method": "env.hitl_activity",
   "params": {
-    "hitlId": "el-01",
+    "actionId": "el-01",
     "message": "Choose a deployment target",
     "kind": "question",
     "executionId": "123e4567-e89b-12d3-a456-426614174000",

@@ -27,7 +27,7 @@ public class ClientWebSocketFixture extends WebSocketFixture<ClientWebSocketFixt
     /** Callback resolving a HITL approval request with the offered options. */
     @FunctionalInterface
     public interface PermissionApprover {
-        void approve(UUID executionId, String hitlId, String command, List<PermissionOption> options);
+        void approve(UUID executionId, String actionId, String command, List<PermissionOption> options);
     }
 
     private final CountDownLatch subscribedLatch = new CountDownLatch(1);
@@ -77,7 +77,7 @@ public class ClientWebSocketFixture extends WebSocketFixture<ClientWebSocketFixt
                             "[auto-approve] Auto-approving permission for execution={}, command='{}'",
                             msg.executionId(),
                             hitl.command());
-                    approver.approve(msg.executionId(), hitl.hitlId(), hitl.command(), hitl.options());
+                    approver.approve(msg.executionId(), msg.actionId(), hitl.command(), hitl.options());
                 });
         return this;
     }

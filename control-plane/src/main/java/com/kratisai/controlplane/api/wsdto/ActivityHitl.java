@@ -5,13 +5,11 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /** Persisted HITL history. Tolerates unknown keys so older stored rows still replay. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ActivityHitl(
-        @JsonProperty("hitlId") String hitlId,
         @JsonProperty("kind") HitlKind kind,
         @JsonProperty("state") HitlState state,
         @JsonProperty("message") String message,
@@ -25,12 +23,10 @@ public record ActivityHitl(
         @JsonProperty("response") HitlResponse response,
         @JsonProperty("optionId") String optionId,
         @JsonProperty("content") Map<String, Object> content,
-        @JsonProperty("resolvedBy") String resolvedBy,
-        @JsonProperty("resolvedByUserId") UUID resolvedByUserId) {
+        @JsonProperty("resolvedBy") HitlResolver resolvedBy) {
 
     public static ActivityHitl from(HitlRequestSnapshot request, HitlState state) {
         return new ActivityHitl(
-                request.hitlId(),
                 request.kind(),
                 state,
                 request.message(),
@@ -44,17 +40,15 @@ public record ActivityHitl(
                 null,
                 null,
                 null,
-                null,
                 null);
     }
 
     /** Minimal history row when the request snapshot was never persisted. */
     public static ActivityHitl from(HitlResolution resolution) {
         return new ActivityHitl(
-                resolution.hitlId(),
                 resolution.kind(),
                 HitlState.RESOLVED,
-                resolution.hitlId(),
+                resolution.actionId(),
                 null,
                 null,
                 null,
@@ -65,16 +59,14 @@ public record ActivityHitl(
                 resolution.response(),
                 resolution.optionId(),
                 resolution.content(),
-                resolution.resolvedByDisplayName(),
-                resolution.resolvedByUserId());
+                resolution.resolvedBy());
     }
 
     public ActivityHitl withResolution(HitlResolution resolution) {
         return new ActivityHitl(
-                hitlId,
                 kind != null ? kind : resolution.kind(),
                 HitlState.RESOLVED,
-                message != null ? message : resolution.hitlId(),
+                message != null ? message : resolution.actionId(),
                 command,
                 commandSegments,
                 title,
@@ -85,7 +77,6 @@ public record ActivityHitl(
                 resolution.response(),
                 resolution.optionId(),
                 resolution.content(),
-                resolution.resolvedByDisplayName() != null ? resolution.resolvedByDisplayName() : resolvedBy,
-                resolution.resolvedByUserId() != null ? resolution.resolvedByUserId() : resolvedByUserId);
+                resolution.resolvedBy());
     }
 }

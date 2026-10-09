@@ -4,6 +4,7 @@ import com.kratisai.controlplane.api.restdto.CreateHitlRuleRequest;
 import com.kratisai.controlplane.api.restdto.ResolveHitlRequest;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
+import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.config.SecurityUtil;
@@ -84,13 +85,9 @@ public class SandboxHitlController {
         SandboxExecution execution = findAndVerifyMembership(request.executionId(), userId);
         UUID teamId = execution.getEnvironment().getTeam().getId();
 
-        PendingHitlRegistry.PendingHitl pending =
-                pendingHitlRegistry.getPending().get(request.executionId());
+        PendingHitlRegistry.PendingHitl pending = pendingHitlRegistry.find(request.executionId(), request.actionId());
         if (pending == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No pending HITL request for this execution");
-        }
-        if (!pending.request().hitlId().equals(request.hitlId())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "hitlId does not match pending request");
         }
 
         HitlResponse response = request.response();
@@ -114,19 +111,18 @@ public class SandboxHitlController {
                 teamId,
                 new HitlResolution(
                         request.executionId(),
-                        request.hitlId(),
+                        request.actionId(),
                         kind,
                         response,
                         request.optionId(),
                         request.content(),
-                        userId,
-                        resolvingUser.getDisplayName())));
+                        HitlResolver.user(userId, resolvingUser.getDisplayName()))));
 
         dispatchFeedbackSteering(request, execution);
 
         logger.info(
                 "Resolved HITL '{}' (kind={}, response={}) for execution {} by user {}",
-                request.hitlId(),
+                request.actionId(),
                 kind,
                 response,
                 request.executionId(),

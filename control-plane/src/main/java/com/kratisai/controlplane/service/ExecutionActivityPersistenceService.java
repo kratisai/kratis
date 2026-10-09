@@ -130,7 +130,7 @@ public class ExecutionActivityPersistenceService {
 
     private void applyApproval(UUID teamId, HitlRequestSnapshot request, ActivityHitl hitl, ActivityStatus status) {
         SandboxExecutionActivity row = repository
-                .findByExecutionIdAndActionId(request.executionId(), request.hitlId())
+                .findByExecutionIdAndActionId(request.executionId(), request.actionId())
                 .map(existing -> {
                     ActivityDetail detail = detailOf(existing);
                     existing.setStatus(status);
@@ -141,13 +141,13 @@ public class ExecutionActivityPersistenceService {
                 .orElseGet(() -> {
                     logger.warn(
                             "Approval {} has no activity row for execution {}; inserting placeholder",
-                            request.hitlId(),
+                            request.actionId(),
                             request.executionId());
                     return insert(
                             request.executionId(),
                             placeholderType(request.toolKind()),
                             request.command() != null ? request.command() : request.message(),
-                            request.hitlId(),
+                            request.actionId(),
                             status,
                             placeholderDetail(request).withHitl(hitl));
                 });
@@ -160,7 +160,7 @@ public class ExecutionActivityPersistenceService {
                 request.executionId(),
                 ActivityType.ELICITATION,
                 request.message(),
-                request.hitlId(),
+                request.actionId(),
                 ActivityStatus.PENDING,
                 emptyDetail().withHitl(ActivityHitl.from(request, HitlState.AWAITING_HUMAN)));
         publishActivity(event.teamId(), row);
@@ -178,7 +178,7 @@ public class ExecutionActivityPersistenceService {
     private void onApprovalResolved(SandboxExecutionHitlResolvedEvent event) {
         HitlResolution resolution = event.result();
         repository
-                .findByExecutionIdAndActionId(resolution.executionId(), resolution.hitlId())
+                .findByExecutionIdAndActionId(resolution.executionId(), resolution.actionId())
                 .ifPresent(activity -> {
                     boolean approved = resolution.response() == HitlResponse.APPROVED;
                     activity.setStatus(approved ? ActivityStatus.IN_PROGRESS : ActivityStatus.FAILED);
@@ -194,7 +194,7 @@ public class ExecutionActivityPersistenceService {
     private void onQuestionResolved(SandboxExecutionHitlResolvedEvent event) {
         HitlResolution resolution = event.result();
         repository
-                .findFirstByExecutionIdAndActionIdOrderBySequenceDesc(resolution.executionId(), resolution.hitlId())
+                .findFirstByExecutionIdAndActionIdOrderBySequenceDesc(resolution.executionId(), resolution.actionId())
                 .ifPresent(activity -> {
                     ActivityDetail detail = detailOf(activity);
                     ActivityHitl answered = detail != null && detail.hitl() != null
@@ -220,15 +220,15 @@ public class ExecutionActivityPersistenceService {
 
     private static ActivityDetail placeholderDetail(HitlRequestSnapshot request) {
         ActivityKind kind = ActivityKind.fromWireValue(request.toolKind()).orElse(null);
-        ActivityLocation location = request.diff() != null && request.diff().path() != null
-                ? new ActivityLocation(request.diff().path(), null)
-                : null;
-        List<ActivityLocation> locations = location != null ? List.of(location) : null;
+        List<ActivityLocation> locations = request.locations();
+        if (locations == null && request.diff() != null && request.diff().path() != null) {
+            locations = List.of(new ActivityLocation(request.diff().path(), null));
+        }
         return new ActivityDetail(
                 kind,
                 request.title(),
                 locations,
-                null,
+                request.input(),
                 null,
                 request.diff(),
                 null,
