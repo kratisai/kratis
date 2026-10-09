@@ -9,7 +9,6 @@ import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
-import com.kratisai.controlplane.repository.UserRepository;
 import com.kratisai.controlplane.service.JwtService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,9 +22,6 @@ import org.springframework.web.context.WebApplicationContext;
 class UsageLogControllerTest {
 
     private MockMvc mockMvc;
-
-    @Autowired
-    private UserRepository userRepository;
 
     @Autowired
     private TestDataFactory testDataFactory;
@@ -72,7 +68,10 @@ class UsageLogControllerTest {
                         .header("Authorization", "Bearer " + authToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").exists())
-                .andExpect(jsonPath("$.totalElements").exists());
+                .andExpect(jsonPath("$.number").value(0))
+                .andExpect(jsonPath("$.size").value(10))
+                .andExpect(jsonPath("$.totalElements").exists())
+                .andExpect(jsonPath("$.totalPages").exists());
     }
 
     @Test
