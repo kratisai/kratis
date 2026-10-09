@@ -1,7 +1,7 @@
 package com.kratisai.controlplane.service;
 
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import java.util.Map;
@@ -54,7 +54,7 @@ public class PendingHitlTimeoutService {
 
             eventPublisher.publishEvent(new SandboxExecutionHitlResolvedEvent(
                     request.teamId(),
-                    new ExecutionHitlResolvedResult(
+                    new HitlResolution(
                             executionId,
                             request.request().hitlId(),
                             request.request().kind(),

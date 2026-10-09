@@ -11,12 +11,14 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.HarnessCatalogFixture;
 import com.kratisai.controlplane.api.wsdto.ActivityDetail;
+import com.kratisai.controlplane.api.wsdto.ActivityHitl;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
+import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
+import com.kratisai.controlplane.api.wsdto.HitlState;
 import com.kratisai.controlplane.api.wsdto.PlanEntry;
 import com.kratisai.controlplane.api.wsdto.PlanEntryPriority;
 import com.kratisai.controlplane.api.wsdto.PlanEntryStatus;
@@ -454,7 +456,7 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         executionId,
                         "tool-call-42",
                         HitlKind.APPROVAL,
@@ -478,7 +480,7 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         executionId,
                         "tool-call-42",
                         HitlKind.APPROVAL,
@@ -499,7 +501,7 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         executionId,
                         "tool-call-42",
                         HitlKind.APPROVAL,
@@ -523,7 +525,7 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
                 UUID.randomUUID(),
-                new ExecutionHitlRequiredResult(
+                new HitlRequestSnapshot(
                         executionId,
                         "tool-call-42",
                         HitlKind.APPROVAL,
@@ -551,7 +553,7 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
                 UUID.randomUUID(),
-                new ExecutionHitlRequiredResult(
+                new HitlRequestSnapshot(
                         executionId,
                         "tool-call-42",
                         HitlKind.APPROVAL,
@@ -579,7 +581,7 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
                 UUID.randomUUID(),
-                new ExecutionHitlRequiredResult(
+                new HitlRequestSnapshot(
                         executionId,
                         "tool-call-42",
                         HitlKind.APPROVAL,
@@ -605,7 +607,7 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
                 UUID.randomUUID(),
-                new ExecutionHitlRequiredResult(
+                new HitlRequestSnapshot(
                         executionId,
                         "el-1",
                         HitlKind.QUESTION,
@@ -635,7 +637,7 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         executionId,
                         "el-1",
                         HitlKind.QUESTION,
@@ -659,7 +661,7 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         executionId, "el-1", HitlKind.QUESTION, HitlResponse.DECLINED, null, null, null, "Alice")));
 
         assertThat(pending.getStatus()).isEqualTo(ActivityStatus.FAILED);
@@ -674,7 +676,7 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         executionId, "el-1", HitlKind.QUESTION, HitlResponse.ANSWERED, null, null, null, "Alice")));
 
         verify(repository, never()).save(any());
@@ -688,6 +690,194 @@ class ExecutionActivityPersistenceServiceTest {
         when(repository.findByExecutionIdOrderBySequenceAsc(executionId)).thenReturn(rows);
 
         assertThat(service.getActivities(executionId)).isSameAs(rows);
+    }
+
+    private static HitlRequestSnapshot commandRequest(UUID executionId) {
+        return new HitlRequestSnapshot(
+                executionId,
+                "tool-call-42",
+                HitlKind.APPROVAL,
+                "Approve rm -rf /",
+                "rm -rf /",
+                null,
+                "Remove",
+                "execute",
+                null,
+                null,
+                null);
+    }
+
+    private SandboxExecutionActivityEvent publishedActivity() {
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        return (SandboxExecutionActivityEvent) captor.getValue();
+    }
+
+    @Test
+    void onHitlRequired_approval_writesAwaitingHumanAndBroadcastsTheRow() {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        SandboxExecutionActivity existing =
+                row(executionId, 1, "tool-call-42", ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
+                .thenReturn(Optional.of(existing));
+
+        service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(teamId, commandRequest(executionId)));
+
+        SandboxExecutionActivityEvent event = publishedActivity();
+        assertThat(event.teamId()).isEqualTo(teamId);
+        assertThat(event.actionId()).isEqualTo("tool-call-42");
+        assertThat(event.status()).isEqualTo(ActivityStatus.PENDING);
+        assertThat(event.detail().hitl().state()).isEqualTo(HitlState.AWAITING_HUMAN);
+        assertThat(event.detail().hitl().response()).isNull();
+    }
+
+    @Test
+    void onHitlRequired_question_broadcastsAwaitingHumanElicitation() {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+
+        service.onHitlRequired(new SandboxExecutionHitlRequiredEvent(
+                teamId, new HitlRequestSnapshot(executionId, "el-1", HitlKind.QUESTION, "Pick a target")));
+
+        SandboxExecutionActivityEvent event = publishedActivity();
+        assertThat(event.activityType()).isEqualTo(ActivityType.ELICITATION);
+        assertThat(event.detail().hitl().state()).isEqualTo(HitlState.AWAITING_HUMAN);
+    }
+
+    @Test
+    void onHitlResolved_approval_broadcastsResolvedRowWithResolver() throws Exception {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        SandboxExecutionActivity pending =
+                row(executionId, 1, "tool-call-42", ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
+        pending.setDetail(objectMapper.writeValueAsString(emptyActivityDetail()
+                .withHitl(ActivityHitl.from(commandRequest(executionId), HitlState.AWAITING_HUMAN))));
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
+                .thenReturn(Optional.of(pending));
+
+        service.onHitlResolved(new SandboxExecutionHitlResolvedEvent(
+                teamId,
+                new HitlResolution(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        HitlResponse.APPROVED,
+                        "allow-once",
+                        null,
+                        null,
+                        "Alice")));
+
+        SandboxExecutionActivityEvent event = publishedActivity();
+        assertThat(event.status()).isEqualTo(ActivityStatus.IN_PROGRESS);
+        assertThat(event.detail().hitl().state()).isEqualTo(HitlState.RESOLVED);
+        assertThat(event.detail().hitl().response()).isEqualTo(HitlResponse.APPROVED);
+        assertThat(event.detail().hitl().resolvedBy()).isEqualTo("Alice");
+    }
+
+    @Test
+    void recordAutoResolved_approved_publishesOnlyAResolvedRow() {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        SandboxExecutionActivity existing =
+                row(executionId, 1, "tool-call-42", ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
+                .thenReturn(Optional.of(existing));
+
+        service.recordAutoResolved(
+                teamId,
+                commandRequest(executionId),
+                new HitlResolution(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        HitlResponse.APPROVED,
+                        "allow",
+                        null,
+                        null,
+                        "Remembered rule"));
+
+        SandboxExecutionActivityEvent event = publishedActivity();
+        assertThat(event.status()).isEqualTo(ActivityStatus.IN_PROGRESS);
+        assertThat(event.detail().hitl().state()).isEqualTo(HitlState.RESOLVED);
+        assertThat(event.detail().hitl().resolvedBy()).isEqualTo("Remembered rule");
+        assertThat(existing.getDetail()).doesNotContain("awaiting_human");
+    }
+
+    @Test
+    void recordAutoResolved_declinedWithoutRow_insertsFailedPlaceholder() {
+        UUID executionId = UUID.randomUUID();
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
+                .thenReturn(Optional.empty());
+        when(repository.nextSequence(executionId)).thenReturn(4L);
+
+        service.recordAutoResolved(
+                UUID.randomUUID(),
+                commandRequest(executionId),
+                new HitlResolution(
+                        executionId,
+                        "tool-call-42",
+                        HitlKind.APPROVAL,
+                        HitlResponse.DECLINED,
+                        null,
+                        null,
+                        null,
+                        "Remembered rule"));
+
+        assertInsertedRow(
+                capturedSave(),
+                executionId,
+                4,
+                "tool-call-42",
+                ActivityType.COMMAND,
+                ActivityStatus.FAILED,
+                "rm -rf /");
+        assertThat(publishedActivity().detail().hitl().response()).isEqualTo(HitlResponse.DECLINED);
+    }
+
+    @Test
+    void recordActivity_ignoresApprovalStateSuppliedBySidecar() {
+        UUID executionId = UUID.randomUUID();
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
+                .thenReturn(Optional.empty());
+        when(repository.nextSequence(executionId)).thenReturn(1L);
+
+        service.recordActivity(
+                executionId,
+                ActivityType.COMMAND,
+                "rm -rf /",
+                "tool-call-42",
+                ActivityStatus.PENDING,
+                emptyActivityDetail()
+                        .withHitl(ActivityHitl.from(commandRequest(executionId), HitlState.AWAITING_HUMAN)));
+
+        assertThat(capturedSave().getDetail()).doesNotContain("hitl").doesNotContain("awaiting_human");
+    }
+
+    @Test
+    void recordActivity_mergeKeepsControlPlaneApprovalState() throws Exception {
+        UUID executionId = UUID.randomUUID();
+        SandboxExecutionActivity existing =
+                row(executionId, 1, "tool-call-42", ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
+        existing.setDetail(objectMapper.writeValueAsString(emptyActivityDetail()
+                .withHitl(ActivityHitl.from(commandRequest(executionId), HitlState.AWAITING_HUMAN))));
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
+                .thenReturn(Optional.of(existing));
+
+        service.recordActivity(
+                executionId,
+                ActivityType.COMMAND,
+                "rm -rf /",
+                "tool-call-42",
+                ActivityStatus.IN_PROGRESS,
+                emptyActivityDetail());
+
+        assertThat(existing.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
+        assertThat(existing.getDetail()).contains("awaiting_human");
+    }
+
+    private static ActivityDetail emptyActivityDetail() {
+        return new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     @Test

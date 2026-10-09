@@ -1,6 +1,6 @@
 {
   "jsonrpc": "2.0",
-  "method": "env.hitl_request",
+  "method": "env.hitl_activity",
   "params": {
     "hitlId": "tool-call-1",
     "message": "Remove build directory",

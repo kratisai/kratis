@@ -2,8 +2,8 @@ package com.kratisai.controlplane.api.rest;
 
 import com.kratisai.controlplane.api.restdto.CreateHitlRuleRequest;
 import com.kratisai.controlplane.api.restdto.ResolveHitlRequest;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.config.SecurityUtil;
@@ -112,7 +112,7 @@ public class SandboxHitlController {
 
         eventPublisher.publishEvent(new SandboxExecutionHitlResolvedEvent(
                 teamId,
-                new ExecutionHitlResolvedResult(
+                new HitlResolution(
                         request.executionId(),
                         request.hitlId(),
                         kind,

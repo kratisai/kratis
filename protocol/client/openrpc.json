@@ -249,20 +249,6 @@
       }
     },
     {
-      "name": "execution_hitl_required",
-      "summary": "HITL request (approval or question) for an execution",
-      "schema": {
-        "$ref": "./schemas/results/execution_hitl_required.schema.json"
-      }
-    },
-    {
-      "name": "execution_hitl_resolved",
-      "summary": "HITL resolution (approved/answered/declined/cancelled) for an execution",
-      "schema": {
-        "$ref": "./schemas/results/execution_hitl_resolved.schema.json"
-      }
-    },
-    {
       "name": "execution_output",
       "summary": "Streamed stdout/stderr line from an execution",
       "schema": {

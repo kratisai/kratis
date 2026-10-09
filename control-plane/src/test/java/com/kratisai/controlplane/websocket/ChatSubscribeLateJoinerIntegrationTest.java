@@ -16,9 +16,7 @@ import com.kratisai.controlplane.service.CanvasService;
 import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
-import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
 import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
-import com.kratisai.controlplane.service.PendingHitlRegistry;
 import com.kratisai.controlplane.websocket.client.ClientChatSubscribeRpcHandler;
 import java.util.ArrayList;
 import java.util.List;
@@ -51,7 +49,6 @@ class ChatSubscribeLateJoinerIntegrationTest {
         CanvasService canvasService = mock(CanvasService.class);
         chatFluxRegistry = new ChatFluxRegistry();
         SandboxExecutionRepository executionRepository = mock(SandboxExecutionRepository.class);
-        PendingHitlRegistry pendingHitlRegistry = new PendingHitlRegistry(mock(EnvironmentSessionRegistry.class));
         ExecutionActivityPersistenceService activityPersistenceService =
                 mock(ExecutionActivityPersistenceService.class);
 
@@ -63,7 +60,6 @@ class ChatSubscribeLateJoinerIntegrationTest {
                 canvasService,
                 chatFluxRegistry,
                 executionRepository,
-                pendingHitlRegistry,
                 activityPersistenceService);
 
         teamId = UUID.randomUUID();

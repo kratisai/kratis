@@ -8,9 +8,9 @@ import com.kratisai.controlplane.api.restdto.CreateSandboxExecutionRequest;
 import com.kratisai.controlplane.api.restdto.SandboxExecutionDto;
 import com.kratisai.controlplane.api.restdto.SteerCommentDto;
 import com.kratisai.controlplane.api.restdto.SteerExecutionRequest;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlResolvedResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
+import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.PromptStatus;
@@ -678,7 +678,7 @@ public class SandboxExecutionService {
         transactionTemplate.executeWithoutResult(
                 status -> eventPublisher.publishEvent(new SandboxExecutionHitlResolvedEvent(
                         teamId,
-                        new ExecutionHitlResolvedResult(
+                        new HitlResolution(
                                 execution.getId(),
                                 pendingHitl.request().hitlId(),
                                 pendingHitl.request().kind(),

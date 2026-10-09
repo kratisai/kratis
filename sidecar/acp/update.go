@@ -419,7 +419,6 @@ func (h *Handler) buildToolDetail(info *ToolCallInfo) ActivityDetail {
 		ExitCode:  info.ExitCode,
 		Truncated: info.Truncated || omitted > 0,
 		Meta:      info.Meta,
-		Hitl:      info.Hitl,
 	}
 	for _, loc := range info.Locations {
 		al := ActivityLocation{Path: loc.Path}

@@ -207,23 +207,13 @@ class ExecutionReplayOnChatSubscribeIntegrationTest {
                                     ActivityStatus.PENDING.getValue(),
                                     "actionId",
                                     "tool-call-100",
-                                    "detail",
-                                    Map.of(
-                                            "hitl",
-                                            Map.of(
-                                                    "hitlId",
-                                                    "tool-call-100",
-                                                    "kind",
-                                                    "approval",
-                                                    "message",
-                                                    "Approve rm -rf /")),
                                     "executionId",
                                     executionId.toString())),
                             null);
                     session.sendMessage(new TextMessage(objectMapper.writeValueAsString(toolActivity)));
 
                     JsonRpcInboundRequest permRequest = new JsonRpcInboundRequest(
-                            EnvironmentRpcPayload.HitlRequest.METHOD,
+                            EnvironmentRpcPayload.HitlActivity.METHOD,
                             objectMapper.valueToTree(Map.of(
                                     "hitlId", "tool-call-100",
                                     "message", "Approve rm -rf /",
@@ -244,8 +234,12 @@ class ExecutionReplayOnChatSubscribeIntegrationTest {
         Awaitility.await()
                 .atMost(Duration.ofSeconds(10))
                 .pollInterval(Duration.ofMillis(100))
-                .untilAsserted(() -> assertThat(activityRepository.findByExecutionIdOrderBySequenceAsc(executionId))
-                        .hasSize(2));
+                .untilAsserted(() -> {
+                    List<SandboxExecutionActivity> rows =
+                            activityRepository.findByExecutionIdOrderBySequenceAsc(executionId);
+                    assertThat(rows).hasSize(2);
+                    assertThat(rows.get(1).getDetail()).contains("awaiting_human");
+                });
 
         List<SandboxExecutionActivity> activities = activityRepository.findByExecutionIdOrderBySequenceAsc(executionId);
         assertThat(activities.getFirst().getActivityType()).isEqualTo(ActivityType.RESEARCH);
@@ -259,7 +253,7 @@ class ExecutionReplayOnChatSubscribeIntegrationTest {
         ClientWebSocketFixtureWithChatSubscribe lateJoinerFixture =
                 new ClientWebSocketFixtureWithChatSubscribe(userAuthToken, team.getId(), chat.getId());
         lateJoinerFixture.expectTrigger("execution_activity", 1);
-        lateJoinerFixture.expectTrigger("execution_hitl_required", 1);
+        lateJoinerFixture.expectTrigger("awaiting_human", 1);
 
         WebSocketSession lateJoinerSession = client.execute(lateJoinerFixture, "ws://localhost:" + port + "/ws/client")
                 .get(5, TimeUnit.SECONDS);
@@ -272,21 +266,18 @@ class ExecutionReplayOnChatSubscribeIntegrationTest {
         assertThat(lateJoinerFixture.hasReceivedMessageContaining("execution_activity", executionId.toString()))
                 .as("Replayed activity should reference the execution")
                 .isTrue();
-
-        boolean receivedPermission = lateJoinerFixture.awaitTrigger("execution_hitl_required", 5, TimeUnit.SECONDS);
-        assertThat(receivedPermission)
-                .as("Late joiner should receive replayed execution_hitl_required")
+        assertThat(lateJoinerFixture.hasReceivedMessageContaining("execution_activity", "awaiting_human"))
+                .as("Replayed activity should contain awaiting_human")
                 .isTrue();
-        assertThat(lateJoinerFixture.hasReceivedMessageContaining("execution_hitl_required", "rm -rf /"))
-                .as("Replayed permission should contain the command")
+        assertThat(lateJoinerFixture.hasReceivedMessageContaining("execution_activity", "rm -rf /"))
+                .as("Replayed activity should contain the command")
                 .isTrue();
 
         // 6. A second fresh client (restart-equivalent: no in-memory state) must receive the same
         //    replay from the database
         ClientWebSocketFixtureWithChatSubscribe restartClientFixture =
                 new ClientWebSocketFixtureWithChatSubscribe(userAuthToken, team.getId(), chat.getId());
-        restartClientFixture.expectTrigger("execution_activity", 1);
-        restartClientFixture.expectTrigger("execution_hitl_required", 1);
+        restartClientFixture.expectTrigger("execution_activity", 2);
 
         WebSocketSession restartClientSession = client.execute(
                         restartClientFixture, "ws://localhost:" + port + "/ws/client")
@@ -295,8 +286,8 @@ class ExecutionReplayOnChatSubscribeIntegrationTest {
         assertThat(restartClientFixture.awaitTrigger("execution_activity", 5, TimeUnit.SECONDS))
                 .as("Fresh client should receive the same replayed activity from the database")
                 .isTrue();
-        assertThat(restartClientFixture.awaitTrigger("execution_hitl_required", 5, TimeUnit.SECONDS))
-                .as("Fresh client should receive the replayed pending permission")
+        assertThat(restartClientFixture.hasReceivedMessageContaining("execution_activity", "awaiting_human"))
+                .as("Fresh client should receive the replayed pending permission in activity")
                 .isTrue();
         assertThat(restartClientFixture.hasReceivedMessageContaining("execution_activity", executionId.toString()))
                 .as("Replayed activity should reference the execution")

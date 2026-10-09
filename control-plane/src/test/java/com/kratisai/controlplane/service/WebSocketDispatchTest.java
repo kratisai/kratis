@@ -213,7 +213,7 @@ class WebSocketDispatchTest {
     void streamEnvironmentResponses_sendsPayload() throws Exception {
         WebSocketSession envSession = mock(WebSocketSession.class);
         dispatch.streamEnvironmentResponses(
-                envSession, 8, Flux.just(EnvironmentResponsePayload.HitlResult.approved("ok")));
+                envSession, 8, Flux.just(EnvironmentResponsePayload.HitlActivityResult.approved("ok")));
 
         verify(envSession).sendMessage(any(TextMessage.class));
     }

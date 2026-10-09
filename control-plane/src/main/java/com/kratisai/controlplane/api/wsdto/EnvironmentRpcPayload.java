@@ -141,7 +141,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
     }
 
     /** Ask the control plane for a human decision: authorize a command or answer a structured question. */
-    record HitlRequest(
+    record HitlActivity(
             @JsonProperty("hitlId") String hitlId,
             @JsonProperty("message") String message,
             @JsonProperty("kind") HitlKind kind,
@@ -153,14 +153,14 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
             @JsonProperty("diff") ActivityDiff diff,
             @JsonProperty("form") Map<String, Object> form)
             implements InboundRequestPayload {
-        public static final String METHOD = "env.hitl_request";
+        public static final String METHOD = "env.hitl_activity";
 
         @Override
         public String method() {
             return METHOD;
         }
 
-        public HitlRequest(
+        public HitlActivity(
                 String hitlId,
                 String message,
                 HitlKind kind,

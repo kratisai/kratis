@@ -98,33 +98,6 @@ public class ClientRealtimeEventListeners {
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void onSandboxExecutionHitlRequiredEvent(SandboxExecutionHitlRequiredEvent event) {
-        try {
-            dispatch.broadcastNotificationToTeam(event.teamId(), event.result());
-        } catch (Exception e) {
-            logger.error(
-                    "Failed to publish HITL required event for execution {} (hitlId='{}', kind={})",
-                    event.result().executionId(),
-                    event.result().hitlId(),
-                    event.result().kind(),
-                    e);
-        }
-    }
-
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void onSandboxExecutionHitlResolvedEvent(SandboxExecutionHitlResolvedEvent event) {
-        try {
-            dispatch.broadcastNotificationToTeam(event.teamId(), event.result());
-        } catch (Exception e) {
-            logger.error(
-                    "Failed to publish HITL resolved event for execution {} (hitlId='{}')",
-                    event.result().executionId(),
-                    event.result().hitlId(),
-                    e);
-        }
-    }
-
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onSandboxExecutionCompleteEvent(SandboxExecutionCompleteEvent event) {
         try {
             dispatch.broadcastNotificationToTeam(

@@ -31,6 +31,7 @@ const permissionDiffSchema = z
 
 const hitlKind = z.enum(['approval', 'question'])
 const hitlResponse = z.enum(['approved', 'answered', 'declined', 'cancelled'])
+const hitlState = z.enum(['awaiting_human', 'resolved'])
 
 const planEntryPriority = z.enum(['high', 'medium', 'low'])
 const planEntryStatus = z.enum(['pending', 'in_progress', 'completed'])
@@ -55,7 +56,10 @@ const hitlSchema = z
     message: z.string(),
     optionId: z.string().optional(),
     options: z.array(permissionOption).optional(),
+    resolvedBy: z.string().optional(),
+    resolvedByUserId: uuid.optional(),
     response: hitlResponse.optional(),
+    state: hitlState.optional(),
     title: z.string().optional(),
     toolKind: z.string().optional(),
   })
@@ -198,35 +202,6 @@ export const CLIENT_RESULTS = {
       executionId: uuid,
       teamId: uuid,
       type: z.literal('execution_diff_changed'),
-    })
-    .strict(),
-  execution_hitl_required: z
-    .object({
-      command: z.string().optional(),
-      commandSegments: z.array(commandSegment).optional(),
-      diff: permissionDiffSchema,
-      executionId: uuid,
-      form: z.record(z.string(), z.unknown()).optional(),
-      hitlId: z.string(),
-      kind: hitlKind,
-      message: z.string(),
-      options: z.array(permissionOption).optional(),
-      title: z.string().optional(),
-      toolKind: z.string().optional(),
-      type: z.literal('execution_hitl_required'),
-    })
-    .strict(),
-  execution_hitl_resolved: z
-    .object({
-      content: z.record(z.string(), z.unknown()).optional(),
-      executionId: uuid,
-      hitlId: z.string(),
-      kind: hitlKind,
-      optionId: z.string().nullable().optional(),
-      resolvedByDisplayName: z.string().nullable().optional(),
-      resolvedByUserId: uuid.nullable().optional(),
-      response: hitlResponse,
-      type: z.literal('execution_hitl_resolved'),
     })
     .strict(),
   execution_logs: z

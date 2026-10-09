@@ -4,18 +4,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.wsdto.ApprovalOptionKind;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.CommandSegment;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload;
-import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlResult;
+import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlActivityResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
+import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
@@ -31,6 +33,7 @@ import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import com.kratisai.controlplane.repository.HitlRuleRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
+import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import com.kratisai.controlplane.service.PendingHitlRegistry;
 import java.util.List;
 import java.util.Map;
@@ -45,7 +48,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
-class EnvironmentHitlRequestRpcHandlerTest {
+class EnvironmentHitlActivityRpcHandlerTest {
 
     @Mock
     private EnvironmentSessionRegistry sessionRegistry;
@@ -65,8 +68,11 @@ class EnvironmentHitlRequestRpcHandlerTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private ExecutionActivityPersistenceService activityPersistenceService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private EnvironmentHitlRequestRpcHandler handler;
+    private EnvironmentHitlActivityRpcHandler handler;
 
     private final UUID envId = UUID.randomUUID();
     private final UUID teamId = UUID.randomUUID();
@@ -75,14 +81,15 @@ class EnvironmentHitlRequestRpcHandlerTest {
     @BeforeEach
     void setUp() {
         EnvironmentExecutionGuard executionGuard = new EnvironmentExecutionGuard(sessionRegistry, executionRepository);
-        handler = new EnvironmentHitlRequestRpcHandler(
+        handler = new EnvironmentHitlActivityRpcHandler(
                 sessionRegistry,
                 ruleRepository,
                 environmentRepository,
                 executionRepository,
                 executionGuard,
                 pendingHitlRegistry,
-                eventPublisher);
+                eventPublisher,
+                activityPersistenceService);
     }
 
     private ExecutionEnvironment createEnvironment() {
@@ -108,12 +115,21 @@ class EnvironmentHitlRequestRpcHandlerTest {
         when(environmentRepository.findById(envId)).thenReturn(Optional.of(createEnvironment()));
     }
 
-    private EnvironmentRpcPayload.HitlRequest approvalParams(String command, String hitlId) {
-        return approvalParams(command, hitlId, UUID.randomUUID());
+    /** Rule-resolved approvals are recorded on the execution's activity, so the execution must exist. */
+    private UUID stubbedExecutionId() {
+        UUID executionId = UUID.randomUUID();
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        execution.setId(executionId);
+        lenient().when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+        return executionId;
     }
 
-    private EnvironmentRpcPayload.HitlRequest approvalParams(String command, String hitlId, UUID executionId) {
-        return new EnvironmentRpcPayload.HitlRequest(
+    private EnvironmentRpcPayload.HitlActivity approvalParams(String command, String hitlId) {
+        return approvalParams(command, hitlId, stubbedExecutionId());
+    }
+
+    private EnvironmentRpcPayload.HitlActivity approvalParams(String command, String hitlId, UUID executionId) {
+        return new EnvironmentRpcPayload.HitlActivity(
                 hitlId,
                 "Approve " + command,
                 HitlKind.APPROVAL,
@@ -145,9 +161,9 @@ class EnvironmentHitlRequestRpcHandlerTest {
     void handle_withUnmappedSession_returnsRegistrationError() {
         when(sessionRegistry.getEnvironmentId(sessionId)).thenReturn(Optional.empty());
 
-        EnvironmentRpcPayload.HitlRequest params = approvalParams("ls", "tool-call-1");
+        EnvironmentRpcPayload.HitlActivity params = approvalParams("ls", "tool-call-1");
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         assertThatThrownBy(() -> handler.handle(sessionId, request, params))
                 .isInstanceOf(RpcErrorException.class)
@@ -164,18 +180,23 @@ class EnvironmentHitlRequestRpcHandlerTest {
         rule.setRuleType(HitlRuleType.PREFIX_WILD);
         when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of(rule));
 
-        EnvironmentRpcPayload.HitlRequest params = approvalParams("echo hello", "tool-call-1");
+        EnvironmentRpcPayload.HitlActivity params = approvalParams("echo hello", "tool-call-1");
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
 
-        assertThat(response).isInstanceOf(HitlResult.class);
-        assertThat(((HitlResult) response).response()).isEqualTo(HitlResponse.APPROVED);
-        verify(pendingHitlRegistry, never())
-                .register(any(), any(ExecutionHitlRequiredResult.class), any(), any(), any());
+        assertThat(response).isInstanceOf(HitlActivityResult.class);
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.APPROVED);
+        verify(pendingHitlRegistry, never()).register(any(), any(HitlRequestSnapshot.class), any(), any(), any());
         verify(eventPublisher, never()).publishEvent(any());
+
+        ArgumentCaptor<HitlResolution> resolution = ArgumentCaptor.forClass(HitlResolution.class);
+        verify(activityPersistenceService)
+                .recordAutoResolved(eq(teamId), any(HitlRequestSnapshot.class), resolution.capture());
+        assertThat(resolution.getValue().response()).isEqualTo(HitlResponse.APPROVED);
+        assertThat(resolution.getValue().optionId()).isEqualTo("allow");
     }
 
     @Test
@@ -188,18 +209,22 @@ class EnvironmentHitlRequestRpcHandlerTest {
         denyRule.setAction(HitlRuleAction.DENY);
         when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of(denyRule));
 
-        EnvironmentRpcPayload.HitlRequest params = approvalParams("rm -rf /tmp/test", "tool-call-1");
+        EnvironmentRpcPayload.HitlActivity params = approvalParams("rm -rf /tmp/test", "tool-call-1");
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
 
-        assertThat(response).isInstanceOf(HitlResult.class);
-        assertThat(((HitlResult) response).response()).isEqualTo(HitlResponse.DECLINED);
-        verify(pendingHitlRegistry, never())
-                .register(any(), any(ExecutionHitlRequiredResult.class), any(), any(), any());
+        assertThat(response).isInstanceOf(HitlActivityResult.class);
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.DECLINED);
+        verify(pendingHitlRegistry, never()).register(any(), any(HitlRequestSnapshot.class), any(), any(), any());
         verify(eventPublisher, never()).publishEvent(any());
+
+        ArgumentCaptor<HitlResolution> resolution = ArgumentCaptor.forClass(HitlResolution.class);
+        verify(activityPersistenceService)
+                .recordAutoResolved(eq(teamId), any(HitlRequestSnapshot.class), resolution.capture());
+        assertThat(resolution.getValue().response()).isEqualTo(HitlResponse.DECLINED);
     }
 
     @Test
@@ -218,17 +243,16 @@ class EnvironmentHitlRequestRpcHandlerTest {
 
         when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of(allowRule, denyRule));
 
-        EnvironmentRpcPayload.HitlRequest params = approvalParams("git push --force origin main", "tool-call-1");
+        EnvironmentRpcPayload.HitlActivity params = approvalParams("git push --force origin main", "tool-call-1");
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
 
-        assertThat(response).isInstanceOf(HitlResult.class);
-        assertThat(((HitlResult) response).response()).isEqualTo(HitlResponse.DECLINED);
-        verify(pendingHitlRegistry, never())
-                .register(any(), any(ExecutionHitlRequiredResult.class), any(), any(), any());
+        assertThat(response).isInstanceOf(HitlActivityResult.class);
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.DECLINED);
+        verify(pendingHitlRegistry, never()).register(any(), any(HitlRequestSnapshot.class), any(), any(), any());
         verify(eventPublisher, never()).publishEvent(any());
     }
 
@@ -241,7 +265,7 @@ class EnvironmentHitlRequestRpcHandlerTest {
         rule.setRuleType(HitlRuleType.PREFIX_WILD);
         when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of(rule));
 
-        EnvironmentRpcPayload.HitlRequest params = new EnvironmentRpcPayload.HitlRequest(
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
                 "tool-call-1",
                 "Remove",
                 HitlKind.APPROVAL,
@@ -253,13 +277,13 @@ class EnvironmentHitlRequestRpcHandlerTest {
                 null,
                 null);
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
 
-        assertThat(response).isInstanceOf(HitlResult.class);
-        assertThat(((HitlResult) response).response()).isEqualTo(HitlResponse.CANCELLED);
+        assertThat(response).isInstanceOf(HitlActivityResult.class);
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.CANCELLED);
     }
 
     @Test
@@ -270,7 +294,7 @@ class EnvironmentHitlRequestRpcHandlerTest {
         SandboxExecution execution = createExecutionInEnvironment(envId);
         when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
-        EnvironmentRpcPayload.HitlRequest params = new EnvironmentRpcPayload.HitlRequest(
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
                 "tool-call-42",
                 "Approve rm -rf /",
                 HitlKind.APPROVAL,
@@ -282,7 +306,7 @@ class EnvironmentHitlRequestRpcHandlerTest {
                 null,
                 null);
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
@@ -294,7 +318,7 @@ class EnvironmentHitlRequestRpcHandlerTest {
         verify(pendingHitlRegistry)
                 .register(
                         eq(execution.getId()),
-                        eq(new ExecutionHitlRequiredResult(
+                        eq(new HitlRequestSnapshot(
                                 execution.getId(),
                                 "tool-call-42",
                                 HitlKind.APPROVAL,
@@ -325,7 +349,7 @@ class EnvironmentHitlRequestRpcHandlerTest {
         when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of());
 
         UUID nonexistentExecId = UUID.randomUUID();
-        EnvironmentRpcPayload.HitlRequest params = new EnvironmentRpcPayload.HitlRequest(
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
                 "tool-call-1",
                 "Approve ls",
                 HitlKind.APPROVAL,
@@ -337,23 +361,23 @@ class EnvironmentHitlRequestRpcHandlerTest {
                 null,
                 null);
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
 
-        assertThat(response).isInstanceOf(HitlResult.class);
-        assertThat(((HitlResult) response).response()).isEqualTo(HitlResponse.CANCELLED);
+        assertThat(response).isInstanceOf(HitlActivityResult.class);
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.CANCELLED);
     }
 
     @Test
     void handle_approvalBlankCommand_invalidParams() {
         stubSessionAndEnvironment();
 
-        EnvironmentRpcPayload.HitlRequest params = new EnvironmentRpcPayload.HitlRequest(
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
                 "tool-call-1", "q", HitlKind.APPROVAL, UUID.randomUUID().toString(), " ", null, null, null, null, null);
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         assertThatThrownBy(() -> handler.handle(sessionId, request, params))
                 .isInstanceOf(RpcErrorException.class)
@@ -368,7 +392,7 @@ class EnvironmentHitlRequestRpcHandlerTest {
         SandboxExecution execution = createExecutionInEnvironment(envId);
         when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
-        EnvironmentRpcPayload.HitlRequest params = new EnvironmentRpcPayload.HitlRequest(
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
                 "el-1",
                 "Choose a target",
                 HitlKind.QUESTION,
@@ -380,7 +404,7 @@ class EnvironmentHitlRequestRpcHandlerTest {
                 null,
                 Map.of("type", "object", "properties", Map.of("target", Map.of("type", "string"))));
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
@@ -389,7 +413,7 @@ class EnvironmentHitlRequestRpcHandlerTest {
         verify(pendingHitlRegistry)
                 .register(
                         eq(execution.getId()),
-                        eq(new ExecutionHitlRequiredResult(
+                        eq(new HitlRequestSnapshot(
                                 execution.getId(),
                                 "el-1",
                                 HitlKind.QUESTION,
@@ -418,7 +442,7 @@ class EnvironmentHitlRequestRpcHandlerTest {
         stubSessionAndEnvironment();
 
         UUID nonexistentExecId = UUID.randomUUID();
-        EnvironmentRpcPayload.HitlRequest params = new EnvironmentRpcPayload.HitlRequest(
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
                 "el-1",
                 "Choose a target",
                 HitlKind.QUESTION,
@@ -430,13 +454,13 @@ class EnvironmentHitlRequestRpcHandlerTest {
                 null,
                 Map.of("type", "object", "properties", Map.of("target", Map.of("type", "string"))));
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
 
-        assertThat(response).isInstanceOf(HitlResult.class);
-        assertThat(((HitlResult) response).response()).isEqualTo(HitlResponse.CANCELLED);
+        assertThat(response).isInstanceOf(HitlActivityResult.class);
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.CANCELLED);
     }
 
     @Test
@@ -447,7 +471,7 @@ class EnvironmentHitlRequestRpcHandlerTest {
         SandboxExecution execution = createExecutionInEnvironment(UUID.randomUUID());
         when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
-        EnvironmentRpcPayload.HitlRequest params = new EnvironmentRpcPayload.HitlRequest(
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
                 "tool-call-1",
                 "Approve ls",
                 HitlKind.APPROVAL,
@@ -459,14 +483,13 @@ class EnvironmentHitlRequestRpcHandlerTest {
                 null,
                 null);
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         assertThatThrownBy(() -> handler.handle(sessionId, request, params).blockLast())
                 .isInstanceOf(RpcErrorException.class)
                 .satisfies(
                         e -> assertThat(((RpcErrorException) e).error().code()).isEqualTo(-32002));
-        verify(pendingHitlRegistry, never())
-                .register(any(), any(ExecutionHitlRequiredResult.class), any(), any(), any());
+        verify(pendingHitlRegistry, never()).register(any(), any(HitlRequestSnapshot.class), any(), any(), any());
     }
 
     @Test
@@ -476,7 +499,7 @@ class EnvironmentHitlRequestRpcHandlerTest {
         SandboxExecution execution = createExecutionInEnvironment(UUID.randomUUID());
         when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
-        EnvironmentRpcPayload.HitlRequest params = new EnvironmentRpcPayload.HitlRequest(
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
                 "el-1",
                 "Choose a target",
                 HitlKind.QUESTION,
@@ -488,14 +511,13 @@ class EnvironmentHitlRequestRpcHandlerTest {
                 null,
                 Map.of("type", "object", "properties", Map.of("target", Map.of("type", "string"))));
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         assertThatThrownBy(() -> handler.handle(sessionId, request, params).blockLast())
                 .isInstanceOf(RpcErrorException.class)
                 .satisfies(
                         e -> assertThat(((RpcErrorException) e).error().code()).isEqualTo(-32002));
-        verify(pendingHitlRegistry, never())
-                .register(any(), any(ExecutionHitlRequiredResult.class), any(), any(), any());
+        verify(pendingHitlRegistry, never()).register(any(), any(HitlRequestSnapshot.class), any(), any(), any());
     }
 
     @Test
@@ -508,15 +530,15 @@ class EnvironmentHitlRequestRpcHandlerTest {
         rule.setAction(HitlRuleAction.ALLOW);
         when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of(rule));
 
-        EnvironmentRpcPayload.HitlRequest params = approvalParams("echo hello", "tool-call-1");
+        EnvironmentRpcPayload.HitlActivity params = approvalParams("echo hello", "tool-call-1");
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
 
-        assertThat(((HitlResult) response).response()).isEqualTo(HitlResponse.APPROVED);
-        assertThat(((HitlResult) response).optionId()).isEqualTo("allow");
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.APPROVED);
+        assertThat(((HitlActivityResult) response).optionId()).isEqualTo("allow");
     }
 
     @Test
@@ -533,16 +555,15 @@ class EnvironmentHitlRequestRpcHandlerTest {
         gitStatus.setAction(HitlRuleAction.ALLOW);
         when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of(echo, gitStatus));
 
-        EnvironmentRpcPayload.HitlRequest params = approvalParams("echo hi && git status", "tool-call-1");
+        EnvironmentRpcPayload.HitlActivity params = approvalParams("echo hi && git status", "tool-call-1");
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
 
-        assertThat(((HitlResult) response).response()).isEqualTo(HitlResponse.APPROVED);
-        verify(pendingHitlRegistry, never())
-                .register(any(), any(ExecutionHitlRequiredResult.class), any(), any(), any());
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.APPROVED);
+        verify(pendingHitlRegistry, never()).register(any(), any(HitlRequestSnapshot.class), any(), any(), any());
     }
 
     @Test
@@ -559,14 +580,14 @@ class EnvironmentHitlRequestRpcHandlerTest {
         denyRm.setAction(HitlRuleAction.DENY);
         when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of(echo, denyRm));
 
-        EnvironmentRpcPayload.HitlRequest params = approvalParams("echo hi && rm -rf /tmp/x", "tool-call-1");
+        EnvironmentRpcPayload.HitlActivity params = approvalParams("echo hi && rm -rf /tmp/x", "tool-call-1");
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
 
-        assertThat(((HitlResult) response).response()).isEqualTo(HitlResponse.DECLINED);
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.DECLINED);
     }
 
     @Test
@@ -574,16 +595,16 @@ class EnvironmentHitlRequestRpcHandlerTest {
         stubSessionAndEnvironment();
         when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of(toolKindRule("edit", HitlRuleAction.ALLOW)));
 
-        EnvironmentRpcPayload.HitlRequest params =
-                editParams("/kratis/workspace/foo.txt", "tool-call-1", UUID.randomUUID());
+        EnvironmentRpcPayload.HitlActivity params =
+                editParams("/kratis/workspace/foo.txt", "tool-call-1", stubbedExecutionId());
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
 
-        assertThat(((HitlResult) response).response()).isEqualTo(HitlResponse.APPROVED);
-        assertThat(((HitlResult) response).optionId()).isEqualTo("allow");
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.APPROVED);
+        assertThat(((HitlActivityResult) response).optionId()).isEqualTo("allow");
     }
 
     @Test
@@ -591,15 +612,15 @@ class EnvironmentHitlRequestRpcHandlerTest {
         stubSessionAndEnvironment();
         when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of(toolKindRule("edit", HitlRuleAction.DENY)));
 
-        EnvironmentRpcPayload.HitlRequest params =
-                editParams("/kratis/workspace/foo.txt", "tool-call-1", UUID.randomUUID());
+        EnvironmentRpcPayload.HitlActivity params =
+                editParams("/kratis/workspace/foo.txt", "tool-call-1", stubbedExecutionId());
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
 
-        assertThat(((HitlResult) response).response()).isEqualTo(HitlResponse.DECLINED);
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.DECLINED);
     }
 
     @Test
@@ -615,17 +636,17 @@ class EnvironmentHitlRequestRpcHandlerTest {
         SandboxExecution execution = createExecutionInEnvironment(envId);
         when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
-        EnvironmentRpcPayload.HitlRequest params =
+        EnvironmentRpcPayload.HitlActivity params =
                 editParams("/kratis/workspace/foo.txt", "tool-call-1", execution.getId());
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         EnvironmentResponsePayload response =
                 handler.handle(sessionId, request, params).blockLast();
 
         assertThat(response).isNull();
         verify(pendingHitlRegistry)
-                .register(eq(execution.getId()), any(ExecutionHitlRequiredResult.class), any(), any(), any());
+                .register(eq(execution.getId()), any(HitlRequestSnapshot.class), any(), any(), any());
     }
 
     @Test
@@ -636,18 +657,32 @@ class EnvironmentHitlRequestRpcHandlerTest {
         SandboxExecution execution = createExecutionInEnvironment(envId);
         when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
-        EnvironmentRpcPayload.HitlRequest params =
+        EnvironmentRpcPayload.HitlActivity params =
                 editParams("/kratis/workspace/foo.txt", "tool-call-1", execution.getId());
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         handler.handle(sessionId, request, params).blockLast();
 
-        ArgumentCaptor<ExecutionHitlRequiredResult> payloadCaptor =
-                ArgumentCaptor.forClass(ExecutionHitlRequiredResult.class);
+        ArgumentCaptor<HitlRequestSnapshot> payloadCaptor = ArgumentCaptor.forClass(HitlRequestSnapshot.class);
         verify(pendingHitlRegistry).register(eq(execution.getId()), payloadCaptor.capture(), any(), any(), any());
         assertThat(payloadCaptor.getValue().commandSegments())
                 .containsExactly(new CommandSegment("edit", "edit", HitlRuleType.TOOL_KIND));
+    }
+
+    @Test
+    void handle_approvalWithNoMatchingRule_defersAndDoesNotRecordAutoResolution() {
+        stubSessionAndEnvironment();
+        when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of());
+        EnvironmentRpcPayload.HitlActivity params = approvalParams("rm -rf /tmp/x", "tool-call-1");
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
+
+        assertThat(handler.handle(sessionId, request, params).collectList().block())
+                .isEmpty();
+
+        verify(eventPublisher).publishEvent(any(SandboxExecutionHitlRequiredEvent.class));
+        verify(activityPersistenceService, never()).recordAutoResolved(any(), any(), any());
     }
 
     @Test
@@ -663,15 +698,14 @@ class EnvironmentHitlRequestRpcHandlerTest {
         SandboxExecution execution = createExecutionInEnvironment(envId);
         when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
-        EnvironmentRpcPayload.HitlRequest params =
+        EnvironmentRpcPayload.HitlActivity params =
                 approvalParams("git status && git push origin main", "tool-call-1", execution.getId());
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         handler.handle(sessionId, request, params).blockLast();
 
-        ArgumentCaptor<ExecutionHitlRequiredResult> payloadCaptor =
-                ArgumentCaptor.forClass(ExecutionHitlRequiredResult.class);
+        ArgumentCaptor<HitlRequestSnapshot> payloadCaptor = ArgumentCaptor.forClass(HitlRequestSnapshot.class);
         verify(pendingHitlRegistry).register(eq(execution.getId()), payloadCaptor.capture(), any(), any(), any());
 
         List<CommandSegment> segments = payloadCaptor.getValue().commandSegments();
@@ -692,15 +726,14 @@ class EnvironmentHitlRequestRpcHandlerTest {
         SandboxExecution execution = createExecutionInEnvironment(envId);
         when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
-        EnvironmentRpcPayload.HitlRequest params = approvalParams(
+        EnvironmentRpcPayload.HitlActivity params = approvalParams(
                 "NODE_ENV=production npm run build > ~/build.log && git push", "tool-call-2", execution.getId());
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
-                EnvironmentRpcPayload.HitlRequest.METHOD, objectMapper.valueToTree(params), "req-1");
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
         handler.handle(sessionId, request, params).blockLast();
 
-        ArgumentCaptor<ExecutionHitlRequiredResult> payloadCaptor =
-                ArgumentCaptor.forClass(ExecutionHitlRequiredResult.class);
+        ArgumentCaptor<HitlRequestSnapshot> payloadCaptor = ArgumentCaptor.forClass(HitlRequestSnapshot.class);
         verify(pendingHitlRegistry).register(eq(execution.getId()), payloadCaptor.capture(), any(), any(), any());
 
         List<CommandSegment> segments = payloadCaptor.getValue().commandSegments();
@@ -727,8 +760,8 @@ class EnvironmentHitlRequestRpcHandlerTest {
     }
 
     /** Mirrors the sidecar's synthesized edit request: title and command both carry the path. */
-    private EnvironmentRpcPayload.HitlRequest editParams(String path, String hitlId, UUID executionId) {
-        return new EnvironmentRpcPayload.HitlRequest(
+    private EnvironmentRpcPayload.HitlActivity editParams(String path, String hitlId, UUID executionId) {
+        return new EnvironmentRpcPayload.HitlActivity(
                 hitlId,
                 path,
                 HitlKind.APPROVAL,
@@ -743,7 +776,7 @@ class EnvironmentHitlRequestRpcHandlerTest {
 
     @Test
     void sanitizeOptions_stripsAlwaysVariantsOnlyWhenOnceVariantsExist() {
-        List<PermissionOption> sanitized = EnvironmentHitlRequestRpcHandler.sanitizeOptions(defaultOptions());
+        List<PermissionOption> sanitized = EnvironmentHitlActivityRpcHandler.sanitizeOptions(defaultOptions());
         assertThat(sanitized)
                 .containsExactly(
                         new PermissionOption("allow", "Allow", ApprovalOptionKind.ALLOW_ONCE),
@@ -752,19 +785,21 @@ class EnvironmentHitlRequestRpcHandlerTest {
         List<PermissionOption> onlyAlways = List.of(
                 new PermissionOption("aa", "Always allow", ApprovalOptionKind.ALLOW_ALWAYS),
                 new PermissionOption("ra", "Always reject", ApprovalOptionKind.REJECT_ALWAYS));
-        assertThat(EnvironmentHitlRequestRpcHandler.sanitizeOptions(onlyAlways)).isEqualTo(onlyAlways);
+        assertThat(EnvironmentHitlActivityRpcHandler.sanitizeOptions(onlyAlways))
+                .isEqualTo(onlyAlways);
 
         List<PermissionOption> mixedAllow = List.of(
                 new PermissionOption("aa", "Always allow", ApprovalOptionKind.ALLOW_ALWAYS),
                 new PermissionOption("r", "Reject", ApprovalOptionKind.REJECT_ONCE));
-        assertThat(EnvironmentHitlRequestRpcHandler.sanitizeOptions(mixedAllow)).isEqualTo(mixedAllow);
+        assertThat(EnvironmentHitlActivityRpcHandler.sanitizeOptions(mixedAllow))
+                .isEqualTo(mixedAllow);
 
-        assertThat(EnvironmentHitlRequestRpcHandler.sanitizeOptions(null)).isNull();
-        assertThat(EnvironmentHitlRequestRpcHandler.sanitizeOptions(List.of())).isEmpty();
+        assertThat(EnvironmentHitlActivityRpcHandler.sanitizeOptions(null)).isNull();
+        assertThat(EnvironmentHitlActivityRpcHandler.sanitizeOptions(List.of())).isEmpty();
     }
 
     @Test
-    void getMethodName_returnsEnvHitlRequest() {
-        assertThat(handler.getMethodName()).isEqualTo("env.hitl_request");
+    void getMethodName_returnsEnvHitlActivity() {
+        assertThat(handler.getMethodName()).isEqualTo("env.hitl_activity");
     }
 }

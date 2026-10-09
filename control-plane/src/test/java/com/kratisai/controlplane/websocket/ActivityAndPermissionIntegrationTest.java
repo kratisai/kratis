@@ -89,20 +89,24 @@ class ActivityAndPermissionIntegrationTest {
                 auth,
                 scenario,
                 client -> client.whenContains("execution_activity", (wsSession, payload) -> activityLatch.countDown())
-                        .whenContains("execution_hitl_required", (wsSession, payload) -> permissionLatch.countDown()),
+                        .whenContains("awaiting_human", (wsSession, payload) -> permissionLatch.countDown()),
                 sidecar -> sidecar.whenMethod("env.acp_prompt", (wsSession, payload) -> {
                             JsonRpcInboundRequest activityRequest = new JsonRpcInboundRequest(
                                     EnvironmentRpcPayload.Activity.METHOD,
                                     objectMapper.valueToTree(Map.of(
-                                            "activityType", "THINKING",
-                                            "description", "Thinking...",
-                                            "status", "in_progress",
-                                            "executionId", executionId.toString())),
+                                            "activityType",
+                                            "THINKING",
+                                            "description",
+                                            "Thinking...",
+                                            "status",
+                                            "in_progress",
+                                            "executionId",
+                                            executionId.toString())),
                                     null);
                             wsSession.sendMessage(new TextMessage(objectMapper.writeValueAsString(activityRequest)));
 
                             JsonRpcInboundRequest echoPermRequest = new JsonRpcInboundRequest(
-                                    EnvironmentRpcPayload.HitlRequest.METHOD,
+                                    EnvironmentRpcPayload.HitlActivity.METHOD,
                                     objectMapper.valueToTree(Map.of(
                                             "hitlId", "tool-call-99",
                                             "message", "Approve echo hello",
@@ -114,7 +118,7 @@ class ActivityAndPermissionIntegrationTest {
                             wsSession.sendMessage(new TextMessage(objectMapper.writeValueAsString(echoPermRequest)));
 
                             JsonRpcInboundRequest permRequest = new JsonRpcInboundRequest(
-                                    EnvironmentRpcPayload.HitlRequest.METHOD,
+                                    EnvironmentRpcPayload.HitlActivity.METHOD,
                                     objectMapper.valueToTree(Map.of(
                                             "hitlId", "tool-call-100",
                                             "message", "Approve rm -rf /",
@@ -148,7 +152,7 @@ class ActivityAndPermissionIntegrationTest {
                     .isTrue();
 
             assertThat(permissionLatch.await(5, TimeUnit.SECONDS)).isTrue();
-            assertThat(pair.client().hasReceivedMessageContaining("execution_hitl_required"))
+            assertThat(pair.client().hasReceivedMessageContaining("awaiting_human"))
                     .isTrue();
 
             Thread.sleep(500);

@@ -203,8 +203,8 @@
       ]
     },
     {
-      "name": "env.hitl_request",
-      "summary": "Request a human decision: authorize a command (approval) or answer a structured question (question)",
+      "name": "env.hitl_activity",
+      "summary": "Request authorization or human answer for an activity",
       "x-kratis-direction": "connector-to-control-plane",
       "x-kratis-message-kind": "request",
       "params": [
@@ -212,14 +212,14 @@
           "name": "params",
           "required": true,
           "schema": {
-            "$ref": "./schemas/requests/hitl_request.schema.json"
+            "$ref": "./schemas/requests/hitl_activity.schema.json"
           }
         }
       ],
       "result": {
         "name": "result",
         "schema": {
-          "$ref": "./schemas/results/hitl_request.schema.json"
+          "$ref": "./schemas/results/hitl_activity.schema.json"
         }
       }
     },

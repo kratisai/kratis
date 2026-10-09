@@ -14,7 +14,7 @@ public sealed interface EnvironmentResponsePayload
                 EnvironmentResponsePayload.EnvironmentHeartbeatResult,
                 EnvironmentResponsePayload.DiffManifestResult,
                 EnvironmentResponsePayload.DiffSectionsResult,
-                EnvironmentResponsePayload.HitlResult,
+                EnvironmentResponsePayload.HitlActivityResult,
                 EnvironmentResponsePayload.GitTokenResult {
 
     record EnvironmentRegisterResult(EnvironmentResultType type, EnvironmentRegisterStatus status, String environmentId)
@@ -47,29 +47,29 @@ public sealed interface EnvironmentResponsePayload
         }
     }
 
-    record HitlResult(
+    record HitlActivityResult(
             @JsonProperty("response") HitlResponse response,
             @JsonProperty("optionId") String optionId,
             @JsonProperty("content") Map<String, Object> content)
             implements EnvironmentResponsePayload {
-        public HitlResult {
+        public HitlActivityResult {
             Objects.requireNonNull(response, "response is required");
         }
 
-        public static HitlResult approved(String optionId) {
-            return new HitlResult(HitlResponse.APPROVED, optionId, null);
+        public static HitlActivityResult approved(String optionId) {
+            return new HitlActivityResult(HitlResponse.APPROVED, optionId, null);
         }
 
-        public static HitlResult answered(Map<String, Object> content) {
-            return new HitlResult(HitlResponse.ANSWERED, null, content);
+        public static HitlActivityResult answered(Map<String, Object> content) {
+            return new HitlActivityResult(HitlResponse.ANSWERED, null, content);
         }
 
-        public static HitlResult declined() {
-            return new HitlResult(HitlResponse.DECLINED, null, null);
+        public static HitlActivityResult declined() {
+            return new HitlActivityResult(HitlResponse.DECLINED, null, null);
         }
 
-        public static HitlResult cancelled() {
-            return new HitlResult(HitlResponse.CANCELLED, null, null);
+        public static HitlActivityResult cancelled() {
+            return new HitlActivityResult(HitlResponse.CANCELLED, null, null);
         }
     }
 

@@ -11,9 +11,7 @@ import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionActivityResult;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.ClientRpcPayload;
-import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
 import com.kratisai.controlplane.model.ChatMemoryEntity;
 import com.kratisai.controlplane.model.SandboxExecution;
@@ -26,9 +24,7 @@ import com.kratisai.controlplane.service.CanvasService;
 import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
-import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
 import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
-import com.kratisai.controlplane.service.PendingHitlRegistry;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,7 +33,6 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.web.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
@@ -46,7 +41,6 @@ class ClientChatSubscribeRpcHandlerTest {
     private ChatFluxRegistry chatFluxRegistry;
     private ClientChatSubscribeRpcHandler handler;
     private SandboxExecutionRepository executionRepository;
-    private PendingHitlRegistry pendingHitlRegistry;
     private ExecutionActivityPersistenceService activityPersistenceService;
 
     private ClientSessionRegistry sessionRegistry;
@@ -63,7 +57,6 @@ class ClientChatSubscribeRpcHandlerTest {
         CanvasService canvasService = mock(CanvasService.class);
         chatFluxRegistry = new ChatFluxRegistry();
         executionRepository = mock(SandboxExecutionRepository.class);
-        pendingHitlRegistry = new PendingHitlRegistry(mock(EnvironmentSessionRegistry.class));
         activityPersistenceService = mock(ExecutionActivityPersistenceService.class);
 
         handler = new ClientChatSubscribeRpcHandler(
@@ -74,7 +67,6 @@ class ClientChatSubscribeRpcHandlerTest {
                 canvasService,
                 chatFluxRegistry,
                 executionRepository,
-                pendingHitlRegistry,
                 activityPersistenceService);
 
         userId = UUID.randomUUID();
@@ -249,66 +241,10 @@ class ClientChatSubscribeRpcHandlerTest {
     }
 
     @Test
-    void handle_replaysPendingPermissionOfRunningExecution() {
-        UUID executionId = UUID.randomUUID();
-        when(executionRepository.findByChatIdOrderByStartedAtAsc(chatId))
-                .thenReturn(List.of(runningExecution(executionId)));
-        WebSocketSession envSession = mock(WebSocketSession.class);
-        pendingHitlRegistry.register(
-                executionId,
-                new PendingHitlRegistry.PendingHitl(
-                        new ExecutionHitlRequiredResult(
-                                executionId,
-                                "tool-call-42",
-                                HitlKind.APPROVAL,
-                                "Approve rm -rf /",
-                                "rm -rf /",
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null),
-                        envSession,
-                        "req-1",
-                        Instant.now(),
-                        teamId));
-
-        ClientRpcPayload.ChatSubscribe params =
-                new ClientRpcPayload.ChatSubscribe(chatId.toString(), teamId.toString());
-        List<ClientPayload> sent = collectComplete(handler.handle("ws-1", 302, params));
-
-        ExecutionHitlRequiredResult permission = (ExecutionHitlRequiredResult) sent.getFirst();
-        assertThat(permission.executionId()).isEqualTo(executionId);
-        assertThat(permission.command()).isEqualTo("rm -rf /");
-        assertThat(permission.hitlId()).isEqualTo("tool-call-42");
-    }
-
-    @Test
     void handle_doesNotReplayStateForCompletedExecution() {
         UUID executionId = UUID.randomUUID();
         when(executionRepository.findByChatIdOrderByStartedAtAsc(chatId))
                 .thenReturn(List.of(completedExecution(executionId)));
-        WebSocketSession envSession = mock(WebSocketSession.class);
-        pendingHitlRegistry.register(
-                executionId,
-                new PendingHitlRegistry.PendingHitl(
-                        new ExecutionHitlRequiredResult(
-                                executionId,
-                                "tool-call-42",
-                                HitlKind.APPROVAL,
-                                "Approve rm -rf /",
-                                "rm -rf /",
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null),
-                        envSession,
-                        "req-1",
-                        Instant.now(),
-                        teamId));
 
         ClientRpcPayload.ChatSubscribe params =
                 new ClientRpcPayload.ChatSubscribe(chatId.toString(), teamId.toString());

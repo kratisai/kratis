@@ -2,12 +2,13 @@ package com.kratisai.controlplane.websocket.environment;
 
 import com.kratisai.controlplane.api.wsdto.ActivityKind;
 import com.kratisai.controlplane.api.wsdto.ApprovalOptionKind;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.CommandSegment;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload;
-import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlResult;
+import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlActivityResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
+import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
@@ -21,6 +22,7 @@ import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import com.kratisai.controlplane.repository.HitlRuleRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
+import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import com.kratisai.controlplane.service.HitlRuleService;
 import com.kratisai.controlplane.service.PendingHitlRegistry;
 import com.kratisai.controlplane.service.command.ShellCommandSplitter;
@@ -36,9 +38,10 @@ import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
 
 @Component
-public class EnvironmentHitlRequestRpcHandler
-        implements EnvironmentRpcHandler<EnvironmentRpcPayload.HitlRequest, EnvironmentResponsePayload> {
-    private static final Logger logger = LoggerFactory.getLogger(EnvironmentHitlRequestRpcHandler.class);
+public class EnvironmentHitlActivityRpcHandler
+        implements EnvironmentRpcHandler<EnvironmentRpcPayload.HitlActivity, EnvironmentResponsePayload> {
+    private static final Logger logger = LoggerFactory.getLogger(EnvironmentHitlActivityRpcHandler.class);
+    private static final String RULE_RESOLVER = "Remembered rule";
 
     private final EnvironmentSessionRegistry sessionRegistry;
     private final HitlRuleRepository ruleRepository;
@@ -47,15 +50,17 @@ public class EnvironmentHitlRequestRpcHandler
     private final EnvironmentExecutionGuard executionGuard;
     private final PendingHitlRegistry pendingHitlRegistry;
     private final ApplicationEventPublisher eventPublisher;
+    private final ExecutionActivityPersistenceService activityPersistenceService;
 
-    public EnvironmentHitlRequestRpcHandler(
+    public EnvironmentHitlActivityRpcHandler(
             EnvironmentSessionRegistry sessionRegistry,
             HitlRuleRepository ruleRepository,
             ExecutionEnvironmentRepository environmentRepository,
             SandboxExecutionRepository executionRepository,
             EnvironmentExecutionGuard executionGuard,
             PendingHitlRegistry pendingHitlRegistry,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            ExecutionActivityPersistenceService activityPersistenceService) {
         this.sessionRegistry = sessionRegistry;
         this.ruleRepository = ruleRepository;
         this.environmentRepository = environmentRepository;
@@ -63,27 +68,28 @@ public class EnvironmentHitlRequestRpcHandler
         this.executionGuard = executionGuard;
         this.pendingHitlRegistry = pendingHitlRegistry;
         this.eventPublisher = eventPublisher;
+        this.activityPersistenceService = activityPersistenceService;
     }
 
     @Override
     public String getMethodName() {
-        return EnvironmentRpcPayload.HitlRequest.METHOD;
+        return EnvironmentRpcPayload.HitlActivity.METHOD;
     }
 
     @Override
-    public Class<EnvironmentRpcPayload.HitlRequest> getPayloadType() {
-        return EnvironmentRpcPayload.HitlRequest.class;
+    public Class<EnvironmentRpcPayload.HitlActivity> getPayloadType() {
+        return EnvironmentRpcPayload.HitlActivity.class;
     }
 
     @Override
     @Transactional
     public Flux<EnvironmentResponsePayload> handle(
-            String sessionId, Object requestId, EnvironmentRpcPayload.HitlRequest params) {
-        logger.info("Received env.hitl_request from session {} with request id {}", sessionId, requestId);
+            String sessionId, Object requestId, EnvironmentRpcPayload.HitlActivity params) {
+        logger.info("Received env.hitl_activity from session {} with request id {}", sessionId, requestId);
 
         Optional<UUID> envIdOpt = sessionRegistry.getEnvironmentId(sessionId);
         if (envIdOpt.isEmpty()) {
-            logger.warn("Received env.hitl_request from unmapped session: {}", sessionId);
+            logger.warn("Received env.hitl_activity from unmapped session: {}", sessionId);
             throw new RpcErrorException(
                     JsonRpcError.error(-32001, "Registration required", "Environment session not registered"));
         }
@@ -104,7 +110,7 @@ public class EnvironmentHitlRequestRpcHandler
     }
 
     private Flux<EnvironmentResponsePayload> handleApproval(
-            String sessionId, Object requestId, EnvironmentRpcPayload.HitlRequest params, UUID envId, UUID teamId) {
+            String sessionId, Object requestId, EnvironmentRpcPayload.HitlActivity params, UUID envId, UUID teamId) {
         if (params.command() == null || params.command().isBlank()) {
             throw new RpcErrorException(JsonRpcError.InvalidParams("Invalid params: 'command' is required"));
         }
@@ -117,35 +123,25 @@ public class EnvironmentHitlRequestRpcHandler
         List<HitlRule> rules = ruleRepository.findByTeamId(teamId);
         Optional<HitlResponse> autoResolution = HitlRuleService.autoResolve(rules, command, toolKind);
 
-        if (autoResolution.isPresent()) {
-            if (autoResolution.get() == HitlResponse.DECLINED) {
-                logger.info("Command '{}' rejected by DENY HITL rule for team {}", command, teamId);
-                return Flux.just(HitlResult.declined());
-            }
-            String optionId = selectAllowOptionId(params.options());
-            if (optionId == null) {
+        String allowOptionId = null;
+        if (autoResolution.isPresent() && autoResolution.get() != HitlResponse.DECLINED) {
+            allowOptionId = selectAllowOptionId(params.options());
+            if (allowOptionId == null) {
                 logger.warn(
                         "Auto-approved command '{}' but no allow option was offered — treating as cancelled", command);
-                return Flux.just(HitlResult.cancelled());
+                return Flux.just(HitlActivityResult.cancelled());
             }
-            logger.info(
-                    "Auto-approved command '{}' for session {} (request id {}), optionId={}",
-                    command,
-                    sessionId,
-                    requestId,
-                    optionId);
-            return Flux.just(HitlResult.approved(optionId));
         }
 
         UUID execId = UUID.fromString(params.executionId());
         SandboxExecution execution = executionRepository.findById(execId).orElse(null);
         if (execution == null) {
             logger.warn("Execution {} not found for environment {} — rejecting command '{}'", execId, envId, command);
-            return Flux.just(HitlResult.cancelled());
+            return Flux.just(HitlActivityResult.cancelled());
         }
         executionGuard.verifyExecutionInEnvironment(execution, envId);
 
-        ExecutionHitlRequiredResult payload = new ExecutionHitlRequiredResult(
+        HitlRequestSnapshot payload = new HitlRequestSnapshot(
                 execution.getId(),
                 params.hitlId(),
                 HitlKind.APPROVAL,
@@ -158,6 +154,22 @@ public class EnvironmentHitlRequestRpcHandler
                 params.diff(),
                 null);
 
+        if (autoResolution.isPresent()) {
+            if (autoResolution.get() == HitlResponse.DECLINED) {
+                logger.info("Command '{}' rejected by DENY HITL rule for team {}", command, teamId);
+                recordRuleResolution(teamId, payload, HitlResponse.DECLINED, null);
+                return Flux.just(HitlActivityResult.declined());
+            }
+            logger.info(
+                    "Auto-approved command '{}' for session {} (request id {}), optionId={}",
+                    command,
+                    sessionId,
+                    requestId,
+                    allowOptionId);
+            recordRuleResolution(teamId, payload, HitlResponse.APPROVED, allowOptionId);
+            return Flux.just(HitlActivityResult.approved(allowOptionId));
+        }
+
         pendingHitlRegistry.register(execution.getId(), payload, sessionId, requestId, teamId);
         eventPublisher.publishEvent(new SandboxExecutionHitlRequiredEvent(teamId, payload));
         logger.info(
@@ -169,7 +181,7 @@ public class EnvironmentHitlRequestRpcHandler
     }
 
     private Flux<EnvironmentResponsePayload> handleQuestion(
-            String sessionId, Object requestId, EnvironmentRpcPayload.HitlRequest params, UUID envId, UUID teamId) {
+            String sessionId, Object requestId, EnvironmentRpcPayload.HitlActivity params, UUID envId, UUID teamId) {
         UUID execId = UUID.fromString(params.executionId());
         SandboxExecution execution = executionRepository.findById(execId).orElse(null);
         if (execution == null) {
@@ -178,11 +190,11 @@ public class EnvironmentHitlRequestRpcHandler
                     execId,
                     envId,
                     params.hitlId());
-            return Flux.just(HitlResult.cancelled());
+            return Flux.just(HitlActivityResult.cancelled());
         }
         executionGuard.verifyExecutionInEnvironment(execution, envId);
 
-        ExecutionHitlRequiredResult payload = new ExecutionHitlRequiredResult(
+        HitlRequestSnapshot payload = new HitlRequestSnapshot(
                 execution.getId(),
                 params.hitlId(),
                 HitlKind.QUESTION,
@@ -203,6 +215,23 @@ public class EnvironmentHitlRequestRpcHandler
                 execution.getId(),
                 teamId);
         return Flux.empty();
+    }
+
+    /** The activity row records the rule decision directly; the UI never sees an awaiting-human state for it. */
+    private void recordRuleResolution(
+            UUID teamId, HitlRequestSnapshot request, HitlResponse response, String optionId) {
+        activityPersistenceService.recordAutoResolved(
+                teamId,
+                request,
+                new HitlResolution(
+                        request.executionId(),
+                        request.hitlId(),
+                        HitlKind.APPROVAL,
+                        response,
+                        optionId,
+                        null,
+                        null,
+                        RULE_RESOLVER));
     }
 
     /** Unknown tool kinds get no segments, so nothing unrememberable can be persisted. */

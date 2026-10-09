@@ -12,8 +12,8 @@ import com.kratisai.controlplane.api.restdto.*;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.ApprovalOptionKind;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.model.*;
@@ -152,7 +152,7 @@ class SandboxHitlControllerTest {
         pendingHitlRegistry.register(
                 executionId,
                 new PendingHitlRegistry.PendingHitl(
-                        new ExecutionHitlRequiredResult(
+                        new HitlRequestSnapshot(
                                 executionId,
                                 "tool-call-42",
                                 HitlKind.APPROVAL,
@@ -174,7 +174,7 @@ class SandboxHitlControllerTest {
         pendingHitlRegistry.register(
                 executionId,
                 new PendingHitlRegistry.PendingHitl(
-                        new ExecutionHitlRequiredResult(
+                        new HitlRequestSnapshot(
                                 executionId,
                                 "el-1",
                                 HitlKind.QUESTION,

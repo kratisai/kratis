@@ -473,7 +473,6 @@ func (c *Client) SendActivity(activity acp.Activity) {
 		ExitCode:  activity.Detail.ExitCode,
 		Truncated: activity.Detail.Truncated,
 		Meta:      activity.Detail.Meta,
-		Hitl:      convertHitl(activity.Detail.Hitl),
 		MessageID: activity.Detail.MessageID,
 		Role:      activity.Detail.Role,
 		RawUpdate: activity.Detail.RawUpdate,
@@ -543,31 +542,6 @@ func convertDiff(diff *acp.ActivityDiff) *ActivityDiff {
 		return nil
 	}
 	return &ActivityDiff{OldText: diff.OldText, NewText: diff.NewText, Path: diff.Path}
-}
-
-func convertHitl(hitl *acp.ActivityHitl) *ActivityHitl {
-	if hitl == nil {
-		return nil
-	}
-	out := &ActivityHitl{
-		HitlID:    hitl.HitlID,
-		Kind:      hitl.Kind,
-		Message:   hitl.Message,
-		Command:   hitl.Command,
-		Title:     hitl.Title,
-		ToolKind:  hitl.ToolKind,
-		Diff:      convertDiff(hitl.Diff),
-		Form:      hitl.Form,
-		Response:  hitl.Response,
-		OptionID:  hitl.OptionID,
-		Content:   hitl.Content,
-		Approved:  hitl.Approved,
-		Cancelled: hitl.Cancelled,
-	}
-	for _, opt := range hitl.Options {
-		out.Options = append(out.Options, PermissionOption{OptionID: opt.OptionID, Name: opt.Name, Kind: opt.Kind})
-	}
-	return out
 }
 
 func (c *Client) SendComplete(info runner.CompletionInfo) {
@@ -1111,7 +1085,7 @@ func (c *Client) RequestPermission(req acp.PermissionRequest) (string, error) {
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	c.mu.Unlock()
-	result, err := c.requestHitl(HitlRequest{
+	result, err := c.requestHitl(HitlActivityParams{
 		HitlID:      hitlID,
 		Message:     message,
 		Kind:        HitlApproval,
@@ -1152,7 +1126,7 @@ func (c *Client) CreateElicitation(req acp.ElicitationRequest) (acp.ElicitationR
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	c.mu.Unlock()
-	result, err := c.requestHitl(HitlRequest{
+	result, err := c.requestHitl(HitlActivityParams{
 		HitlID:      req.ElicitationID,
 		Message:     req.Message,
 		Kind:        HitlQuestion,
@@ -1172,9 +1146,9 @@ func (c *Client) CreateElicitation(req acp.ElicitationRequest) (acp.ElicitationR
 	}
 }
 
-// requestHitl sends one env.hitl_request to the control plane and blocks until
+// requestHitl sends one env.hitl_activity to the control plane and blocks until
 // the user resolves it or it is cancelled/timed out.
-func (c *Client) requestHitl(req HitlRequest) (HitlResult, error) {
+func (c *Client) requestHitl(req HitlActivityParams) (HitlActivityResult, error) {
 	c.mu.Lock()
 	id := c.nextID
 	c.nextID++
@@ -1192,18 +1166,18 @@ func (c *Client) requestHitl(req HitlRequest) (HitlResult, error) {
 
 	reqMsg := JsonRpcRequest{
 		JsonRPC: "2.0",
-		Method:  "env.hitl_request",
+		Method:  "env.hitl_activity",
 		Params:  req,
 		ID:      id,
 	}
 
-	hitlDebug("[HITL] requestHitl: sending env.hitl_request to control plane, id=%d, kind=%q, hitlId=%q", id, req.Kind, req.HitlID)
+	hitlDebug("[HITL] requestHitl: sending env.hitl_activity to control plane, id=%d, kind=%q, hitlId=%q", id, req.Kind, req.HitlID)
 	if err := c.writeJSON(reqMsg); err != nil {
 		hitlDebug("[HITL] requestHitl: failed to send request to control plane: %v", err)
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return HitlResult{}, err
+		return HitlActivityResult{}, err
 	}
 
 	hitlDebug("[HITL] requestHitl: request sent, waiting for control plane response (id=%d)", id)
@@ -1215,15 +1189,15 @@ func (c *Client) requestHitl(req HitlRequest) (HitlResult, error) {
 			c.mu.Lock()
 			delete(c.pending, id)
 			c.mu.Unlock()
-			return HitlResult{}, fmt.Errorf("hitl request error [%d]: %s", resp.Error.Code, resp.Error.Message)
+			return HitlActivityResult{}, fmt.Errorf("hitl request error [%d]: %s", resp.Error.Code, resp.Error.Message)
 		}
-		var res HitlResult
+		var res HitlActivityResult
 		if err := json.Unmarshal(resp.Result, &res); err != nil {
 			hitlDebug("[HITL] requestHitl: failed to parse result: %v, raw=%s", err, string(resp.Result))
 			c.mu.Lock()
 			delete(c.pending, id)
 			c.mu.Unlock()
-			return HitlResult{}, fmt.Errorf("failed to parse hitl result: %w", err)
+			return HitlActivityResult{}, fmt.Errorf("failed to parse hitl result: %w", err)
 		}
 		c.mu.Lock()
 		delete(c.pending, id)
@@ -1235,13 +1209,13 @@ func (c *Client) requestHitl(req HitlRequest) (HitlResult, error) {
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return HitlResult{}, fmt.Errorf("hitl request cancelled")
+		return HitlActivityResult{}, fmt.Errorf("hitl request cancelled")
 	case <-time.After(c.Timeouts.PermissionTimeout):
 		hitlDebug("[HITL] requestHitl: TIMEOUT waiting for HITL response (id=%d)", id)
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return HitlResult{}, fmt.Errorf("timeout waiting for hitl response")
+		return HitlActivityResult{}, fmt.Errorf("timeout waiting for hitl response")
 	}
 }
 

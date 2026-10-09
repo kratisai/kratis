@@ -395,15 +395,12 @@ func TestHandleTerminalCreate_CorrelatesPermissionByCommand(t *testing.T) {
 	if len(sink.permRequests) != 1 || sink.permRequests[0].actionID != "tc-shell" {
 		t.Fatalf("expected permission correlated with tc-shell, got %+v", sink.permRequests)
 	}
-	// The permission lifecycle emits pending then failed (mock cancels).
-	if len(sink.activities) < 2 {
-		t.Fatalf("expected permission lifecycle activities, got %+v", sink.activities)
+	// Only the resolution is emitted (mock cancels); the request itself is the control-plane RPC.
+	if len(sink.activities) != 1 {
+		t.Fatalf("expected 1 resolution activity, got %+v", sink.activities)
 	}
-	if sink.activities[0].actionID != "tc-shell" || sink.activities[0].status != "pending" {
-		t.Errorf("expected pending activity for tc-shell, got %+v", sink.activities[0])
-	}
-	if sink.activities[1].actionID != "tc-shell" || sink.activities[1].status != "failed" {
-		t.Errorf("expected failed resolution activity for tc-shell, got %+v", sink.activities[1])
+	if sink.activities[0].actionID != "tc-shell" || sink.activities[0].status != "failed" {
+		t.Errorf("expected failed resolution activity for tc-shell, got %+v", sink.activities[0])
 	}
 }
 
@@ -449,19 +446,11 @@ func TestHandlePermissionRequest_ApprovalEmitTransitions(t *testing.T) {
 		t.Fatal("timeout waiting for HandlePermissionRequest")
 	}
 
-	if len(sink.activities) != 2 {
-		t.Fatalf("expected pending + in_progress activities, got %+v", sink.activities)
+	if len(sink.activities) != 1 {
+		t.Fatalf("expected 1 resolution activity, got %+v", sink.activities)
 	}
-	if sink.activities[0].status != "pending" || sink.activities[0].actionID != "tc-perm" {
-		t.Errorf("expected pending activity, got %+v", sink.activities[0])
-	}
-	if sink.activities[1].status != "in_progress" || sink.activities[1].actionID != "tc-perm" {
-		t.Errorf("expected in_progress resolution, got %+v", sink.activities[1])
-	}
-	if sink.activities[1].detail.Hitl == nil ||
-		!sink.activities[1].detail.Hitl.Approved ||
-		sink.activities[1].detail.Hitl.OptionID != "allow" {
-		t.Errorf("expected hitl detail on resolution, got %+v", sink.activities[1].detail.Hitl)
+	if sink.activities[0].status != "in_progress" || sink.activities[0].actionID != "tc-perm" {
+		t.Errorf("expected in_progress resolution, got %+v", sink.activities[0])
 	}
 }
 

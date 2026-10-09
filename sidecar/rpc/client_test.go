@@ -253,9 +253,9 @@ func TestReadLoop_ServerRequestDispatched(t *testing.T) {
 				return
 			}
 			var req JsonRpcRequest
-			if json.Unmarshal(msg, &req) == nil && req.Method == "env.hitl_request" {
+			if json.Unmarshal(msg, &req) == nil && req.Method == "env.hitl_activity" {
 				// Approve the command.
-				raw, _ := json.Marshal(HitlResult{Response: HitlApproved, OptionID: "allow"})
+				raw, _ := json.Marshal(HitlActivityResult{Response: HitlApproved, OptionID: "allow"})
 				_ = conn.WriteJSON(JsonRpcResponse{JsonRPC: "2.0", Result: raw, ID: req.ID})
 			}
 		}
@@ -421,7 +421,7 @@ func TestRequestPermission_ServerError(t *testing.T) {
 			if err := json.Unmarshal(msg, &req); err != nil {
 				continue
 			}
-			if req.Method == "env.hitl_request" {
+			if req.Method == "env.hitl_activity" {
 				// Send error response
 				_ = conn.WriteJSON(JsonRpcResponse{
 					JsonRPC: "2.0",
@@ -461,8 +461,8 @@ func TestRequestPermission_MalformedResult(t *testing.T) {
 			if err := json.Unmarshal(msg, &req); err != nil {
 				continue
 			}
-			if req.Method == "env.hitl_request" {
-				// Send response with invalid result (not a valid HitlResult)
+			if req.Method == "env.hitl_activity" {
+				// Send response with invalid result (not a valid HitlActivityResult)
 				raw, _ := json.Marshal("not a valid result")
 				_ = conn.WriteJSON(JsonRpcResponse{
 					JsonRPC: "2.0",
@@ -514,8 +514,8 @@ func TestRequestPermission_MissingToolCallIDWarnsLoudly(t *testing.T) {
 			if err := json.Unmarshal(msg, &req); err != nil {
 				continue
 			}
-			if req.Method == "env.hitl_request" {
-				result, _ := json.Marshal(HitlResult{Response: HitlDeclined})
+			if req.Method == "env.hitl_activity" {
+				result, _ := json.Marshal(HitlActivityResult{Response: HitlDeclined})
 				_ = conn.WriteJSON(JsonRpcResponse{JsonRPC: "2.0", Result: result, ID: req.ID})
 			}
 		}
@@ -544,7 +544,7 @@ func TestRequestPermission_MissingToolCallIDWarnsLoudly(t *testing.T) {
 			if stream == "stderr" && strings.Contains(line, "session/request_permission without toolCallId") {
 				warnLine = line
 			}
-		case "env.hitl_request":
+		case "env.hitl_activity":
 			hitlID, _ = params["hitlId"].(string)
 		}
 	}
@@ -1515,7 +1515,7 @@ func TestRequestPermission_Cancellation(t *testing.T) {
 			if err := json.Unmarshal(msg, &req); err != nil {
 				continue
 			}
-			if req.Method == "env.hitl_request" {
+			if req.Method == "env.hitl_activity" {
 				// Don't respond - let the test cancel the permission
 				time.Sleep(10 * time.Second)
 			}

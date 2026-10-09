@@ -16,12 +16,12 @@ import com.kratisai.controlplane.api.restdto.SandboxExecutionDto;
 import com.kratisai.controlplane.api.restdto.SteerExecutionRequest;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionHitlRequiredResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.ExecStatus;
 import com.kratisai.controlplane.api.wsdto.GitRegistrationStatus;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.LaunchStatus;
@@ -1327,7 +1327,7 @@ class SandboxExecutionServiceTest {
         when(webSocketSession.isOpen()).thenReturn(true);
 
         PendingHitlRegistry.PendingHitl pendingHitl = new PendingHitlRegistry.PendingHitl(
-                new ExecutionHitlRequiredResult(
+                new HitlRequestSnapshot(
                         execution.getId(),
                         "tool-call-1",
                         HitlKind.APPROVAL,
@@ -1386,7 +1386,7 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
         PendingHitlRegistry.PendingHitl pendingHitl = new PendingHitlRegistry.PendingHitl(
-                new ExecutionHitlRequiredResult(
+                new HitlRequestSnapshot(
                         execution.getId(),
                         "hitl-789",
                         HitlKind.QUESTION,

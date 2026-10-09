@@ -144,6 +144,32 @@ describe('Execution Activity Log', () => {
     expect(screen.queryByRole('button', { name: /Reject/i })).not.toBeInTheDocument()
   })
 
+  it('never shows the approval prompt for a request the control plane resolved itself', async () => {
+    const ws = setupConnected()
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    triggerMockExecutionActivity(ws, EXECUTION_ID, 'COMMAND', 'git status', 'pending', 'tc-rule')
+    await waitFor(() => {
+      expect(screen.getByText('git status')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('Permission Required')).not.toBeInTheDocument()
+
+    triggerMockPermissionResolved(
+      ws,
+      EXECUTION_ID,
+      'git status',
+      true,
+      null,
+      'Remembered rule',
+      'tc-rule',
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/Permission approved/)).toBeInTheDocument()
+    })
+    expect(screen.queryByText('Permission Required')).not.toBeInTheDocument()
+  })
+
   it('shows empty state when no activities', async () => {
     renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
 
@@ -221,13 +247,22 @@ describe('Execution Activity Log', () => {
 
     // Merges into the existing activity in place — no length change, so only
     // the prompt scroll can bring the card into view.
-    useActivityStore.getState().handleHitlRequired({
-      command: 'systemctl restart app',
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'tc-approve-scroll',
+      activityType: 'COMMAND',
+      description: 'systemctl restart app',
+      detail: {
+        hitl: {
+          command: 'systemctl restart app',
+          hitlId: 'tc-approve-scroll',
+          kind: 'approval',
+          message: 'Allow systemctl restart app?',
+          state: 'awaiting_human',
+        },
+      },
       executionId: EXECUTION_ID,
-      hitlId: 'tc-approve-scroll',
-      kind: 'approval',
-      message: 'Allow systemctl restart app?',
-      type: 'execution_hitl_required',
+      status: 'pending',
+      type: 'execution_activity',
     })
 
     await waitFor(() => {
@@ -245,13 +280,22 @@ describe('Execution Activity Log', () => {
     renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
     const { calls, restore } = captureScrollCalls()
 
-    useActivityStore.getState().handleHitlRequired({
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'el-scroll',
+      activityType: 'ELICITATION',
+      description: 'Choose a deployment target',
+      detail: {
+        hitl: {
+          form: { properties: { target: { type: 'string' } }, type: 'object' },
+          hitlId: 'el-scroll',
+          kind: 'question',
+          message: 'Choose a deployment target',
+          state: 'awaiting_human',
+        },
+      },
       executionId: EXECUTION_ID,
-      form: { properties: { target: { type: 'string' } }, type: 'object' },
-      hitlId: 'el-scroll',
-      kind: 'question',
-      message: 'Choose a deployment target',
-      type: 'execution_hitl_required',
+      status: 'pending',
+      type: 'execution_activity',
     })
 
     await waitFor(() => {
@@ -269,13 +313,22 @@ describe('Execution Activity Log', () => {
     renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
     const { calls, restore } = captureScrollCalls()
 
-    useActivityStore.getState().handleHitlRequired({
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'el-follow',
+      activityType: 'ELICITATION',
+      description: 'Choose a deployment target',
+      detail: {
+        hitl: {
+          form: { properties: { target: { type: 'string' } }, type: 'object' },
+          hitlId: 'el-follow',
+          kind: 'question',
+          message: 'Choose a deployment target',
+          state: 'awaiting_human',
+        },
+      },
       executionId: EXECUTION_ID,
-      form: { properties: { target: { type: 'string' } }, type: 'object' },
-      hitlId: 'el-follow',
-      kind: 'question',
-      message: 'Choose a deployment target',
-      type: 'execution_hitl_required',
+      status: 'pending',
+      type: 'execution_activity',
     })
     await waitFor(() => {
       expect(screen.getByText('Agent Question')).toBeInTheDocument()
@@ -394,13 +447,22 @@ describe('Execution Activity Log', () => {
 
   it('sends optional feedback when declining a question', async () => {
     setupConnected()
-    useActivityStore.getState().handleHitlRequired({
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'el-feedback',
+      activityType: 'ELICITATION',
+      description: 'Choose a deployment target',
+      detail: {
+        hitl: {
+          form: { properties: { target: { type: 'string' } }, type: 'object' },
+          hitlId: 'el-feedback',
+          kind: 'question',
+          message: 'Choose a deployment target',
+          state: 'awaiting_human',
+        },
+      },
       executionId: EXECUTION_ID,
-      form: { properties: { target: { type: 'string' } }, type: 'object' },
-      hitlId: 'el-feedback',
-      kind: 'question',
-      message: 'Choose a deployment target',
-      type: 'execution_hitl_required',
+      status: 'pending',
+      type: 'execution_activity',
     })
 
     const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)

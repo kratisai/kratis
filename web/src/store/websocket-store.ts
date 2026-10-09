@@ -9,8 +9,6 @@ import type {
   ExecutionActivityResult,
   ExecutionCompleteResult,
   ExecutionDiffChangedResult,
-  ExecutionHitlRequiredResult,
-  ExecutionHitlResolvedResult,
   ExecutionLogsResult,
   ExecutionOutputResult,
   ExecutionReplayCompleteResult,
@@ -171,12 +169,6 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
         case 'execution_diff_changed':
           handleExecutionDiffChangedResult(response.result)
           break
-        case 'execution_hitl_required':
-          handleExecutionHitlRequired(response.result)
-          break
-        case 'execution_hitl_resolved':
-          handleExecutionHitlResolved(response.result)
-          break
         case 'execution_logs':
           handleExecutionLogsResult(response.result)
           break
@@ -250,14 +242,6 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
 
   function handleExecutionReplayCompleteResult(result: ExecutionReplayCompleteResult) {
     useExecutionStore.getState().handleReplayComplete(result)
-  }
-
-  function handleExecutionHitlRequired(result: ExecutionHitlRequiredResult) {
-    useActivityStore.getState().handleHitlRequired(result)
-  }
-
-  function handleExecutionHitlResolved(result: ExecutionHitlResolvedResult) {
-    useActivityStore.getState().handleHitlResolved(result)
   }
 
   function handleCanvasResult(canvasResult: CanvasResult) {
