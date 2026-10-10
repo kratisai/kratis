@@ -13,7 +13,7 @@ Connect Git repositories, get a living wiki and code graph, plan with an archite
 
 ## Quick start (self-host)
 
-Requires Docker (x86), curl and openssl. Downloads the compose stack, generates secrets, and starts Kratis:
+Requires Docker, curl and openssl. Downloads the compose stack, generates secrets, and starts Kratis:
 
 ```bash
 mkdir kratis && cd kratis

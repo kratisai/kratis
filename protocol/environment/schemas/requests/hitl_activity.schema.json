@@ -68,10 +68,6 @@
         }
       }
     },
-    "input": {
-      "type": "object",
-      "description": "Agent-defined input bag of the action (kind=approval). Used to build the activity row when the agent never announced a tool_call."
-    },
     "form": {
       "type": "object",
       "description": "JSON Schema for the expected answer (kind=question)."

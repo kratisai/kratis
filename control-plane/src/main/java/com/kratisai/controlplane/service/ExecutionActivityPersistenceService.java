@@ -134,6 +134,11 @@ public class ExecutionActivityPersistenceService {
                 .map(existing -> {
                     ActivityDetail detail = detailOf(existing);
                     existing.setStatus(status);
+                    if (ActivityKind.isCommandLike(request.toolKind())
+                            && request.command() != null
+                            && !request.command().isBlank()) {
+                        existing.setDescription(request.command());
+                    }
                     existing.setDetail(toJson((detail != null ? detail : emptyDetail()).withHitl(hitl)));
                     repository.save(existing);
                     return existing;
@@ -215,7 +220,7 @@ public class ExecutionActivityPersistenceService {
     }
 
     private static ActivityDetail emptyDetail() {
-        return new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null);
     }
 
     private static ActivityDetail placeholderDetail(HitlRequestSnapshot request) {
@@ -225,20 +230,7 @@ public class ExecutionActivityPersistenceService {
             locations = List.of(new ActivityLocation(request.diff().path(), null));
         }
         return new ActivityDetail(
-                kind,
-                request.title(),
-                locations,
-                request.input(),
-                null,
-                request.diff(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null);
+                kind, request.title(), locations, null, request.diff(), null, null, null, null, null, null);
     }
 
     private static ActivityType placeholderType(String toolKind) {
@@ -285,8 +277,8 @@ public class ExecutionActivityPersistenceService {
         String description = reason != null && !reason.isBlank()
                 ? truncate(reason)
                 : "Execution failed (exit code " + exitCode + ")";
-        ActivityDetail detail = new ActivityDetail(
-                null, null, null, null, null, null, exitCode, null, null, null, null, null, null, null);
+        ActivityDetail detail =
+                new ActivityDetail(null, null, null, null, null, exitCode, null, null, null, null, null);
 
         recordActivity(executionId, ActivityType.ERROR, description, ERROR_ACTION_ID, ActivityStatus.FAILED, detail);
 

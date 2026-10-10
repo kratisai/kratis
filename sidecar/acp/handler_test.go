@@ -530,9 +530,6 @@ func TestHandleSessionUpdate_PlanStructuredEntries(t *testing.T) {
 	if !reflect.DeepEqual(act.detail.Plan, want) {
 		t.Errorf("expected structured plan entries, got %+v", act.detail.Plan)
 	}
-	if act.detail.RawUpdate == nil || act.detail.RawUpdate["sessionUpdate"] != "plan" {
-		t.Errorf("expected raw update preserved verbatim, got %+v", act.detail.RawUpdate)
-	}
 }
 
 func TestHandleSessionUpdate_PlanReplaceAllAndOrdering(t *testing.T) {
@@ -945,21 +942,6 @@ func TestHandleSessionUpdate_ForwardsChunkMetaAndRawUpdate(t *testing.T) {
 		t.Fatalf("expected 1 activity, got %d", len(sink.activities))
 	}
 	detail := sink.activities[0].detail
-	if detail.Meta == nil {
-		t.Fatal("expected _meta forwarded into detail.meta")
-	}
-	if detail.Meta["chunkKey"] != "chunkVal" {
-		t.Errorf("expected chunk-level _meta preserved, got %+v", detail.Meta)
-	}
-	if detail.Meta["blockKey"] != "blockVal" {
-		t.Errorf("expected content-block _meta merged in, got %+v", detail.Meta)
-	}
-	if detail.RawUpdate == nil {
-		t.Fatal("expected rawUpdate captured")
-	}
-	if detail.RawUpdate["sessionUpdate"] != "agent_message_chunk" {
-		t.Errorf("expected rawUpdate to preserve the update payload, got %+v", detail.RawUpdate)
-	}
 	if detail.MessageID != "msg-1" {
 		t.Errorf("expected messageId, got %q", detail.MessageID)
 	}

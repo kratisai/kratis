@@ -55,7 +55,6 @@ const planEntrySchema = z
 
 const hitlSchema = z
   .object({
-    command: z.string().optional(),
     commandSegments: z.array(commandSegment).optional(),
     content: z.record(z.string(), z.unknown()).optional(),
     diff: permissionDiffSchema,
@@ -85,7 +84,6 @@ const activityDetailSchema = z
       .optional(),
     exitCode: z.number().int().optional(),
     hitl: hitlSchema,
-    input: z.record(z.string(), z.unknown()).optional(),
     kind: activityKind.optional(),
     locations: z
       .array(
@@ -93,10 +91,8 @@ const activityDetailSchema = z
       )
       .optional(),
     messageId: z.string().optional(),
-    meta: z.record(z.string(), z.unknown()).optional(),
     output: z.string().optional(),
     plan: z.array(planEntrySchema).optional(),
-    rawUpdate: z.record(z.string(), z.unknown()).optional(),
     role: z.string().optional(),
     title: z.string().optional(),
     truncated: z.boolean().optional(),

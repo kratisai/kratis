@@ -52,10 +52,6 @@ export function activityCommand(activity: Activity): string {
     return activity.command
   }
   const detail = activity.detail
-  const rawCommand = detail?.input?.['command']
-  if (typeof rawCommand === 'string' && rawCommand !== '') {
-    return rawCommand
-  }
   if (typeof detail?.title === 'string' && detail.title !== '') {
     return detail.title
   }
@@ -255,18 +251,9 @@ function toolRecordFrom(current: ToolRecord): ToolExecutionActivity {
 
 function toolTarget(detail: ActivityDetail | undefined): string | undefined {
   if (!detail) return undefined
-  const input = detail.input
-  const candidates = [
-    input?.['filePath'],
-    input?.['file_path'],
-    input?.['path'],
-    input?.['pattern'],
-    input?.['command'],
-    input?.['url'],
-    detail.locations?.[0]?.path,
-  ]
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate !== '') return candidate
+  const locationPath = detail.locations?.[0]?.path
+  if (typeof locationPath === 'string' && locationPath !== '') {
+    return locationPath
   }
   return undefined
 }
@@ -482,7 +469,7 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
     } else if (activityType === 'COMMAND') {
       set((state) => {
         const existing = state.activitiesByExecution[executionId] ?? []
-        const command = getDetailCommand(detail) ?? description
+        const command = description
         const idx = findToolRecordIndex(existing, actionId)
         const current = idx >= 0 ? existing[idx] : undefined
         if (
@@ -684,11 +671,3 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
     })
   },
 }))
-
-function getDetailCommand(detail: ActivityDetail | undefined): string | undefined {
-  const rawCommand = detail?.input?.['command']
-  if (typeof rawCommand === 'string' && rawCommand !== '') {
-    return rawCommand
-  }
-  return undefined
-}

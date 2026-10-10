@@ -253,8 +253,6 @@ describe('Execution Activity Log', () => {
       description: 'systemctl restart app',
       detail: {
         hitl: {
-          command: 'systemctl restart app',
-
           kind: 'approval',
           message: 'Allow systemctl restart app?',
           state: 'awaiting_human',

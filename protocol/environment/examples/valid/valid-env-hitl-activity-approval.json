@@ -10,7 +10,6 @@
     "title": "Remove build directory",
     "toolKind": "execute",
     "locations": [{ "path": "/tmp/build" }],
-    "input": { "command": "rm -rf /tmp/build" },
     "options": [
       { "optionId": "allow-once", "name": "Allow once", "kind": "allow_once" },
       { "optionId": "allow-always", "name": "Always allow", "kind": "allow_always" },

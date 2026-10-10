@@ -240,13 +240,12 @@ type HitlActivityParams struct {
 	ExecutionID string   `json:"executionId"`
 
 	// kind=approval
-	Command   string             `json:"command,omitempty"`
-	Title     string             `json:"title,omitempty"`
-	ToolKind  string             `json:"toolKind,omitempty"`
-	Options   []PermissionOption `json:"options,omitempty"`
-	Diff      *ActivityDiff      `json:"diff,omitempty"`
-	Locations []ActivityLocation `json:"locations,omitempty"`
-	Input     map[string]any     `json:"input,omitempty"`
+	Command   string                 `json:"command,omitempty"`
+	Title     string                 `json:"title,omitempty"`
+	ToolKind  string                 `json:"toolKind,omitempty"`
+	Options   []PermissionOption     `json:"options,omitempty"`
+	Diff      *acp.ActivityDiff      `json:"diff,omitempty"`
+	Locations []acp.ActivityLocation `json:"locations,omitempty"`
 
 	// kind=question
 	Form map[string]any `json:"form,omitempty"`
@@ -614,59 +613,20 @@ const (
 	ApprovalRejectAlways ApprovalOptionKind = "reject_always"
 )
 
-// ActivityDetail mirrors acp.ActivityDetail: structured, optional fields
-// derived from the accumulated ACP tool/message state. input/meta/rawUpdate
-// are agent-defined opaque bags preserved verbatim.
-type ActivityDetail struct {
-	Kind      ActivityKind       `json:"kind,omitempty"`
-	Title     string             `json:"title,omitempty"`
-	Locations []ActivityLocation `json:"locations,omitempty"`
-	Input     map[string]any     `json:"input,omitempty"`
-	Output    string             `json:"output,omitempty"`
-	Diff      *ActivityDiff      `json:"diff,omitempty"`
-	ExitCode  *int               `json:"exitCode,omitempty"`
-	Truncated bool               `json:"truncated,omitempty"`
-	Meta      map[string]any     `json:"meta,omitempty"`
-	MessageID string             `json:"messageId,omitempty"`
-	Role      string             `json:"role,omitempty"`
-	Plan      []PlanEntry        `json:"plan,omitempty"`
-	RawUpdate map[string]any     `json:"rawUpdate,omitempty"`
-}
+// ActivityDetail is the structured detail of an activity event, aliasing acp.ActivityDetail.
+type ActivityDetail = acp.ActivityDetail
 
-// PlanEntry mirrors acp.PlanEntry for the env.activity wire format.
-type PlanEntry struct {
-	Content  string            `json:"content"`
-	Priority PlanEntryPriority `json:"priority"`
-	Status   PlanEntryStatus   `json:"status"`
-}
+// ActivityLocation aliases acp.ActivityLocation.
+type ActivityLocation = acp.ActivityLocation
 
-// PlanEntryPriority is the closed set of ACP PlanEntryPriority values.
-type PlanEntryPriority string
+// ActivityDiff aliases acp.ActivityDiff.
+type ActivityDiff = acp.ActivityDiff
 
-const (
-	PlanPriorityHigh   PlanEntryPriority = "high"
-	PlanPriorityMedium PlanEntryPriority = "medium"
-	PlanPriorityLow    PlanEntryPriority = "low"
-)
+// PlanEntry aliases acp.PlanEntry.
+type PlanEntry = acp.PlanEntry
 
-// PlanEntryStatus is the closed set of ACP PlanEntryStatus values.
-type PlanEntryStatus string
+// PlanEntryPriority aliases acp.PlanEntryPriority.
+type PlanEntryPriority = acp.PlanEntryPriority
 
-const (
-	PlanStatusPending    PlanEntryStatus = "pending"
-	PlanStatusInProgress PlanEntryStatus = "in_progress"
-	PlanStatusCompleted  PlanEntryStatus = "completed"
-)
-
-// ActivityLocation is one file location referenced by a tool call.
-type ActivityLocation struct {
-	Path string `json:"path,omitempty"`
-	Line *int   `json:"line,omitempty"`
-}
-
-// ActivityDiff is the before/after text of an edit tool.
-type ActivityDiff struct {
-	OldText string `json:"oldText,omitempty"`
-	NewText string `json:"newText,omitempty"`
-	Path    string `json:"path,omitempty"`
-}
+// PlanEntryStatus aliases acp.PlanEntryStatus.
+type PlanEntryStatus = acp.PlanEntryStatus

@@ -89,22 +89,18 @@ type Activity struct {
 }
 
 // ActivityDetail is the structured detail of an activity event. Every field is
-// optional and omitted when empty. input/meta/rawUpdate are agent-defined
-// opaque bags preserved verbatim (never parsed for behavior).
+// optional and omitted when empty.
 type ActivityDetail struct {
 	Kind      ActivityKind       `json:"kind,omitempty"`
 	Title     string             `json:"title,omitempty"`
 	Locations []ActivityLocation `json:"locations,omitempty"`
-	Input     map[string]any     `json:"input,omitempty"`
 	Output    string             `json:"output,omitempty"`
 	Diff      *ActivityDiff      `json:"diff,omitempty"`
 	ExitCode  *int               `json:"exitCode,omitempty"`
 	Truncated bool               `json:"truncated,omitempty"`
-	Meta      map[string]any     `json:"meta,omitempty"`
 	MessageID string             `json:"messageId,omitempty"`
 	Role      string             `json:"role,omitempty"`
 	Plan      []PlanEntry        `json:"plan,omitempty"`
-	RawUpdate map[string]any     `json:"rawUpdate,omitempty"`
 }
 
 // ActivityLocation is one file location referenced by a tool call.

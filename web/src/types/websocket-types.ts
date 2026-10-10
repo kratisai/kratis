@@ -11,14 +11,11 @@ export interface ActivityDetail {
   diff?: ActivityDiff
   exitCode?: number
   hitl?: ActivityHitl
-  input?: Record<string, unknown>
   kind?: ActivityKind
   locations?: ActivityLocation[]
   messageId?: string
-  meta?: Record<string, unknown>
   output?: string
   plan?: PlanEntry[]
-  rawUpdate?: Record<string, unknown>
   role?: string
   title?: string
   truncated?: boolean
@@ -31,7 +28,6 @@ export interface ActivityDiff {
 }
 
 export interface ActivityHitl {
-  command?: string
   commandSegments?: CommandSegment[]
   content?: Record<string, unknown>
   diff?: ActivityDiff

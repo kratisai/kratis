@@ -464,29 +464,6 @@ func runeFloorBoundary(s string, n int) int {
 
 func (c *Client) SendActivity(activity acp.Activity) {
 	c.markActivity()
-	detail := ActivityDetail{
-		Kind:      ActivityKind(activity.Detail.Kind),
-		Title:     activity.Detail.Title,
-		Input:     activity.Detail.Input,
-		Output:    activity.Detail.Output,
-		Diff:      convertDiff(activity.Detail.Diff),
-		ExitCode:  activity.Detail.ExitCode,
-		Truncated: activity.Detail.Truncated,
-		Meta:      activity.Detail.Meta,
-		MessageID: activity.Detail.MessageID,
-		Role:      activity.Detail.Role,
-		RawUpdate: activity.Detail.RawUpdate,
-	}
-	for _, loc := range activity.Detail.Locations {
-		detail.Locations = append(detail.Locations, ActivityLocation{Path: loc.Path, Line: loc.Line})
-	}
-	for _, entry := range activity.Detail.Plan {
-		detail.Plan = append(detail.Plan, PlanEntry{
-			Content:  entry.Content,
-			Priority: PlanEntryPriority(entry.Priority),
-			Status:   PlanEntryStatus(entry.Status),
-		})
-	}
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	c.mu.Unlock()
@@ -496,7 +473,7 @@ func (c *Client) SendActivity(activity acp.Activity) {
 		ExecutionID:  execID,
 		ActionID:     activity.ActionID,
 		Status:       ActivityStatus(activity.Status),
-		Detail:       detail,
+		Detail:       activity.Detail,
 	})
 
 	if activity.Status == acp.ActivityCompleted &&
@@ -535,13 +512,6 @@ func (c *Client) diffCheckAfterQuiet(activityNanosBefore int64) {
 	if c.lastActivityNanos.Load() != activityNanosBefore {
 		c.TriggerDiffCheck()
 	}
-}
-
-func convertDiff(diff *acp.ActivityDiff) *ActivityDiff {
-	if diff == nil {
-		return nil
-	}
-	return &ActivityDiff{OldText: diff.OldText, NewText: diff.NewText, Path: diff.Path}
 }
 
 func convertLocations(locations []acp.ToolLocation) []ActivityLocation {
@@ -1110,9 +1080,8 @@ func (c *Client) RequestPermission(req acp.PermissionRequest) (string, error) {
 		Title:       req.Title,
 		ToolKind:    req.Kind,
 		Options:     convertPermissionOptions(req.Options),
-		Diff:        convertDiff(req.Diff),
+		Diff:        req.Diff,
 		Locations:   convertLocations(req.Locations),
-		Input:       req.Input,
 	})
 	if err != nil {
 		return "", err

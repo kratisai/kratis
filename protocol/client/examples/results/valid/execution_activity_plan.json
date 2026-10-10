@@ -10,14 +10,6 @@
       { "content": "Setup repo", "priority": "high", "status": "in_progress" },
       { "content": "Implement feature", "priority": "medium", "status": "pending" },
       { "content": "Run tests", "priority": "low", "status": "completed" }
-    ],
-    "rawUpdate": {
-      "sessionUpdate": "plan",
-      "entries": [
-        { "content": "Setup repo", "priority": "high", "status": "in_progress" },
-        { "content": "Implement feature", "priority": "medium", "status": "pending" },
-        { "content": "Run tests", "priority": "low", "status": "completed" }
-      ]
-    }
+    ]
   }
 }

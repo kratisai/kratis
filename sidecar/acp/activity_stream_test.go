@@ -156,8 +156,8 @@ func TestHandleSessionUpdate_LifecycleFieldsSplitAcrossMessages(t *testing.T) {
 		if act.activityType != "COMMAND" {
 			t.Errorf("activity %d: expected type COMMAND from accumulated kind, got %q", i, act.activityType)
 		}
-		if act.description != "shell · git status" {
-			t.Errorf("activity %d: expected description from accumulated title, got %q", i, act.description)
+		if act.description != "git status" {
+			t.Errorf("activity %d: expected description from accumulated command, got %q", i, act.description)
 		}
 	}
 	if sink.activities[0].status != "pending" || sink.activities[1].status != "completed" {
