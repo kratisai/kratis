@@ -243,7 +243,7 @@ class SandboxExecutionWebSocketIntegrationTest {
 |----------|---------------|
 | Client Auth & Subscription | Connect `ClientWebSocketFixture` with token & team, assert connection is established, and verify `authenticated` message received. |
 | Sidecar Register & Command Dispatch | Connect `SidecarWebSocketFixture` with connector token, trigger action from controller/service, and assert `env.launch_acp_agent` or `env.exec` trigger is received. |
-| Human-in-the-Loop (HITL) Permission Flow | Connect sidecar with command requiring approval. Assert first response has `approved:false`. Trigger REST endpoint to approve, and assert sidecar receives `approved:true` event payload. |
+| Human-in-the-Loop (HITL) Permission Flow | Connect sidecar with a command that needs approval. Assert the deferred response has `response: "approved"` and the selected `optionId`. |
 | Session Disconnect Cleanup | Connect a client, verify `webSocketHandler.getAuthenticatedSessionCount()` is >0. Close connection, and assert the session count returns to 0. |
 
 ## Running Tests

@@ -535,7 +535,10 @@ output text, diff, exit code, approval state, messageId, harness `_meta`
 preserved verbatim). Activities sharing an `actionId` (ACP `toolCallId` for
 tools, the chunk-run key for message/thought runs; see §9.1) are exactly one
 activity record in the UI and one row per execution in the control plane
-(enforced by the `(execution_id, action_id)` unique index). Chunk emissions
+(enforced by the `(execution_id, action_id)` unique index). The sidecar
+correlates one capability request without `toolCallId` to one active tool call,
+and it does not approve a tool call again after its first approval. A second
+approval for the same `actionId` is a `RESOURCE_CONFLICT` error. Chunk emissions
 carry cumulative text, so both layers replace the description on merge and
 never concatenate. The ACP `_meta` extension bag (chunk-level and
 content-block-level) is preserved

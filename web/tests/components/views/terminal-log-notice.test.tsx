@@ -44,11 +44,15 @@ describe('TerminalLogNotice', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 
-  it('shows a starting notice while the sandbox reconnects', () => {
-    render(<TerminalLogNotice isWaking={false} onWake={null} status="PENDING_RECONNECT" />)
+  it('shows a connecting notice that clears once the sandbox connects', () => {
+    const { container, rerender } = render(
+      <TerminalLogNotice isWaking={false} onWake={null} status="PENDING_CONNECT" />,
+    )
 
-    expect(screen.getByTestId('terminal-pending-reconnect-notice')).toBeInTheDocument()
-    expect(screen.getByTestId('terminal-pending-reconnect-notice')).toHaveTextContent(/starting/i)
+    expect(screen.getByTestId('terminal-connecting-notice')).toHaveTextContent(/connecting/i)
+
+    rerender(<TerminalLogNotice isWaking={false} onWake={null} status="CONNECTED" />)
+    expect(container).toBeEmptyDOMElement()
   })
 
   it('shows a disconnected notice for DISCONNECTED', () => {

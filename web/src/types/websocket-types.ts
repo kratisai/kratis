@@ -124,7 +124,7 @@ export interface CompleteResult {
 export type EnvironmentStatus =
   | 'CONNECTED'
   | 'DISCONNECTED'
-  | 'PENDING_RECONNECT'
+  | 'PENDING_CONNECT'
   | 'SLEEPING'
   | 'TERMINATED'
 

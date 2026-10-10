@@ -720,6 +720,29 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
+    void hasApprovalRequest_returnsTrueForResolvedApprovalHistory() {
+        UUID executionId = UUID.randomUUID();
+        SandboxExecutionActivity existing =
+                row(executionId, 1, "tool-call-42", ActivityType.COMMAND, ActivityStatus.COMPLETED, "rm -rf /");
+        existing.setDetail("{\"hitl\":{\"kind\":\"approval\",\"state\":\"resolved\"}}");
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
+                .thenReturn(Optional.of(existing));
+
+        assertThat(service.hasApprovalRequest(executionId, "tool-call-42")).isTrue();
+    }
+
+    @Test
+    void hasApprovalRequest_returnsFalseForActivityWithoutApprovalHistory() {
+        UUID executionId = UUID.randomUUID();
+        SandboxExecutionActivity existing =
+                row(executionId, 1, "tool-call-42", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "rm -rf /");
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
+                .thenReturn(Optional.of(existing));
+
+        assertThat(service.hasApprovalRequest(executionId, "tool-call-42")).isFalse();
+    }
+
+    @Test
     void getActivities_delegatesOrderedRead() {
         UUID executionId = UUID.randomUUID();
         List<SandboxExecutionActivity> rows =
@@ -923,6 +946,38 @@ class ExecutionActivityPersistenceServiceTest {
 
         assertThat(existing.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
         assertThat(existing.getDetail()).contains("awaiting_human");
+    }
+
+    @Test
+    void recordActivity_afterApprovalUpdatesExecutionStatusAndKeepsResolvedApproval() throws Exception {
+        UUID executionId = UUID.randomUUID();
+        HitlResolution resolution = new HitlResolution(
+                executionId,
+                "tool-call-42",
+                HitlKind.APPROVAL,
+                HitlResponse.APPROVED,
+                "allow-once",
+                null,
+                HitlResolver.user(UUID.randomUUID(), "Alice"));
+        ActivityHitl resolvedApproval = ActivityHitl.from(commandRequest(executionId), HitlState.AWAITING_HUMAN)
+                .withResolution(resolution);
+        SandboxExecutionActivity existing =
+                row(executionId, 1, "tool-call-42", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "rm -rf /");
+        existing.setDetail(objectMapper.writeValueAsString(emptyActivityDetail().withHitl(resolvedApproval)));
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
+                .thenReturn(Optional.of(existing));
+
+        service.recordActivity(
+                executionId,
+                ActivityType.COMMAND,
+                "rm -rf /",
+                "tool-call-42",
+                ActivityStatus.COMPLETED,
+                emptyActivityDetail());
+
+        assertThat(existing.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+        assertThat(service.detailOf(existing).hitl().state()).isEqualTo(HitlState.RESOLVED);
+        assertThat(service.detailOf(existing).hitl().response()).isEqualTo(HitlResponse.APPROVED);
     }
 
     private static ActivityDetail emptyActivityDetail() {

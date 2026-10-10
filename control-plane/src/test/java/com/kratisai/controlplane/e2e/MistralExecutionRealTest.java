@@ -83,10 +83,7 @@ class MistralExecutionRealTest extends AbstractAgentExecutionRealTest {
 
     @Override
     protected int getExpectedHitlRequestCount() {
-        // accept-edits auto-approves write_file/edit; bash still requires HITL.
-        // write_file (auto) + bash tool (HITL) + any secondary bash/HITL from vibe = 2,
-        // plus the gated fs/write_text_file client-capability write (kind "write") = 3.
-        return 3;
+        return 2;
     }
 
     @Override

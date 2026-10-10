@@ -12,6 +12,7 @@ import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcError;
+import com.kratisai.controlplane.api.wsdto.JsonRpcErrorCodes;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
@@ -29,6 +30,7 @@ import com.kratisai.controlplane.service.PendingHitlRegistry;
 import com.kratisai.controlplane.service.command.ShellCommandSplitter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -118,9 +120,16 @@ public class EnvironmentHitlActivityRpcHandler
 
         String command = params.command();
         String toolKind = params.toolKind();
+        UUID execId = UUID.fromString(params.executionId());
+        SandboxExecution execution = executionRepository.findById(execId).orElse(null);
+        if (execution == null) {
+            logger.warn("Execution {} not found for environment {} — rejecting command '{}'", execId, envId, command);
+            return Flux.just(HitlActivityResult.cancelled());
+        }
+        executionGuard.verifyExecutionInEnvironment(execution, envId);
+        rejectDuplicateApproval(execution.getId(), params.actionId());
 
         logger.debug("Checking HITL rules for team {} and command '{}'", teamId, command);
-
         List<HitlRule> rules = ruleRepository.findByTeamId(teamId);
         Optional<HitlResponse> autoResolution = HitlRuleService.autoResolve(rules, command, toolKind);
 
@@ -133,14 +142,6 @@ public class EnvironmentHitlActivityRpcHandler
                 return Flux.just(HitlActivityResult.cancelled());
             }
         }
-
-        UUID execId = UUID.fromString(params.executionId());
-        SandboxExecution execution = executionRepository.findById(execId).orElse(null);
-        if (execution == null) {
-            logger.warn("Execution {} not found for environment {} — rejecting command '{}'", execId, envId, command);
-            return Flux.just(HitlActivityResult.cancelled());
-        }
-        executionGuard.verifyExecutionInEnvironment(execution, envId);
 
         HitlRequestSnapshot payload = new HitlRequestSnapshot(
                 execution.getId(),
@@ -172,7 +173,9 @@ public class EnvironmentHitlActivityRpcHandler
             return Flux.just(HitlActivityResult.approved(allowOptionId));
         }
 
-        pendingHitlRegistry.register(payload, sessionId, requestId, teamId);
+        if (!pendingHitlRegistry.register(payload, sessionId, requestId, teamId)) {
+            throw duplicateHitlRequest(HitlKind.APPROVAL, execution.getId(), params.actionId());
+        }
         eventPublisher.publishEvent(new SandboxExecutionHitlRequiredEvent(teamId, payload));
         logger.info(
                 "Deferred command '{}' to HITL for execution {} and team {} — response sent when user resolves",
@@ -210,7 +213,9 @@ public class EnvironmentHitlActivityRpcHandler
                 params.form(),
                 null);
 
-        pendingHitlRegistry.register(payload, sessionId, requestId, teamId);
+        if (!pendingHitlRegistry.register(payload, sessionId, requestId, teamId)) {
+            throw duplicateHitlRequest(HitlKind.QUESTION, execution.getId(), params.actionId());
+        }
         eventPublisher.publishEvent(new SandboxExecutionHitlRequiredEvent(teamId, payload));
         logger.info(
                 "Deferred question '{}' to HITL for execution {} and team {} — response sent when user answers",
@@ -218,6 +223,21 @@ public class EnvironmentHitlActivityRpcHandler
                 execution.getId(),
                 teamId);
         return Flux.empty();
+    }
+
+    private void rejectDuplicateApproval(UUID executionId, String actionId) {
+        if (pendingHitlRegistry.find(executionId, actionId) != null
+                || activityPersistenceService.hasApprovalRequest(executionId, actionId)) {
+            throw duplicateHitlRequest(HitlKind.APPROVAL, executionId, actionId);
+        }
+    }
+
+    private RpcErrorException duplicateHitlRequest(HitlKind kind, UUID executionId, String actionId) {
+        String message =
+                "Duplicate HITL " + kind.name().toLowerCase(Locale.ROOT) + " request for actionId '" + actionId + "'";
+        logger.error("Rejecting duplicate {} HITL request for execution {} actionId='{}'", kind, executionId, actionId);
+        return new RpcErrorException(
+                JsonRpcError.error(JsonRpcErrorCodes.RESOURCE_CONFLICT, "Duplicate HITL request", message));
     }
 
     /** The activity row records the rule decision directly; the UI never sees an awaiting-human state for it. */

@@ -120,8 +120,8 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
         return <Badge variant="default">Connected</Badge>
       case 'DISCONNECTED':
         return <Badge variant="secondary">Disconnected</Badge>
-      case 'PENDING_RECONNECT':
-        return <Badge variant="outline">Pending Reconnect</Badge>
+      case 'PENDING_CONNECT':
+        return <Badge variant="outline">Connecting</Badge>
       case 'SLEEPING':
         return <Badge variant="secondary">Sleeping</Badge>
       case 'TERMINATED':

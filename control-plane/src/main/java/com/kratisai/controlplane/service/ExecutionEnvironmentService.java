@@ -417,7 +417,7 @@ public class ExecutionEnvironmentService {
         }
 
         env.setContainerId(containerId);
-        env.setStatus(EnvironmentStatus.PENDING_RECONNECT);
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
 
@@ -447,7 +447,7 @@ public class ExecutionEnvironmentService {
             // The suspend teardown drops the connector session by design; the SLEEPING write
             // below must survive that disconnect, and TERMINATED is terminal.
             if (env.getStatus() != EnvironmentStatus.CONNECTED
-                    && env.getStatus() != EnvironmentStatus.PENDING_RECONNECT) {
+                    && env.getStatus() != EnvironmentStatus.PENDING_CONNECT) {
                 return;
             }
             env.setStatus(EnvironmentStatus.DISCONNECTED);

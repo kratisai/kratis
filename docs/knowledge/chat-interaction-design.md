@@ -214,9 +214,12 @@ sequenceDiagram
 ```
 
 The HITL child is keyed by the parent activity's `actionId` (the ACP toolCallId for approvals, the
-question id for questions); there is no separate HITL id. After a decision, the control plane
-publishes the same activity with `detail.hitl.state` set to `resolved`, plus `response` and a
-structured `resolvedBy` (`{ "kind": "user" | "rule" | "timeout" | "system", "userId"?, "displayName"? }`).
+question id for questions); there is no separate HITL id. The sidecar correlates a capability request
+without `toolCallId` to one active tool call. It also does not approve a tool call again after its
+first approval. A second approval for the same `actionId` is a `RESOURCE_CONFLICT` error.
+After a decision, the control plane publishes the same activity with `detail.hitl.state` set to
+`resolved`, plus `response` and a structured `resolvedBy`
+(`{ "kind": "user" | "rule" | "timeout" | "system", "userId"?, "displayName"? }`).
 
 `commandSegments` lists the root commands of a composite command. The control plane splits at
 `&&`, `||`, `;`, `|`, and newlines. Each segment carries a derived rule candidate. The UI uses

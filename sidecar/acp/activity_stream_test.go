@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"strings"
@@ -401,6 +402,65 @@ func TestHandleTerminalCreate_CorrelatesPermissionByCommand(t *testing.T) {
 	}
 	if sink.activities[0].actionID != "tc-shell" || sink.activities[0].status != "failed" {
 		t.Errorf("expected failed resolution activity for tc-shell, got %+v", sink.activities[0])
+	}
+}
+
+func TestHandleTerminalCreate_SkipsGateWhenCommandAlreadyApproved(t *testing.T) {
+	tm := NewTerminalManager(t.TempDir())
+	sink := &mockEventSink{}
+	sink.cancelChan = make(chan struct{})
+	close(sink.cancelChan)
+	h := NewHandler(sink, tm, "")
+
+	h.mu.Lock()
+	h.toolCalls["tc-shell"] = &ToolCallInfo{
+		ToolCallID:      "tc-shell",
+		Kind:            "execute",
+		Title:           "shell · true",
+		Command:         "true",
+		ApprovalDecided: true,
+		Approved:        true,
+	}
+	h.mu.Unlock()
+
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	defer func() { _ = stdinR.Close() }()
+	defer func() { _ = stdinW.Close() }()
+	transport := &AcpTransport{stdin: stdinW}
+	responses := make(chan string, 4)
+	go func() {
+		scanner := bufio.NewScanner(stdinR)
+		for scanner.Scan() {
+			responses <- scanner.Text()
+		}
+	}()
+	done := make(chan struct{})
+	go func() {
+		h.HandleTerminalCreate(transport, map[string]interface{}{
+			"command": "true",
+			"cwd":     tm.workspace,
+		}, float64(1))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for HandleTerminalCreate")
+	}
+
+	if len(sink.permRequests) != 0 {
+		t.Fatalf("expected no re-approval for an already approved command, got %+v", sink.permRequests)
+	}
+	select {
+	case resp := <-responses:
+		if !strings.Contains(resp, "terminalId") || strings.Contains(resp, `"error"`) {
+			t.Errorf("expected terminalId success response, got %s", resp)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no response written")
 	}
 }
 

@@ -100,6 +100,16 @@ class PendingHitlRegistryTest {
     }
 
     @Test
+    void registerRejectsDuplicateActionIdWithoutReplacingTheOriginal() {
+        PendingHitlRegistry.PendingHitl first = registerSample("ws-1", "action-1", HitlKind.APPROVAL);
+        PendingHitlRegistry.PendingHitl duplicate = new PendingHitlRegistry.PendingHitl(
+                sampleRequest(executionId, "action-1", HitlKind.APPROVAL), session("ws-2"), 43, Instant.now(), teamId);
+
+        assertThat(registry.register(duplicate)).isFalse();
+        assertThat(registry.find(executionId, "action-1")).isSameAs(first);
+    }
+
+    @Test
     void registerKeepsConcurrentRequestsForSameExecution() {
         PendingHitlRegistry.PendingHitl first = registerSample("ws-1", "action-1", HitlKind.APPROVAL);
         PendingHitlRegistry.PendingHitl second = new PendingHitlRegistry.PendingHitl(

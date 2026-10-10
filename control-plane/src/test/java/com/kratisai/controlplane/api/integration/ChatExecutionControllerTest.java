@@ -314,7 +314,7 @@ class ChatExecutionControllerTest {
         assertThat(tokenIndex).isGreaterThan(-1);
         assertThat(execCommand.get(tokenIndex + 1)).isNotNull();
 
-        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.DISCONNECTED);
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
 
         // Track container ID for cleanup in tearDown
         spawnedContainerId = actualContainerId;

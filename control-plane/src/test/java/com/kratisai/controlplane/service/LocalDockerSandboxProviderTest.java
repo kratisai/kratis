@@ -607,10 +607,10 @@ class LocalDockerSandboxProviderTest {
     }
 
     @Test
-    void testTerminateSandboxCapturesSidecarLogsWhenEnvironmentPendingReconnect() throws Exception {
+    void testTerminateSandboxCapturesSidecarLogsWhenEnvironmentPendingConnect() throws Exception {
         ExecutionEnvironment env = new ExecutionEnvironment();
         env.setContainerId("test-container-id");
-        env.setStatus(EnvironmentStatus.PENDING_RECONNECT);
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
         when(mockEnvRepository.findByContainerId("test-container-id")).thenReturn(Optional.of(env));
 
         when(mockProcessExecutor.execute(any(), any(), any()))

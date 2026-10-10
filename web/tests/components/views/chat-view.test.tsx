@@ -451,25 +451,25 @@ describe('ChatView', () => {
     })
 
     it('does not replay history while the sandbox is waking', async () => {
-      await mockExecutions('PENDING_RECONNECT')
+      await mockExecutions('PENDING_CONNECT')
       useExecutionStore.setState({ terminalOpen: true })
       renderWithProviders(<ChatView />)
 
       const send = await sendMock()
       await waitFor(() => {
-        expect(screen.getByTestId('terminal-pending-reconnect-notice')).toBeInTheDocument()
+        expect(screen.getByTestId('terminal-connecting-notice')).toBeInTheDocument()
       })
       expect(send).not.toHaveBeenCalledWith('execution.get_logs', expect.anything())
     })
 
     it('replays history when a resumed sandbox becomes connected', async () => {
-      await mockExecutions('PENDING_RECONNECT')
+      await mockExecutions('PENDING_CONNECT')
       useExecutionStore.setState({ terminalOpen: true })
       renderWithProviders(<ChatView />)
 
       const send = await sendMock()
       await waitFor(() => {
-        expect(screen.getByTestId('terminal-pending-reconnect-notice')).toBeInTheDocument()
+        expect(screen.getByTestId('terminal-connecting-notice')).toBeInTheDocument()
       })
       send.mockClear()
 

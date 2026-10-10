@@ -90,6 +90,10 @@ class EnvironmentHitlActivityRpcHandlerTest {
                 pendingHitlRegistry,
                 eventPublisher,
                 activityPersistenceService);
+        lenient()
+                .when(pendingHitlRegistry.register(
+                        any(HitlRequestSnapshot.class), any(String.class), any(), any(UUID.class)))
+                .thenReturn(true);
     }
 
     private ExecutionEnvironment createEnvironment() {
@@ -259,6 +263,8 @@ class EnvironmentHitlActivityRpcHandlerTest {
     @Test
     void handle_approvalWithRuleButNoAllowOption_cancelled() {
         stubSessionAndEnvironment();
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
         HitlRule rule = new HitlRule();
         rule.setCommandRoot("rm");
@@ -269,7 +275,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
                 "tool-call-1",
                 "Remove",
                 HitlKind.APPROVAL,
-                UUID.randomUUID().toString(),
+                execution.getId().toString(),
                 "rm -rf /",
                 "Remove",
                 "execute",
@@ -344,9 +350,73 @@ class EnvironmentHitlActivityRpcHandlerTest {
     }
 
     @Test
-    void handle_approvalNoActiveExecution_cancelled() {
+    void handle_approvalAlreadyPending_rejectsDuplicateActionId() {
+        stubSessionAndEnvironment();
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(pendingHitlRegistry.find(execution.getId(), "tool-call-42"))
+                .thenReturn(new PendingHitlRegistry.PendingHitl(null, null, null, null, null));
+        EnvironmentRpcPayload.HitlActivity params = approvalParams("rm -rf /", "tool-call-42", execution.getId());
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-2");
+
+        assertThatThrownBy(() -> handler.handle(sessionId, request, params))
+                .isInstanceOf(RpcErrorException.class)
+                .satisfies(error -> {
+                    RpcErrorException rpcError = (RpcErrorException) error;
+                    assertThat(rpcError.error().code()).isEqualTo(-32004);
+                    assertThat(rpcError.error().message()).isEqualTo("Duplicate HITL request");
+                });
+        verify(activityPersistenceService, never()).hasApprovalRequest(execution.getId(), "tool-call-42");
+        verify(pendingHitlRegistry, never()).register(any(HitlRequestSnapshot.class), any(), any(), any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void handle_approvalAlreadyPersisted_rejectsDuplicateActionId() {
+        stubSessionAndEnvironment();
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(activityPersistenceService.hasApprovalRequest(execution.getId(), "tool-call-42"))
+                .thenReturn(true);
+        EnvironmentRpcPayload.HitlActivity params = approvalParams("rm -rf /", "tool-call-42", execution.getId());
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-3");
+
+        assertThatThrownBy(() -> handler.handle(sessionId, request, params))
+                .isInstanceOf(RpcErrorException.class)
+                .satisfies(error -> {
+                    RpcErrorException rpcError = (RpcErrorException) error;
+                    assertThat(rpcError.error().code()).isEqualTo(-32004);
+                    assertThat(rpcError.error().message()).isEqualTo("Duplicate HITL request");
+                });
+        verify(ruleRepository, never()).findByTeamId(teamId);
+        verify(pendingHitlRegistry, never()).register(any(HitlRequestSnapshot.class), any(), any(), any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void handle_approvalRegistrationRace_rejectsDuplicateActionId() {
         stubSessionAndEnvironment();
         when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of());
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(pendingHitlRegistry.register(any(HitlRequestSnapshot.class), any(String.class), any(), any(UUID.class)))
+                .thenReturn(false);
+        EnvironmentRpcPayload.HitlActivity params = approvalParams("rm -rf /", "tool-call-42", execution.getId());
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-4");
+
+        assertThatThrownBy(() -> handler.handle(sessionId, request, params))
+                .isInstanceOf(RpcErrorException.class)
+                .satisfies(error ->
+                        assertThat(((RpcErrorException) error).error().code()).isEqualTo(-32004));
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void handle_approvalNoActiveExecution_cancelled() {
+        stubSessionAndEnvironment();
 
         UUID nonexistentExecId = UUID.randomUUID();
         EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
@@ -466,7 +536,6 @@ class EnvironmentHitlActivityRpcHandlerTest {
     @Test
     void handle_approvalForExecutionFromAnotherEnvironment_throwsNotAuthorized() {
         stubSessionAndEnvironment();
-        when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of());
 
         SandboxExecution execution = createExecutionInEnvironment(UUID.randomUUID());
         when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
