@@ -1375,7 +1375,7 @@ describe('activity-store', () => {
       })
     })
 
-    it('does not collapse a closed message when a new activity appends', () => {
+    it('keeps an open message stream expanded when a new activity appends', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
@@ -1395,7 +1395,43 @@ describe('activity-store', () => {
       )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities[0].collapsed).toBe(false)
+      expect(activities[0]).toMatchObject({ collapsed: false, state: 'active' })
+    })
+
+    it('auto-collapses a completed message when the next activity appends', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'msg-1',
+          activityType: 'MESSAGE',
+          description: 'agent reply',
+          detail: { messageId: 'msg-1', role: 'agent' },
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'msg-1',
+          activityType: 'MESSAGE',
+          description: 'agent reply',
+          detail: { messageId: 'msg-1', role: 'agent' },
+          status: 'completed',
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'tc-1',
+          activityType: 'RESEARCH',
+          description: 'Reading main.go',
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities[0]).toMatchObject({
+        collapsed: true,
+        state: 'completed',
+        type: 'message',
+      })
+      expect(activities[1]).toMatchObject({ actionId: 'tc-1', state: 'active' })
     })
 
     it('renders a replayed completed message stream as completed', () => {

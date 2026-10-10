@@ -66,9 +66,11 @@ describe('Execution Activity Log', () => {
     // Render the activity log for that execution
     renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
 
-    // Assert thinking card appears (the thought is both the title and the body)
+    // Assert thinking card appears with the "Thinking" prefix
     await waitFor(() => {
-      expect(screen.getAllByText('Analyzing the codebase structure').length).toBeGreaterThanOrEqual(1)
+      expect(
+        screen.getByText('Thinking ... Analyzing the codebase structure'),
+      ).toBeInTheDocument()
     })
   })
 

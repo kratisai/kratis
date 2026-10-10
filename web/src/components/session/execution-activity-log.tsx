@@ -24,11 +24,14 @@ import type {
 import { ActivityApproval } from '@/components/session/activities/activity-approval'
 import { ActivityElicitation } from '@/components/session/activities/activity-elicitation'
 import { PlanEntriesList, planSummaryLabel } from '@/components/session/plan-entries'
+import { cn } from '@/lib/utils'
 import { activityTitle, useActivityStore } from '@/store/activity-store'
 
 const EMPTY_ACTIVITIES: Activity[] = []
 
 const NEAR_BOTTOM_THRESHOLD_PX = 120
+
+const THINKING_LABEL = 'Thinking ...'
 
 interface ActivityItemProps {
   activity: Activity
@@ -201,6 +204,68 @@ function ActivityItemShell({
   )
 }
 
+/**
+ * A text-first activity (agent message, thinking) whose own text is the header
+ * and the summary: open shows the full text, collapsed shows one truncated line.
+ */
+function ActivityTextShell({
+  activity,
+  children,
+  className,
+  executionId,
+  icon,
+  summary,
+}: {
+  activity: Activity
+  children: ReactNode
+  className: string
+  executionId: string
+  icon?: ReactNode
+  summary: string
+}) {
+  const toggleCollapsed = useActivityStore((s) => s.toggleCollapsed)
+  const collapsed = activity.collapsed
+
+  const chevron = collapsed ? (
+    <ChevronRight className="text-muted-foreground h-3 w-3 shrink-0" />
+  ) : (
+    <ChevronDown className="text-muted-foreground h-3 w-3 shrink-0" />
+  )
+
+  const toggle = () => toggleCollapsed(executionId, activity.id)
+
+  if (collapsed) {
+    return (
+      <button
+        className="hover:bg-muted/50 flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left"
+        onClick={toggle}
+        title={summary}
+        type="button"
+      >
+        {chevron}
+        {icon}
+        <span className={cn('min-w-0 flex-1 truncate', className)}>{summary}</span>
+      </button>
+    )
+  }
+
+  return (
+    <div className="border-border/50 min-w-0 rounded border p-2">
+      <button
+        className="flex w-full min-w-0 items-start gap-2 text-left"
+        onClick={toggle}
+        type="button"
+      >
+        <span className="mt-0.5 shrink-0">{chevron}</span>
+        {icon}
+        <span className={cn('min-w-0 flex-1 break-words whitespace-pre-wrap', className)}>
+          {children}
+        </span>
+      </button>
+    </div>
+  )
+}
+
 function CommandExecutionActivityItem({
   activity,
   executionId,
@@ -283,6 +348,19 @@ function MessageActivityItem({
   activity: MessageActivity
   executionId: string
 }) {
+  if (activity.role === 'agent') {
+    return (
+      <ActivityTextShell
+        activity={activity}
+        className="text-sm"
+        executionId={executionId}
+        summary={singleLine(activity.text)}
+      >
+        {activity.text}
+      </ActivityTextShell>
+    )
+  }
+
   return (
     <ActivityItemShell
       activity={activity}
@@ -329,6 +407,10 @@ function PlanActivityItem({
   )
 }
 
+function singleLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
 function statusIcon(activity: Activity): ReactNode {
   if (activity.state === 'active' || activity.state === 'pending_approval') {
     return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-blue-500" />
@@ -347,19 +429,15 @@ function ThinkingActivityItem({
   executionId: string
 }) {
   return (
-    <ActivityItemShell
+    <ActivityTextShell
       activity={activity}
-      content={
-        <div className="mt-1 pl-5">
-          <p className="text-muted-foreground text-xs break-words whitespace-pre-wrap">
-            {activity.thought}
-          </p>
-        </div>
-      }
+      className="text-muted-foreground text-xs italic"
       executionId={executionId}
       icon={statusIcon(activity)}
-      title={activityTitle(activity)}
-    />
+      summary={singleLine(`${THINKING_LABEL} ${activity.thought}`)}
+    >
+      {`${THINKING_LABEL} ${activity.thought.replace(/^\s+/, '')}`}
+    </ActivityTextShell>
   )
 }
 

@@ -92,9 +92,9 @@ describe('Execution Activity Stream with HITL', () => {
       'thought-1',
     )
 
-    // Assert thinking card appears (the thought is both the title and the body)
+    // Assert thinking card appears with the "Thinking" prefix
     await waitFor(() => {
-      expect(screen.getAllByText('Analyzing codebase structure').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByText(/Analyzing codebase structure/)).toBeInTheDocument()
     })
 
     // 2. Trigger tool execution activity
@@ -140,7 +140,7 @@ describe('Execution Activity Stream with HITL', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getAllByText('Continuing work').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByText(/Continuing work/)).toBeInTheDocument()
     })
   })
 
@@ -181,7 +181,7 @@ describe('Execution Activity Stream with HITL', () => {
     triggerMockExecutionActivity(ws, EXECUTION_ID, 'THINKING', 'Burst thought', 'completed', 'burst-0')
 
     await waitFor(() => {
-      expect(screen.getByText('Burst thought')).toBeInTheDocument()
+      expect(screen.getByText(/Burst thought/)).toBeInTheDocument()
     })
     expect(screen.getByText('burst_search')).toBeInTheDocument()
     expect(screen.getByText(/burst command/)).toBeInTheDocument()
@@ -218,7 +218,7 @@ describe('Execution Activity Stream with HITL', () => {
 
     // Assert all appear in order
     await waitFor(() => {
-      expect(screen.getByText('Planning next steps')).toBeInTheDocument()
+      expect(screen.getByText(/Planning next steps/)).toBeInTheDocument()
     })
     await waitFor(() => {
       expect(screen.getByText('web_search')).toBeInTheDocument()
