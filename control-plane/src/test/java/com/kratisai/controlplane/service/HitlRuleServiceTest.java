@@ -286,6 +286,23 @@ class HitlRuleServiceTest {
     }
 
     @Test
+    void autoResolve_prefixAllowRule_appliesToOtherKindCommand() {
+        assertThat(HitlRuleService.autoResolve(List.of(prefixAllow("mkdir -p")), "mkdir -p /tmp/x", "other"))
+                .isEqualTo(Optional.of(HitlResponse.APPROVED));
+    }
+
+    @Test
+    void autoResolve_prefixDenyRule_declinesOtherKindCommand() {
+        HitlRule denyRm = new HitlRule();
+        denyRm.setCommandRoot("rm -rf");
+        denyRm.setRuleType(HitlRuleType.PREFIX_WILD);
+        denyRm.setAction(HitlRuleAction.DENY);
+
+        assertThat(HitlRuleService.autoResolve(List.of(denyRm), "rm -rf /tmp/x", "other"))
+                .isEqualTo(Optional.of(HitlResponse.DECLINED));
+    }
+
+    @Test
     void autoResolve_toolKindDenyBeatsTextAllow() {
         assertThat(HitlRuleService.autoResolve(
                         List.of(prefixAllow("git"), toolKindRule("execute", HitlRuleAction.DENY)),

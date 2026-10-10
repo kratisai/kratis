@@ -1728,6 +1728,51 @@ func TestHandlePermissionRequest_OptionsSurviveRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHandlePermissionRequest_OtherKindPrefersConcreteKindFromToolCallUpdate(t *testing.T) {
+	sink := &mockEventSink{approveOnce: true, approveResult: "allow"}
+	h := NewHandler(sink, nil, "")
+
+	// The tool_call update carries the tool's real kind; request_permission then
+	// reports the ACP "other" default.
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "tc1",
+			"kind":          "execute",
+			"title":         "mkdir",
+			"status":        "pending",
+		},
+	})
+
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	defer func() { _ = stdinR.Close() }()
+	defer func() { _ = stdinW.Close() }()
+
+	params := map[string]interface{}{
+		"sessionId": "test-session",
+		"toolCall": map[string]interface{}{
+			"toolCallId": "tc1",
+			"title":      "mkdir",
+			"kind":       "other",
+			"rawInput":   map[string]interface{}{"command": "mkdir -p /tmp/x"},
+		},
+		"options": []interface{}{
+			map[string]interface{}{"kind": "allow_once", "optionId": "allow", "name": "Allow once"},
+		},
+	}
+	h.HandlePermissionRequest(&AcpTransport{stdin: stdinW}, params, float64(100))
+
+	if len(sink.permRequests) != 1 {
+		t.Fatalf("expected 1 permission request, got %d", len(sink.permRequests))
+	}
+	if got := sink.permRequests[0].kind; got != "execute" {
+		t.Errorf("expected permission kind 'execute' from tool_call update, got %q", got)
+	}
+}
+
 func TestHandlePermissionRequest_SynthesisesDefaultOptions(t *testing.T) {
 	sink := &mockEventSink{approveOnce: true, approveResult: "allow"}
 	params := map[string]interface{}{
