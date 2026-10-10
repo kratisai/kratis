@@ -4,6 +4,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { EnvironmentStatus } from '@/types/websocket-types'
+
 import { ChatView } from '@/components/views/chat-view'
 import { useCanvasStore } from '@/store/canvas-store'
 import { useChatStore } from '@/store/chat-store'
@@ -125,9 +127,7 @@ describe('ChatView', () => {
       canvases: {},
     })
     useExecutionStore.setState({
-      logEnvironmentId: {},
       logs: {},
-      logStatus: {},
       replayingExecutionId: null,
       terminalFullscreen: false,
       terminalHeight: 256,
@@ -404,7 +404,25 @@ describe('ChatView', () => {
       return useWebSocketStore.getState().send as ReturnType<typeof vi.fn>
     }
 
-    it('requests terminal history when the drawer opens', async () => {
+    function execution(environmentStatus: EnvironmentStatus) {
+      return {
+        chatId: 'session-1',
+        completedAt: null,
+        environmentId: 'env-1',
+        environmentStatus,
+        id: 'exec-1',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        status: 'IDLE' as const,
+      }
+    }
+
+    async function mockExecutions(environmentStatus: EnvironmentStatus) {
+      const { listChatExecutions } = await import('@/lib/execution-api')
+      vi.mocked(listChatExecutions).mockResolvedValue([execution(environmentStatus)])
+    }
+
+    it('requests terminal history when the drawer opens on a connected sandbox', async () => {
+      await mockExecutions('CONNECTED')
       useExecutionStore.setState({ terminalOpen: true })
       renderWithProviders(<ChatView />)
 
@@ -414,46 +432,78 @@ describe('ChatView', () => {
       })
     })
 
+    it('does not replay history when logs are already present', async () => {
+      await mockExecutions('CONNECTED')
+      useExecutionStore.setState({ logs: { 'exec-1': ['[System] existing'] }, terminalOpen: true })
+      renderWithProviders(<ChatView />)
+
+      const send = await sendMock()
+      await waitFor(() => expect(screen.getByText('[System] existing')).toBeInTheDocument())
+      expect(send).not.toHaveBeenCalledWith('execution.get_logs', expect.anything())
+    })
+
     it('does not request history while the drawer is closed', async () => {
+      await mockExecutions('CONNECTED')
       renderWithProviders(<ChatView />)
 
       const send = await sendMock()
       expect(send).not.toHaveBeenCalledWith('execution.get_logs', expect.anything())
     })
 
+    it('does not replay history while the sandbox is waking', async () => {
+      await mockExecutions('PENDING_RECONNECT')
+      useExecutionStore.setState({ terminalOpen: true })
+      renderWithProviders(<ChatView />)
+
+      const send = await sendMock()
+      await waitFor(() => {
+        expect(screen.getByTestId('terminal-pending-reconnect-notice')).toBeInTheDocument()
+      })
+      expect(send).not.toHaveBeenCalledWith('execution.get_logs', expect.anything())
+    })
+
+    it('replays history when a resumed sandbox becomes connected', async () => {
+      await mockExecutions('PENDING_RECONNECT')
+      useExecutionStore.setState({ terminalOpen: true })
+      renderWithProviders(<ChatView />)
+
+      const send = await sendMock()
+      await waitFor(() => {
+        expect(screen.getByTestId('terminal-pending-reconnect-notice')).toBeInTheDocument()
+      })
+      send.mockClear()
+
+      const { listChatExecutions } = await import('@/lib/execution-api')
+      vi.mocked(listChatExecutions).mockResolvedValue([execution('CONNECTED')])
+      await queryClient.invalidateQueries({ queryKey: ['chat-executions', 'session-1'] })
+
+      await waitFor(() => {
+        expect(send).toHaveBeenCalledWith('execution.get_logs', { executionId: 'exec-1' })
+      })
+    })
+
     it('shows a wake prompt for a sleeping sandbox and resumes it on click', async () => {
       const user = userEvent.setup()
       resumeEnvironmentMock.mockResolvedValue({})
-      useExecutionStore.setState({
-        logEnvironmentId: { 'exec-1': 'env-1' },
-        logStatus: { 'exec-1': 'SLEEPING' },
-        terminalOpen: true,
-      })
+      await mockExecutions('SLEEPING')
+      useExecutionStore.setState({ terminalOpen: true })
       renderWithProviders(<ChatView />)
 
-      expect(screen.getByText('Sandbox is asleep.')).toBeInTheDocument()
-      const send = await sendMock()
-      send.mockClear()
+      expect(await screen.findByText('Sandbox is asleep.')).toBeInTheDocument()
 
       await user.click(screen.getByRole('button', { name: /wake sandbox to view console/i }))
 
       await waitFor(() => {
         expect(resumeEnvironmentMock).toHaveBeenCalledWith('team-1', 'env-1')
       })
-      await waitFor(() => {
-        expect(send).toHaveBeenCalledWith('execution.get_logs', { executionId: 'exec-1' })
-      })
     })
 
-    it('shows a terminated notice without a wake action', () => {
-      useExecutionStore.setState({
-        logEnvironmentId: { 'exec-1': 'env-1' },
-        logStatus: { 'exec-1': 'TERMINATED' },
-        terminalOpen: true,
-      })
+    it('shows a terminated notice without a wake action', async () => {
+      await mockExecutions('TERMINATED')
+      useExecutionStore.setState({ terminalOpen: true })
       renderWithProviders(<ChatView />)
 
-      expect(screen.getByTestId('terminal-terminated-notice')).toBeInTheDocument()
+      expect(await screen.findByTestId('terminal-terminated-notice')).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /wake sandbox/i })).toBeNull()
     })
   })

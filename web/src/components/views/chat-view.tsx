@@ -33,9 +33,7 @@ export function ChatView() {
   const terminalEndRef = useRef<HTMLDivElement>(null)
 
   const {
-    logEnvironmentId,
     logs,
-    logStatus,
     requestLogs,
     setTerminalFullscreen,
     setTerminalHeight,
@@ -51,10 +49,11 @@ export function ChatView() {
     .reverse()
     .find((e) => e.status === 'RUNNING' || e.status === 'IDLE')
   const activeExecutionId = routeExecutionId ?? latestRunning?.id ?? null
+  const activeExecution = executions.find((e) => e.id === activeExecutionId)
   const activeLogs = activeExecutionId ? (logs[activeExecutionId] ?? []) : []
   const showTerminal = terminalOpen && activeExecutionId !== null
-  const activeEnvironmentId = activeExecutionId ? logEnvironmentId[activeExecutionId] : undefined
-  const activeLogStatus = activeExecutionId ? logStatus[activeExecutionId] : undefined
+  const activeEnvironmentId = activeExecution?.environmentId ?? undefined
+  const activeEnvironmentStatus = activeExecution?.environmentStatus
   const resumeEnvironment = useResumeEnvironment()
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- canvases[chatId] can be undefined at runtime despite the Record type
@@ -70,18 +69,18 @@ export function ChatView() {
     }
   }, [chatId, queryClient, subscribeChat])
 
-  // Catch up on history each time the drawer opens or the target execution changes.
+  // Replay only when we hold no lines, since live output already streams in; also fires when a
+  // waking sandbox flips PENDING_RECONNECT -> CONNECTED.
   useEffect(() => {
-    if (showTerminal && activeExecutionId) {
-      requestLogs(activeExecutionId)
-    }
-  }, [showTerminal, activeExecutionId, requestLogs])
+    if (!showTerminal || !activeExecutionId) return
+    if (activeLogs.length > 0) return
+    if (activeEnvironmentStatus !== 'CONNECTED') return
+    requestLogs(activeExecutionId)
+  }, [showTerminal, activeExecutionId, activeLogs.length, activeEnvironmentStatus, requestLogs])
 
   const handleWake = () => {
-    if (!activeEnvironmentId || !activeExecutionId) return
-    resumeEnvironment.mutate(activeEnvironmentId, {
-      onSuccess: () => requestLogs(activeExecutionId),
-    })
+    if (!activeEnvironmentId) return
+    resumeEnvironment.mutate(activeEnvironmentId)
   }
 
   useEffect(() => {
@@ -207,7 +206,7 @@ export function ChatView() {
             <TerminalLogNotice
               isWaking={resumeEnvironment.isPending}
               onWake={activeEnvironmentId ? handleWake : null}
-              status={activeLogStatus}
+              status={activeEnvironmentStatus}
             />
             {activeLogs.length === 0 ? (
               <div className="text-zinc-600 italic">

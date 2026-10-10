@@ -289,10 +289,7 @@ describe('ExecutionStageView', () => {
 
     expect(screen.getByTestId('execution-sleeping-banner')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /resume environment/i }))
-    expect(resumeMutateMock).toHaveBeenCalledWith(
-      'env-1',
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    )
+    expect(resumeMutateMock).toHaveBeenCalledWith('env-1')
   })
 
   it('offers Resume environment from the options menu when asleep', async () => {
@@ -315,10 +312,7 @@ describe('ExecutionStageView', () => {
     await user.click(screen.getByRole('button', { name: /activity log options/i }))
     await user.click(screen.getByRole('menuitem', { name: /resume environment/i }))
 
-    expect(resumeMutateMock).toHaveBeenCalledWith(
-      'env-1',
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    )
+    expect(resumeMutateMock).toHaveBeenCalledWith('env-1')
   })
 
   it('does not show the sleeping banner when the environment is awake', () => {

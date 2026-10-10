@@ -297,7 +297,7 @@ class ExecutionEnvironmentServiceTest {
 
         ExecutionEnvironmentDto dto = executionEnvironmentService.resumeEnvironment(USER_ID, TEAM_ID, ENV_ID);
 
-        assertThat(dto.status()).isEqualTo(EnvironmentStatus.CONNECTED);
+        assertThat(dto.status()).isEqualTo(EnvironmentStatus.PENDING_RECONNECT);
         assertThat(dto.containerId()).isEqualTo("resumed-container-id");
         verify(sandboxProvider).initializeWorkspace("resumed-container-id");
         verify(executionEnvironmentRepository).save(env);

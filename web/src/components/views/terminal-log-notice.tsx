@@ -44,7 +44,18 @@ export function TerminalLogNotice({ isWaking, onWake, status }: TerminalLogNotic
       </div>
     )
   }
-  if (status === 'DISCONNECTED' || status === 'PENDING_RECONNECT') {
+  if (status === 'PENDING_RECONNECT') {
+    return (
+      <div
+        className="mb-3 flex items-center gap-2 rounded border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-400"
+        data-testid="terminal-pending-reconnect-notice"
+      >
+        <Loader2 className="h-3 w-3 animate-spin" />
+        <span>Sandbox is starting. Console history loads once it reconnects.</span>
+      </div>
+    )
+  }
+  if (status === 'DISCONNECTED') {
     return (
       <div
         className="mb-3 rounded border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-400"

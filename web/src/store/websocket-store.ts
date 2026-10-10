@@ -248,18 +248,6 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
     useCanvasStore.getState().handleCanvasEvent(canvasResult)
   }
 
-  function handleTeamEntityChangedResult(result: TeamEntityChangedResult) {
-    if (result.teamId !== useAuthStore.getState().currentTeamId) return
-    const queryKey = teamEntityQueryKey(result.entity, result.teamId)
-    if (queryKey) {
-      void queryClient.invalidateQueries({ queryKey })
-    }
-    if (result.entity === 'USAGE' || result.entity === 'SANDBOX_EXECUTIONS') {
-      void queryClient.invalidateQueries({ queryKey: ['team-usage-summary', result.teamId] })
-      void queryClient.invalidateQueries({ queryKey: ['team-usage-logs', result.teamId] })
-    }
-  }
-
   function handleUserEntityChangedResult(result: UserEntityChangedResult) {
     if (result.entity === 'TEAMS') {
       void queryClient.invalidateQueries({ queryKey: ['teams'] })
@@ -641,6 +629,25 @@ export function handleIngestionResult(result: IngestionResult): void {
   })
   for (const wikiKey of ['wiki-page', 'wiki-children', 'wiki-pages', 'wiki-tree'] as const) {
     void queryClient.invalidateQueries({ queryKey: [wikiKey, teamId, repoId] })
+  }
+}
+
+export function handleTeamEntityChangedResult(result: TeamEntityChangedResult): void {
+  if (result.teamId !== useAuthStore.getState().currentTeamId) return
+  const queryKey = teamEntityQueryKey(result.entity, result.teamId)
+  if (queryKey) {
+    void queryClient.invalidateQueries({ queryKey })
+  }
+  if (result.entity === 'ENVIRONMENTS') {
+    // Executions embed their environment status, so refresh the open chat's on env changes.
+    const currentChatId = useChatStore.getState().currentChatId
+    if (currentChatId) {
+      void queryClient.invalidateQueries({ queryKey: [CHAT_EXECUTIONS_QUERY_KEY, currentChatId] })
+    }
+  }
+  if (result.entity === 'USAGE' || result.entity === 'SANDBOX_EXECUTIONS') {
+    void queryClient.invalidateQueries({ queryKey: ['team-usage-summary', result.teamId] })
+    void queryClient.invalidateQueries({ queryKey: ['team-usage-logs', result.teamId] })
   }
 }
 

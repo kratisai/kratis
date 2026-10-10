@@ -54,16 +54,13 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
 
   const terminalOpen = useExecutionStore((state) => state.terminalOpen)
   const setTerminalOpen = useExecutionStore((state) => state.setTerminalOpen)
-  const requestLogs = useExecutionStore((state) => state.requestLogs)
   const replayingExecutionId = useExecutionStore((state) => state.replayingExecutionId)
   const replayActivities = useExecutionStore((state) => state.replayActivities)
 
   const handleResume = () => {
     if (!environmentId) return
-    // Refresh the console once the sandbox is awake so any sleeping notice clears.
-    resumeEnvironment.mutate(environmentId, {
-      onSuccess: () => requestLogs(executionId),
-    })
+    // Console replay is driven by the PENDING_RECONNECT -> CONNECTED transition, not by resume.
+    resumeEnvironment.mutate(environmentId)
   }
 
   const activities = useActivityStore((state) =>
