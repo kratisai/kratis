@@ -121,7 +121,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     expect(screen.getByText(/PASS src\/app\.test\.ts/)).toBeInTheDocument()
   })
 
-  it('renders completed thinking activity auto-collapsed with a single-line summary title', async () => {
+  it('renders completed thinking activity collapsed to a "Thinking" single-line summary', async () => {
     const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
 
     seedActivities([
@@ -136,20 +136,20 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       },
     ])
 
-    await waitFor(() => {
-      expect(screen.getByText('I need to analyze the project structure first.')).toBeInTheDocument()
-    })
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument()
+    const summary = await screen.findByText('Thinking ... I need to analyze the project structure first.')
+    expect(summary.className).toContain('truncate')
+    expect(summary.className).toContain('italic')
 
-    const expandButton = screen.getByText('I need to analyze the project structure first.').closest('button')!
-    await user.click(expandButton)
+    await user.click(summary.closest('button')!)
 
     await waitFor(() => {
-      expect(screen.getAllByText('I need to analyze the project structure first.')).toHaveLength(2)
+      const expanded = screen.getByText('Thinking ... I need to analyze the project structure first.')
+      expect(expanded.className).not.toContain('truncate')
+      expect(expanded.className).toContain('whitespace-pre-wrap')
     })
   })
 
-  it('renders active thinking activity expanded with spinner', async () => {
+  it('renders active thinking activity expanded with a "Thinking" prefix and spinner', async () => {
     renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
 
     seedActivities([
@@ -165,11 +165,11 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     ])
 
     await waitFor(() => {
-      expect(screen.getAllByText('Processing the request...').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByText('Thinking ... Processing the request...')).toBeInTheDocument()
     })
   })
 
-  it('uses the first line of a multi-line thought as the collapsed summary title', async () => {
+  it('collapses a multi-line thought into a single-line "Thinking" summary', async () => {
     renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
 
     seedActivities([
@@ -184,10 +184,11 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       },
     ])
 
-    await waitFor(() => {
-      expect(screen.getByText('Searching for the failing test.')).toBeInTheDocument()
-    })
-    expect(screen.queryByText(/Found it in src\/app\.test\.ts/)).not.toBeInTheDocument()
+    const summary = await screen.findByText(
+      'Thinking ... Searching for the failing test. Found it in src/app.test.ts',
+    )
+    expect(summary.className).toContain('truncate')
+    expect(summary.textContent).not.toContain('\n')
   })
 
   it('renders completed tool execution auto-collapsed with the tool title', async () => {
@@ -370,6 +371,54 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
 
     expect(screen.queryByText('PASS src/a.test.ts')).not.toBeInTheDocument()
     expect(screen.queryByText(/PASS src\/b\.test\.ts/)).not.toBeInTheDocument()
+  })
+
+  it('auto-collapses a completed agent message once the next activity arrives', async () => {
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'msg-1',
+      activityType: 'MESSAGE',
+      description: 'Here is the result',
+      detail: { messageId: 'msg-1', role: 'agent' },
+      executionId: EXECUTION_ID,
+      status: 'in_progress',
+      type: 'execution_activity',
+    })
+    await waitFor(() => {
+      const open = screen.getByText('Here is the result')
+      expect(open.className).toContain('text-sm')
+      expect(open.className).toContain('whitespace-pre-wrap')
+    })
+    expect(screen.queryByText('Agent')).not.toBeInTheDocument()
+
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'msg-1',
+      activityType: 'MESSAGE',
+      description: 'Here is the result',
+      detail: { messageId: 'msg-1', role: 'agent' },
+      executionId: EXECUTION_ID,
+      status: 'completed',
+      type: 'execution_activity',
+    })
+
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'tc-1',
+      activityType: 'RESEARCH',
+      description: 'Reading main.go',
+      executionId: EXECUTION_ID,
+      status: 'in_progress',
+      type: 'execution_activity',
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('Reading main.go')).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      const summary = screen.getByText('Here is the result')
+      expect(summary.className).toContain('truncate')
+    })
+    expect(screen.queryByText('Agent')).not.toBeInTheDocument()
   })
 
   it('renders a command record from detail.output only', async () => {

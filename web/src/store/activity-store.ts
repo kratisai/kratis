@@ -106,14 +106,9 @@ function activityStateFrom(
 function appendActivity(existing: Activity[], activity: Activity): Activity[] {
   const next = [...existing]
   const last = next.at(-1)
-  if (
-    last &&
-    isTerminalState(last.state) &&
-    !last.collapsed &&
-    last.type !== 'message' &&
-    last.type !== 'thinking' &&
-    last.type !== 'plan'
-  ) {
+  // A superseded terminal activity collapses once the next one arrives. Plan /
+  // activities stay open so the current checklist remains visible.
+  if (last && isTerminalState(last.state) && !last.collapsed && last.type !== 'plan') {
     next[next.length - 1] = { ...last, collapsed: true }
   }
   next.push(activity)

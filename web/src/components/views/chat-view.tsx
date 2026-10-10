@@ -69,8 +69,7 @@ export function ChatView() {
     }
   }, [chatId, queryClient, subscribeChat])
 
-  // Replay only when we hold no lines, since live output already streams in; also fires when a
-  // waking sandbox flips PENDING_RECONNECT -> CONNECTED.
+  // Replay only when no lines are held; also runs when a waking sandbox becomes CONNECTED.
   useEffect(() => {
     if (!showTerminal || !activeExecutionId) return
     if (activeLogs.length > 0) return
