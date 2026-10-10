@@ -152,7 +152,6 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
             @JsonProperty("options") List<PermissionOption> options,
             @JsonProperty("diff") ActivityDiff diff,
             @JsonProperty("locations") List<ActivityLocation> locations,
-            @JsonProperty("input") Map<String, Object> input,
             @JsonProperty("form") Map<String, Object> form)
             implements InboundRequestPayload {
         public static final String METHOD = "env.hitl_activity";
@@ -173,7 +172,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
                 List<PermissionOption> options,
                 ActivityDiff diff,
                 Map<String, Object> form) {
-            this(actionId, message, kind, executionId, command, title, toolKind, options, diff, null, null, form);
+            this(actionId, message, kind, executionId, command, title, toolKind, options, diff, null, form);
         }
 
         public HitlActivity(
@@ -187,7 +186,6 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
                 List<PermissionOption> options,
                 ActivityDiff diff,
                 List<ActivityLocation> locations,
-                Map<String, Object> input,
                 Map<String, Object> form) {
             this.actionId = Objects.requireNonNull(actionId, "actionId is required");
             this.message = Objects.requireNonNull(message, "message is required");
@@ -199,7 +197,6 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
             this.options = options;
             this.diff = diff;
             this.locations = locations;
-            this.input = input;
             this.form = form;
         }
     }

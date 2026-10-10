@@ -17,12 +17,10 @@
         "kind": { "type": "string", "enum": ["read", "edit", "write", "delete", "move", "search", "execute", "think", "fetch", "switch_mode", "other"] },
         "title": { "type": "string" },
         "locations": { "type": "array", "items": { "type": "object", "properties": { "path": { "type": "string" }, "line": { "type": "integer" } } } },
-        "input": { "type": "object" },
         "output": { "type": "string" },
         "diff": { "type": "object", "properties": { "oldText": { "type": "string" }, "newText": { "type": "string" }, "path": { "type": "string" } } },
         "exitCode": { "type": "integer" },
         "truncated": { "type": "boolean" },
-        "meta": { "type": "object" },
         "messageId": { "type": "string" },
         "role": { "type": "string" },
         "plan": {
@@ -39,7 +37,6 @@
             "additionalProperties": true
           }
         },
-        "rawUpdate": { "type": "object" },
         "hitl": {
           "type": "object",
           "description": "HITL state for approval/question activities; the child is keyed by the parent activity's actionId.",
@@ -47,7 +44,6 @@
             "kind": { "type": "string", "enum": ["approval", "question"] },
             "state": { "type": "string", "enum": ["awaiting_human", "resolved"] },
             "message": { "type": "string" },
-            "command": { "type": "string" },
             "commandSegments": {
               "type": "array",
               "items": { "type": "object", "required": ["text", "suggestedRoot"], "properties": { "text": { "type": "string" }, "suggestedRoot": { "type": "string" }, "ruleType": { "type": "string", "enum": ["EXACT", "PREFIX_WILD", "TOOL_KIND"] }, "preApproved": { "type": "boolean" } } }

@@ -154,8 +154,7 @@ public class EnvironmentHitlActivityRpcHandler
                 sanitizeOptions(params.options()),
                 params.diff(),
                 null,
-                params.locations(),
-                params.input());
+                params.locations());
 
         if (autoResolution.isPresent()) {
             if (autoResolution.get() == HitlResponse.DECLINED) {
@@ -209,7 +208,6 @@ public class EnvironmentHitlActivityRpcHandler
                 null,
                 null,
                 params.form(),
-                null,
                 null);
 
         pendingHitlRegistry.register(payload, sessionId, requestId, teamId);

@@ -38,7 +38,6 @@
             }
           }
         },
-        "input": { "type": "object" },
         "output": { "type": "string" },
         "diff": {
           "type": "object",
@@ -50,7 +49,6 @@
         },
         "exitCode": { "type": "integer" },
         "truncated": { "type": "boolean" },
-        "meta": { "type": "object" },
         "messageId": { "type": "string" },
         "role": { "type": "string" },
         "plan": {
@@ -66,8 +64,7 @@
             },
             "additionalProperties": true
           }
-        },
-        "rawUpdate": { "type": "object" }
+        }
       },
       "additionalProperties": true
     }

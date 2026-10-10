@@ -7,7 +7,7 @@ import type {
   WireActivityStatus,
 } from '@/types/websocket-types'
 
-import { activityTitle, useActivityStore } from '@/store/activity-store'
+import { activityCommand, activityTitle, useActivityStore } from '@/store/activity-store'
 
 function activityResult(
   overrides: Partial<ExecutionActivityResult> & {
@@ -38,8 +38,6 @@ function approvalActivity(
     description: 'chmod +x script.sh',
     detail: {
       hitl: {
-        command: 'chmod +x script.sh',
-
         kind: 'approval',
         message: 'Allow chmod +x script.sh?',
         state: 'awaiting_human',
@@ -873,19 +871,82 @@ describe('activity-store', () => {
       })
     })
 
-    it('keeps the command from the detail input over the description', () => {
+    it('takes the command directly from the description for a COMMAND activity', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
           actionId: 'tc-cmd',
           activityType: 'COMMAND',
-          description: 'shell · git status',
-          detail: { input: { command: 'git status' } },
+          description: 'git status',
+          detail: { kind: 'execute', title: 'Running git status' },
         }),
       )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities[0]).toMatchObject({ command: 'git status', type: 'command_execution' })
+    })
+
+    it('populates the command from the reconciled description on approval', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'tc-shell',
+          activityType: 'COMMAND',
+          description: 'npm run build',
+          detail: {
+            hitl: {
+              kind: 'approval',
+              message: 'Allow npm run build?',
+              state: 'awaiting_human',
+            },
+          },
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities[0]).toMatchObject({
+        command: 'npm run build',
+        state: 'pending_approval',
+        type: 'command_execution',
+      })
+      expect(activityCommand(activities[0])).toBe('npm run build')
+    })
+
+    it('keeps the command from description when the execution phase follows the approval', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'tc-shell',
+          activityType: 'COMMAND',
+          description: 'npm run build',
+          detail: {
+            hitl: {
+              kind: 'approval',
+              message: 'Allow npm run build?',
+              state: 'awaiting_human',
+            },
+          },
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'tc-shell',
+          activityType: 'COMMAND',
+          description: 'npm run build',
+          detail: {
+            hitl: {
+              kind: 'approval',
+              message: 'Allow npm run build?',
+              response: 'approved',
+              state: 'resolved',
+            },
+          },
+          status: 'in_progress',
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities[0]).toMatchObject({ command: 'npm run build', state: 'active' })
     })
   })
 
@@ -1531,7 +1592,7 @@ describe('activity-store', () => {
           actionId: 'tc-title-search',
           activityType: 'RESEARCH',
           description: 'glob',
-          detail: { input: { pattern: '**/*.ts' }, kind: 'search' },
+          detail: { kind: 'search', locations: [{ path: '**/*.ts' }] },
           status: 'in_progress',
         }),
       )

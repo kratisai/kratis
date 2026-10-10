@@ -26,20 +26,7 @@ class ClientPayloadSerializationTest {
     @Test
     void executionActivityResult_serializesPresentActionIdAndDetail() {
         ActivityDetail detail = new ActivityDetail(
-                ActivityKind.EXECUTE,
-                "Running tests",
-                null,
-                java.util.Map.of("command", "go build"),
-                null,
-                null,
-                0,
-                false,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null);
+                ActivityKind.EXECUTE, "Running tests", null, null, null, 0, false, null, null, null, null);
         JsonNode json = objectMapper.valueToTree(new ExecutionActivityResult(
                 UUID.randomUUID(),
                 ActivityType.RESEARCH,
@@ -66,10 +53,7 @@ class ClientPayloadSerializationTest {
                 null,
                 null,
                 null,
-                null,
-                null,
                 java.util.List.of(new PlanEntry("Setup", PlanEntryPriority.HIGH, PlanEntryStatus.IN_PROGRESS)),
-                null,
                 null);
         JsonNode json = objectMapper.valueToTree(new ExecutionActivityResult(
                 UUID.randomUUID(),
@@ -86,8 +70,8 @@ class ClientPayloadSerializationTest {
         assertThat(plan.get(0).get("priority").asText()).isEqualTo("high");
         assertThat(plan.get(0).get("status").asText()).isEqualTo("in_progress");
 
-        ActivityDetail emptyPlan = new ActivityDetail(
-                null, null, null, null, null, null, null, null, null, null, null, java.util.List.of(), null, null);
+        ActivityDetail emptyPlan =
+                new ActivityDetail(null, null, null, null, null, null, null, null, null, java.util.List.of(), null);
         JsonNode empty = objectMapper.valueToTree(new ExecutionActivityResult(
                 UUID.randomUUID(),
                 ActivityType.PLAN,

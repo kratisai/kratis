@@ -252,45 +252,38 @@ class ExecutionReplayOnChatSubscribeIntegrationTest {
         // 4. Connect a NEW client (simulating a reconnect) that sends chat.subscribe after auth
         ClientWebSocketFixtureWithChatSubscribe lateJoinerFixture =
                 new ClientWebSocketFixtureWithChatSubscribe(userAuthToken, team.getId(), chat.getId());
-        lateJoinerFixture.expectTrigger("execution_activity", 1);
-        lateJoinerFixture.expectTrigger("awaiting_human", 1);
 
         WebSocketSession lateJoinerSession = client.execute(lateJoinerFixture, "ws://localhost:" + port + "/ws/client")
                 .get(5, TimeUnit.SECONDS);
 
-        // 5. Assert the late joiner receives replayed activity and pending permission
-        boolean receivedActivity = lateJoinerFixture.awaitTrigger("execution_activity", 5, TimeUnit.SECONDS);
-        assertThat(receivedActivity)
-                .as("Late joiner should receive replayed execution_activity")
-                .isTrue();
-        assertThat(lateJoinerFixture.hasReceivedMessageContaining("execution_activity", executionId.toString()))
+        // 5. Assert the late joiner receives replayed activity and pending permission. Replay emits
+        //    the activity log in sequence, so the permission frame follows the tool frame; await each
+        //    frame's own content rather than the first arrival to avoid racing the second frame.
+        assertThat(lateJoinerFixture.awaitMessageContaining(
+                        5, TimeUnit.SECONDS, "execution_activity", executionId.toString()))
                 .as("Replayed activity should reference the execution")
                 .isTrue();
-        assertThat(lateJoinerFixture.hasReceivedMessageContaining("execution_activity", "awaiting_human"))
-                .as("Replayed activity should contain awaiting_human")
-                .isTrue();
-        assertThat(lateJoinerFixture.hasReceivedMessageContaining("execution_activity", "rm -rf /"))
-                .as("Replayed activity should contain the command")
+        assertThat(lateJoinerFixture.awaitMessageContaining(
+                        5, TimeUnit.SECONDS, "execution_activity", "awaiting_human", "rm -rf /"))
+                .as("Replayed activity should contain awaiting_human and the command")
                 .isTrue();
 
         // 6. A second fresh client (restart-equivalent: no in-memory state) must receive the same
         //    replay from the database
         ClientWebSocketFixtureWithChatSubscribe restartClientFixture =
                 new ClientWebSocketFixtureWithChatSubscribe(userAuthToken, team.getId(), chat.getId());
-        restartClientFixture.expectTrigger("execution_activity", 2);
 
         WebSocketSession restartClientSession = client.execute(
                         restartClientFixture, "ws://localhost:" + port + "/ws/client")
                 .get(5, TimeUnit.SECONDS);
 
-        assertThat(restartClientFixture.awaitTrigger("execution_activity", 5, TimeUnit.SECONDS))
-                .as("Fresh client should receive the same replayed activity from the database")
-                .isTrue();
-        assertThat(restartClientFixture.hasReceivedMessageContaining("execution_activity", "awaiting_human"))
-                .as("Fresh client should receive the replayed pending permission in activity")
-                .isTrue();
-        assertThat(restartClientFixture.hasReceivedMessageContaining("execution_activity", executionId.toString()))
+        assertThat(restartClientFixture.awaitMessageContaining(
+                        5, TimeUnit.SECONDS, "execution_activity", executionId.toString()))
                 .as("Replayed activity should reference the execution")
+                .isTrue();
+        assertThat(restartClientFixture.awaitMessageContaining(
+                        5, TimeUnit.SECONDS, "execution_activity", "awaiting_human"))
+                .as("Fresh client should receive the replayed pending permission in activity")
                 .isTrue();
 
         // Clean up

@@ -43,7 +43,7 @@ func (h *Handler) handleSessionUpdate(params map[string]interface{}) {
 		h.resetChunkStream("unknown update: " + u.SessionUpdate)
 		desc := "[Update] " + u.SessionUpdate
 		h.sink.SendOutput(desc, "stdout")
-		h.sendActivity(ActivityTypeThinking, desc, "", ActivityInProgress, ActivityDetail{RawUpdate: updateAsMap(params)})
+		h.sendActivity(ActivityTypeThinking, desc, "", ActivityInProgress, ActivityDetail{})
 	}
 }
 
@@ -335,14 +335,18 @@ func (h *Handler) buildToolActivity(info *ToolCallInfo, status ActivityStatus) A
 			ActionID:     info.ToolCallID,
 			Status:       ActivityInProgress,
 			Detail: ActivityDetail{
-				Plan:      todos,
-				RawUpdate: info.RawInputMap,
+				Plan: todos,
 			},
 		}
 	}
+	actType := mapToolKindToActivity(info.Kind)
+	desc := coalesce(info.Title, info.Kind, "Agent action")
+	if actType == ActivityTypeCommand {
+		desc = coalesce(info.Command, info.Title, info.Kind, "Agent action")
+	}
 	return Activity{
-		ActivityType: mapToolKindToActivity(info.Kind),
-		Description:  coalesce(info.Title, info.Kind, "Agent action"),
+		ActivityType: actType,
+		Description:  desc,
 		ActionID:     info.ToolCallID,
 		Status:       status,
 		Detail:       h.buildToolDetail(info),
@@ -408,17 +412,15 @@ func parseTodosFromRaw(raw json.RawMessage) []PlanEntry {
 }
 
 // buildToolDetail renders the structured, accumulated tool state for the
-// expandable activity record. The rawInput/meta bags are preserved verbatim.
+// expandable activity record.
 func (h *Handler) buildToolDetail(info *ToolCallInfo) ActivityDetail {
 	output, omitted := boundDetail(info.OutputText)
 	detail := ActivityDetail{
 		Kind:      ActivityKind(info.Kind),
 		Title:     info.Title,
-		Input:     info.RawInputMap,
 		Output:    output,
 		ExitCode:  info.ExitCode,
 		Truncated: info.Truncated || omitted > 0,
-		Meta:      info.Meta,
 	}
 	for _, loc := range info.Locations {
 		al := ActivityLocation{Path: loc.Path}
@@ -572,8 +574,6 @@ func (h *Handler) emitChunkRunLocked(run *chunkRun, status ActivityStatus) {
 		Detail: ActivityDetail{
 			MessageID: run.messageID,
 			Role:      run.role,
-			Meta:      run.meta,
-			RawUpdate: run.rawUpdate,
 		},
 	})
 }
@@ -617,8 +617,7 @@ func (h *Handler) handlePlanUpdate(params map[string]interface{}) {
 	raw := updateAsMap(params)
 	h.sink.SendOutput("[Plan] Agent plan updated", "stdout")
 	detail := ActivityDetail{
-		Plan:      parsePlanEntries(raw),
-		RawUpdate: raw,
+		Plan: parsePlanEntries(raw),
 	}
 	h.sendActivity(ActivityTypePlan, "Agent plan updated", h.nextPlanActionID(), ActivityInProgress, detail)
 }

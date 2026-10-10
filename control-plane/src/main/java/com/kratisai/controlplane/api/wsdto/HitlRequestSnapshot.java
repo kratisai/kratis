@@ -17,8 +17,7 @@ public record HitlRequestSnapshot(
         List<PermissionOption> options,
         ActivityDiff diff,
         Map<String, Object> form,
-        List<ActivityLocation> locations,
-        Map<String, Object> input) {
+        List<ActivityLocation> locations) {
 
     public HitlRequestSnapshot {
         Objects.requireNonNull(executionId, "executionId is required");
@@ -29,6 +28,5 @@ public record HitlRequestSnapshot(
         options = options != null ? List.copyOf(options) : null;
         form = form != null ? Map.copyOf(form) : null;
         locations = locations != null ? List.copyOf(locations) : null;
-        input = input != null ? Map.copyOf(input) : null;
     }
 }

@@ -228,8 +228,8 @@ class ExecutionActivityPersistenceServiceTest {
         UUID executionId = UUID.randomUUID();
         when(repository.findByExecutionIdAndActionId(executionId, "tc-1")).thenReturn(Optional.empty());
         when(repository.nextSequence(executionId)).thenReturn(1L);
-        ActivityDetail detail = new ActivityDetail(
-                null, "echo hello", null, null, null, null, null, null, null, null, null, null, null, null);
+        ActivityDetail detail =
+                new ActivityDetail(null, "echo hello", null, null, null, null, null, null, null, null, null);
 
         service.recordActivity(executionId, ActivityType.COMMAND, "echo hello", "tc-1", ActivityStatus.PENDING, detail);
 
@@ -276,10 +276,7 @@ class ExecutionActivityPersistenceServiceTest {
                 null,
                 null,
                 null,
-                null,
-                null,
                 List.of(new PlanEntry("Latest task", PlanEntryPriority.MEDIUM, PlanEntryStatus.PENDING)),
-                null,
                 null);
 
         service.recordActivity(
@@ -307,10 +304,7 @@ class ExecutionActivityPersistenceServiceTest {
                 null,
                 null,
                 null,
-                null,
-                null,
                 List.of(new PlanEntry("Setup repo", PlanEntryPriority.HIGH, PlanEntryStatus.IN_PROGRESS)),
-                null,
                 null);
 
         service.recordActivity(
@@ -516,10 +510,10 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
-    void onHitlRequired_approvalWithExistingActivity_attachesHitlDetail() {
+    void onHitlRequired_approvalWithExistingActivity_reconcilesCommandDescription() {
         UUID executionId = UUID.randomUUID();
         SandboxExecutionActivity existing =
-                row(executionId, 1, "tool-call-42", ActivityType.EDITED, ActivityStatus.IN_PROGRESS, "Write file");
+                row(executionId, 1, "tool-call-42", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "Shell");
         when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
                 .thenReturn(Optional.of(existing));
 
@@ -529,18 +523,18 @@ class ExecutionActivityPersistenceServiceTest {
                         executionId,
                         "tool-call-42",
                         HitlKind.APPROVAL,
-                        "Approve Write file",
-                        "Write file",
+                        "Approve npm run build",
+                        "npm run build",
                         null,
-                        "Write",
-                        "edit",
-                        null,
+                        "Shell",
+                        "execute",
                         null,
                         null,
                         null,
                         null)));
 
         assertThat(existing.getStatus()).isEqualTo(ActivityStatus.PENDING);
+        assertThat(existing.getDescription()).isEqualTo("npm run build");
         assertThat(existing.getDetail()).contains("approval").contains("awaiting_human");
         verify(repository).save(existing);
         verify(repository, never()).nextSequence(executionId);
@@ -567,7 +561,6 @@ class ExecutionActivityPersistenceServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         null)));
 
         SandboxExecutionActivity saved = capturedSave();
@@ -577,7 +570,7 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
-    void onHitlRequired_approvalWithoutMatchingRow_carriesLocationsAndInput() {
+    void onHitlRequired_approvalWithoutMatchingRow_carriesLocations() {
         UUID executionId = UUID.randomUUID();
         when(repository.findByExecutionIdAndActionId(executionId, "tool-call-42"))
                 .thenReturn(Optional.empty());
@@ -597,13 +590,10 @@ class ExecutionActivityPersistenceServiceTest {
                         null,
                         null,
                         null,
-                        List.of(new ActivityLocation("/kratis/workspace/foo.txt", null)),
-                        Map.of("path", "/kratis/workspace/foo.txt"))));
+                        List.of(new ActivityLocation("/kratis/workspace/foo.txt", null)))));
 
         SandboxExecutionActivity saved = capturedSave();
-        assertThat(saved.getDetail())
-                .contains("/kratis/workspace/foo.txt")
-                .contains("\"input\":{\"path\":\"/kratis/workspace/foo.txt\"}");
+        assertThat(saved.getDetail()).contains("/kratis/workspace/foo.txt");
     }
 
     @Test
@@ -624,7 +614,6 @@ class ExecutionActivityPersistenceServiceTest {
                         null,
                         "Write",
                         "edit",
-                        null,
                         null,
                         null,
                         null,
@@ -655,7 +644,6 @@ class ExecutionActivityPersistenceServiceTest {
                         null,
                         null,
                         Map.of("type", "object"),
-                        null,
                         null)));
 
         SandboxExecutionActivity saved = capturedSave();
@@ -754,7 +742,6 @@ class ExecutionActivityPersistenceServiceTest {
                 null,
                 null,
                 null,
-                null,
                 null);
     }
 
@@ -795,7 +782,6 @@ class ExecutionActivityPersistenceServiceTest {
                         "el-1",
                         HitlKind.QUESTION,
                         "Pick a target",
-                        null,
                         null,
                         null,
                         null,
@@ -940,7 +926,7 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     private static ActivityDetail emptyActivityDetail() {
-        return new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null);
     }
 
     @Test

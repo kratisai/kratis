@@ -49,7 +49,6 @@ class PendingHitlRegistryTest {
                 null,
                 null,
                 kind == HitlKind.QUESTION ? Map.of("type", "object") : null,
-                null,
                 null);
     }
 

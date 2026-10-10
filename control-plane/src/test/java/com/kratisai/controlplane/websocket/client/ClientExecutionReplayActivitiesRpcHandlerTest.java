@@ -146,10 +146,7 @@ class ClientExecutionReplayActivitiesRpcHandlerTest {
                         null,
                         null,
                         null,
-                        null,
-                        null,
                         List.of(new PlanEntry("Setup repo", PlanEntryPriority.HIGH, PlanEntryStatus.IN_PROGRESS)),
-                        null,
                         null));
 
         StepVerifier.create(handler.handle(

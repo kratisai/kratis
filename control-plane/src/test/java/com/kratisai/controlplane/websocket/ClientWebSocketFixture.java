@@ -74,10 +74,10 @@ public class ClientWebSocketFixture extends WebSocketFixture<ClientWebSocketFixt
                 (session, msg) -> {
                     var hitl = msg.detail().hitl();
                     logger.info(
-                            "[auto-approve] Auto-approving permission for execution={}, command='{}'",
+                            "[auto-approve] Auto-approving permission for execution={}, description='{}'",
                             msg.executionId(),
-                            hitl.command());
-                    approver.approve(msg.executionId(), msg.actionId(), hitl.command(), hitl.options());
+                            msg.description());
+                    approver.approve(msg.executionId(), msg.actionId(), msg.description(), hitl.options());
                 });
         return this;
     }
