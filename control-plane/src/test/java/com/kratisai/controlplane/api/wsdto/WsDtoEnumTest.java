@@ -100,6 +100,7 @@ class WsDtoEnumTest {
 
         assertThat(ActivityKind.isCommandLike(null)).isTrue();
         assertThat(ActivityKind.isCommandLike("execute")).isTrue();
+        assertThat(ActivityKind.isCommandLike("other")).isTrue();
         assertThat(ActivityKind.isCommandLike("edit")).isFalse();
     }
 

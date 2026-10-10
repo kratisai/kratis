@@ -301,7 +301,7 @@ func (h *Handler) HandlePermissionRequest(transport *AcpTransport, params map[st
 
 	// Authorisation is part of the tool call's lifecycle.
 	p, _ := parseRequestPermissionParams(params)
-	h.beginPermission(actionID, cmdText, p.ToolCall.Title, p.ToolCall.Kind)
+	info := h.beginPermission(actionID, cmdText, p.ToolCall.Title, p.ToolCall.Kind)
 
 	// The agent owns the option set; a non-empty one is guaranteed downstream
 	// so the UI always has something to present and the control plane always
@@ -315,7 +315,7 @@ func (h *Handler) HandlePermissionRequest(transport *AcpTransport, params map[st
 		Command:   cmdText,
 		ActionID:  actionID,
 		Title:     p.ToolCall.Title,
-		Kind:      p.ToolCall.Kind,
+		Kind:      canonicalPermissionKind(p.ToolCall.Kind, info),
 		Options:   options,
 		Diff:      permissionDiff(p.ToolCall),
 		Locations: p.ToolCall.Locations,
@@ -453,6 +453,30 @@ func (h *Handler) beginPermission(toolCallID string, command string, title strin
 		info.Kind = kind
 	}
 	return info
+}
+
+// canonicalPermissionKind resolves the tool kind reported to the control plane.
+// request_permission often omits kind or sends the ACP "other" default, while the
+// preceding tool_call update carries the tool's real kind; prefer whichever side
+// names a concrete kind so HITL matching agrees with the activity detail.
+func canonicalPermissionKind(requestKind string, info *ToolCallInfo) string {
+	if isConcreteKind(requestKind) {
+		return requestKind
+	}
+	if info != nil && isConcreteKind(info.Kind) {
+		return info.Kind
+	}
+	if requestKind != "" {
+		return requestKind
+	}
+	if info != nil {
+		return info.Kind
+	}
+	return requestKind
+}
+
+func isConcreteKind(kind string) bool {
+	return kind != "" && kind != string(KindOther)
 }
 
 // resolvePermission emits the tool call transition for a permission outcome:

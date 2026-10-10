@@ -739,6 +739,38 @@ class EnvironmentHitlActivityRpcHandlerTest {
     }
 
     @Test
+    void handle_otherKindApproval_parsesCommandSegmentsInsteadOfOtherSegment() {
+        stubSessionAndEnvironment();
+        when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of());
+
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
+                "tool-call-1",
+                "Approve mkdir",
+                HitlKind.APPROVAL,
+                execution.getId().toString(),
+                "mkdir -p /tmp/x && cp /tmp/a /tmp/b",
+                "Run mkdir",
+                "other",
+                defaultOptions(),
+                null,
+                null);
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
+
+        handler.handle(sessionId, request, params).blockLast();
+
+        ArgumentCaptor<HitlRequestSnapshot> payloadCaptor = ArgumentCaptor.forClass(HitlRequestSnapshot.class);
+        verify(pendingHitlRegistry).register(payloadCaptor.capture(), any(), any(), any());
+        assertThat(payloadCaptor.getValue().commandSegments())
+                .containsExactly(
+                        new CommandSegment("mkdir -p /tmp/x", "mkdir -p", HitlRuleType.PREFIX_WILD),
+                        new CommandSegment("cp /tmp/a /tmp/b", "cp", HitlRuleType.PREFIX_WILD));
+    }
+
+    @Test
     void handle_approvalWithNoMatchingRule_defersAndDoesNotRecordAutoResolution() {
         stubSessionAndEnvironment();
         when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of());

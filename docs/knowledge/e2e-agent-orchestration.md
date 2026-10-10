@@ -152,9 +152,10 @@ The control plane owns permission policy:
   Untrusted segments never auto-approve.
 - Rules carry a match type. `EXACT` and `PREFIX_WILD` match command text. `TOOL_KIND` matches
   the ACP tool kind of the request (`read`, `edit`, `write`, `delete`, `move`, `search`,
-  `execute`, `think`, `fetch`, `switch_mode`, `other`). Non-command kinds (e.g. an agent edit
-  tool) are governed exclusively by `TOOL_KIND` rules, because their command text is only a
-  synthesized description. A `TOOL_KIND` rule on `execute` resolves every command request.
+  `execute`, `think`, `fetch`, `switch_mode`, `other`). `other` is the ACP default kind and is
+  treated as command-like, since the sidecar classifies it as a command. Non-command kinds
+  (e.g. an agent edit tool) are governed exclusively by `TOOL_KIND` rules, because their command
+  text is only a synthesized description. A `TOOL_KIND` rule on `execute` resolves every command request.
 - The control plane strips agent-offered `allow_always` and `reject_always` options when a
   once-variant exists. Persistent memory is exclusively team HITL rules. Auto-approve picks
   `allow_once` first, so a rule match never seeds agent-side session memory.

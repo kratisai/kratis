@@ -61,7 +61,13 @@ public enum ActivityKind {
         return toolKind.trim().toLowerCase(Locale.ROOT);
     }
 
+    /**
+     * True when the request carries a real, approvable shell command. {@code execute} is the
+     * explicit kind; {@code other} is the ACP default that the sidecar classifies as a command,
+     * so treating it otherwise would offer an unrememberable "other" segment.
+     */
     public static boolean isCommandLike(String toolKind) {
-        return EXECUTE.value.equals(effectiveWireValue(toolKind));
+        String effective = effectiveWireValue(toolKind);
+        return EXECUTE.value.equals(effective) || OTHER.value.equals(effective);
     }
 }
