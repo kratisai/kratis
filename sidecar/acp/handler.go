@@ -122,16 +122,18 @@ func runeCeilBoundary(s string, n int) int {
 // ToolCallInfo is the accumulated state of one ACP tool call, keyed by
 // toolCallId.
 type ToolCallInfo struct {
-	ToolCallID   string
-	Kind         string
-	Title        string
-	Status       ActivityStatus
-	Command      string
-	FilePath     string
-	Locations    []ToolLocation
-	RawInputMap  map[string]any
-	Meta         map[string]any
-	RawOutputRaw json.RawMessage
+	ToolCallID      string
+	Kind            string
+	Title           string
+	Status          ActivityStatus
+	ApprovalDecided bool
+	Approved        bool
+	Command         string
+	FilePath        string
+	Locations       []ToolLocation
+	RawInputMap     map[string]any
+	Meta            map[string]any
+	RawOutputRaw    json.RawMessage
 	// Todos: TodoWrite list from rawInput.todos; non-empty → relay as PLAN.
 	Todos []PlanEntry
 
@@ -169,8 +171,9 @@ type Handler struct {
 	workspace string
 	debug     bool
 
-	mu        sync.Mutex
-	toolCalls map[string]*ToolCallInfo
+	mu                      sync.Mutex
+	toolCalls               map[string]*ToolCallInfo
+	permissionActionAliases map[string]string
 	// terminalOutputs buffers agent-owned terminal relay state keyed by
 	// terminal_id until the correlated tool call arrives (see
 	// TerminalOutputState). Guarded by mu.
@@ -195,13 +198,14 @@ func NewHandler(sink EventSink, terminals *TerminalManager, workspace string) *H
 		terminals.SetOutputSink(sink.SendOutput)
 	}
 	return &Handler{
-		sink:            sink,
-		terminals:       terminals,
-		workspace:       workspace,
-		toolCalls:       make(map[string]*ToolCallInfo),
-		terminalOutputs: make(map[string]*TerminalOutputState),
-		sessionMetadata: make(map[string][]map[string]any),
-		chunkRunCounts:  make(map[string]int),
+		sink:                    sink,
+		terminals:               terminals,
+		workspace:               workspace,
+		toolCalls:               make(map[string]*ToolCallInfo),
+		permissionActionAliases: make(map[string]string),
+		terminalOutputs:         make(map[string]*TerminalOutputState),
+		sessionMetadata:         make(map[string][]map[string]any),
+		chunkRunCounts:          make(map[string]int),
 	}
 }
 
@@ -464,6 +468,8 @@ func (h *Handler) resolvePermission(toolCallID string, approved bool, _ string, 
 	if info == nil {
 		return
 	}
+	info.ApprovalDecided = true
+	info.Approved = approved
 	status := ActivityInProgress
 	if !approved {
 		status = ActivityFailed
@@ -486,60 +492,61 @@ func (h *Handler) HandleTerminalCreate(transport *AcpTransport, params map[strin
 	}
 
 	cwd, _ := params["cwd"].(string)
-	h.debugf("[ACP][TERM] Requesting HITL permission for command=%q cwd=%q", command, cwd)
 
 	// Some ACP RPCs carry no toolCallId (e.g. Goose); correlate the permission
 	// with the accumulated tool call whose command matches so the approval
 	// lands on the tool activity (Slice 6).
 	toolCallID := h.findToolCallByCommand(command)
-	h.beginPermission(toolCallID, command, "", "")
 
-	// terminal/create carries no agent option set; synthesise the default pair
-	// so the UI and control plane see a uniform shape.
-	req := PermissionRequest{
-		Command:  command,
-		ActionID: toolCallID,
-		Options: []PermissionOption{
-			{OptionID: "allow", Name: "Allow Once", Kind: string(ApprovalAllowOnce)},
-			{OptionID: "reject", Name: "Reject", Kind: string(ApprovalRejectOnce)},
-		},
-		Input: termInput(command, cwd),
-	}
-	selectedOptionID, err := h.sink.RequestPermission(req)
-	h.debugf("[ACP][TERM] HITL permission result: selectedOptionID=%q, err=%v", selectedOptionID, err)
+	if !h.toolCallAlreadyApproved(toolCallID) {
+		h.debugf("[ACP][TERM] Requesting HITL permission for command=%q cwd=%q", command, cwd)
+		h.beginPermission(toolCallID, command, "", "")
 
-	if err != nil && strings.Contains(err.Error(), "cancelled") {
-		h.debugf("[ACP][TERM] Permission cancelled, returning cancelled outcome")
-		h.resolvePermission(toolCallID, false, "", "", true)
-		responseBody := map[string]interface{}{
-			"jsonrpc": "2.0",
-			"result": map[string]interface{}{
-				"outcome": map[string]interface{}{
-					"outcome": "cancelled",
-				},
+		req := PermissionRequest{
+			Command:  command,
+			ActionID: toolCallID,
+			Options: []PermissionOption{
+				{OptionID: "allow", Name: "Allow Once", Kind: string(ApprovalAllowOnce)},
+				{OptionID: "reject", Name: "Reject", Kind: string(ApprovalRejectOnce)},
 			},
-			"id": id,
+			Input: termInput(command, cwd),
 		}
-		_ = transport.WriteResponse(responseBody)
-		return
-	}
+		selectedOptionID, err := h.sink.RequestPermission(req)
+		h.debugf("[ACP][TERM] HITL permission result: selectedOptionID=%q, err=%v", selectedOptionID, err)
 
-	if selectedOptionID == "" || err != nil {
-		h.debugf("[ACP][TERM] Permission denied: selectedOptionID=%q, err=%v", selectedOptionID, err)
-		h.resolvePermission(toolCallID, false, "", "", false)
-		responseBody := map[string]interface{}{
-			"jsonrpc": "2.0",
-			"result": map[string]interface{}{
-				"outcome": map[string]interface{}{
-					"outcome": "rejected",
+		if err != nil && strings.Contains(err.Error(), "cancelled") {
+			h.debugf("[ACP][TERM] Permission cancelled, returning cancelled outcome")
+			h.resolvePermission(toolCallID, false, "", "", true)
+			responseBody := map[string]interface{}{
+				"jsonrpc": "2.0",
+				"result": map[string]interface{}{
+					"outcome": map[string]interface{}{
+						"outcome": "cancelled",
+					},
 				},
-			},
-			"id": id,
+				"id": id,
+			}
+			_ = transport.WriteResponse(responseBody)
+			return
 		}
-		_ = transport.WriteResponse(responseBody)
-		return
+
+		if selectedOptionID == "" || err != nil {
+			h.debugf("[ACP][TERM] Permission denied: selectedOptionID=%q, err=%v", selectedOptionID, err)
+			h.resolvePermission(toolCallID, false, "", "", false)
+			responseBody := map[string]interface{}{
+				"jsonrpc": "2.0",
+				"result": map[string]interface{}{
+					"outcome": map[string]interface{}{
+						"outcome": "rejected",
+					},
+				},
+				"id": id,
+			}
+			_ = transport.WriteResponse(responseBody)
+			return
+		}
+		h.resolvePermission(toolCallID, true, selectedOptionID, ApprovalAllowOnce, false)
 	}
-	h.resolvePermission(toolCallID, true, selectedOptionID, ApprovalAllowOnce, false)
 
 	h.debugf("[ACP][TERM] Permission granted, creating terminal for command=%q cwd=%q", command, cwd)
 
@@ -566,6 +573,16 @@ func (h *Handler) HandleTerminalCreate(transport *AcpTransport, params map[strin
 		"id": id,
 	}
 	_ = transport.WriteResponse(response)
+}
+
+func (h *Handler) toolCallAlreadyApproved(toolCallID string) bool {
+	if toolCallID == "" {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	info := h.toolCalls[toolCallID]
+	return info != nil && info.ApprovalDecided && info.Approved
 }
 
 // findToolCallByCommand correlates a terminal/create command with the
@@ -901,52 +918,55 @@ func (h *Handler) HandleFsWriteTextFile(transport *AcpTransport, params map[stri
 		return
 	}
 
-	h.debugf("[ACP][FS] Requesting HITL permission for write: %s (%d bytes)", path, len(content))
-
-	diff := &ActivityDiff{Path: path, NewText: content}
-	if old, err := os.ReadFile(path); err == nil { //nolint:gosec // G304: diff preview reads the agent-requested path by design; the write itself is HITL-gated below
-		diff.OldText = string(old)
-	}
-
 	// fs/write_text_file carries no toolCallId per ACP spec (Goose bridges
 	// developer edit/write through the client). Correlate with the live tool
 	// call for this path so the HITL approval attaches to the tool activity
 	// instead of synthesising an orphan actionId downstream.
 	toolCallID := h.findToolCallByPath(path)
-	h.beginPermission(toolCallID, path, path, "write")
 
-	// No agent option set; synthesise the default pair for a uniform shape.
-	req := PermissionRequest{
-		Command:  path,
-		ActionID: toolCallID,
-		Title:    path,
-		Kind:     "write",
-		Options: []PermissionOption{
-			{OptionID: "allow", Name: "Allow Once", Kind: string(ApprovalAllowOnce)},
-			{OptionID: "reject", Name: "Reject", Kind: string(ApprovalRejectOnce)},
-		},
-		Diff:      diff,
-		Locations: []ToolLocation{{Path: path}},
-		Input:     map[string]any{"path": path},
-	}
-	selectedOptionID, err := h.sink.RequestPermission(req)
-	h.debugf("[ACP][FS] HITL permission result: selectedOptionID=%q, err=%v", selectedOptionID, err)
+	if !h.toolCallAlreadyApproved(toolCallID) {
+		h.debugf("[ACP][FS] Requesting HITL permission for write: %s (%d bytes)", path, len(content))
 
-	cancelled := err != nil && strings.Contains(err.Error(), "cancelled")
-	selected := err == nil && selectedOptionID != ""
-	optionKind := ApprovalOptionKind("")
-	if selected {
-		optionKind = optionKindForOptions(req.Options, selectedOptionID)
-	}
-	h.resolvePermission(toolCallID, selected && isAllowKind(optionKind), selectedOptionID, optionKind, cancelled && !selected)
+		diff := &ActivityDiff{Path: path, NewText: content}
+		if old, err := os.ReadFile(path); err == nil { //nolint:gosec // G304: diff preview reads the agent-requested path by design; the write itself is HITL-gated below
+			diff.OldText = string(old)
+		}
 
-	if cancelled && !selected {
-		h.sendErrorResponse(transport, id, -32800, "Cancelled", "Write cancelled before a decision")
-		return
-	}
-	if !selected {
-		h.sendErrorResponse(transport, id, -32000, "Write denied", "The user denied permission to write "+path)
-		return
+		h.beginPermission(toolCallID, path, path, "write")
+
+		// No agent option set; synthesise the default pair for a uniform shape.
+		req := PermissionRequest{
+			Command:  path,
+			ActionID: toolCallID,
+			Title:    path,
+			Kind:     "write",
+			Options: []PermissionOption{
+				{OptionID: "allow", Name: "Allow Once", Kind: string(ApprovalAllowOnce)},
+				{OptionID: "reject", Name: "Reject", Kind: string(ApprovalRejectOnce)},
+			},
+			Diff:      diff,
+			Locations: []ToolLocation{{Path: path}},
+			Input:     map[string]any{"path": path},
+		}
+		selectedOptionID, err := h.sink.RequestPermission(req)
+		h.debugf("[ACP][FS] HITL permission result: selectedOptionID=%q, err=%v", selectedOptionID, err)
+
+		cancelled := err != nil && strings.Contains(err.Error(), "cancelled")
+		selected := err == nil && selectedOptionID != ""
+		optionKind := ApprovalOptionKind("")
+		if selected {
+			optionKind = optionKindForOptions(req.Options, selectedOptionID)
+		}
+		h.resolvePermission(toolCallID, selected && isAllowKind(optionKind), selectedOptionID, optionKind, cancelled && !selected)
+
+		if cancelled && !selected {
+			h.sendErrorResponse(transport, id, -32800, "Cancelled", "Write cancelled before a decision")
+			return
+		}
+		if !selected {
+			h.sendErrorResponse(transport, id, -32000, "Write denied", "The user denied permission to write "+path)
+			return
+		}
 	}
 
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
@@ -1015,7 +1035,45 @@ func (h *Handler) extractPermissionActionID(params map[string]interface{}) strin
 	if err != nil {
 		return ""
 	}
-	return p.ToolCall.ToolCallID
+	return h.correlatePermissionActionID(p.ToolCall)
+}
+
+func (h *Handler) correlatePermissionActionID(permissionToolCall PermissionToolCall) string {
+	requestedID := permissionToolCall.ToolCallID
+	if requestedID == "" {
+		return ""
+	}
+
+	h.mu.Lock()
+	if _, exists := h.toolCalls[requestedID]; exists {
+		h.mu.Unlock()
+		return requestedID
+	}
+	previousAlias := h.permissionActionAliases[requestedID]
+	if permissionToolCall.Kind != "other" {
+		h.mu.Unlock()
+		return requestedID
+	}
+
+	candidateID := ""
+	candidateCount := 0
+	for toolCallID, info := range h.toolCalls {
+		if (info.Status == ActivityPending || info.Status == ActivityInProgress) && info.Kind != "" && info.Kind != "other" {
+			candidateID = toolCallID
+			candidateCount++
+		}
+	}
+	if candidateCount == 1 {
+		h.permissionActionAliases[requestedID] = candidateID
+		h.mu.Unlock()
+		h.debugf("[PERM] Correlated generic permission id=%q to active toolCallId=%q", requestedID, candidateID)
+		return candidateID
+	}
+	h.mu.Unlock()
+	if previousAlias != "" {
+		return previousAlias
+	}
+	return requestedID
 }
 
 func mapToolKindToActivity(kind string) ActivityType {

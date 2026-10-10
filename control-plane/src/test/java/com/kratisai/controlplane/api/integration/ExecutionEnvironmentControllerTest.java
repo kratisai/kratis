@@ -415,12 +415,12 @@ class ExecutionEnvironmentControllerTest {
             mockMvc.perform(post("/api/v1/teams/{teamId}/environments/{envId}/resume", teamId, runnerEnvId)
                             .header("Authorization", "Bearer " + authToken))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.status").value("PENDING_RECONNECT"))
+                    .andExpect(jsonPath("$.status").value("PENDING_CONNECT"))
                     .andExpect(jsonPath("$.containerId").isNotEmpty());
 
             ExecutionEnvironment updated =
                     executionEnvironmentRepository.findById(runnerEnvId).orElseThrow();
-            assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.PENDING_RECONNECT);
+            assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
             assertThat(updated.getContainerId()).isNotBlank();
 
             mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", teamId, runnerEnvId)

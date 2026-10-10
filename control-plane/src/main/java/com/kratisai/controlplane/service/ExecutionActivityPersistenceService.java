@@ -80,6 +80,15 @@ public class ExecutionActivityPersistenceService {
         return repository.findByExecutionIdOrderBySequenceAsc(executionId);
     }
 
+    public boolean hasApprovalRequest(UUID executionId, String actionId) {
+        return repository
+                .findByExecutionIdAndActionId(executionId, actionId)
+                .map(this::detailOf)
+                .map(detail ->
+                        detail != null && detail.hitl() != null && detail.hitl().kind() == HitlKind.APPROVAL)
+                .orElse(false);
+    }
+
     public ActivityDetail detailOf(SandboxExecutionActivity activity) {
         String detail = activity.getDetail();
         if (detail == null || detail.isBlank()) {

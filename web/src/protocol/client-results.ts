@@ -212,7 +212,7 @@ export const CLIENT_RESULTS = {
       environmentId: uuid,
       executionId: uuid,
       lines: z.array(z.string()),
-      status: z.enum(['CONNECTED', 'DISCONNECTED', 'PENDING_RECONNECT', 'SLEEPING', 'TERMINATED']),
+      status: z.enum(['CONNECTED', 'DISCONNECTED', 'PENDING_CONNECT', 'SLEEPING', 'TERMINATED']),
       type: z.literal('execution_logs'),
     })
     .strict(),

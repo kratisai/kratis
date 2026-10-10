@@ -1,0 +1,15 @@
+databaseChangeLog:
+- changeSet:
+    id: 006-pending-connect-rename-001
+    author: kratis
+    comment: >-
+      EnvironmentStatus.PENDING_RECONNECT was renamed to PENDING_CONNECT.
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: true
+        stripComments: true
+        sql: >-
+          UPDATE execution_environments
+          SET status = 'PENDING_CONNECT'
+          WHERE status = 'PENDING_RECONNECT';

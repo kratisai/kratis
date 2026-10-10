@@ -177,7 +177,7 @@ describe('Environments Flow', () => {
         id: 'env-pending',
         lastHeartbeat: null,
         name: 'Pending Env',
-        status: 'PENDING_RECONNECT',
+        status: 'PENDING_CONNECT',
         teamId: 'team-1',
         type: 'CONNECTOR',
         updatedAt: '2024-01-01T00:00:00Z',
@@ -199,7 +199,7 @@ describe('Environments Flow', () => {
     })
     expect(screen.getAllByText('Connected').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Pending Env').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Pending Reconnect').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Connecting').length).toBeGreaterThan(0)
   })
 
   it('renders environments as mobile cards alongside the desktop table', async () => {

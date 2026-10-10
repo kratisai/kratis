@@ -164,7 +164,7 @@ public class SandboxExecutionService {
                 environment.setTeam(chat.getTeam());
                 environment.setName("Sandbox - " + provider.getName());
                 environment.setType(ExecutionEnvironmentType.SANDBOX);
-                environment.setStatus(EnvironmentStatus.DISCONNECTED);
+                environment.setStatus(EnvironmentStatus.PENDING_CONNECT);
                 environment.setProvider(provider);
 
                 token = UUID.randomUUID().toString();

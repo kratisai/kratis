@@ -1439,6 +1439,51 @@ func TestExtractPermissionActionID(t *testing.T) {
 	}
 }
 
+func TestCorrelateGenericPermissionIDToActiveToolCall(t *testing.T) {
+	h := NewHandler(nil, nil, "")
+	h.toolCalls["call-file"] = &ToolCallInfo{
+		ToolCallID: "call-file",
+		Kind:       "edit",
+		Status:     ActivityInProgress,
+	}
+
+	permission := PermissionToolCall{ToolCallID: "confirmation-session", Kind: "other"}
+	if got := h.correlatePermissionActionID(permission); got != "call-file" {
+		t.Fatalf("expected generic permission to correlate to active file tool call, got %q", got)
+	}
+
+	h.toolCalls["call-file"].ApprovalDecided = true
+	if got := h.correlatePermissionActionID(permission); got != "call-file" {
+		t.Fatalf("expected repeated permission for active tool to keep its activity id, got %q", got)
+	}
+
+	h.toolCalls["call-file"].Status = ActivityCompleted
+	h.toolCalls["call-terminal"] = &ToolCallInfo{
+		ToolCallID: "call-terminal",
+		Kind:       "execute",
+		Status:     ActivityInProgress,
+	}
+	if got := h.correlatePermissionActionID(permission); got != "call-terminal" {
+		t.Fatalf("expected reused generic id to correlate to the new active tool call, got %q", got)
+	}
+
+	h.toolCalls["call-terminal"].Status = ActivityCompleted
+	if got := h.correlatePermissionActionID(permission); got != "call-terminal" {
+		t.Fatalf("expected late duplicate to retain the last activity id, got %q", got)
+	}
+}
+
+func TestCorrelateGenericPermissionIDLeavesAmbiguousRequestsUnmodified(t *testing.T) {
+	h := NewHandler(nil, nil, "")
+	h.toolCalls["call-file"] = &ToolCallInfo{ToolCallID: "call-file", Kind: "edit", Status: ActivityInProgress}
+	h.toolCalls["call-terminal"] = &ToolCallInfo{ToolCallID: "call-terminal", Kind: "execute", Status: ActivityInProgress}
+
+	permission := PermissionToolCall{ToolCallID: "confirmation-session", Kind: "other"}
+	if got := h.correlatePermissionActionID(permission); got != "confirmation-session" {
+		t.Fatalf("expected ambiguous generic permission to preserve source id, got %q", got)
+	}
+}
+
 func TestHandlePermissionRequest_Cancellation(t *testing.T) {
 	// Create a mock EventSink that simulates cancellation
 	mockSink := &mockEventSink{
@@ -2113,6 +2158,48 @@ func TestHandleFsWriteTextFile_CorrelatesLiveToolCallByPath(t *testing.T) {
 	}
 	if got := sink.permRequests[0].actionID; got != "call-edit-1" {
 		t.Errorf("expected correlated actionID 'call-edit-1', got %q", got)
+	}
+}
+
+func TestHandleFsWriteTextFile_SkipsGateWhenToolCallAlreadyApproved(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.txt")
+
+	sink := &mockEventSink{}
+	sink.cancelChan = make(chan struct{})
+	close(sink.cancelChan)
+	h := NewHandler(sink, nil, "")
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "call-edit-1",
+			"title":         "write",
+			"kind":          "edit",
+			"locations":     []interface{}{map[string]interface{}{"path": path}},
+		},
+	})
+	h.resolvePermission("call-edit-1", true, "once", ApprovalAllowOnce, false)
+
+	transport, responses := fsWriteTestTransport(t)
+	runFsWrite(t, h, transport, map[string]interface{}{"path": path, "content": "new content"})
+
+	if len(sink.permRequests) != 0 {
+		t.Fatalf("expected no re-approval for an already approved tool call, got %+v", sink.permRequests)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected file written without re-gating: %v", err)
+	}
+	if string(data) != "new content" {
+		t.Errorf("expected new content, got %q", string(data))
+	}
+	select {
+	case resp := <-responses:
+		if strings.Contains(resp, `"error"`) {
+			t.Errorf("expected success response, got %s", resp)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no response written")
 	}
 }
 

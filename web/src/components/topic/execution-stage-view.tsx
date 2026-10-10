@@ -59,7 +59,7 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
 
   const handleResume = () => {
     if (!environmentId) return
-    // Console replay is driven by the PENDING_RECONNECT -> CONNECTED transition, not by resume.
+    // Console replay is driven by the PENDING_CONNECT -> CONNECTED transition, not by resume.
     resumeEnvironment.mutate(environmentId)
   }
 

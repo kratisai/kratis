@@ -44,14 +44,14 @@ export function TerminalLogNotice({ isWaking, onWake, status }: TerminalLogNotic
       </div>
     )
   }
-  if (status === 'PENDING_RECONNECT') {
+  if (status === 'PENDING_CONNECT') {
     return (
       <div
         className="mb-3 flex items-center gap-2 rounded border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-400"
-        data-testid="terminal-pending-reconnect-notice"
+        data-testid="terminal-connecting-notice"
       >
         <Loader2 className="h-3 w-3 animate-spin" />
-        <span>Sandbox is starting. Console history loads once it reconnects.</span>
+        <span>Sandbox is connecting. Console history loads once it connects.</span>
       </div>
     )
   }

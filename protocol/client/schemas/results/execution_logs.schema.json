@@ -30,7 +30,7 @@
       "enum": [
         "CONNECTED",
         "DISCONNECTED",
-        "PENDING_RECONNECT",
+        "PENDING_CONNECT",
         "SLEEPING",
         "TERMINATED"
       ]

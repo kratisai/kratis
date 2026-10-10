@@ -109,10 +109,7 @@ class KiloExecutionRealTest extends AbstractAgentExecutionRealTest {
 
     @Override
     protected int getExpectedHitlRequestCount() {
-        // Kilo requests its own permission for the edit (verified in a live kilo acp session)
-        // plus the gated fs/write_text_file client-capability write (kind "write") and
-        // the agent permission for the bash command = 3.
-        return 3;
+        return 2;
     }
 
     @Override

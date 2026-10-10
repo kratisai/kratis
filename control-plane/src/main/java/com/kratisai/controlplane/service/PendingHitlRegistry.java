@@ -38,15 +38,10 @@ public class PendingHitlRegistry {
         this.sessionRegistry = Objects.requireNonNull(sessionRegistry, "sessionRegistry is required");
     }
 
-    public void register(PendingHitl pendingHitl) {
+    public boolean register(PendingHitl pendingHitl) {
         HitlKey key = keyOf(pendingHitl.request());
-        PendingHitl previous = pending.put(key, pendingHitl);
-        if (previous != null) {
-            logger.warn(
-                    "Replaced pending HITL request for execution {} actionId='{}' (kind={})",
-                    key.executionId(),
-                    key.actionId(),
-                    previous.request().kind());
+        if (pending.putIfAbsent(key, pendingHitl) != null) {
+            return false;
         }
         logger.info(
                 "Registered pending HITL request for execution {} (actionId='{}', kind={}, team={}, request id={})",
@@ -55,14 +50,15 @@ public class PendingHitlRegistry {
                 pendingHitl.request().kind(),
                 pendingHitl.teamId(),
                 pendingHitl.requestId());
+        return true;
     }
 
-    public void register(HitlRequestSnapshot request, String sessionId, Object requestId, UUID teamId) {
+    public boolean register(HitlRequestSnapshot request, String sessionId, Object requestId, UUID teamId) {
         WebSocketSession session = sessionRegistry.getSession(sessionId);
         if (session == null) {
             throw new IllegalStateException("Unknown environment session " + sessionId);
         }
-        register(new PendingHitl(request, session, requestId, Instant.now(), teamId));
+        return register(new PendingHitl(request, session, requestId, Instant.now(), teamId));
     }
 
     public PendingHitl find(UUID executionId, String actionId) {
