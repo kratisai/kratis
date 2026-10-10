@@ -12,9 +12,7 @@ vi.mock('@/store/websocket-store', () => ({
 describe('useExecutionStore', () => {
   beforeEach(() => {
     useExecutionStore.setState({
-      logEnvironmentId: {},
       logs: {},
-      logStatus: {},
       replayingExecutionId: null,
       terminalFullscreen: false,
       terminalHeight: 256,
@@ -26,9 +24,7 @@ describe('useExecutionStore', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     useExecutionStore.setState({
-      logEnvironmentId: {},
       logs: {},
-      logStatus: {},
       replayingExecutionId: null,
       terminalFullscreen: false,
       terminalHeight: 256,
@@ -158,8 +154,6 @@ describe('useExecutionStore', () => {
 
       const state = useExecutionStore.getState()
       expect(state.logs['exec-1']).toEqual(['one', 'two', '[Output] live while waiting'])
-      expect(state.logStatus['exec-1']).toBe('CONNECTED')
-      expect(state.logEnvironmentId['exec-1']).toBe('env-1')
     })
 
     it('keeps existing logs when the sidecar returns no lines', () => {
@@ -178,7 +172,7 @@ describe('useExecutionStore', () => {
     })
 
     it.each(['DISCONNECTED', 'PENDING_RECONNECT', 'SLEEPING', 'TERMINATED'] as const)(
-      'records %s status without touching logs',
+      'leaves logs untouched for %s status',
       (status) => {
         useExecutionStore.setState({ logs: { 'exec-1': ['[System] done'] } })
 
@@ -190,10 +184,7 @@ describe('useExecutionStore', () => {
           type: 'execution_logs',
         })
 
-        const state = useExecutionStore.getState()
-        expect(state.logStatus['exec-1']).toBe(status)
-        expect(state.logs['exec-1']).toEqual(['[System] done'])
-        expect(state.logEnvironmentId['exec-1']).toBe('env-9')
+        expect(useExecutionStore.getState().logs['exec-1']).toEqual(['[System] done'])
       },
     )
   })

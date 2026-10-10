@@ -1,10 +1,6 @@
 import { create } from 'zustand'
 
-import type {
-  EnvironmentStatus,
-  ExecutionLogsResult,
-  ExecutionReplayCompleteResult,
-} from '@/types/websocket-types'
+import type { ExecutionLogsResult, ExecutionReplayCompleteResult } from '@/types/websocket-types'
 
 import { useActivityStore } from '@/store/activity-store'
 import { useWebSocketStore } from '@/store/websocket-store'
@@ -14,9 +10,7 @@ interface ExecutionState {
   clearLogs: (executionId: string) => void
   handleLogsResult: (result: ExecutionLogsResult) => void
   handleReplayComplete: (result: ExecutionReplayCompleteResult) => void
-  logEnvironmentId: Record<string, string>
   logs: Record<string, string[]>
-  logStatus: Record<string, EnvironmentStatus>
   replayActivities: (executionId: string) => void
   replayingExecutionId: null | string
   requestLogs: (executionId: string) => void
@@ -46,22 +40,15 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     }),
   handleLogsResult: (result) =>
     set((state) => {
-      const logStatus = { ...state.logStatus, [result.executionId]: result.status }
-      const logEnvironmentId = {
-        ...state.logEnvironmentId,
-        [result.executionId]: result.environmentId,
-      }
       if (result.status !== 'CONNECTED' || result.lines.length === 0) {
         logBaselines.delete(result.executionId)
-        return { logEnvironmentId, logStatus }
+        return {}
       }
       const current = state.logs[result.executionId] ?? []
       const liveSinceRequest = current.slice(logBaselines.get(result.executionId) ?? current.length)
       logBaselines.delete(result.executionId)
       return {
-        logEnvironmentId,
         logs: { ...state.logs, [result.executionId]: [...result.lines, ...liveSinceRequest] },
-        logStatus,
       }
     }),
   handleReplayComplete: (result) => {
@@ -69,9 +56,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       set({ replayingExecutionId: null })
     }
   },
-  logEnvironmentId: {},
   logs: {},
-  logStatus: {},
   replayActivities: (executionId) => {
     useActivityStore.getState().clearActivities(executionId)
     set({ replayingExecutionId: executionId })

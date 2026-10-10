@@ -417,7 +417,7 @@ public class ExecutionEnvironmentService {
         }
 
         env.setContainerId(containerId);
-        env.setStatus(EnvironmentStatus.CONNECTED);
+        env.setStatus(EnvironmentStatus.PENDING_RECONNECT);
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
 

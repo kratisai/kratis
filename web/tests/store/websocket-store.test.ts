@@ -13,6 +13,7 @@ import {
   handleExecutionDiffChangedResult,
   handleExecutionStatusChangedResult,
   handleIngestionResult,
+  handleTeamEntityChangedResult,
   resyncActiveExecution,
   teamEntityQueryKey,
 } from '@/store/websocket-store'
@@ -117,6 +118,60 @@ describe('handleExecutionStatusChangedResult', () => {
       executionId: 'exec-1',
       teamId: 'team-1',
       type: 'execution_status_changed',
+    })
+
+    expect(invalidateSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleTeamEntityChangedResult', () => {
+  beforeEach(() => {
+    useAuthStore.setState({ currentTeamId: 'team-1' })
+    useChatStore.setState({ currentChatId: null })
+    vi.restoreAllMocks()
+  })
+
+  afterEach(() => {
+    useAuthStore.setState({ currentTeamId: null })
+    useChatStore.setState({ currentChatId: null })
+  })
+
+  it('refetches the open chat executions when an environment changes', () => {
+    useChatStore.setState({ currentChatId: 'chat-1' })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined)
+
+    handleTeamEntityChangedResult({
+      entity: 'ENVIRONMENTS',
+      teamId: 'team-1',
+      type: 'team_entity_changed',
+    })
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['environments', 'team-1'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['chat-executions', 'chat-1'] })
+  })
+
+  it('does not refetch chat executions when no chat is open', () => {
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined)
+
+    handleTeamEntityChangedResult({
+      entity: 'ENVIRONMENTS',
+      teamId: 'team-1',
+      type: 'team_entity_changed',
+    })
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['environments', 'team-1'] })
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: ['chat-executions', expect.anything()],
+    })
+  })
+
+  it('does nothing when the team does not match', () => {
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined)
+
+    handleTeamEntityChangedResult({
+      entity: 'ENVIRONMENTS',
+      teamId: 'team-other',
+      type: 'team_entity_changed',
     })
 
     expect(invalidateSpy).not.toHaveBeenCalled()
