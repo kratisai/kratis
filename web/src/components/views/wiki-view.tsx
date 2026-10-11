@@ -128,7 +128,7 @@ export function WikiView() {
 
             <Card>
               <CardContent className="p-6">
-                <MarkdownMessage content={selectedPage.content} />
+                <MarkdownMessage content={selectedPage.content} variant="wiki" />
               </CardContent>
             </Card>
           </div>

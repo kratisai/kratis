@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import mermaid from 'mermaid'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { MarkdownMessage, sanitizeMermaidSource } from '@/components/chat/markdown-message'
+import { getMermaidConfig, MarkdownMessage, sanitizeMermaidSource } from '@/components/chat/markdown-message'
 
 const mockResolvedTheme = vi.fn().mockReturnValue('light')
 
@@ -47,6 +47,71 @@ describe('MarkdownMessage', () => {
     expect(prose).toHaveClass('overflow-x-auto', 'prose-xs', 'max-w-none')
   })
 
+  it.each([['document' as const, 'prose-document'], ['wiki' as const, 'prose-wiki']])(
+    'applies the %s density class for long-form reading',
+    (variant, expectedClass) => {
+      const { container } = render(<MarkdownMessage content="hello" variant={variant} />)
+      expect(container.querySelector('.prose')).toHaveClass(expectedClass)
+    },
+  )
+
+  it('wraps tables in a rounded scroll container', () => {
+    const { container } = render(<MarkdownMessage content={'| a | b |\n|---|---|\n| 1 | 2 |'} />)
+    const wrapper = container.querySelector('.md-table-wrapper')
+    expect(wrapper).not.toBeNull()
+    expect(wrapper?.querySelector('table')).not.toBeNull()
+  })
+
+  it('renders task-list checkboxes', () => {
+    render(<MarkdownMessage content={'- [x] done\n- [ ] todo'} />)
+    expect(screen.getAllByRole('checkbox').map((box) => (box as HTMLInputElement).checked)).toEqual(
+      [true, false],
+    )
+  })
+
+  it.each([
+    ['NOTE', 'note', 'Note'],
+    ['TIP', 'tip', 'Tip'],
+    ['IMPORTANT', 'important', 'Important'],
+    ['WARNING', 'warning', 'Warning'],
+    ['CAUTION', 'caution', 'Caution'],
+  ])('renders a %s GitHub callout with a label', (marker, type, label) => {
+    const { container } = render(
+      <MarkdownMessage content={`> [!${marker}]\n> Stay calm and carry on.`} />,
+    )
+    const quote = container.querySelector(`blockquote[data-callout="${type}"]`)
+    expect(quote).not.toBeNull()
+    expect(quote?.textContent).toContain(label)
+    expect(quote?.textContent).toContain('Stay calm and carry on.')
+    expect(quote?.textContent).not.toContain(`[!${marker}]`)
+  })
+
+  it('renders plain blockquotes without a callout treatment', () => {
+    const { container } = render(<MarkdownMessage content="> Just a quote." />)
+    expect(container.querySelector('blockquote[data-callout]')).toBeNull()
+    expect(screen.getByText('Just a quote.')).toBeInTheDocument()
+  })
+
+  it('exposes warm-paper mermaid variables for light mode', () => {
+    expect(getMermaidConfig(false)).toMatchObject({
+      theme: 'base',
+      themeVariables: expect.objectContaining({
+        edgeLabelBackground: '#faf9f6',
+        primaryColor: '#efe9dc',
+      }),
+    })
+  })
+
+  it('exposes graphite mermaid variables for dark mode', () => {
+    expect(getMermaidConfig(true)).toMatchObject({
+      theme: 'base',
+      themeVariables: expect.objectContaining({
+        edgeLabelBackground: '#242424',
+        primaryColor: '#2e2c28',
+      }),
+    })
+  })
+
   it('renders a mermaid diagram when code block language is mermaid', async () => {
     const mermaidContent = 'graph TD;\nA-->B;'
     render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
@@ -71,8 +136,12 @@ describe('MarkdownMessage', () => {
       expect(screen.getByText('Mocked Mermaid Diagram')).toBeInTheDocument()
     })
 
-    // Check that mermaid.initialize was called with default theme
-    expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({ theme: 'default' }))
+    expect(mermaid.initialize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        theme: 'base',
+        themeVariables: expect.objectContaining({ primaryColor: '#efe9dc' }),
+      }),
+    )
 
     // Change theme to dark
     mockResolvedTheme.mockReturnValue('dark')
@@ -81,7 +150,12 @@ describe('MarkdownMessage', () => {
     rerender(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
 
     await waitFor(() => {
-      expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({ theme: 'dark' }))
+      expect(mermaid.initialize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          theme: 'base',
+          themeVariables: expect.objectContaining({ primaryColor: '#2e2c28' }),
+        }),
+      )
     })
   })
 
@@ -140,6 +214,40 @@ describe('MarkdownMessage', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /view diagram fullscreen/i })).toBeInTheDocument()
     })
+  })
+
+  it('shows a copy button that writes the diagram source to the clipboard', async () => {
+    const user = userEvent.setup()
+    const mermaidContent = 'graph TD;\nA-->B;'
+    render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
+
+    const copyButton = await screen.findByRole('button', { name: /copy diagram source/i })
+    expect(copyButton.querySelector('.lucide-copy')).toBeInTheDocument()
+    await user.click(copyButton)
+
+    expect(await navigator.clipboard.readText()).toBe(mermaidContent)
+
+    await waitFor(() => {
+      expect(copyButton.querySelector('.lucide-check')).toBeInTheDocument()
+    })
+  })
+
+  it('does not show a copy button before the diagram has rendered', () => {
+    let resolveRender: (value: RenderResult) => void = () => {}
+    vi.mocked(mermaid.render).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRender = resolve
+        }),
+    )
+
+    const mermaidContent = 'graph TD;\nA-->B;'
+    render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
+
+    expect(screen.queryByRole('button', { name: /copy diagram source/i })).not.toBeInTheDocument()
+
+    // Cleanup: resolve the pending render so it doesn't leak into other tests
+    resolveRender(mockMermaidRenderResult('<svg>Mocked Mermaid Diagram</svg>'))
   })
 
   it('opens a fullscreen dialog with the diagram when the expand button is clicked', async () => {
