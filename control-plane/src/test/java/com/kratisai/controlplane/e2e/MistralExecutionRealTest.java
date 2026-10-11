@@ -49,14 +49,15 @@ class MistralExecutionRealTest extends AbstractAgentExecutionRealTest {
     protected void configureWireMockScenario() {
         LlmMockScenarios.mistral(wireMockLlmServer);
 
-        // Mistral Vibe uses SSE streaming with write_file/bash tool names
-        // Note: write_file uses "file_path" parameter (not "path")
+        // Mistral Vibe 2.26.x runs on the Unified Harness, which is now the
+        // mandatory default runtime. It exposes the Rust file-system tools:
+        // write_file/read_file take "path", while edit takes "file_path".
         wireMockLlmServer.addMatcher(HttpRequestMatcher.builder()
                 .contains("Write a shell script")
                 .sseResponse(
                         LlmResponseBuilders.mistralSseToolCall(
                                 "write_file",
-                                "{\"file_path\":\"/kratis/workspace/kratis_task.sh\",\"content\":\"#!/bin/bash\\necho \\\"Hello Kratis - what a lovely day\\\"\\n\"}"))
+                                "{\"path\":\"/kratis/workspace/kratis_task.sh\",\"content\":\"#!/bin/bash\\necho \\\"Hello Kratis - what a lovely day\\\"\\n\"}"))
                 .maxMatches(1)
                 .build());
 
@@ -84,11 +85,6 @@ class MistralExecutionRealTest extends AbstractAgentExecutionRealTest {
     @Override
     protected int getExpectedHitlRequestCount() {
         return 2;
-    }
-
-    @Override
-    protected boolean permissionRequestsCarryToolCallId() {
-        return false;
     }
 
     @Override
