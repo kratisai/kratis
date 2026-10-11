@@ -6,9 +6,11 @@ import { toast } from 'sonner'
 import type { CanvasDocument } from '@/types/canvas-types'
 
 import { Button } from '@/components/ui/button'
+import { useChatPermissions, useUpdateChatPermissions } from '@/hooks/use-chats'
 import { deleteCanvasDocument } from '@/lib/canvas-api'
 import { createSandboxExecution } from '@/lib/execution-api'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/store/auth-store'
 import { useCanvasStore } from '@/store/canvas-store'
 import { useExecutionStore } from '@/store/execution-store'
 
@@ -27,6 +29,17 @@ export function CanvasTabs({ chatId, className, docId }: CanvasTabsProps) {
   const removeCanvasDocument = useCanvasStore((state) => state.removeCanvasDocument)
 
   const { clearLogs, setTerminalOpen } = useExecutionStore()
+
+  const teamId = useAuthStore((state) => state.currentTeamId)
+  const allowAllPermissions = useChatPermissions(chatId)
+  const updatePermissions = useUpdateChatPermissions(teamId)
+
+  const handleDisableAllowAll = () => {
+    updatePermissions.mutate(
+      { allowAllPermissions: false, chatId },
+      { onError: () => toast.error('Failed to update permission mode') },
+    )
+  }
 
   const [isLaunchDialogOpen, setIsLaunchDialogOpen] = useState(false)
   const [docToDelete, setDocToDelete] = useState<CanvasDocument | null>(null)
@@ -147,6 +160,8 @@ export function CanvasTabs({ chatId, className, docId }: CanvasTabsProps) {
       ) : null}
 
       <ExecutionLaunchDialog
+        allowAllPermissions={allowAllPermissions}
+        onDisableAllowAll={handleDisableAllowAll}
         onLaunch={(target) => {
           void handleLaunch(target)
         }}

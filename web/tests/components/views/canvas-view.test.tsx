@@ -35,6 +35,11 @@ vi.mock('@/hooks/use-executions', () => ({
   })),
 }))
 
+vi.mock('@/hooks/use-chats', () => ({
+  useChatPermissions: () => false,
+  useUpdateChatPermissions: () => ({ isPending: false, mutate: vi.fn() }),
+}))
+
 describe('CanvasView', () => {
   beforeEach(() => {
     useCanvasStore.setState({ canvases: {}, unreadCanvasDocIds: {} })

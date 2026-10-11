@@ -222,6 +222,47 @@ describe('ExecutionLaunchDialog', () => {
     expect(useUIStore.getState().selectedProviderId).toBe('prov-openai')
   })
 
+  it('shows the allow-all notice when permission prompts are disabled for the topic', () => {
+    renderWithProviders(
+      <ExecutionLaunchDialog
+        allowAllPermissions={true}
+        onDisableAllowAll={vi.fn()}
+        onLaunch={vi.fn()}
+        onOpenChange={vi.fn()}
+        open={true}
+      />,
+    )
+
+    expect(screen.getByTestId('launch-allow-all-notice')).toBeInTheDocument()
+    expect(screen.getByText(/permission prompts are off for this topic/i)).toBeInTheDocument()
+  })
+
+  it('hides the allow-all notice by default', () => {
+    renderWithProviders(
+      <ExecutionLaunchDialog onLaunch={vi.fn()} onOpenChange={vi.fn()} open={true} />,
+    )
+
+    expect(screen.queryByTestId('launch-allow-all-notice')).not.toBeInTheDocument()
+  })
+
+  it('invokes onDisableAllowAll from the notice', async () => {
+    const user = userEvent.setup()
+    const onDisableAllowAll = vi.fn()
+
+    renderWithProviders(
+      <ExecutionLaunchDialog
+        allowAllPermissions={true}
+        onDisableAllowAll={onDisableAllowAll}
+        onLaunch={vi.fn()}
+        onOpenChange={vi.fn()}
+        open={true}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /turn off before launching/i }))
+    expect(onDisableAllowAll).toHaveBeenCalledTimes(1)
+  })
+
   it('never collects a credential at launch', async () => {
     const user = userEvent.setup()
     const onLaunch = vi.fn()

@@ -134,6 +134,7 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
     const resolution: HitlResponse =
       activity.hitlResponse ?? (activity.approved === true ? 'approved' : 'declined')
     const timedOut = resolution === 'cancelled' && activity.resolvedBy?.kind === 'timeout'
+    const autoApproved = resolution === 'approved' && activity.resolvedBy?.kind === 'policy'
     return (
       <Card className="border-border/50 bg-muted/30 min-w-0 p-0">
         <CardContent className="flex min-w-0 items-center gap-2">
@@ -147,13 +148,15 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
             <XCircle className="h-4 w-4 shrink-0 text-red-500" />
           )}
           <span className="min-w-0 flex-1 truncate text-sm">
-            {resolution === 'approved'
-              ? 'Permission approved:'
-              : timedOut
-                ? 'Permission request timed out — no response:'
-                : resolution === 'cancelled'
-                  ? 'Permission request cancelled:'
-                  : 'Permission rejected:'}{' '}
+            {autoApproved
+              ? 'Auto-approved:'
+              : resolution === 'approved'
+                ? 'Permission approved:'
+                : timedOut
+                  ? 'Permission request timed out — no response:'
+                  : resolution === 'cancelled'
+                    ? 'Permission request cancelled:'
+                    : 'Permission rejected:'}{' '}
             <code className="bg-muted rounded px-1 font-mono text-xs">{command}</code>
           </span>
         </CardContent>
@@ -190,11 +193,10 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
           <div className="space-y-2">
             <Button
               aria-expanded={rememberOpen}
-              className="w-full justify-between"
               onClick={() => setRememberOpen((open) => !open)}
               size="sm"
               type="button"
-              variant="ghost"
+              variant="outline"
             >
               <span>Remember choices</span>
               <ChevronDown

@@ -1,0 +1,17 @@
+databaseChangeLog:
+- changeSet:
+    id: 007-chat-allow-all-permissions-001
+    author: kratis
+    comment: >-
+      Adds a per-topic allow-all permission mode. When enabled, command approvals
+      for executions in the chat are auto-approved without prompting a human.
+    changes:
+    - addColumn:
+        tableName: chats
+        columns:
+        - column:
+            name: allow_all_permissions
+            type: BOOLEAN
+            defaultValueBoolean: false
+            constraints:
+              nullable: false

@@ -375,4 +375,111 @@ class ChatControllerTest {
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].title").value("Persistent Session"));
     }
+
+    // ==================== Permission Mode ====================
+
+    @Test
+    void updatePermissions_togglesFlagAndReturns204() throws Exception {
+        Team team = teamRepository.findById(UUID.fromString(teamId)).orElseThrow();
+        User user = userRepository.findById(userId).orElseThrow();
+        ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "Permission Session"));
+
+        mockMvc.perform(patch("/api/v1/chats/{id}/permissions", chat.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new UpdateChatPermissionsRequest(true)))
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isNoContent());
+
+        assertThat(chatRepository.findById(chat.getId()).orElseThrow().isAllowAllPermissions())
+                .isTrue();
+
+        mockMvc.perform(patch("/api/v1/chats/{id}/permissions", chat.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new UpdateChatPermissionsRequest(false)))
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isNoContent());
+
+        assertThat(chatRepository.findById(chat.getId()).orElseThrow().isAllowAllPermissions())
+                .isFalse();
+    }
+
+    @Test
+    void updatePermissions_reflectsFlagInChatList() throws Exception {
+        Team team = teamRepository.findById(UUID.fromString(teamId)).orElseThrow();
+        User user = userRepository.findById(userId).orElseThrow();
+        ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "List Permission Session"));
+        chat.setAllowAllPermissions(true);
+        chatRepository.save(chat);
+
+        mockMvc.perform(get("/api/v1/chats")
+                        .param("teamId", teamId)
+                        .param("filter", "mine")
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].allowAllPermissions").value(true));
+    }
+
+    @Test
+    void updatePermissions_missingField_returns400() throws Exception {
+        Team team = teamRepository.findById(UUID.fromString(teamId)).orElseThrow();
+        User user = userRepository.findById(userId).orElseThrow();
+        ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "Invalid Session"));
+
+        mockMvc.perform(patch("/api/v1/chats/{id}/permissions", chat.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}")
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void updatePermissions_notFound_returns404() throws Exception {
+        mockMvc.perform(patch("/api/v1/chats/{id}/permissions", UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new UpdateChatPermissionsRequest(true)))
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void updatePermissions_notTeamMember_returns403() throws Exception {
+        Team team = teamRepository.findById(UUID.fromString(teamId)).orElseThrow();
+        User user = userRepository.findById(userId).orElseThrow();
+        ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "Restricted Session"));
+
+        RegisterUserRequest registerRequest =
+                new RegisterUserRequest("perm-outsider@example.com", "password123", "Outsider");
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registerRequest)))
+                .andExpect(status().isCreated());
+        LoginRequest loginRequest = new LoginRequest("perm-outsider@example.com", "password123");
+        MvcResult loginResult = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loginRequest)))
+                .andExpect(status().isOk())
+                .andReturn();
+        String outsiderToken = objectMapper
+                .readTree(loginResult.getResponse().getContentAsString())
+                .get("accessToken")
+                .asText();
+
+        mockMvc.perform(patch("/api/v1/chats/{id}/permissions", chat.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new UpdateChatPermissionsRequest(true)))
+                        .header("Authorization", "Bearer " + outsiderToken))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void updatePermissions_unauthenticated_returns401() throws Exception {
+        Team team = teamRepository.findById(UUID.fromString(teamId)).orElseThrow();
+        User user = userRepository.findById(userId).orElseThrow();
+        ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "Anonymous Session"));
+
+        mockMvc.perform(patch("/api/v1/chats/{id}/permissions", chat.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new UpdateChatPermissionsRequest(true))))
+                .andExpect(status().isUnauthorized());
+    }
 }

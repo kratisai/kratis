@@ -3,10 +3,11 @@ package com.kratisai.controlplane.api.wsdto;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
-/** How a HITL request was resolved: by a user, a remembered rule, a timeout, or the system. */
+/** How a HITL request was resolved: by a user, a remembered rule, a topic policy, a timeout, or the system. */
 public enum HitlResolverKind {
     USER("user"),
     RULE("rule"),
+    POLICY("policy"),
     TIMEOUT("timeout"),
     SYSTEM("system");
 

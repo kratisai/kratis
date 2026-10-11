@@ -25,6 +25,10 @@ public record HitlResolver(
         return new HitlResolver(HitlResolverKind.RULE, null, displayName);
     }
 
+    public static HitlResolver policy(String displayName) {
+        return new HitlResolver(HitlResolverKind.POLICY, null, displayName);
+    }
+
     public static HitlResolver timeout() {
         return new HitlResolver(HitlResolverKind.TIMEOUT, null, null);
     }

@@ -621,6 +621,21 @@ describe('ActivityApproval', () => {
     expect(screen.getByText(/Permission approved/)).toBeInTheDocument()
   })
 
+  it('labels a topic auto-approval distinctly', () => {
+    render(
+      <ActivityApproval
+        activity={pendingActivity({
+          approved: true,
+          resolvedBy: { displayName: 'Auto approve', kind: 'policy' },
+          state: 'active',
+        })}
+        executionId="exec-1"
+      />,
+    )
+
+    expect(screen.getByText(/Auto-approved:/)).toBeInTheDocument()
+  })
+
   it('renders the resolved summary for a rejected activity', () => {
     render(
       <ActivityApproval

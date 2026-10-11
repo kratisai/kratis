@@ -9,6 +9,7 @@ import { ExecutionDiffTab } from '@/components/session/diff/execution-diff-tab'
 import { SteeringPublishBar } from '@/components/session/diff/steering-publish-bar'
 import { ExecutionActivityLog } from '@/components/session/execution-activity-log'
 import { ExecutionUsageSummary } from '@/components/session/execution-usage-summary'
+import { AllowAllPermissionsToggle } from '@/components/topic/allow-all-permissions-toggle'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -145,6 +146,8 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
     >
       <div className="border-border/60 bg-muted/20 hidden h-9.5 items-center justify-end border-b px-3 backdrop-blur-xs select-none md:flex">
         <div className="flex items-center gap-1.5 sm:gap-2">
+          <AllowAllPermissionsToggle chatId={chatId} />
+
           <div className="hidden sm:block">
             <ExecutionUsageSummary chatId={chatId} executionId={executionId} />
           </div>

@@ -399,10 +399,6 @@ export function mockListProviders(providers: Array<Record<string, unknown>> = []
   })
 }
 
-// ---------------------------------------------------------------------------
-// Model provider mocks
-// ---------------------------------------------------------------------------
-
 export function mockListRemoteRepositories(repos: Array<Record<string, unknown>> = []) {
   addFetchHandler((url) => {
     if (url.includes('/available-repos')) {
@@ -413,7 +409,7 @@ export function mockListRemoteRepositories(repos: Array<Record<string, unknown>>
 }
 
 // ---------------------------------------------------------------------------
-// Repository mocks
+// Model provider mocks
 // ---------------------------------------------------------------------------
 
 export function mockListRepositories(repos: Array<RepositoryDto> = []) {
@@ -425,6 +421,10 @@ export function mockListRepositories(repos: Array<RepositoryDto> = []) {
     return null
   })
 }
+
+// ---------------------------------------------------------------------------
+// Repository mocks
+// ---------------------------------------------------------------------------
 
 export function mockListTeams(teams: Array<TeamDto> = []) {
   addFetchHandler((url) => {
@@ -447,8 +447,6 @@ export function mockListWikiPageChildren(
   })
 }
 
-
-
 export function mockListWikiPages(pages: Array<Record<string, unknown>> = []) {
   addFetchHandler((url) => {
     if (url.includes('/wiki/pages') && url.endsWith('/pages')) {
@@ -458,9 +456,7 @@ export function mockListWikiPages(pages: Array<Record<string, unknown>> = []) {
   })
 }
 
-// ---------------------------------------------------------------------------
-// Session mocks
-// ---------------------------------------------------------------------------
+
 
 export function mockLogin(response?: Partial<AuthTokensResponse>) {
   addFetchHandler((url, options) => {
@@ -483,7 +479,7 @@ export function mockLogin(response?: Partial<AuthTokensResponse>) {
 }
 
 // ---------------------------------------------------------------------------
-// Team mocks
+// Session mocks
 // ---------------------------------------------------------------------------
 
 export function mockLoginShouldFail(errorMessage = 'Invalid credentials') {
@@ -494,6 +490,10 @@ export function mockLoginShouldFail(errorMessage = 'Invalid credentials') {
     return null
   })
 }
+
+// ---------------------------------------------------------------------------
+// Team mocks
+// ---------------------------------------------------------------------------
 
 export function mockRefreshToken(shouldFail = false) {
   addFetchHandler((url, options) => {
@@ -539,10 +539,6 @@ export function mockResolvePermission(shouldFail = false) {
   })
 }
 
-// ---------------------------------------------------------------------------
-// Wiki mocks
-// ---------------------------------------------------------------------------
-
 export function mockSupportedProviderTypes(
   types: Array<Record<string, unknown>> = [
     {
@@ -578,6 +574,10 @@ export function mockSupportedProviderTypes(
     return null
   })
 }
+
+// ---------------------------------------------------------------------------
+// Wiki mocks
+// ---------------------------------------------------------------------------
 
 export function mockTerminateEnvironment(envId: string) {
   addFetchHandler((url, options) => {
@@ -619,6 +619,16 @@ export function mockTriggerIngestion(repoId = 'repo-1', shouldFail = false) {
         return jsonResponse({ message: 'Failed to start ingestion' }, 500)
       }
       return jsonResponse({ batchId: 'batch-1', status: 'QUEUED' }, 202)
+    }
+    return null
+  })
+}
+
+export function mockUpdateChatPermissions(shouldFail = false) {
+  addFetchHandler((url, options) => {
+    if (/\/api\/v1\/chats\/[^/]+\/permissions$/.test(url) && options.method === 'PATCH') {
+      if (shouldFail) return jsonResponse({ message: 'Forbidden' }, 403)
+      return new Response(null, { status: 204 })
     }
     return null
   })

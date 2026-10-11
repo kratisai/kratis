@@ -170,7 +170,8 @@ public class ChatService {
                 totalTokens,
                 promptTokens,
                 completionTokens,
-                usageLastUpdatedAt);
+                usageLastUpdatedAt,
+                chat.isAllowAllPermissions());
     }
 
     /** Archive a chat. */
@@ -200,6 +201,20 @@ public class ChatService {
         }
 
         chatRepository.updateArchivedAt(chatId, null);
+        eventPublisher.publishEvent(new TeamEntityChangedEvent(chat.getTeam().getId(), TeamEntityType.CHATS));
+    }
+
+    @Transactional
+    public void setAllowAllPermissions(UUID chatId, UUID userId, boolean enabled) {
+        ChatEntity chat = chatRepository
+                .findById(chatId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chat not found"));
+
+        if (!teamMemberRepository.existsByTeamIdAndUserId(chat.getTeam().getId(), userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this team");
+        }
+
+        chatRepository.updateAllowAllPermissions(chatId, enabled);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(chat.getTeam().getId(), TeamEntityType.CHATS));
     }
 

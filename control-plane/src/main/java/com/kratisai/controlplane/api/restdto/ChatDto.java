@@ -15,4 +15,5 @@ public record ChatDto(
         Long totalTokens,
         Long promptTokens,
         Long completionTokens,
-        Instant usageLastUpdatedAt) {}
+        Instant usageLastUpdatedAt,
+        boolean allowAllPermissions) {}

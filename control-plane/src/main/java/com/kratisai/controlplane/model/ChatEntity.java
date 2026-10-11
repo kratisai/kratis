@@ -37,6 +37,10 @@ public class ChatEntity {
     @Column(name = "archived_at")
     private Instant archivedAt;
 
+    /** Topic-scoped opt-in: auto-approve every permission request without prompting. */
+    @Column(name = "allow_all_permissions", nullable = false)
+    private boolean allowAllPermissions = false;
+
     public ChatEntity() {}
 
     public ChatEntity(Team team, User user, String title) {
@@ -115,5 +119,13 @@ public class ChatEntity {
 
     public void setArchivedAt(Instant archivedAt) {
         this.archivedAt = archivedAt;
+    }
+
+    public boolean isAllowAllPermissions() {
+        return allowAllPermissions;
+    }
+
+    public void setAllowAllPermissions(boolean allowAllPermissions) {
+        this.allowAllPermissions = allowAllPermissions;
     }
 }

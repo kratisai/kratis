@@ -33,11 +33,10 @@ export function HitlFeedbackField({
     <div className="space-y-2" ref={panelRef}>
       <Button
         aria-expanded={open}
-        className="w-full justify-between"
         onClick={() => setOpen((prev) => !prev)}
         size="sm"
         type="button"
-        variant="ghost"
+        variant="outline"
       >
         <span>Message to agent</span>
         <ChevronDown className={cn('h-4 w-4 transition-transform', open && 'rotate-180')} />

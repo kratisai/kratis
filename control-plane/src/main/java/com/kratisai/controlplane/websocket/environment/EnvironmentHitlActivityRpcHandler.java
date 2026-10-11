@@ -45,6 +45,7 @@ public class EnvironmentHitlActivityRpcHandler
         implements EnvironmentRpcHandler<EnvironmentRpcPayload.HitlActivity, EnvironmentResponsePayload> {
     private static final Logger logger = LoggerFactory.getLogger(EnvironmentHitlActivityRpcHandler.class);
     private static final String RULE_RESOLVER = "Remembered rule";
+    private static final String POLICY_RESOLVER = "Auto approve";
 
     private final EnvironmentSessionRegistry sessionRegistry;
     private final HitlRuleRepository ruleRepository;
@@ -129,19 +130,7 @@ public class EnvironmentHitlActivityRpcHandler
         executionGuard.verifyExecutionInEnvironment(execution, envId);
         rejectDuplicateApproval(execution.getId(), params.actionId());
 
-        logger.debug("Checking HITL rules for team {} and command '{}'", teamId, command);
         List<HitlRule> rules = ruleRepository.findByTeamId(teamId);
-        Optional<HitlResponse> autoResolution = HitlRuleService.autoResolve(rules, command, toolKind);
-
-        String allowOptionId = null;
-        if (autoResolution.isPresent() && autoResolution.get() != HitlResponse.DECLINED) {
-            allowOptionId = selectAllowOptionId(params.options());
-            if (allowOptionId == null) {
-                logger.warn(
-                        "Auto-approved command '{}' but no allow option was offered — treating as cancelled", command);
-                return Flux.just(HitlActivityResult.cancelled());
-            }
-        }
 
         HitlRequestSnapshot payload = new HitlRequestSnapshot(
                 execution.getId(),
@@ -156,6 +145,38 @@ public class EnvironmentHitlActivityRpcHandler
                 params.diff(),
                 null,
                 params.locations());
+
+        // Topic opt-in is decided before rules so the untrusted-parse guard never gates it. Already
+        // pending requests are untouched: this reads the flag only when a request first arrives.
+        if (execution.getChat().isAllowAllPermissions()) {
+            String allowOptionId = selectAllowOptionId(params.options());
+            if (allowOptionId == null) {
+                logger.warn(
+                        "Topic allow-all is enabled but command '{}' offered no allow option — treating as cancelled",
+                        command);
+                return Flux.just(HitlActivityResult.cancelled());
+            }
+            logger.info(
+                    "Auto-approved command '{}' for execution {} via topic allow-all (optionId={})",
+                    command,
+                    execution.getId(),
+                    allowOptionId);
+            recordPolicyResolution(teamId, payload, allowOptionId);
+            return Flux.just(HitlActivityResult.approved(allowOptionId));
+        }
+
+        logger.debug("Checking HITL rules for team {} and command '{}'", teamId, command);
+        Optional<HitlResponse> autoResolution = HitlRuleService.autoResolve(rules, command, toolKind);
+
+        String allowOptionId = null;
+        if (autoResolution.isPresent() && autoResolution.get() != HitlResponse.DECLINED) {
+            allowOptionId = selectAllowOptionId(params.options());
+            if (allowOptionId == null) {
+                logger.warn(
+                        "Auto-approved command '{}' but no allow option was offered — treating as cancelled", command);
+                return Flux.just(HitlActivityResult.cancelled());
+            }
+        }
 
         if (autoResolution.isPresent()) {
             if (autoResolution.get() == HitlResponse.DECLINED) {
@@ -254,6 +275,21 @@ public class EnvironmentHitlActivityRpcHandler
                         optionId,
                         null,
                         HitlResolver.rule(RULE_RESOLVER)));
+    }
+
+    /** Records a topic allow-all auto-approval so the activity log distinguishes it from rule matches. */
+    private void recordPolicyResolution(UUID teamId, HitlRequestSnapshot request, String optionId) {
+        activityPersistenceService.recordAutoResolved(
+                teamId,
+                request,
+                new HitlResolution(
+                        request.executionId(),
+                        request.actionId(),
+                        HitlKind.APPROVAL,
+                        HitlResponse.APPROVED,
+                        optionId,
+                        null,
+                        HitlResolver.policy(POLICY_RESOLVER)));
     }
 
     /** Unknown tool kinds get no segments, so nothing unrememberable can be persisted. */
