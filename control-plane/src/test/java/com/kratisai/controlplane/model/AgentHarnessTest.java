@@ -262,10 +262,10 @@ class AgentHarnessTest {
     }
 
     @Test
-    void mistralSetupCommands_defaultAgentAcceptEdits() {
-        // accept-edits auto-approves write/edit; bash still raises HITL.
+    void mistralSetupCommands_defaultAgentAsk() {
+        //  default_agent:Ask routes every mutating tool through approval.
         assertThat(AgentHarness.valueOf("MISTRAL").getSetupCommands())
-                .anySatisfy(command -> assertThat(command).contains("default_agent = \"accept-edits\""));
+                .anySatisfy(command -> assertThat(command).contains("default_agent = \"ask\""));
     }
 
     @Test
