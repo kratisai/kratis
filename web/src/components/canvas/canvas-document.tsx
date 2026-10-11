@@ -69,7 +69,7 @@ export function CanvasDocument({ chatId, documentId }: CanvasDocumentProps) {
         </Button>
       </div>
       <div className="mx-auto max-w-4xl">
-        <MarkdownMessage content={doc.content} />
+        <MarkdownMessage content={doc.content} variant="document" />
       </div>
     </div>
   )

@@ -34,6 +34,53 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.9 0 0);
   --sidebar-ring: oklch(0.55 0.18 165);
+  --md-body: oklch(0.32 0.015 70);
+  --md-heading: oklch(0.22 0.015 70);
+  --md-muted: oklch(0.55 0.02 70);
+  --md-link: oklch(0.5 0.15 260);
+  --md-link-underline: oklch(0.5 0.15 260 / 0.35);
+  --md-marker: oklch(0.55 0.08 260);
+  --md-hairline: oklch(0.9 0.01 70);
+  --md-quote-text: oklch(0.45 0.02 70);
+  --md-quote-bar: oklch(0.75 0.1 85);
+  --md-quote-bg: oklch(0.97 0.01 85);
+  --md-code-bg: oklch(0.96 0.005 70);
+  --md-code-fg: oklch(0.32 0.015 70);
+  --md-code-border: oklch(0.88 0.01 70);
+  --md-inline-code-bg: oklch(0.94 0.015 70);
+  --md-inline-code-fg: oklch(0.45 0.08 30);
+  --md-table-header-bg: oklch(0.95 0.008 70);
+  --md-table-border: oklch(0.88 0.01 70);
+  --md-table-row-alt: oklch(0.98 0.005 70);
+  --md-kbd-bg: oklch(1 0 0);
+  --md-kbd-border: oklch(0.84 0.01 70);
+  --md-kbd-shadow: oklch(0.78 0.01 70);
+  --md-task-accent: oklch(0.5 0.15 260);
+  --md-syn-keyword: oklch(0.55 0.14 290);
+  --md-syn-string: oklch(0.55 0.12 170);
+  --md-syn-number: oklch(0.55 0.12 80);
+  --md-syn-comment: oklch(0.6 0.02 70);
+  --md-syn-function: oklch(0.5 0.15 260);
+  --md-syn-attr: oklch(0.52 0.1 200);
+  --md-syn-builtin: oklch(0.5 0.12 290);
+  --md-syn-operator: oklch(0.42 0.02 70);
+  --md-syn-selector: oklch(0.52 0.11 170);
+  --md-syn-addition: oklch(0.5 0.12 170);
+  --md-syn-addition-bg: oklch(0.55 0.12 170 / 0.1);
+  --md-syn-deletion: oklch(0.55 0.15 25);
+  --md-syn-deletion-bg: oklch(0.55 0.15 25 / 0.08);
+  --md-callout-note: oklch(0.5 0.15 260);
+  --md-callout-note-bg: oklch(0.5 0.15 260 / 0.07);
+  --md-callout-tip: oklch(0.52 0.12 170);
+  --md-callout-tip-bg: oklch(0.52 0.12 170 / 0.08);
+  --md-callout-important: oklch(0.55 0.14 290);
+  --md-callout-important-bg: oklch(0.55 0.14 290 / 0.07);
+  --md-callout-warning: oklch(0.6 0.14 80);
+  --md-callout-warning-bg: oklch(0.6 0.14 80 / 0.1);
+  --md-callout-caution: oklch(0.55 0.18 25);
+  --md-callout-caution-bg: oklch(0.55 0.18 25 / 0.07);
+  --md-mermaid-row-odd: #fffdf7;
+  --md-mermaid-row-even: #f7f5ef;
 }
 
 .dark {
@@ -64,6 +111,53 @@
   --sidebar-accent-foreground: oklch(0.93 0 0);
   --sidebar-border: oklch(0.22 0 0);
   --sidebar-ring: oklch(0.6 0.2 165);
+  --md-body: oklch(0.83 0 0);
+  --md-heading: oklch(0.93 0 0);
+  --md-muted: oklch(0.65 0 0);
+  --md-link: oklch(0.78 0.1 260);
+  --md-link-underline: oklch(0.78 0.1 260 / 0.4);
+  --md-marker: oklch(0.7 0.08 260);
+  --md-hairline: oklch(0.32 0 0);
+  --md-quote-text: oklch(0.75 0.01 0);
+  --md-quote-bar: oklch(0.6 0.08 85);
+  --md-quote-bg: oklch(0.24 0.01 85);
+  --md-code-bg: oklch(0.22 0 0);
+  --md-code-fg: oklch(0.85 0 0);
+  --md-code-border: oklch(0.32 0 0);
+  --md-inline-code-bg: oklch(0.28 0.01 0);
+  --md-inline-code-fg: oklch(0.85 0.06 85);
+  --md-table-header-bg: oklch(0.24 0 0);
+  --md-table-border: oklch(0.32 0 0);
+  --md-table-row-alt: oklch(0.22 0 0);
+  --md-kbd-bg: oklch(0.25 0 0);
+  --md-kbd-border: oklch(0.38 0 0);
+  --md-kbd-shadow: oklch(0.15 0 0);
+  --md-task-accent: oklch(0.78 0.1 260);
+  --md-syn-keyword: oklch(0.75 0.1 290);
+  --md-syn-string: oklch(0.78 0.08 170);
+  --md-syn-number: oklch(0.75 0.09 80);
+  --md-syn-comment: oklch(0.6 0.02 70);
+  --md-syn-function: oklch(0.78 0.1 260);
+  --md-syn-attr: oklch(0.72 0.08 200);
+  --md-syn-builtin: oklch(0.74 0.09 290);
+  --md-syn-operator: oklch(0.78 0.01 0);
+  --md-syn-selector: oklch(0.74 0.08 170);
+  --md-syn-addition: oklch(0.78 0.08 170);
+  --md-syn-addition-bg: oklch(0.78 0.08 170 / 0.12);
+  --md-syn-deletion: oklch(0.78 0.1 25);
+  --md-syn-deletion-bg: oklch(0.78 0.1 25 / 0.1);
+  --md-callout-note: oklch(0.78 0.1 260);
+  --md-callout-note-bg: oklch(0.78 0.1 260 / 0.1);
+  --md-callout-tip: oklch(0.75 0.09 170);
+  --md-callout-tip-bg: oklch(0.75 0.09 170 / 0.1);
+  --md-callout-important: oklch(0.76 0.1 290);
+  --md-callout-important-bg: oklch(0.76 0.1 290 / 0.1);
+  --md-callout-warning: oklch(0.78 0.1 80);
+  --md-callout-warning-bg: oklch(0.78 0.1 80 / 0.1);
+  --md-callout-caution: oklch(0.75 0.12 25);
+  --md-callout-caution-bg: oklch(0.75 0.12 25 / 0.1);
+  --md-mermaid-row-odd: #2e2c28;
+  --md-mermaid-row-even: #26241f;
 }
 
 @theme inline {
@@ -178,46 +272,115 @@
   }
 }
 
-/* Markdown content styling - prose overrides for chat bubbles */
-/* These must be outside @layer components to override the typography plugin */
+/* Markdown editorial theme - neutral ink with functional accents.
+   These must be outside @layer components to override the typography plugin.
+   Light values are warm paper; .dark overrides to soft graphite. */
 .prose {
-  --tw-prose-body: var(--secondary-foreground);
-  --tw-prose-headings: var(--secondary-foreground);
-  --tw-prose-bold: var(--foreground);
-  --tw-prose-counters: var(--muted-foreground);
-  --tw-prose-bullets: var(--muted-foreground);
-  --tw-prose-hr: var(--border);
-  --tw-prose-quotes: var(--muted-foreground);
-  --tw-prose-quote-borders: var(--border);
-  --tw-prose-code: var(--foreground);
-  --tw-prose-pre-code: var(--foreground);
-  --tw-prose-pre-bg: var(--muted);
-  --tw-prose-th-borders: var(--border);
-  --tw-prose-td-borders: var(--border);
+  --tw-prose-body: var(--md-body);
+  --tw-prose-headings: var(--md-heading);
+  --tw-prose-lead: var(--md-muted);
+  --tw-prose-links: var(--md-link);
+  --tw-prose-bold: var(--md-heading);
+  --tw-prose-counters: var(--md-marker);
+  --tw-prose-bullets: var(--md-marker);
+  --tw-prose-hr: var(--md-hairline);
+  --tw-prose-quotes: var(--md-quote-text);
+  --tw-prose-quote-borders: var(--md-quote-bar);
+  --tw-prose-captions: var(--md-muted);
+  --tw-prose-kbd: var(--md-body);
+  --tw-prose-kbd-shadows: var(--md-kbd-shadow);
+  --tw-prose-code: var(--md-inline-code-fg);
+  --tw-prose-pre-code: var(--md-code-fg);
+  --tw-prose-pre-bg: var(--md-code-bg);
+  --tw-prose-th-borders: var(--md-table-border);
+  --tw-prose-td-borders: var(--md-table-border);
+  --tw-prose-invert-body: var(--md-body);
+  --tw-prose-invert-headings: var(--md-heading);
+  --tw-prose-invert-lead: var(--md-muted);
+  --tw-prose-invert-links: var(--md-link);
+  --tw-prose-invert-bold: var(--md-heading);
+  --tw-prose-invert-counters: var(--md-marker);
+  --tw-prose-invert-bullets: var(--md-marker);
+  --tw-prose-invert-hr: var(--md-hairline);
+  --tw-prose-invert-quotes: var(--md-quote-text);
+  --tw-prose-invert-quote-borders: var(--md-quote-bar);
+  --tw-prose-invert-captions: var(--md-muted);
+  --tw-prose-invert-kbd: var(--md-body);
+  --tw-prose-invert-kbd-shadows: var(--md-kbd-shadow);
+  --tw-prose-invert-code: var(--md-inline-code-fg);
+  --tw-prose-invert-pre-code: var(--md-code-fg);
+  --tw-prose-invert-pre-bg: var(--md-code-bg);
+  --tw-prose-invert-th-borders: var(--md-table-border);
+  --tw-prose-invert-td-borders: var(--md-table-border);
+  color: var(--md-body);
+}
+
+.prose :where(h1, h2, h3, h4):not(:where([class~='not-prose'], [class~='not-prose'] *)) {
+  color: var(--md-heading);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+  font-weight: 650;
+}
+
+.prose :where(a):not(:where([class~='not-prose'], [class~='not-prose'] *)) {
+  color: var(--md-link);
+  text-decoration-color: var(--md-link-underline);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  font-weight: 500;
+}
+
+.prose :where(a:hover):not(:where([class~='not-prose'], [class~='not-prose'] *)) {
+  text-decoration-color: var(--md-link);
+}
+
+.prose :where(strong):not(:where([class~='not-prose'], [class~='not-prose'] *)) {
+  color: var(--md-heading);
+  font-weight: 650;
+}
+
+.prose :where(hr):not(:where([class~='not-prose'], [class~='not-prose'] *)) {
+  border-color: var(--md-hairline);
+}
+
+.prose :where(::marker):not(:where([class~='not-prose'], [class~='not-prose'] *)) {
+  color: var(--md-marker);
 }
 
 .prose pre {
-  background-color: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
+  background-color: var(--md-code-bg);
+  color: var(--md-code-fg);
+  border: 1px solid var(--md-code-border);
   padding: 0.75rem 1rem;
-  border-radius: 0.5rem;
+  border-radius: 0.625rem;
   overflow-x: auto;
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.04);
 }
 
 .prose code {
-  background-color: hsl(var(--muted));
+  background-color: var(--md-inline-code-bg);
+  color: var(--md-inline-code-fg);
+  border: 1px solid var(--md-code-border);
   padding: 0.125rem 0.375rem;
-  border-radius: 0.25rem;
-  font-size: 0.875em;
+  border-radius: 0.375rem;
+  font-size: 0.85em;
+  font-weight: 500;
+  white-space: break-spaces;
+  word-break: break-word;
 }
 
 .prose pre code {
   background-color: transparent;
+  color: inherit;
+  border: 0;
   padding: 0;
   border-radius: 0;
   font-size: 0.875em;
+  font-weight: 400;
+  white-space: pre;
+  word-break: normal;
 }
 
 .prose ul,
@@ -225,10 +388,157 @@
   padding-left: 1.5rem;
 }
 
+.prose li > input[type='checkbox'] {
+  accent-color: var(--md-task-accent);
+  margin-right: 0.375rem;
+}
+
 .prose blockquote {
-  border-left: 3px solid hsl(var(--border));
-  padding-left: 1rem;
-  color: hsl(var(--muted-foreground));
+  background-color: var(--md-quote-bg);
+  border-left: 3px solid var(--md-quote-bar);
+  border-radius: 0 0.5rem 0.5rem 0;
+  padding: 0.625rem 1rem;
+  color: var(--md-quote-text);
+  font-style: normal;
+}
+
+.prose blockquote p:first-child {
+  margin-top: 0;
+}
+
+.prose blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.prose blockquote[data-callout='note'] {
+  background-color: var(--md-callout-note-bg);
+  border-left-color: var(--md-callout-note);
+}
+
+.prose blockquote[data-callout='tip'] {
+  background-color: var(--md-callout-tip-bg);
+  border-left-color: var(--md-callout-tip);
+}
+
+.prose blockquote[data-callout='important'] {
+  background-color: var(--md-callout-important-bg);
+  border-left-color: var(--md-callout-important);
+}
+
+.prose blockquote[data-callout='warning'] {
+  background-color: var(--md-callout-warning-bg);
+  border-left-color: var(--md-callout-warning);
+}
+
+.prose blockquote[data-callout='caution'] {
+  background-color: var(--md-callout-caution-bg);
+  border-left-color: var(--md-callout-caution);
+}
+
+.prose .md-callout-label {
+  display: block;
+  font-size: 0.75em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 0.25rem;
+}
+
+.prose blockquote[data-callout='note'] .md-callout-label {
+  color: var(--md-callout-note);
+}
+
+.prose blockquote[data-callout='tip'] .md-callout-label {
+  color: var(--md-callout-tip);
+}
+
+.prose blockquote[data-callout='important'] .md-callout-label {
+  color: var(--md-callout-important);
+}
+
+.prose blockquote[data-callout='warning'] .md-callout-label {
+  color: var(--md-callout-warning);
+}
+
+.prose blockquote[data-callout='caution'] .md-callout-label {
+  color: var(--md-callout-caution);
+}
+
+.prose .md-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--md-table-border);
+  border-radius: 0.625rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.prose .md-table-wrapper table {
+  margin: 0;
+  border: 0;
+  font-size: 0.875em;
+}
+
+.prose thead {
+  background-color: var(--md-table-header-bg);
+}
+
+.prose thead th {
+  color: var(--md-heading);
+  font-weight: 650;
+  font-size: 0.8em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--md-table-border);
+}
+
+.prose tbody tr:nth-child(even) {
+  background-color: var(--md-table-row-alt);
+}
+
+.prose tbody tr:hover {
+  filter: brightness(0.99);
+}
+
+.dark .prose tbody tr:hover {
+  filter: brightness(1.15);
+}
+
+.prose kbd {
+  background-color: var(--md-kbd-bg);
+  border: 1px solid var(--md-kbd-border);
+  border-bottom-width: 2px;
+  border-radius: 0.375rem;
+  box-shadow: 0 1px 0 var(--md-kbd-shadow);
+  padding: 0.0625rem 0.375rem;
+  font-size: 0.8em;
+  font-family: var(--font-mono), monospace;
+  white-space: nowrap;
+}
+
+.prose img {
+  border-radius: 0.625rem;
+  border: 1px solid var(--md-code-border);
+}
+
+.prose details {
+  background-color: var(--md-quote-bg);
+  border: 1px solid var(--md-code-border);
+  border-radius: 0.625rem;
+  padding: 0.625rem 0.875rem;
+}
+
+.prose summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--md-heading);
+}
+
+.prose .footnotes {
+  color: var(--md-muted);
+  font-size: 0.85em;
+  border-top: 1px solid var(--md-hairline);
+  margin-top: 1rem;
+  padding-top: 0.5rem;
 }
 
 .prose p {
@@ -249,10 +559,213 @@
   margin-bottom: 0.25rem;
 }
 
+.prose li::marker {
+  color: var(--md-marker);
+}
+
+/* Muted jewel syntax theme driven by the same md tokens */
+.prose .hljs-comment,
+.prose .hljs-quote {
+  color: var(--md-syn-comment);
+  font-style: italic;
+}
+
+.prose .hljs-keyword,
+.prose .hljs-selector-tag,
+.prose .hljs-doctag,
+.prose .hljs-section {
+  color: var(--md-syn-keyword);
+}
+
+.prose .hljs-string,
+.prose .hljs-regexp,
+.prose .hljs-symbol,
+.prose .hljs-bullet,
+.prose .hljs-link,
+.prose .hljs-meta .hljs-string {
+  color: var(--md-syn-string);
+}
+
+.prose .hljs-number,
+.prose .hljs-literal {
+  color: var(--md-syn-number);
+}
+
+.prose .hljs-title,
+.prose .hljs-title\.function_,
+.prose .hljs-function .hljs-title,
+.prose .hljs-name {
+  color: var(--md-syn-function);
+}
+
+.prose .hljs-attr,
+.prose .hljs-attribute,
+.prose .hljs-variable,
+.prose .hljs-template-variable,
+.prose .hljs-property {
+  color: var(--md-syn-attr);
+}
+
+.prose .hljs-built_in,
+.prose .hljs-type,
+.prose .hljs-class .hljs-title {
+  color: var(--md-syn-builtin);
+}
+
+.prose .hljs-operator,
+.prose .hljs-punctuation,
+.prose .hljs-params,
+.prose .hljs-tag {
+  color: var(--md-syn-operator);
+}
+
+.prose .hljs-selector-id,
+.prose .hljs-selector-class,
+.prose .hljs-selector-attr,
+.prose .hljs-selector-pseudo {
+  color: var(--md-syn-selector);
+}
+
+.prose .hljs-addition {
+  color: var(--md-syn-addition);
+  background-color: var(--md-syn-addition-bg);
+}
+
+.prose .hljs-deletion {
+  color: var(--md-syn-deletion);
+  background-color: var(--md-syn-deletion-bg);
+}
+
+.prose .hljs-emphasis {
+  font-style: italic;
+}
+
+.prose .hljs-strong {
+  font-weight: 700;
+}
+
+/* Mermaid diagrams inherit the editorial surface */
+.prose .mermaid-diagram {
+  background-color: var(--md-quote-bg);
+  border: 1px solid var(--md-code-border);
+  border-radius: 0.625rem;
+  padding: 1rem 0.75rem;
+}
+
+.prose .mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Mermaid's base theme hard-codes ER attribute rows to near-white, which leaves
+   near-white text unreadable in dark mode. Presentation-attribute fills lose to
+   stylesheet rules, so re-theme the rows from our tokens. The fullscreen diagram
+   renders in a portal outside .prose, so these selectors are unscoped. */
+.mermaid-diagram .row-rect-odd > path:not([fill='none']),
+.mermaid-diagram-fullscreen .row-rect-odd > path:not([fill='none']) {
+  fill: var(--md-mermaid-row-odd);
+}
+
+.mermaid-diagram .row-rect-even > path:not([fill='none']),
+.mermaid-diagram-fullscreen .row-rect-even > path:not([fill='none']) {
+  fill: var(--md-mermaid-row-even);
+}
+
 /* Extra small prose for chat bubbles */
 .prose-xs {
   font-size: 0.8125rem;
   line-height: 1.5;
+}
+
+/* Editorial prose for canvas documents and wiki pages */
+.prose-document,
+.prose-wiki {
+  font-size: 0.9375rem;
+  line-height: 1.75;
+}
+
+.prose-document p,
+.prose-wiki p {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.prose-document h1,
+.prose-wiki h1 {
+  font-size: 1.875rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.2;
+}
+
+.prose-document h2,
+.prose-wiki h2 {
+  font-size: 1.5rem;
+  margin-top: 1.25rem;
+  margin-bottom: 0.625rem;
+  line-height: 1.25;
+}
+
+.prose-document h3,
+.prose-wiki h3 {
+  font-size: 1.25rem;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.35;
+}
+
+.prose-document h4,
+.prose-wiki h4 {
+  font-size: 1.125rem;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.4;
+}
+
+.prose-document ul,
+.prose-document ol,
+.prose-wiki ul,
+.prose-wiki ol {
+  padding-left: 1.75rem;
+  margin-top: 0.625rem;
+  margin-bottom: 0.625rem;
+}
+
+.prose-document li,
+.prose-wiki li {
+  margin-top: 0.375rem;
+  margin-bottom: 0.375rem;
+}
+
+.prose-document pre,
+.prose-wiki pre {
+  padding: 1rem 1.25rem;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.prose-document blockquote,
+.prose-wiki blockquote {
+  padding: 0.875rem 1.25rem;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.prose-document hr,
+.prose-wiki hr {
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.prose-document .md-table-wrapper,
+.prose-wiki .md-table-wrapper {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.prose-document table,
+.prose-wiki table {
+  font-size: 0.875rem;
 }
 
 .prose-xs p {
