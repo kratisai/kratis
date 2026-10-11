@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.node.IntNode;
 import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.api.wsdto.ClientPayloadType;
 import com.kratisai.controlplane.api.wsdto.ClientRpcPayload;
@@ -54,6 +55,9 @@ class ProtocolConformanceTest {
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true)
             .setDefaultPropertyInclusion(JsonInclude.Include.NON_NULL);
 
+    /** Canonical schemas and OpenRPC documents live under protocol/ as YAML. */
+    private static final ObjectMapper YAML_MAPPER = new YAMLMapper();
+
     private static Path protocolDir() {
         Path relative = Paths.get("../protocol");
         if (Files.isDirectory(relative)) {
@@ -70,29 +74,29 @@ class ProtocolConformanceTest {
     @Test
     void closedCollectionMatchesClientProtocolExactly() throws Exception {
         assertMethodSetsMatch(
-                protocolDir().resolve("client/openrpc.json"),
+                protocolDir().resolve("client/openrpc.yaml"),
                 clientMethods(),
-                "Every client method in the closed collection must exist in protocol/client/openrpc.json "
+                "Every client method in the closed collection must exist in protocol/client/openrpc.yaml "
                         + "and vice versa");
     }
 
     @Test
     void closedCollectionMatchesEnvironmentProtocolExactly() throws Exception {
         assertMethodSetsMatch(
-                protocolDir().resolve("environment/openrpc.json"),
+                protocolDir().resolve("environment/openrpc.yaml"),
                 environmentMethods(),
                 "Every environment method in the closed collection must exist in "
-                        + "protocol/environment/openrpc.json and vice versa");
+                        + "protocol/environment/openrpc.yaml and vice versa");
     }
 
     @Test
     void everyMethodMatchesDirectionKindAndParamsSchema() throws Exception {
         verifyProtocolConformance(
-                protocolDir().resolve("client/openrpc.json"),
+                protocolDir().resolve("client/openrpc.yaml"),
                 clientMethods(),
                 protocolDir().resolve("client"));
         verifyProtocolConformance(
-                protocolDir().resolve("environment/openrpc.json"),
+                protocolDir().resolve("environment/openrpc.yaml"),
                 environmentMethods(),
                 protocolDir().resolve("environment"));
     }
@@ -100,11 +104,11 @@ class ProtocolConformanceTest {
     @Test
     void validFixturesRoundTripThroughTypedParamsRecords() throws Exception {
         verifyValidFixtures(
-                protocolDir().resolve("client/openrpc.json"),
+                protocolDir().resolve("client/openrpc.yaml"),
                 clientMethods(),
                 protocolDir().resolve("client"));
         verifyValidFixtures(
-                protocolDir().resolve("environment/openrpc.json"),
+                protocolDir().resolve("environment/openrpc.yaml"),
                 environmentMethods(),
                 protocolDir().resolve("environment"));
     }
@@ -118,7 +122,7 @@ class ProtocolConformanceTest {
     @Test
     void environmentResultRecordsMatchProtocolResultSchemas() throws Exception {
         Map<String, JsonNode> protocolMethods =
-                protocolMethodsByName(protocolDir().resolve("environment/openrpc.json"));
+                protocolMethodsByName(protocolDir().resolve("environment/openrpc.yaml"));
         List<Class<?>> allRecords = new ArrayList<>();
         allRecords.addAll(Arrays.asList(EnvironmentResponsePayload.class.getPermittedSubclasses()));
         allRecords.addAll(Arrays.asList(EnvironmentConnectorResult.class.getPermittedSubclasses()));
@@ -143,7 +147,7 @@ class ProtocolConformanceTest {
                 .as("Every environment result record must be referenced by exactly one protocol result schema")
                 .containsExactlyInAnyOrderElementsOf(allRecords);
         assertThat(referencedRefs)
-                .as("Every environment result schema file must be referenced by openrpc.json")
+                .as("Every environment result schema file must be referenced by openrpc.yaml")
                 .isEqualTo(listSchemaFiles("environment/schemas/results"));
     }
 
@@ -156,10 +160,10 @@ class ProtocolConformanceTest {
 
         List<Class<?>> allRecords = clientPayloadRecords();
         Set<String> coveredTypes = new HashSet<>();
-        File[] files = listJsonFiles(schemasDir);
+        File[] files = listSchemaFilesIn(schemasDir);
         for (File file : files) {
             String wireType = schemaTypeName(file);
-            JsonNode schema = MAPPER.readTree(file);
+            JsonNode schema = YAML_MAPPER.readTree(file);
             Class<?> record = clientResultRecord(ClientPayloadType.fromWire(wireType));
             assertThat(record)
                     .as("Schema %s has no matching Java record", file.getName())
@@ -182,15 +186,15 @@ class ProtocolConformanceTest {
 
     @Test
     void clientOpenRpcReferencesEveryResultSchema() throws Exception {
-        JsonNode root =
-                MAPPER.readTree(protocolDir().resolve("client/openrpc.json").toFile());
+        JsonNode root = YAML_MAPPER.readTree(
+                protocolDir().resolve("client/openrpc.yaml").toFile());
         Set<String> referenced = new HashSet<>();
         root.path("methods")
                 .forEach(method -> collectSchemaRefs(method.path("result").path("schema"), referenced));
         root.path("x-kratis-notifications")
                 .forEach(notification -> collectSchemaRefs(notification.path("schema"), referenced));
         assertThat(referenced)
-                .as("Every client result schema must be referenced by openrpc.json "
+                .as("Every client result schema must be referenced by openrpc.yaml "
                         + "(method result or x-kratis-notifications)")
                 .isEqualTo(listSchemaFiles("client/schemas/results"));
     }
@@ -275,14 +279,14 @@ class ProtocolConformanceTest {
     @Test
     void envelopeRecordsMatchCommonEnvelopeSchemas() throws Exception {
         Path common = protocolDir().resolve("common");
-        assertEnvelope(JsonRpcRequest.class, common.resolve("json-rpc-request.schema.json"), Set.of("params", "id"));
+        assertEnvelope(JsonRpcRequest.class, common.resolve("json-rpc-request.schema.yaml"), Set.of("params", "id"));
         assertEnvelope(
-                JsonRpcInboundRequest.class, common.resolve("json-rpc-request.schema.json"), Set.of("params", "id"));
+                JsonRpcInboundRequest.class, common.resolve("json-rpc-request.schema.yaml"), Set.of("params", "id"));
         assertEnvelope(
                 JsonRpcResponse.class,
-                common.resolve("json-rpc-response.schema.json"),
+                common.resolve("json-rpc-response.schema.yaml"),
                 Set.of("result", "error", "id"));
-        assertEnvelope(JsonRpcError.class, common.resolve("json-rpc-error.schema.json"), Set.of("data"));
+        assertEnvelope(JsonRpcError.class, common.resolve("json-rpc-error.schema.yaml"), Set.of("data"));
     }
 
     @Test
@@ -403,7 +407,7 @@ class ProtocolConformanceTest {
         assertThat(Files.isRegularFile(schemaFile))
                 .as("Params schema %s must exist", schemaFile)
                 .isTrue();
-        return MAPPER.readTree(schemaFile.toFile());
+        return YAML_MAPPER.readTree(schemaFile.toFile());
     }
 
     private static JsonNode resolveResultSchema(JsonNode result, Path protocolDir) throws IOException {
@@ -412,12 +416,12 @@ class ProtocolConformanceTest {
         assertThat(Files.isRegularFile(schemaFile))
                 .as("Result schema %s must exist", schemaFile)
                 .isTrue();
-        return MAPPER.readTree(schemaFile.toFile());
+        return YAML_MAPPER.readTree(schemaFile.toFile());
     }
 
     private static JsonNode resultSchema(String wireType) throws IOException {
-        return MAPPER.readTree(protocolDir()
-                .resolve("client/schemas/results/" + wireType + ".schema.json")
+        return YAML_MAPPER.readTree(protocolDir()
+                .resolve("client/schemas/results/" + wireType + ".schema.yaml")
                 .toFile());
     }
 
@@ -493,7 +497,7 @@ class ProtocolConformanceTest {
                 .isNotNull();
         List<Class<?>> variants = Arrays.asList(eventComponent.getType().getPermittedSubclasses());
         List<JsonNode> branches = new ArrayList<>();
-        anyOf.forEach(branches::add);
+        anyOf.forEach(child -> branches.add(resolveDef(schema, child)));
 
         for (Class<?> variant : variants) {
             Set<String> variantProps = recordJsonNames(variant);
@@ -577,6 +581,26 @@ class ProtocolConformanceTest {
             case "object" -> MAPPER.createObjectNode();
             default -> NullNode.getInstance();
         };
+    }
+
+    /**
+     * Resolve an in-document {@code $defs} reference against the owning schema, so named event
+     * shapes can be shared instead of inlined.
+     */
+    private static JsonNode resolveDef(JsonNode root, JsonNode node) {
+        String ref = node.path("$ref").asText("");
+        if (ref.isEmpty()) {
+            return node;
+        }
+        String[] parts = ref.split("/");
+        if (parts.length != 3 || !"#".equals(parts[0]) || !"$defs".equals(parts[1]) || parts[2].isEmpty()) {
+            throw new IllegalStateException("Unsupported in-document $ref " + ref);
+        }
+        JsonNode resolved = root.path("$defs").path(parts[2]);
+        assertThat(resolved.isMissingNode())
+                .as("Schema $ref %s must resolve", ref)
+                .isFalse();
+        return resolved;
     }
 
     private static Set<String> propertyNames(JsonNode schema) {
@@ -663,7 +687,7 @@ class ProtocolConformanceTest {
     }
 
     private static void assertEnvelope(Class<?> record, Path schemaFile, Set<String> omittable) throws IOException {
-        JsonNode schema = MAPPER.readTree(schemaFile.toFile());
+        JsonNode schema = YAML_MAPPER.readTree(schemaFile.toFile());
         Set<String> schemaProperties = propertyNames(schema);
         Set<String> recordProperties = recordJsonNames(record);
         assertThat(recordProperties)
@@ -696,12 +720,20 @@ class ProtocolConformanceTest {
     }
 
     private static Set<String> listSchemaFiles(String relativeDir) {
-        File[] files = listJsonFiles(protocolDir().resolve(relativeDir));
         Set<String> names = new LinkedHashSet<>();
-        for (File file : files) {
+        for (File file : listSchemaFilesIn(protocolDir().resolve(relativeDir))) {
             names.add(file.getName());
         }
         return names;
+    }
+
+    private static File[] listSchemaFilesIn(Path dir) {
+        assertThat(Files.isDirectory(dir))
+                .as("Schema directory %s must exist", dir)
+                .isTrue();
+        File[] files = dir.toFile().listFiles((d, name) -> name.endsWith(".schema.yaml"));
+        assertThat(files).isNotNull();
+        return files;
     }
 
     private static File[] listJsonFiles(Path dir) {
@@ -714,7 +746,7 @@ class ProtocolConformanceTest {
     }
 
     private static Map<String, JsonNode> protocolMethodsByName(Path openrpcFile) throws IOException {
-        JsonNode root = MAPPER.readTree(openrpcFile.toFile());
+        JsonNode root = YAML_MAPPER.readTree(openrpcFile.toFile());
         Map<String, JsonNode> methods = new TreeMap<>();
         root.path("methods").forEach(m -> methods.put(m.path("name").asText(), m));
         return methods;
@@ -775,7 +807,7 @@ class ProtocolConformanceTest {
 
     private static String schemaTypeName(File file) {
         String name = file.getName();
-        return name.substring(0, name.length() - ".schema.json".length());
+        return name.substring(0, name.length() - ".schema.yaml".length());
     }
 
     private static List<Class<?>> clientPayloadRecords() {

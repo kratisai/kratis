@@ -1,0 +1,15 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: RegisterGitAuthParams
+type: object
+required:
+- credentialType
+properties:
+  credentialType:
+    type: string
+    enum:
+    - "GITHUB_APP"
+    - "PAT"
+    - "SSH_KEY"
+  privateKey:
+    type: string
+additionalProperties: false

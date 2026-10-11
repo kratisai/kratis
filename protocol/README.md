@@ -19,18 +19,18 @@ Overview: [`docs/knowledge/websocket-api.md`](../docs/knowledge/websocket-api.md
 protocol/
 ├── common/                 # envelopes and error-codes.json
 ├── client/
-│   ├── openrpc.json        # web → control plane
+│   ├── openrpc.yaml        # web → control plane
 │   ├── schemas/
 │   └── examples/
 └── environment/
-    ├── openrpc.json        # connector ↔ control plane
+    ├── openrpc.yaml        # connector ↔ control plane
     ├── schemas/
     └── examples/
 ```
 
-- `client/openrpc.json` — UI methods. `x-kratis-streaming: true` marks a streamed result. `x-kratis-notifications` lists server-push payloads (`id=null`).
-- `environment/openrpc.json` — connector methods. `x-kratis-message-kind: notification` means no response (completion arrives on a later method).
-- `schemas/results/*.schema.json` — one schema per result `type`, pinned with `const`.
+- `client/openrpc.yaml` — UI methods. `x-kratis-streaming: true` marks a streamed result. `x-kratis-notifications` lists server-push payloads (`id=null`).
+- `environment/openrpc.yaml` — connector methods. `x-kratis-message-kind: notification` means no response (completion arrives on a later method).
+- `schemas/results/*.schema.yaml` — one schema per result `type`, pinned with `const`.
 
 ## Conformance
 

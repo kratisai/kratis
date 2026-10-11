@@ -1,6 +1,6 @@
 package rpc
 
-// MessageKind mirrors x-kratis-message-kind in protocol/environment/openrpc.json.
+// MessageKind mirrors x-kratis-message-kind in protocol/environment/openrpc.yaml.
 type MessageKind string
 
 const (
@@ -8,7 +8,7 @@ const (
 	Notification MessageKind = "notification"
 )
 
-// Direction mirrors x-kratis-direction in protocol/environment/openrpc.json.
+// Direction mirrors x-kratis-direction in protocol/environment/openrpc.yaml.
 type Direction string
 
 const (
@@ -17,7 +17,7 @@ const (
 )
 
 // MethodDef describes one environment JSON-RPC method. The closed set of records
-// in this package is validated against protocol/environment/openrpc.json by
+// in this package is validated against protocol/environment/openrpc.yaml by
 // ProtocolConformanceTest so any drift fails the build.
 type MethodDef struct {
 	Name string

@@ -3,6 +3,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { parse as parseYaml } from 'yaml'
 import { z } from 'zod'
 
 import { CLIENT_METHODS, type ClientMethod } from '@/protocol/client-methods'
@@ -80,11 +81,15 @@ function loadSchemaFromRef($ref: string, baseDir: string): JsonSchema {
     throw new Error('Schema $ref is missing')
   }
   const path = resolve(baseDir, $ref)
-  return readJson<JsonSchema>(path)
+  return readYaml<JsonSchema>(path)
 }
 
 function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, 'utf-8')) as T
+}
+
+function readYaml<T>(path: string): T {
+  return parseYaml(readFileSync(path, 'utf-8')) as T
 }
 
 function resolveProtocolDir(protocolName: 'client' | 'environment'): string {
@@ -144,7 +149,7 @@ function zodSchemaType(schema: z.ZodType<unknown>): string {
 
 describe('Protocol Conformance', () => {
   const protocolDir = resolveProtocolDir('client')
-  const openrpc = readJson<{ methods: OpenRpcMethod[] }>(join(protocolDir, 'openrpc.json'))
+  const openrpc = readYaml<{ methods: OpenRpcMethod[] }>(join(protocolDir, 'openrpc.yaml'))
   const protocolMethodNames = openrpc.methods.map((m) => m.name)
 
   it('closed collection matches protocol method names exactly', () => {
@@ -243,8 +248,8 @@ describe('Client Result Protocol Conformance', () => {
 
   it('closed result registry matches protocol result schemas exactly', () => {
     const schemaTypes = readdirSync(resultsDir)
-      .filter((name) => name.endsWith('.schema.json'))
-      .map((name) => name.replace(/\.schema\.json$/, ''))
+      .filter((name) => name.endsWith('.schema.yaml'))
+      .map((name) => name.replace(/\.schema\.yaml$/, ''))
       .sort()
     expect(Object.keys(CLIENT_RESULTS).sort()).toEqual(schemaTypes)
   })

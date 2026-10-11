@@ -113,7 +113,7 @@ Re-run a completed execution by hand.
 ## Protocol
 
 `env.git_push` includes `targetBranch`.
-See `protocol/environment/schemas/requests/git_push.schema.json`.
+See `protocol/environment/schemas/requests/git_push.schema.yaml`.
 
 `env.git_set_remote` takes `remoteUrl`, `defaultBranch`, and `executionId`.
 It returns `status`, `defaultBranch`, and `seedCommit`.

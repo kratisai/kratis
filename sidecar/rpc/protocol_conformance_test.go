@@ -7,36 +7,38 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 type jsonSchema struct {
-	Ref        string                `json:"$ref"`
-	Type       any                   `json:"type"`
-	Required   []string              `json:"required"`
-	Properties map[string]jsonSchema `json:"properties"`
-	Enum       []any                 `json:"enum"`
-	Items      *jsonSchema           `json:"items"`
+	Ref        string                `json:"$ref" yaml:"$ref"`
+	Type       any                   `json:"type" yaml:"type"`
+	Required   []string              `json:"required" yaml:"required"`
+	Properties map[string]jsonSchema `json:"properties" yaml:"properties"`
+	Enum       []any                 `json:"enum" yaml:"enum"`
+	Items      *jsonSchema           `json:"items" yaml:"items"`
 }
 
-// openRpcMethod mirrors protocol/environment/openrpc.json method entries.
+// openRpcMethod mirrors protocol/environment/openrpc.yaml method entries.
 type openRpcMethod struct {
-	Name               string `json:"name"`
-	XKratisDirection   string `json:"x-kratis-direction"`
-	XKratisMessageKind string `json:"x-kratis-message-kind"`
+	Name               string `json:"name" yaml:"name"`
+	XKratisDirection   string `json:"x-kratis-direction" yaml:"x-kratis-direction"`
+	XKratisMessageKind string `json:"x-kratis-message-kind" yaml:"x-kratis-message-kind"`
 	Params             []struct {
-		Name   string     `json:"name"`
-		Schema jsonSchema `json:"schema"`
-	} `json:"params"`
+		Name   string     `json:"name" yaml:"name"`
+		Schema jsonSchema `json:"schema" yaml:"schema"`
+	} `json:"params" yaml:"params"`
 	Result *struct {
-		Schema jsonSchema `json:"schema"`
-	} `json:"result"`
+		Schema jsonSchema `json:"schema" yaml:"schema"`
+	} `json:"result" yaml:"result"`
 }
 
 func loadOpenRpc(t *testing.T) []openRpcMethod {
 	t.Helper()
 	candidates := []string{
-		filepath.Join("..", "..", "protocol", "environment", "openrpc.json"),
-		filepath.Join("..", "protocol", "environment", "openrpc.json"),
+		filepath.Join("..", "..", "protocol", "environment", "openrpc.yaml"),
+		filepath.Join("..", "protocol", "environment", "openrpc.yaml"),
 	}
 	var data []byte
 	var err error
@@ -47,14 +49,14 @@ func loadOpenRpc(t *testing.T) []openRpcMethod {
 		}
 	}
 	if err != nil {
-		t.Fatalf("Cannot locate protocol/environment/openrpc.json: %v", err)
+		t.Fatalf("Cannot locate protocol/environment/openrpc.yaml: %v", err)
 	}
 
 	var doc struct {
-		Methods []openRpcMethod `json:"methods"`
+		Methods []openRpcMethod `yaml:"methods"`
 	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatalf("Failed to parse openrpc.json: %v", err)
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("Failed to parse openrpc.yaml: %v", err)
 	}
 	return doc.Methods
 }
@@ -70,7 +72,7 @@ func loadSchema(t *testing.T, ref string, baseDir string) jsonSchema {
 		t.Fatalf("Failed to read schema %s: %v", path, err)
 	}
 	var schema jsonSchema
-	if err := json.Unmarshal(data, &schema); err != nil {
+	if err := yaml.Unmarshal(data, &schema); err != nil {
 		t.Fatalf("Failed to parse schema %s: %v", path, err)
 	}
 	return schema
@@ -176,7 +178,7 @@ func TestEnvironmentProtocolCompleteness(t *testing.T) {
 	}
 	for _, m := range EnvironmentMethods {
 		if _, ok := protocolNames[m.Name]; !ok {
-			t.Errorf("Closed method %s is not defined in protocol/environment/openrpc.json", m.Name)
+			t.Errorf("Closed method %s is not defined in protocol/environment/openrpc.yaml", m.Name)
 		}
 	}
 }

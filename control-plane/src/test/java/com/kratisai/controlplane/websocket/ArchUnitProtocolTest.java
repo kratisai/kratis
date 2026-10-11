@@ -159,7 +159,7 @@ class ArchUnitProtocolTest {
     private static Class<?>[] environmentPayloads() {
         List<Class<?>> result = new ArrayList<>();
         for (Class<?> sub : EnvironmentRpcPayload.class.getPermittedSubclasses()) {
-            result.addAll(java.util.Arrays.asList(sub.getPermittedSubclasses()));
+            result.addAll(Arrays.asList(sub.getPermittedSubclasses()));
         }
         return result.toArray(new Class<?>[0]);
     }
