@@ -46,4 +46,8 @@ public interface ChatRepository extends JpaRepository<ChatEntity, UUID> {
     @Modifying
     @Query("UPDATE ChatEntity c SET c.archivedAt = :archivedAt WHERE c.id = :chatId")
     int updateArchivedAt(@Param("chatId") UUID chatId, @Param("archivedAt") Instant archivedAt);
+
+    @Modifying
+    @Query("UPDATE ChatEntity c SET c.allowAllPermissions = :enabled WHERE c.id = :chatId")
+    int updateAllowAllPermissions(@Param("chatId") UUID chatId, @Param("enabled") boolean enabled);
 }

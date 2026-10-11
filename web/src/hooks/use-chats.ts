@@ -8,7 +8,14 @@ import {
   type CreateChatResponse,
   fetchChats,
   unarchiveChatApi,
+  updateChatPermissionsApi,
 } from '@/lib/chat-api'
+import { useAuthStore } from '@/store/auth-store'
+
+interface UpdateChatPermissionsVariables {
+  allowAllPermissions: boolean
+  chatId: string
+}
 
 export function useArchiveChat(teamId: null | string | undefined) {
   const queryClient = useQueryClient()
@@ -20,6 +27,12 @@ export function useArchiveChat(teamId: null | string | undefined) {
       }
     },
   })
+}
+
+export function useChatPermissions(chatId: null | string | undefined): boolean {
+  const teamId = useAuthStore((state) => state.currentTeamId)
+  const { data: chats = [] } = useChats(teamId, 'all', 'active')
+  return chats.find((chat) => chat.id === chatId)?.allowAllPermissions ?? false
 }
 
 export function useChats(
@@ -48,6 +61,19 @@ export function useUnarchiveChat(teamId: null | string | undefined) {
   const queryClient = useQueryClient()
   return useMutation<void, Error, string>({
     mutationFn: unarchiveChatApi,
+    onSuccess: () => {
+      if (teamId) {
+        void queryClient.invalidateQueries({ queryKey: ['chats', teamId] })
+      }
+    },
+  })
+}
+
+export function useUpdateChatPermissions(teamId: null | string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation<void, Error, UpdateChatPermissionsVariables>({
+    mutationFn: ({ allowAllPermissions, chatId }) =>
+      updateChatPermissionsApi(chatId, allowAllPermissions),
     onSuccess: () => {
       if (teamId) {
         void queryClient.invalidateQueries({ queryKey: ['chats', teamId] })

@@ -18,10 +18,12 @@ import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
+import com.kratisai.controlplane.api.wsdto.HitlResolverKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
+import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.HitlRule;
 import com.kratisai.controlplane.model.HitlRuleAction;
@@ -111,6 +113,13 @@ class EnvironmentHitlActivityRpcHandlerTest {
         SandboxExecution execution = new SandboxExecution();
         execution.setId(UUID.randomUUID());
         execution.setEnvironment(env);
+        execution.setChat(new ChatEntity());
+        return execution;
+    }
+
+    private SandboxExecution createAllowAllExecutionInEnvironment(UUID environmentId) {
+        SandboxExecution execution = createExecutionInEnvironment(environmentId);
+        execution.getChat().setAllowAllPermissions(true);
         return execution;
     }
 
@@ -258,6 +267,71 @@ class EnvironmentHitlActivityRpcHandlerTest {
         assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.DECLINED);
         verify(pendingHitlRegistry, never()).register(any(HitlRequestSnapshot.class), any(), any(), any());
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void handle_approvalWithTopicAllowAll_autoApprovesEvenWithDenyRuleAndUntrustedCommand() {
+        stubSessionAndEnvironment();
+
+        // A DENY rule and an untrusted command must not gate a topic-level allow-all.
+        HitlRule denyRule = new HitlRule();
+        denyRule.setCommandRoot("echo");
+        denyRule.setRuleType(HitlRuleType.PREFIX_WILD);
+        denyRule.setAction(HitlRuleAction.DENY);
+        when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of(denyRule));
+
+        SandboxExecution execution = createAllowAllExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.HitlActivity params =
+                approvalParams("echo $(whoami) && rm -rf /tmp/x", "tool-call-1", execution.getId());
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
+
+        EnvironmentResponsePayload response =
+                handler.handle(sessionId, request, params).blockLast();
+
+        assertThat(response).isInstanceOf(HitlActivityResult.class);
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.APPROVED);
+        assertThat(((HitlActivityResult) response).optionId()).isEqualTo("allow");
+        verify(pendingHitlRegistry, never()).register(any(HitlRequestSnapshot.class), any(), any(), any());
+        verify(eventPublisher, never()).publishEvent(any());
+
+        ArgumentCaptor<HitlResolution> resolution = ArgumentCaptor.forClass(HitlResolution.class);
+        verify(activityPersistenceService)
+                .recordAutoResolved(eq(teamId), any(HitlRequestSnapshot.class), resolution.capture());
+        assertThat(resolution.getValue().resolvedBy().kind()).isEqualTo(HitlResolverKind.POLICY);
+        assertThat(resolution.getValue().response()).isEqualTo(HitlResponse.APPROVED);
+        assertThat(resolution.getValue().optionId()).isEqualTo("allow");
+    }
+
+    @Test
+    void handle_approvalWithTopicAllowAll_noAllowOption_cancelled() {
+        stubSessionAndEnvironment();
+        when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of());
+
+        SandboxExecution execution = createAllowAllExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
+                "tool-call-1",
+                "Remove",
+                HitlKind.APPROVAL,
+                execution.getId().toString(),
+                "rm -rf /",
+                "Remove",
+                "execute",
+                List.of(),
+                null,
+                null);
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
+
+        EnvironmentResponsePayload response =
+                handler.handle(sessionId, request, params).blockLast();
+
+        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.CANCELLED);
+        verify(activityPersistenceService, never()).recordAutoResolved(any(), any(), any());
     }
 
     @Test

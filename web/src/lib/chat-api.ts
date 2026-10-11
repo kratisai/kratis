@@ -1,6 +1,7 @@
 import { fetchWithAuth } from '@/lib/auth-api'
 
 export interface ChatDto {
+  allowAllPermissions?: boolean
   archivedAt?: null | string
   createdAt: string
   createdByDisplayName: string
@@ -63,5 +64,19 @@ export async function unarchiveChatApi(chatId: string): Promise<void> {
   if (!response.ok) {
     const errorText = await response.text()
     throw new Error(errorText || 'Failed to unarchive chat')
+  }
+}
+
+export async function updateChatPermissionsApi(
+  chatId: string,
+  allowAllPermissions: boolean,
+): Promise<void> {
+  const response = await fetchWithAuth(`/api/v1/chats/${encodeURIComponent(chatId)}/permissions`, {
+    body: JSON.stringify({ allowAllPermissions }),
+    method: 'PATCH',
+  })
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || 'Failed to update chat permissions')
   }
 }

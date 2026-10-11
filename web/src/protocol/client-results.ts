@@ -36,7 +36,7 @@ const hitlState = z.enum(['awaiting_human', 'resolved'])
 const hitlResolver = z
   .object({
     displayName: z.string().optional(),
-    kind: z.enum(['user', 'rule', 'timeout', 'system']),
+    kind: z.enum(['user', 'rule', 'policy', 'timeout', 'system']),
     userId: uuid.optional(),
   })
   .strict()

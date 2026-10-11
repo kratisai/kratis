@@ -64,7 +64,7 @@
               "description": "Who or what resolved the request.",
               "required": ["kind"],
               "properties": {
-                "kind": { "type": "string", "enum": ["user", "rule", "timeout", "system"] },
+                "kind": { "type": "string", "enum": ["user", "rule", "policy", "timeout", "system"] },
                 "userId": { "type": "string", "format": "uuid" },
                 "displayName": { "type": "string" }
               },

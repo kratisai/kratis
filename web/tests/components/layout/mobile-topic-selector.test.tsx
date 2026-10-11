@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { MobileTopicSelector } from '@/components/layout/mobile-topic-selector'
 import * as executionApi from '@/lib/execution-api'
+import { useAuthStore } from '@/store/auth-store'
 import { useCanvasStore } from '@/store/canvas-store'
 
 const mockNavigate = vi.fn()
@@ -242,6 +243,24 @@ describe('MobileTopicSelector', () => {
     )
 
     expect(screen.queryByTestId('mobile-canvas-pulse-indicator')).not.toBeInTheDocument()
+  })
+
+  it('shows the allow-all permission checkbox in the dropdown', async () => {
+    useAuthStore.setState({ currentTeamId: null })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MobileTopicSelector />
+      </QueryClientProvider>,
+    )
+
+    const trigger = screen.getByRole('button', { name: /topic navigation menu/i })
+    fireEvent.pointerDown(trigger, { pointerType: 'mouse' })
+
+    const checkbox = await screen.findByRole('menuitemcheckbox', {
+      name: /auto approve permission requests/i,
+    })
+    expect(checkbox).toHaveAttribute('aria-checked', 'false')
   })
 
   it('shows the sleeping icon for a run whose environment is asleep', async () => {

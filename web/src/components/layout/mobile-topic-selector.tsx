@@ -7,8 +7,10 @@ import {
   GitCompare,
   MessageSquare,
   Moon,
+  ShieldCheck,
 } from 'lucide-react'
 import { useEffect } from 'react'
+import { toast } from 'sonner'
 
 import type { ExecutionDisplayStatus } from '@/lib/execution-api'
 import type { CanvasDocument } from '@/types/canvas-types'
@@ -18,15 +20,18 @@ import { harnessDisplayName } from '@/components/session/execution-harness-badge
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { useChatPermissions, useUpdateChatPermissions } from '@/hooks/use-chats'
 import { useChatExecutions } from '@/hooks/use-executions'
 import { executionDisplayStatus } from '@/lib/execution-api'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/store/auth-store'
 import { useCanvasStore } from '@/store/canvas-store'
 
 const EMPTY_CANVASES: CanvasDocument[] = []
@@ -59,6 +64,18 @@ export function MobileTopicSelector() {
   }, [chatId, clearCanvasActivity, docId, unreadDocIds])
 
   const { data: executions = [] } = useChatExecutions(chatId)
+
+  const teamId = useAuthStore((state) => state.currentTeamId)
+  const allowAllPermissions = useChatPermissions(chatId)
+  const updatePermissions = useUpdateChatPermissions(teamId)
+
+  const handleToggleAllowAll = (checked: boolean) => {
+    if (!chatId) return
+    updatePermissions.mutate(
+      { allowAllPermissions: checked, chatId },
+      { onError: () => toast.error('Failed to update permission mode') },
+    )
+  }
 
   if (!isOnChatRoute || !chatId) {
     return null
@@ -219,6 +236,18 @@ export function MobileTopicSelector() {
               })}
             </>
           )}
+
+          <DropdownMenuSeparator />
+          <DropdownMenuCheckboxItem
+            checked={allowAllPermissions}
+            className="text-xs"
+            disabled={updatePermissions.isPending}
+            onCheckedChange={handleToggleAllowAll}
+            onSelect={(event) => event.preventDefault()}
+          >
+            <ShieldCheck className="text-primary mr-2 h-3.5 w-3.5" />
+            Auto approve permission requests
+          </DropdownMenuCheckboxItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

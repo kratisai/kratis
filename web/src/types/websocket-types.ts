@@ -198,7 +198,7 @@ export interface HitlResolver {
   userId?: string
 }
 
-export type HitlResolverKind = 'rule' | 'system' | 'timeout' | 'user'
+export type HitlResolverKind = 'policy' | 'rule' | 'system' | 'timeout' | 'user'
 
 export type HitlResponse = 'answered' | 'approved' | 'cancelled' | 'declined'
 

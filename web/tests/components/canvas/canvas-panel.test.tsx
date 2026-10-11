@@ -27,6 +27,11 @@ vi.mock("@/hooks/use-executions", () => ({
   })),
 }));
 
+vi.mock("@/hooks/use-chats", () => ({
+  useChatPermissions: () => false,
+  useUpdateChatPermissions: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
 describe("CanvasPanel", () => {
   beforeEach(() => {
     useCanvasStore.setState({ canvases: {} });

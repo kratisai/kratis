@@ -61,6 +61,11 @@ vi.mock("@/hooks/use-executions", () => ({
   })),
 }));
 
+vi.mock("@/hooks/use-chats", () => ({
+  useChatPermissions: () => false,
+  useUpdateChatPermissions: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
 vi.mock("@/lib/execution-api", () => ({
   createSandboxExecution: vi.fn(() => Promise.resolve({ id: "exec-1" })),
 }));

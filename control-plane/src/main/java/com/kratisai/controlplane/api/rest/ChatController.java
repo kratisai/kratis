@@ -3,6 +3,7 @@ package com.kratisai.controlplane.api.rest;
 import com.kratisai.controlplane.api.restdto.ChatDto;
 import com.kratisai.controlplane.api.restdto.CreateChatRequest;
 import com.kratisai.controlplane.api.restdto.CreateChatResponse;
+import com.kratisai.controlplane.api.restdto.UpdateChatPermissionsRequest;
 import com.kratisai.controlplane.config.SecurityUtil;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.planningagent.PlanningAgentService;
@@ -15,6 +16,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -23,6 +25,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -129,6 +132,25 @@ public class ChatController {
     public ResponseEntity<Void> unarchiveChat(@PathVariable UUID id) {
         UUID userId = SecurityUtil.getCurrentUserId();
         chatService.unarchiveChat(id, userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PatchMapping("/{id}/permissions")
+    @Operation(
+            summary = "Update topic permission mode",
+            description =
+                    "Toggles the per-topic allow-all permission mode. When enabled, command approvals for executions in the chat are auto-approved without prompting")
+    @ApiResponses(
+            value = {
+                @ApiResponse(responseCode = "204", description = "Permission mode updated successfully"),
+                @ApiResponse(responseCode = "400", description = "Invalid request body", content = @Content),
+                @ApiResponse(responseCode = "404", description = "Chat not found"),
+                @ApiResponse(responseCode = "403", description = "Not a member of this team")
+            })
+    public ResponseEntity<Void> updatePermissions(
+            @PathVariable UUID id, @Valid @RequestBody UpdateChatPermissionsRequest request) {
+        UUID userId = SecurityUtil.getCurrentUserId();
+        chatService.setAllowAllPermissions(id, userId, request.allowAllPermissions());
         return ResponseEntity.noContent().build();
     }
 }
