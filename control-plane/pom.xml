@@ -123,6 +123,15 @@
 			<artifactId>spring-boot-starter-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!--
+		  Protocol conformance tests read the canonical YAML schemas under protocol/.
+		  Kept at compile scope because springdoc's ObjectMapperProvider exposes a YAMLFactory
+		  field: AOT processing introspects it and fails without this on the runtime classpath.
+		-->
+		<dependency>
+			<groupId>com.fasterxml.jackson.dataformat</groupId>
+			<artifactId>jackson-dataformat-yaml</artifactId>
+		</dependency>
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

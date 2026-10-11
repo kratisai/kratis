@@ -14,7 +14,7 @@ This document describes the production orchestration flow and the end-to-end tes
 | **WireMock** | Test-only mock model server returning matcher-defined responses. |
 | **UI WebSocket Client** | Test fixture subscribing to execution output, activity, HITL, and completion events. |
 
-> **Protocol Specification & Schemas**: The canonical source of truth for all sidecar <-> control-plane JSON-RPC 2.0 methods, parameters, and payload schemas is located in [`protocol/environment/openrpc.json`](../../protocol/environment/openrpc.json) and [`protocol/environment/schemas/`](../../protocol/environment/schemas/). All Java DTO records (`com.kratisai.controlplane.api.wsdto`) and Go sidecar structs (`sidecar/rpc/protocol.go`) are validated against these canonical specifications.
+> **Protocol Specification & Schemas**: The canonical source of truth for all sidecar <-> control-plane JSON-RPC 2.0 methods, parameters, and payload schemas is located in [`protocol/environment/openrpc.yaml`](../../protocol/environment/openrpc.yaml) and [`protocol/environment/schemas/`](../../protocol/environment/schemas/). All Java DTO records (`com.kratisai.controlplane.api.wsdto`) and Go sidecar structs (`sidecar/rpc/protocol.go`) are validated against these canonical specifications.
 
 ## Primary Sequence
 

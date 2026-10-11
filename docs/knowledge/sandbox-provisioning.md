@@ -3,7 +3,7 @@
 A sandbox is an isolated execution environment that runs a single `kratis-connector`
 process. The control plane provisions the sandbox, then drives everything else over the
 connector's `/ws/env` WebSocket using the `env.*` methods in
-[`protocol/environment/openrpc.json`](../../protocol/environment/openrpc.json). The
+[`protocol/environment/openrpc.yaml`](../../protocol/environment/openrpc.yaml). The
 connector, in turn, supervises one ACP agent (see [`acp-lifecycle.md`](acp-lifecycle.md)).
 
 ## Provider model
