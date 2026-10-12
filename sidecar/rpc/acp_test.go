@@ -2840,6 +2840,10 @@ exit 42
 		t.Logf("Note: exit code was %d (expected 42, but timing may vary)", comp.ExitCode)
 	}
 
+	if !comp.Terminated {
+		t.Error("expected deliberate terminate completion to be marked terminated")
+	}
+
 	// Verify session was removed
 	c.mu.Lock()
 	sup := c.supervisor
@@ -3115,6 +3119,10 @@ exit 42
 
 	if comp.ExitCode != 42 {
 		t.Errorf("expected exit code 42, got %d", comp.ExitCode)
+	}
+
+	if comp.Terminated {
+		t.Error("expected an unexpected process exit to not be marked terminated")
 	}
 
 	c.mu.Lock()

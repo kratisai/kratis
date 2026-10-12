@@ -463,6 +463,7 @@ The sidecar translates ACP events into Kratis-native WebSocket messages:
 | `env.acp_prompt` accepted | `env.acp_prompt` result with `status: "accepted"` (dispatch acknowledgement) |
 | `session/prompt` response with stopReason, after quiet window | `env.acp_prompt_complete` with `stopReason` and `promptId` |
 | Agent process exit | `env.complete` with `exitCode` |
+| Deliberate stop (`env.terminate` or internal teardown) | `env.complete` with `exitCode` and `terminated: true`; an expected pause, not an error, even when signal-terminated |
 | Launch failure | `env.complete` with `exitCode: -1` |
 
 ### 9.1 `session/update` relay model

@@ -325,7 +325,8 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
     record Complete(
             @JsonProperty("exitCode") Integer exitCode,
             @JsonProperty("executionId") String executionId,
-            @JsonProperty("reason") String reason)
+            @JsonProperty("reason") String reason,
+            @JsonProperty("terminated") Boolean terminated)
             implements InboundNotificationPayload {
         public static final String METHOD = "env.complete";
 
@@ -335,7 +336,11 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         }
 
         public Complete(Integer exitCode, String executionId) {
-            this(exitCode, executionId, null);
+            this(exitCode, executionId, null, null);
+        }
+
+        public Complete(Integer exitCode, String executionId, String reason) {
+            this(exitCode, executionId, reason, null);
         }
 
         public Complete {

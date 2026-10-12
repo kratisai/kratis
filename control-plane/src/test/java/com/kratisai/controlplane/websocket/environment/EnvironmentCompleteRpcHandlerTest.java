@@ -186,6 +186,25 @@ class EnvironmentCompleteRpcHandlerTest {
     }
 
     @Test
+    void handle_withTerminatedCompletion_recordsNoErrorActivity() {
+        stubOwnedExecution();
+
+        EnvironmentRpcPayload.Complete params = new EnvironmentRpcPayload.Complete(
+                143, executionId.toString(), "agent terminated by user request", true);
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.Complete.METHOD, objectMapper.valueToTree(params), null);
+
+        handler.handle(sessionId, request, params);
+
+        ArgumentCaptor<SandboxExecution> savedCaptor = ArgumentCaptor.forClass(SandboxExecution.class);
+        verify(executionRepository).save(savedCaptor.capture());
+        assertThat(savedCaptor.getValue().getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+        assertThat(savedCaptor.getValue().getExitCode()).isEqualTo(143);
+
+        verify(activityRepository, never()).save(any());
+    }
+
+    @Test
     void handle_cancelsPendingPermissionsForExecution() {
         stubOwnedExecution();
 

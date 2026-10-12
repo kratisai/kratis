@@ -302,6 +302,7 @@ type CompleteParams struct {
 	ExitCode    int    `json:"exitCode"`
 	ExecutionID string `json:"executionId"`
 	Reason      string `json:"reason,omitempty"`
+	Terminated  bool   `json:"terminated,omitempty"`
 }
 
 // RegisterGitAuthParams is the parameters payload for the env.registerGitAuth method.

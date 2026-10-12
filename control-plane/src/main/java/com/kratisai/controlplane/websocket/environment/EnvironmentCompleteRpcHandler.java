@@ -79,8 +79,11 @@ public class EnvironmentCompleteRpcHandler
         UUID teamId = execution.getChat().getTeam().getId();
 
         // Persist a faithful ERROR activity for any abnormal termination so the
-        // activity log records the agent's own error message.
-        if (exitCode != 0) {
+        // activity log records the agent's own error message. A deliberate stop
+        // (control-plane terminate or internal teardown) reports a non-zero exit
+        // code when the process is signalled, but is an expected pause, not an
+        // agent failure, so it must not surface as an error activity.
+        if (exitCode != 0 && !Boolean.TRUE.equals(params.terminated())) {
             activityPersistenceService.recordExecutionError(execution.getId(), params.reason(), exitCode);
         }
 

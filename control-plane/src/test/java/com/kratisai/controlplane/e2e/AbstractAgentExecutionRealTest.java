@@ -242,7 +242,7 @@ public abstract class AbstractAgentExecutionRealTest {
     private CanvasService canvasService;
 
     @Autowired
-    private SandboxExecutionService sandboxExecutionService;
+    private ExecutionEnvironmentService executionEnvironmentService;
 
     @Autowired
     private VirtualKeyService virtualKeyService;
@@ -252,6 +252,9 @@ public abstract class AbstractAgentExecutionRealTest {
 
     @Autowired
     private RepositoryRepository repositoryRepository;
+
+    @Autowired
+    private SandboxExecutionActivityRepository activityRepository;
 
     private Repository repository;
 
@@ -1284,16 +1287,17 @@ public abstract class AbstractAgentExecutionRealTest {
                     });
         }
 
-        // Terminate the ACP session if still running
+        // Sleep the environment to simulate a graceful pause (reproducing the issue where
+        // ExecutionEnvironmentService.sleepEnvironmentInternal calls terminateExecution, which for
+        // agents like Codex that exit via signal produced an ugly "Execution failed" activity).
         SandboxExecution execution = sandboxExecutionRepository.findAll().stream()
                 .filter(e -> e.getEnvironment().getId().equals(env.getId()))
                 .findFirst()
                 .orElseThrow();
 
-        if (execution.getStatus() == SandboxExecutionStatus.RUNNING
-                || execution.getStatus() == SandboxExecutionStatus.IDLE) {
-            sandboxExecutionService.terminateExecution(execution.getId());
-        }
+        ExecutionEnvironment currentEnv =
+                executionEnvironmentRepository.findById(env.getId()).orElseThrow();
+        executionEnvironmentService.sleepEnvironmentInternal(currentEnv);
 
         // Wait for the execution to reach a terminal state
         Awaitility.await()
@@ -1311,6 +1315,34 @@ public abstract class AbstractAgentExecutionRealTest {
                                     getHarness().getName())
                             .isIn(SandboxExecutionStatus.COMPLETED, SandboxExecutionStatus.FAILED);
                 });
+
+        // The environment must have transitioned to SLEEPING
+        ExecutionEnvironment sleptEnv =
+                executionEnvironmentRepository.findById(env.getId()).orElseThrow();
+        assertThat(sleptEnv.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
+
+        // Regression assertion: sleeping an environment (which terminates the execution including
+        // Codex via real sidecar) is a gentle pause operation, not a failure, and must not record
+        // an ERROR activity ("Execution failed") in the activity log.
+        assertThat(receivedActivityTypes)
+                .as(
+                        "Sleeping environment for harness '%s' must not record an ERROR activity in the activity log",
+                        getHarness().getName())
+                .doesNotContain(ActivityType.ERROR);
+        assertThat(activityRepository.findByExecutionIdAndActivityTypeOrderBySequenceAsc(
+                        execution.getId(), ActivityType.ERROR))
+                .as(
+                        "No ERROR activities should be persisted for harness '%s' upon sleep",
+                        getHarness().getName())
+                .isEmpty();
+
+        // The activity log must include the sleep message ("Codex has gone to sleep")
+        assertThat(activityRepository.findByExecutionIdOrderBySequenceAsc(execution.getId()).stream()
+                        .map(SandboxExecutionActivity::getDescription)
+                        .filter(d -> d.contains("has gone to sleep"))
+                        .findFirst())
+                .as("Activity log must contain sleep message")
+                .isPresent();
     }
 
     /**

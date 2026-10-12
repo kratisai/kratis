@@ -424,7 +424,7 @@ func (s *AgentSupervisor) terminate(emitComplete bool) (int, error) {
 	s.completeOnce.Do(func() {
 		if s.eventSink != nil && emitComplete {
 			reason := "agent terminated by user request"
-			s.eventSink.SendComplete(CompletionInfo{ExitCode: exitCode, Reason: reason})
+			s.eventSink.SendComplete(CompletionInfo{ExitCode: exitCode, Reason: reason, Terminated: true})
 		}
 	})
 
