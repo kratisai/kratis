@@ -37,8 +37,8 @@ public class ExecutionEnvironment {
     @Column(nullable = false, length = 50)
     private EnvironmentStatus status;
 
-    @Column(name = "container_id", length = 255)
-    private String containerId;
+    @Column(name = "suspended_at")
+    private Instant suspendedAt;
 
     @Column(name = "auth_token", length = 255)
     private String authToken;
@@ -110,14 +110,6 @@ public class ExecutionEnvironment {
         this.status = status;
     }
 
-    public String getContainerId() {
-        return containerId;
-    }
-
-    public void setContainerId(String containerId) {
-        this.containerId = containerId;
-    }
-
     public String getAuthToken() {
         return authToken;
     }
@@ -140,5 +132,13 @@ public class ExecutionEnvironment {
 
     public void setLastHeartbeat(Instant lastHeartbeat) {
         this.lastHeartbeat = lastHeartbeat;
+    }
+
+    public Instant getSuspendedAt() {
+        return suspendedAt;
+    }
+
+    public void setSuspendedAt(Instant suspendedAt) {
+        this.suspendedAt = suspendedAt;
     }
 }

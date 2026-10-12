@@ -26,24 +26,8 @@ public record ExecutionEnvironmentDto(
         @Schema(description = "Environment status", example = "DISCONNECTED")
         EnvironmentStatus status,
 
-        @Schema(description = "Container ID", example = "abc123def456", nullable = true)
-        String containerId,
-
         @Schema(description = "Last heartbeat timestamp", example = "2026-05-19T10:05:00Z", nullable = true)
         Instant lastHeartbeat,
 
         @Schema(description = "Last activity timestamp", example = "2026-05-19T10:05:00Z", nullable = true)
-        Instant lastActivity) {
-
-    public ExecutionEnvironmentDto(
-            UUID id,
-            UUID teamId,
-            String name,
-            ExecutionEnvironmentType type,
-            String authToken,
-            EnvironmentStatus status,
-            String containerId,
-            Instant lastHeartbeat) {
-        this(id, teamId, name, type, authToken, status, containerId, lastHeartbeat, null);
-    }
-}
+        Instant lastActivity) {}

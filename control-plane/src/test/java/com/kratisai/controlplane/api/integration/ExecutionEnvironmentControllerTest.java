@@ -14,6 +14,7 @@ import com.kratisai.controlplane.api.restdto.CreateExecutionEnvironmentRequest;
 import com.kratisai.controlplane.api.restdto.CreateTeamRequest;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
+import com.kratisai.controlplane.config.InstanceProperties;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.EnvironmentProvider;
 import com.kratisai.controlplane.model.EnvironmentStatus;
@@ -83,6 +84,9 @@ class ExecutionEnvironmentControllerTest {
 
     @Autowired
     private ExecutionEnvironmentService executionEnvironmentService;
+
+    @Autowired
+    private InstanceProperties instanceProperties;
 
     private User user;
     private String authToken;
@@ -170,7 +174,6 @@ class ExecutionEnvironmentControllerTest {
         customEnv.setTeam(teamRepository.findById(teamId).orElseThrow());
         customEnv.setName("To Be Deleted");
         customEnv.setType(ExecutionEnvironmentType.SANDBOX);
-        customEnv.setContainerId("delete-image:v1");
         customEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.DISCONNECTED);
         executionEnvironmentRepository.save(customEnv);
 
@@ -227,8 +230,7 @@ class ExecutionEnvironmentControllerTest {
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].name").value("Default Sandbox"))
-                .andExpect(jsonPath("$[0].status").value("DISCONNECTED"))
-                .andExpect(jsonPath("$[0].containerId").value("kratis-runner-base:latest"));
+                .andExpect(jsonPath("$[0].status").value("DISCONNECTED"));
     }
 
     @Test
@@ -287,7 +289,7 @@ class ExecutionEnvironmentControllerTest {
     }
 
     @Test
-    void terminateEnvironment_shouldReturn204AndClearContainerId() throws Exception {
+    void terminateEnvironment_shouldReturn204AndMarkDisconnected() throws Exception {
         // Create a provider for the sandbox environment
         EnvironmentProvider provider = new EnvironmentProvider();
         provider.setTeam(teamRepository.findById(teamId).orElseThrow());
@@ -300,7 +302,6 @@ class ExecutionEnvironmentControllerTest {
         sandboxEnv.setProvider(provider);
         sandboxEnv.setName("Terminable Sandbox");
         sandboxEnv.setType(ExecutionEnvironmentType.SANDBOX);
-        sandboxEnv.setContainerId("test-container-id-123");
         sandboxEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED);
         executionEnvironmentRepository.save(sandboxEnv);
 
@@ -310,7 +311,7 @@ class ExecutionEnvironmentControllerTest {
 
         ExecutionEnvironment updatedEnv =
                 executionEnvironmentRepository.findById(sandboxEnv.getId()).orElseThrow();
-        assertThat(updatedEnv.getContainerId()).isNull();
+        assertThat(updatedEnv.getSuspendedAt()).isNull();
         assertThat(updatedEnv.getStatus()).isEqualTo(com.kratisai.controlplane.model.EnvironmentStatus.DISCONNECTED);
     }
 
@@ -327,7 +328,14 @@ class ExecutionEnvironmentControllerTest {
 
         GenericContainer<?> runner = new GenericContainer<>("alpine:3.20")
                 .withCommand("sleep", "infinity")
-                .withLabels(Map.of("kratis.sandbox.id", runnerEnvId.toString(), "kratis.role", "runner"));
+                .withCreateContainerCmdModifier(cmd -> cmd.withName("kratis-sandbox-" + runnerEnvId))
+                .withLabels(Map.of(
+                        "kratis.instance.id",
+                        instanceProperties.getId(),
+                        "kratis.sandbox.id",
+                        runnerEnvId.toString(),
+                        "kratis.role",
+                        "runner"));
         runner.start();
         runnerContainers.add(runner);
         runDocker(
@@ -336,8 +344,6 @@ class ExecutionEnvironmentControllerTest {
                 "sh",
                 "-c",
                 "mkdir -p /kratis/workspace /kratis/logs && chown -R 1000:1000 /kratis");
-        env.setContainerId(runner.getContainerId());
-        executionEnvironmentRepository.save(env);
         return runner;
     }
 
@@ -376,7 +382,7 @@ class ExecutionEnvironmentControllerTest {
     }
 
     @Test
-    void sleepEnvironment_suspendsAndMarksSleeping() throws Exception {
+    void sleepEnvironment_suspendsAndMarksSleeping() {
         EnvironmentProvider provider = new EnvironmentProvider();
         provider.setTeam(teamRepository.findById(teamId).orElseThrow());
         provider.setName("Sleep Provider");
@@ -391,7 +397,7 @@ class ExecutionEnvironmentControllerTest {
             ExecutionEnvironment updated =
                     executionEnvironmentRepository.findById(runnerEnvId).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
-            assertThat(updated.getContainerId()).isNull();
+            assertThat(updated.getSuspendedAt()).isNotNull();
             assertThat(dockerCli("ps", "-a", "--filter", "name=kratis-sandbox-" + runnerEnvId, "-q"))
                     .isEmpty();
         } finally {
@@ -415,13 +421,12 @@ class ExecutionEnvironmentControllerTest {
             mockMvc.perform(post("/api/v1/teams/{teamId}/environments/{envId}/resume", teamId, runnerEnvId)
                             .header("Authorization", "Bearer " + authToken))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.status").value("PENDING_CONNECT"))
-                    .andExpect(jsonPath("$.containerId").isNotEmpty());
+                    .andExpect(jsonPath("$.status").value("PENDING_CONNECT"));
 
             ExecutionEnvironment updated =
                     executionEnvironmentRepository.findById(runnerEnvId).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
-            assertThat(updated.getContainerId()).isNotBlank();
+            assertThat(updated.getSuspendedAt()).isNotNull();
 
             mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", teamId, runnerEnvId)
                             .header("Authorization", "Bearer " + authToken))
@@ -467,7 +472,6 @@ class ExecutionEnvironmentControllerTest {
         connectorEnv.setTeam(teamRepository.findById(teamId).orElseThrow());
         connectorEnv.setName("Connector Env");
         connectorEnv.setType(ExecutionEnvironmentType.CONNECTOR);
-        connectorEnv.setContainerId("test-container-id-123");
         connectorEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED);
         executionEnvironmentRepository.save(connectorEnv);
 
@@ -490,7 +494,6 @@ class ExecutionEnvironmentControllerTest {
         sandboxEnv.setProvider(provider);
         sandboxEnv.setName("To Be Deleted With Termination");
         sandboxEnv.setType(ExecutionEnvironmentType.SANDBOX);
-        sandboxEnv.setContainerId("delete-with-terminate:v1");
         sandboxEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED);
         executionEnvironmentRepository.save(sandboxEnv);
 

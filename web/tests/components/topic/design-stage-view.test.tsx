@@ -336,6 +336,21 @@ describe('DesignStageView', () => {
         expect(copyButton.querySelector('.lucide-check')).toBeInTheDocument()
       })
     })
+
+    it('does not leak timers when unmounted with a pending icon reset', async () => {
+      const user = userEvent.setup()
+      const { unmount } = render(
+        <QueryClientProvider client={queryClient}>
+          <DesignStageView chatId="chat-1" />
+        </QueryClientProvider>,
+      )
+
+      await user.click(screen.getByRole('button', { name: /copy message/i }))
+      unmount()
+      await vi.waitFor(() => {
+        expect(screen.queryByRole('button', { name: /copy message/i })).not.toBeInTheDocument()
+      })
+    })
   })
 
   describe('canvas activity synchronization', () => {

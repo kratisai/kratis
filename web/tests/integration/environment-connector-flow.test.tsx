@@ -78,7 +78,6 @@ describe('Environment Connector Flow (Flow C)', () => {
         const envs: Array<Record<string, unknown>> = []
         if (postPayload) {
           envs.push({
-            containerId: null,
             createdAt: '2024-01-01T00:00:00Z',
             id: 'env-new',
             lastHeartbeat: isConnected ? new Date().toISOString() : null,
@@ -100,7 +99,6 @@ describe('Environment Connector Flow (Flow C)', () => {
         return jsonResponse(
           {
             environment: {
-              containerId: null,
               createdAt: '2024-01-01T00:00:00Z',
               id: 'env-new',
               lastHeartbeat: null,

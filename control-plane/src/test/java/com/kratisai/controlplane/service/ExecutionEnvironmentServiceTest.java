@@ -20,6 +20,7 @@ import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
 import com.kratisai.controlplane.repository.UserRepository;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -125,7 +126,6 @@ class ExecutionEnvironmentServiceTest {
         env.setName("Test Sandbox");
         env.setType(ExecutionEnvironmentType.SANDBOX);
         env.setStatus(EnvironmentStatus.CONNECTED);
-        env.setContainerId("test-container-123");
         env.setProvider(provider);
         return env;
     }
@@ -157,9 +157,9 @@ class ExecutionEnvironmentServiceTest {
 
         executionEnvironmentService.sleepEnvironmentInternal(env);
 
-        verify(sandboxProvider).suspend(ENV_ID.toString());
+        verify(sandboxProvider).suspend(ENV_ID);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
-        assertThat(env.getContainerId()).isNull();
+        assertThat(env.getSuspendedAt()).isNotNull();
         verify(executionEnvironmentRepository).save(env);
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
     }
@@ -184,7 +184,7 @@ class ExecutionEnvironmentServiceTest {
         executionEnvironmentService.sleepEnvironmentInternal(env);
 
         verify(sandboxExecutionService).terminateExecution(EXECUTION_ID);
-        verify(sandboxProvider).suspend(ENV_ID.toString());
+        verify(sandboxProvider).suspend(ENV_ID);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
     }
 
@@ -222,14 +222,14 @@ class ExecutionEnvironmentServiceTest {
                 .thenReturn(sandboxProvider);
         doThrow(new IllegalStateException("No runner container found"))
                 .when(sandboxProvider)
-                .suspend(ENV_ID.toString());
+                .suspend(ENV_ID);
 
         assertThatThrownBy(() -> executionEnvironmentService.sleepEnvironmentInternal(env))
                 .isInstanceOfSatisfying(
                         org.springframework.web.server.ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode().value()).isEqualTo(500));
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
-        assertThat(env.getContainerId()).isEqualTo("test-container-123");
+        assertThat(env.getSuspendedAt()).isNull();
     }
 
     @Test
@@ -253,32 +253,31 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
-    void isContainerRunning_delegatesToProvider() {
+    void isSandboxRunning_delegatesToProvider() {
         ExecutionEnvironment env = createSandboxEnvironment();
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
-        when(sandboxProvider.isContainerRunning(ENV_ID.toString())).thenReturn(true);
+        when(sandboxProvider.isSandboxRunning(ENV_ID)).thenReturn(true);
 
-        assertThat(executionEnvironmentService.isContainerRunning(env)).isTrue();
+        assertThat(executionEnvironmentService.isSandboxRunning(env)).isTrue();
     }
 
     @Test
-    void isContainerRunning_withoutProvider_isFalse() {
+    void isSandboxRunning_withoutProvider_isFalse() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setProvider(null);
 
-        assertThat(executionEnvironmentService.isContainerRunning(env)).isFalse();
+        assertThat(executionEnvironmentService.isSandboxRunning(env)).isFalse();
         verifyNoInteractions(sandboxOrchestratorService);
     }
 
     @Test
-    void handleStoppedContainer_marksDisconnectedAndClearsContainerId() {
+    void handleStoppedContainer_marksDisconnected() {
         ExecutionEnvironment env = createSandboxEnvironment();
 
-        executionEnvironmentService.handleStoppedContainer(env);
+        executionEnvironmentService.reconcileStoppedContainer(env);
 
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.DISCONNECTED);
-        assertThat(env.getContainerId()).isNull();
         verify(executionEnvironmentRepository).save(env);
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
     }
@@ -287,19 +286,17 @@ class ExecutionEnvironmentServiceTest {
     void resumeEnvironment_resumesFromSnapshotAndInitializesWorkspace() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);
-        env.setContainerId(null);
         env.setAuthToken("test-token");
         when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
         when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
-        when(sandboxProvider.resume(ENV_ID.toString(), env, "test-token")).thenReturn("resumed-container-id");
 
         ExecutionEnvironmentDto dto = executionEnvironmentService.resumeEnvironment(USER_ID, TEAM_ID, ENV_ID);
 
         assertThat(dto.status()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
-        assertThat(dto.containerId()).isEqualTo("resumed-container-id");
-        verify(sandboxProvider).initializeWorkspace("resumed-container-id");
+        verify(sandboxProvider).resume(env);
+        verify(sandboxProvider).initializeWorkspace(ENV_ID, "test-token");
         verify(executionEnvironmentRepository).save(env);
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
     }
@@ -308,14 +305,12 @@ class ExecutionEnvironmentServiceTest {
     void resumeEnvironment_publishesExecutionStatusChangeForLatestExecution() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);
-        env.setContainerId(null);
         env.setAuthToken("test-token");
         SandboxExecution execution = createRunningExecution(env);
         when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
         when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
-        when(sandboxProvider.resume(ENV_ID.toString(), env, "test-token")).thenReturn("resumed-container-id");
         when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
                 .thenReturn(Optional.of(execution));
 
@@ -330,7 +325,6 @@ class ExecutionEnvironmentServiceTest {
     void resumeEnvironment_fromTerminatedEnvironment_returns410() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.TERMINATED);
-        env.setContainerId(null);
         when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
         when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
 
@@ -356,7 +350,6 @@ class ExecutionEnvironmentServiceTest {
     void handleEnvironmentDisconnected_keepsSleepingStatus() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);
-        env.setContainerId(null);
         when(executionEnvironmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
 
         executionEnvironmentService.handleEnvironmentDisconnected(new EnvironmentDisconnectedEvent(ENV_ID));
@@ -388,9 +381,8 @@ class ExecutionEnvironmentServiceTest {
 
         executionEnvironmentService.terminateEnvironment(USER_ID, TEAM_ID, ENV_ID);
 
-        verify(sandboxProvider).destroy(ENV_ID.toString());
+        verify(sandboxProvider).destroy(ENV_ID);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.DISCONNECTED);
-        assertThat(env.getContainerId()).isNull();
         verify(executionEnvironmentRepository).save(env);
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
     }
@@ -420,7 +412,7 @@ class ExecutionEnvironmentServiceTest {
         executionEnvironmentService.terminateEnvironment(USER_ID, TEAM_ID, ENV_ID);
 
         verify(sandboxExecutionService).terminateExecution(EXECUTION_ID);
-        verify(sandboxProvider).destroy(ENV_ID.toString());
+        verify(sandboxProvider).destroy(ENV_ID);
         verify(virtualKeyService, never()).revokeKey(any());
     }
 
@@ -445,7 +437,7 @@ class ExecutionEnvironmentServiceTest {
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
         assertThat(execution.getCompletedAt()).isNotNull();
         verify(sandboxExecutionRepository).save(execution);
-        verify(sandboxProvider).destroy(ENV_ID.toString());
+        verify(sandboxProvider).destroy(ENV_ID);
     }
 
     @Test
@@ -475,7 +467,7 @@ class ExecutionEnvironmentServiceTest {
         verify(sandboxExecutionService).terminateExecution(EXECUTION_ID);
         verify(virtualKeyService).revokeKey(stillRunning.getVirtualKey());
         assertThat(stillRunning.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
-        verify(sandboxProvider).destroy(ENV_ID.toString());
+        verify(sandboxProvider).destroy(ENV_ID);
     }
 
     @Test
@@ -572,7 +564,7 @@ class ExecutionEnvironmentServiceTest {
 
         verify(sandboxExecutionService).terminateExecution(EXECUTION_ID);
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
-        verify(sandboxProvider).destroy(ENV_ID.toString());
+        verify(sandboxProvider).destroy(ENV_ID);
     }
 
     @Test
@@ -598,7 +590,7 @@ class ExecutionEnvironmentServiceTest {
         executionEnvironmentService.terminateEnvironment(USER_ID, TEAM_ID, ENV_ID);
 
         verify(virtualKeyService).revokeKey(execution.getVirtualKey());
-        verify(sandboxProvider).destroy(ENV_ID.toString());
+        verify(sandboxProvider).destroy(ENV_ID);
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
     }
 
@@ -704,5 +696,89 @@ class ExecutionEnvironmentServiceTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
                         .isEqualTo(HttpStatus.FORBIDDEN));
+    }
+
+    @Test
+    void reapEnvironment_snapshotsRuntimeAndReturnsToSleeping() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+
+        executionEnvironmentService.reapEnvironment(env);
+
+        verify(sandboxProvider).captureSidecarLogs(ENV_ID);
+        verify(sandboxProvider).suspend(ENV_ID);
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
+        assertThat(env.getSuspendedAt()).isNotNull();
+        verify(executionEnvironmentRepository).save(env);
+        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+    }
+
+    @Test
+    void reapEnvironment_withoutSnapshotDestroysRuntime() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        doThrow(new IllegalStateException("No runner container found"))
+                .when(sandboxProvider)
+                .suspend(ENV_ID);
+
+        executionEnvironmentService.reapEnvironment(env);
+
+        verify(sandboxProvider).destroy(ENV_ID);
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.DISCONNECTED);
+        verify(executionEnvironmentRepository).save(env);
+    }
+
+    @Test
+    void reapEnvironment_withSnapshotFallsBackToResumableState() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
+        env.setSuspendedAt(Instant.now().minusSeconds(60));
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        doThrow(new IllegalStateException("No runner container found"))
+                .when(sandboxProvider)
+                .suspend(ENV_ID);
+
+        executionEnvironmentService.reapEnvironment(env);
+
+        verify(sandboxProvider).terminateSandbox(ENV_ID);
+        verify(sandboxProvider, never()).destroy(any());
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
+    }
+
+    @Test
+    void reapEnvironment_neverResurrectsTerminatedEnvironment() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.TERMINATED);
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+
+        executionEnvironmentService.reapEnvironment(env);
+
+        verify(sandboxProvider).destroy(ENV_ID);
+        verify(sandboxProvider, never()).suspend(any());
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
+        verify(executionEnvironmentRepository, never()).save(any(ExecutionEnvironment.class));
+    }
+
+    @Test
+    void expireEnvironment_destroysSnapshotAndMarksTerminated() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setSuspendedAt(Instant.now().minus(Duration.ofDays(60)));
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+
+        executionEnvironmentService.expireEnvironment(env);
+
+        verify(sandboxProvider).destroy(ENV_ID);
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
+        assertThat(env.getSuspendedAt()).isNull();
+        verify(executionEnvironmentRepository).save(env);
+        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
     }
 }

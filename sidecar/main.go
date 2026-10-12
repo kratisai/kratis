@@ -14,13 +14,12 @@ import (
 
 // AgentConfig holds the parsed configuration for the agent.
 type AgentConfig struct {
-	Mode        string
-	Token       string
-	ServerURL   string
-	ContainerID string
-	Workspace   string
-	LogFile     string
-	Debug       bool
+	Mode      string
+	Token     string
+	ServerURL string
+	Workspace string
+	LogFile   string
+	Debug     bool
 }
 
 // ParseConfig parses command-line flags and environment variables into an AgentConfig.
@@ -30,7 +29,6 @@ func ParseConfig(args []string) (*AgentConfig, error) {
 	modeFlag := fs.String("mode", "sidecar", "Agent mode (daemon or sidecar)")
 	tokenFlag := fs.String("token", "", "Authentication token")
 	serverURLFlag := fs.String("server-url", "", "Control plane WebSocket URL")
-	containerIDFlag := fs.String("container-id", "", "Container ID (only for sidecar mode)")
 	logFileFlag := fs.String("log-file", "", "Path to log file (if set, all log output is written to this file)")
 	debugFlag := fs.Bool("debug", false, "Relay sidecar-internal diagnostics into env.output")
 
@@ -39,12 +37,11 @@ func ParseConfig(args []string) (*AgentConfig, error) {
 	}
 
 	cfg := &AgentConfig{
-		Mode:        *modeFlag,
-		Token:       *tokenFlag,
-		ServerURL:   *serverURLFlag,
-		ContainerID: *containerIDFlag,
-		LogFile:     *logFileFlag,
-		Debug:       *debugFlag,
+		Mode:      *modeFlag,
+		Token:     *tokenFlag,
+		ServerURL: *serverURLFlag,
+		LogFile:   *logFileFlag,
+		Debug:     *debugFlag,
 	}
 
 	if cfg.Token == "" {
@@ -52,9 +49,6 @@ func ParseConfig(args []string) (*AgentConfig, error) {
 	}
 	if cfg.ServerURL == "" {
 		cfg.ServerURL = os.Getenv("KRATIS_SERVER_URL")
-	}
-	if cfg.ContainerID == "" {
-		cfg.ContainerID = os.Getenv("KRATIS_CONTAINER_ID")
 	}
 
 	workspace, err := os.Getwd()
@@ -101,7 +95,7 @@ func main() {
 	log.Printf("Server URL: %s", cfg.ServerURL) //nolint:gosec // G706: config value, not attacker-controlled
 	log.Printf("Workspace directory: %s", cfg.Workspace)
 
-	client := rpc.NewClient(cfg.ServerURL, cfg.Token, cfg.ContainerID, cfg.Workspace)
+	client := rpc.NewClient(cfg.ServerURL, cfg.Token, cfg.Workspace)
 	client.SetDebug(cfg.Debug)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

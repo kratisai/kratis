@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { Check, Copy } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { CanvasPanel } from '@/components/canvas/canvas-panel'
 import { AgentWorkingBlock } from '@/components/chat/agent-working-block'
@@ -11,6 +11,7 @@ import { UserMessageInput } from '@/components/chat/user-message-input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { useIsMobile } from '@/hooks/use-is-mobile'
+import { useResetAfterDelay } from '@/hooks/use-reset-after-delay'
 import { copyToClipboard } from '@/lib/clipboard'
 import { uuid } from '@/lib/id'
 import { cn } from '@/lib/utils'
@@ -41,16 +42,10 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
   const isNearBottomRef = useRef(true)
   const isMobile = useIsMobile()
   const isWidescreen = !useIsMobile(1280)
-  const [copiedMessageId, setCopiedMessageId] = useState<null | string>(null)
+  const [copiedMessageId, setCopiedMessageId] = useResetAfterDelay<null | string>(null, null, 1500)
 
   const handleCopyMessage = (messageId: string, content: string) => {
-    void copyToClipboard(content).then(() => {
-      setCopiedMessageId(messageId)
-      setTimeout(
-        () => setCopiedMessageId((current) => (current === messageId ? null : current)),
-        1500,
-      )
-    })
+    void copyToClipboard(content).then(() => setCopiedMessageId(messageId))
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- messages[chatId] can be undefined at runtime despite the Record type

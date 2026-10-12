@@ -88,7 +88,6 @@ export function mockCreateEnvironment(response?: Record<string, unknown>) {
       return jsonResponse(
         {
           environment: {
-            containerId: null,
             createdAt: '2024-01-01T00:00:00Z',
             id: 'env-new',
             lastHeartbeat: null,

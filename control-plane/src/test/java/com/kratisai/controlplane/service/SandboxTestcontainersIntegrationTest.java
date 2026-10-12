@@ -20,10 +20,9 @@ import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -75,12 +74,9 @@ class SandboxTestcontainersIntegrationTest {
         String expectedRunner = "kratis-sandbox-" + sandboxId;
 
         ProcessExecutor mockExecutor = mock(ProcessExecutor.class);
-        List<List<String>> executedCommands = new CopyOnWriteArrayList<>();
 
         when(mockExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
-            executedCommands.add(new ArrayList<>(cmd));
-
             if (cmd.contains("network") && cmd.contains("create")) {
                 return new ProcessExecutor.ProcessResult(0, "mock-net-id\n".getBytes());
             }
@@ -102,12 +98,11 @@ class SandboxTestcontainersIntegrationTest {
         sandboxProperties.getDocker().setConnectUrl("ws://host.docker.internal:8080/ws/env");
         sandboxProperties.getDocker().setRegistryMirror("http://host.docker.internal:5001");
         sandboxProperties.getDocker().setRunnerImage("kratis-runner-base:latest");
-        LocalDockerSandboxProvider provider = new LocalDockerSandboxProvider(
-                mockExecutor, environmentRepository, instanceProperties, sandboxProperties);
+        LocalDockerSandboxProvider provider =
+                new LocalDockerSandboxProvider(mockExecutor, sandboxProperties, instanceProperties);
 
         // 1. Spawn Sandbox topology: Network -> DinD sibling -> Runner
-        String spawnedContainerId = provider.spawnSandbox(env, "auth-token-xyz");
-        assertThat(spawnedContainerId).isEqualTo(expectedRunner);
+        provider.spawnSandbox(env);
 
         // Verify network creation
         verify(mockExecutor)
@@ -158,16 +153,16 @@ class SandboxTestcontainersIntegrationTest {
                 "docker", "exec", expectedRunner, "docker", "run", "--rm", "alpine", "echo", "testcontainers-ready");
         mockExecutor.execute(inSandboxDockerCmd, null, null);
 
-        // 3. Query active sandboxes: must return runner only (never DinD)
-        doReturn(new ProcessExecutor.ProcessResult(0, (expectedRunner + "\n").getBytes()))
+        // 3. Query active sandboxes: the provider reports environment ids, never raw container ids
+        doReturn(new ProcessExecutor.ProcessResult(0, (sandboxId + "\n").getBytes()))
                 .when(mockExecutor)
                 .execute(argThat(cmd -> cmd.contains("ps") && cmd.contains("label=kratis.role=runner")), any(), any());
 
-        List<String> activeSandboxes = provider.getActiveSandboxIds();
-        assertThat(activeSandboxes).containsExactly(expectedRunner);
+        Set<UUID> activeEnvIds = provider.listActiveEnvIds();
+        assertThat(activeEnvIds).containsExactly(envId);
 
         // 4. Teardown sandbox: deterministic removal of runner, DinD sibling, and network
-        provider.terminateSandbox(spawnedContainerId);
+        provider.terminateSandbox(envId);
 
         // -v matters: the sibling declares two VOLUMEs, so omitting it leaks its image store.
         verify(mockExecutor, atLeastOnce())

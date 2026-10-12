@@ -73,7 +73,7 @@ func TestExecuteCheckout_LocalGitRepo(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", destDir)
+	c := NewClient(wsURL(srv), "tok", destDir)
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 
 	params := CheckoutParams{
@@ -124,7 +124,7 @@ func TestExecuteCheckout_Failed(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", "/invalid/workspace/dir/that/does/not/exist/nonexistent-workspace")
+	c := NewClient(wsURL(srv), "tok", "/invalid/workspace/dir/that/does/not/exist/nonexistent-workspace")
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 
 	params := CheckoutParams{
@@ -210,7 +210,7 @@ func TestExecuteCheckout_ExistingGitRepo_WithChanges(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", destDir)
+	c := NewClient(wsURL(srv), "tok", destDir)
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 
 	params := CheckoutParams{
@@ -291,7 +291,7 @@ func TestExecuteCheckout_ExistingGitRepo_MismatchOrigin(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", destDir)
+	c := NewClient(wsURL(srv), "tok", destDir)
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 
 	params := CheckoutParams{
@@ -372,7 +372,7 @@ func TestExecuteCheckout_ExistingGitRepo_Success(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", destDir)
+	c := NewClient(wsURL(srv), "tok", destDir)
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 
 	params := CheckoutParams{
@@ -445,7 +445,7 @@ func TestGitUtilities(t *testing.T) {
 }
 
 func TestExecuteRegisterGitAuth(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "", "")
+	c := NewClient("ws://localhost:12345", "tok", "")
 	c.credentialsDir = t.TempDir()
 	paramsPAT := RegisterGitAuthParams{
 		CredentialType: "GIT_PAT",
@@ -473,7 +473,7 @@ func TestExecuteRegisterGitIdentity_PersistsAcrossRestart(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	_ = os.Unsetenv("GIT_CONFIG_GLOBAL")
 
-	c := NewClient("ws://localhost:12345", "tok", "", "")
+	c := NewClient("ws://localhost:12345", "tok", "")
 	c.credentialsDir = t.TempDir()
 	c.ExecuteRegisterGitIdentity(RegisterGitIdentityParams{
 		UserName:  "Kratis",
@@ -561,7 +561,7 @@ func TestExecuteRegisterGitAuth_ProcessWideEnv(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	_ = os.Unsetenv("GIT_CONFIG_GLOBAL")
 
-	c := NewClient("ws://localhost:12345", "tok", "", "")
+	c := NewClient("ws://localhost:12345", "tok", "")
 	c.credentialsDir = t.TempDir()
 	defer c.Close()
 
@@ -650,7 +650,7 @@ func generateSSHTestKey(t *testing.T) (string, error) {
 // GIT_PAT / GITHUB values.
 func TestExecuteRegisterGitAuth_ControlPlaneVocabulary(t *testing.T) {
 	for _, credentialType := range []CredentialType{CredentialTypePAT, CredentialTypeGitHubApp} {
-		c := NewClient("ws://localhost:12345", "tok", "", "")
+		c := NewClient("ws://localhost:12345", "tok", "")
 		c.credentialsDir = t.TempDir()
 		params := RegisterGitAuthParams{
 			CredentialType: credentialType,
@@ -662,7 +662,7 @@ func TestExecuteRegisterGitAuth_ControlPlaneVocabulary(t *testing.T) {
 		}
 	}
 
-	c := NewClient("ws://localhost:12345", "tok", "", "")
+	c := NewClient("ws://localhost:12345", "tok", "")
 	c.credentialsDir = t.TempDir()
 	c.ExecuteRegisterGitAuth(RegisterGitAuthParams{
 		CredentialType: CredentialTypeSSHKey,
@@ -793,7 +793,7 @@ func TestExecuteCheckout_UncommittedChanges(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", srcDir)
+	c := NewClient(wsURL(srv), "tok", srcDir)
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 	errChan := make(chan error, 1)
 	go c.readLoop(errChan)
@@ -845,7 +845,7 @@ func TestExecuteCheckout_EdgeCases(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", tmpDir)
+	c := NewClient(wsURL(srv), "tok", tmpDir)
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 	errChan := make(chan error, 1)
 	go c.readLoop(errChan)
@@ -899,7 +899,7 @@ func TestExecuteCheckout_EdgeCases(t *testing.T) {
 	_ = exec.Command("git", "-C", gitDir, "remote", "add", "origin", "https://github.com/foo/bar").Run()
 
 	gotComplete.Store(false)
-	cMismatch := NewClient(wsURL(srv), "tok", "", gitDir)
+	cMismatch := NewClient(wsURL(srv), "tok", gitDir)
 	cMismatch.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 	errChan2 := make(chan error, 1)
 	go cMismatch.readLoop(errChan2)
@@ -965,7 +965,7 @@ func TestExecuteCheckout_EmptyDirectory(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", destDir)
+	c := NewClient(wsURL(srv), "tok", destDir)
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 	errChan := make(chan error, 1)
 	go c.readLoop(errChan)
@@ -1022,7 +1022,7 @@ func TestCleanGitURL_EdgeCases(t *testing.T) {
 // TestExecuteRegisterGitAuth_CleanupPrevious tests that ExecuteRegisterGitAuth
 // cleans up previous SSH agent and helper script before setting new credentials.
 func TestExecuteRegisterGitAuth_CleanupPrevious(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "", "")
+	c := NewClient("ws://localhost:12345", "tok", "")
 	c.credentialsDir = t.TempDir()
 	defer c.Close()
 
@@ -1139,7 +1139,7 @@ func TestExecuteCheckout_WithPAT(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", destDir)
+	c := NewClient(wsURL(srv), "tok", destDir)
 	c.credentialsDir = t.TempDir()
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 	errChan := make(chan error, 1)
@@ -1233,7 +1233,7 @@ func TestExecuteCheckout_ExistingGitRepo_WithPAT(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", destDir)
+	c := NewClient(wsURL(srv), "tok", destDir)
 	c.credentialsDir = t.TempDir()
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 	errChan := make(chan error, 1)
@@ -1322,7 +1322,7 @@ func TestExecuteCheckout_DefaultBranch(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", destDir)
+	c := NewClient(wsURL(srv), "tok", destDir)
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 	errChan := make(chan error, 1)
 	go c.readLoop(errChan)
@@ -1402,7 +1402,7 @@ func TestExecuteCheckout_WithEnvVars(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", destDir)
+	c := NewClient(wsURL(srv), "tok", destDir)
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 
 	// Pass headless git environment variables as the control plane would

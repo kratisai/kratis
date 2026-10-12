@@ -110,7 +110,6 @@ public class ExecutionEnvironmentService {
                 env.getType(),
                 env.getAuthToken(),
                 env.getStatus(),
-                env.getContainerId(),
                 env.getLastHeartbeat(),
                 lastActivity);
     }
@@ -146,7 +145,6 @@ public class ExecutionEnvironmentService {
         env.setType(ExecutionEnvironmentType.CONNECTOR);
         env.setStatus(EnvironmentStatus.DISCONNECTED);
         env.setAuthToken(authToken);
-        // containerId is null until the agent connects and registers
 
         ExecutionEnvironment savedEnv = executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
@@ -185,13 +183,13 @@ public class ExecutionEnvironmentService {
             try {
                 SandboxProvider sandboxProvider =
                         sandboxOrchestratorService.getProvider(env.getProvider().getType());
-                sandboxProvider.destroy(envId.toString());
+                sandboxProvider.destroy(envId);
             } catch (Exception e) {
                 logger.error("Failed to destroy sandbox environment {}", envId, e);
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to terminate environment");
             }
             env.setStatus(EnvironmentStatus.DISCONNECTED);
-            env.setContainerId(null);
+            env.setSuspendedAt(null);
             executionEnvironmentRepository.save(env);
             eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
         } else if (env.getType() == ExecutionEnvironmentType.SANDBOX && env.getProvider() == null) {
@@ -308,7 +306,7 @@ public class ExecutionEnvironmentService {
             try {
                 SandboxProvider sandboxProvider =
                         sandboxOrchestratorService.getProvider(env.getProvider().getType());
-                sandboxProvider.destroy(envId.toString());
+                sandboxProvider.destroy(envId);
             } catch (Exception e) {
                 logger.warn("Failed to destroy sandbox environment {}: {}", envId, e.getMessage());
             }
@@ -318,24 +316,18 @@ public class ExecutionEnvironmentService {
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
     }
 
-    public boolean isContainerRunning(ExecutionEnvironment env) {
+    public boolean isSandboxRunning(ExecutionEnvironment env) {
         if (env.getProvider() == null) {
             return false;
         }
         SandboxProvider sandboxProvider =
                 sandboxOrchestratorService.getProvider(env.getProvider().getType());
-        return sandboxProvider.isContainerRunning(env.getId().toString());
+        return sandboxProvider.isSandboxRunning(env.getId());
     }
 
-    /**
-     * Reconciles an environment whose sandbox container stopped outside Kratis. There is no live
-     * container to snapshot, so it cannot be resumed; mark it disconnected and drop the stale
-     * container reference.
-     */
     @Transactional
-    public void handleStoppedContainer(ExecutionEnvironment env) {
+    public void reconcileStoppedContainer(ExecutionEnvironment env) {
         env.setStatus(EnvironmentStatus.DISCONNECTED);
-        env.setContainerId(null);
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
     }
@@ -348,7 +340,7 @@ public class ExecutionEnvironmentService {
         if (env.getStatus() == EnvironmentStatus.SLEEPING) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Environment is already sleeping");
         }
-        if (env.getStatus() != EnvironmentStatus.CONNECTED || env.getContainerId() == null) {
+        if (env.getStatus() != EnvironmentStatus.CONNECTED) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Environment is not a running sandbox");
         }
         if (env.getProvider() == null) {
@@ -363,14 +355,13 @@ public class ExecutionEnvironmentService {
         try {
             SandboxProvider sandboxProvider =
                     sandboxOrchestratorService.getProvider(env.getProvider().getType());
-            sandboxProvider.suspend(envId.toString());
+            sandboxProvider.suspend(envId);
         } catch (Exception e) {
             logger.error("Failed to suspend sandbox for environment {}", envId, e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to suspend environment");
         }
 
-        env.setStatus(EnvironmentStatus.SLEEPING);
-        env.setContainerId(null);
+        markSuspended(env);
         executionEnvironmentRepository.save(env);
 
         sandboxExecutionRepository
@@ -404,11 +395,11 @@ public class ExecutionEnvironmentService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Environment has no configured sandbox provider");
         }
 
-        String containerId;
+        SandboxProvider sandboxProvider;
         try {
-            SandboxProvider sandboxProvider =
+            sandboxProvider =
                     sandboxOrchestratorService.getProvider(env.getProvider().getType());
-            containerId = sandboxProvider.resume(envId.toString(), env, env.getAuthToken());
+            sandboxProvider.resume(env);
         } catch (ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
@@ -416,7 +407,6 @@ public class ExecutionEnvironmentService {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to resume environment");
         }
 
-        env.setContainerId(containerId);
         env.setStatus(EnvironmentStatus.PENDING_CONNECT);
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
@@ -426,10 +416,58 @@ public class ExecutionEnvironmentService {
                 .ifPresent(execution -> eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
                         teamId, execution.getChat().getId(), execution.getId())));
 
+        sandboxProvider.initializeWorkspace(envId, env.getAuthToken());
+        return toDto(env);
+    }
+
+    @Transactional
+    public void reapEnvironment(ExecutionEnvironment env) {
+        UUID envId = env.getId();
+        UUID teamId = env.getTeam().getId();
         SandboxProvider sandboxProvider =
                 sandboxOrchestratorService.getProvider(env.getProvider().getType());
-        sandboxProvider.initializeWorkspace(containerId);
-        return toDto(env);
+
+        sandboxProvider.captureSidecarLogs(envId);
+
+        if (env.getStatus() == EnvironmentStatus.TERMINATED) {
+            sandboxProvider.destroy(envId);
+            return;
+        }
+
+        try {
+            sandboxProvider.suspend(envId);
+            markSuspended(env);
+        } catch (Exception e) {
+            logger.warn("Could not snapshot sandbox {} while reaping: {}", envId, e.getMessage());
+            if (env.getSuspendedAt() != null) {
+                sandboxProvider.terminateSandbox(envId);
+                env.setStatus(EnvironmentStatus.SLEEPING);
+            } else {
+                sandboxProvider.destroy(envId);
+                env.setStatus(EnvironmentStatus.DISCONNECTED);
+            }
+        }
+        executionEnvironmentRepository.save(env);
+        eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
+    }
+
+    /** Destroys a suspend snapshot that outlived its retention window. */
+    @Transactional
+    public void expireEnvironment(ExecutionEnvironment env) {
+        UUID envId = env.getId();
+        UUID teamId = env.getTeam().getId();
+        SandboxProvider sandboxProvider =
+                sandboxOrchestratorService.getProvider(env.getProvider().getType());
+        sandboxProvider.destroy(envId);
+        env.setStatus(EnvironmentStatus.TERMINATED);
+        env.setSuspendedAt(null);
+        executionEnvironmentRepository.save(env);
+        eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
+    }
+
+    private static void markSuspended(ExecutionEnvironment env) {
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setSuspendedAt(Instant.now());
     }
 
     private void stopRunningExecutions(UUID envId) {

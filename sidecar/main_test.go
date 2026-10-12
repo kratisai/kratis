@@ -11,7 +11,6 @@ func TestParseConfig_AllFlags(t *testing.T) {
 		"--mode", "daemon",
 		"--token", "test-token",
 		"--server-url", "ws://localhost:8080",
-		"--container-id", "container-123",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -24,9 +23,6 @@ func TestParseConfig_AllFlags(t *testing.T) {
 	}
 	if cfg.ServerURL != "ws://localhost:8080" {
 		t.Errorf("expected server URL 'ws://localhost:8080', got '%s'", cfg.ServerURL)
-	}
-	if cfg.ContainerID != "container-123" {
-		t.Errorf("expected container ID 'container-123', got '%s'", cfg.ContainerID)
 	}
 	if cfg.Workspace == "" {
 		t.Error("expected non-empty workspace")
@@ -41,13 +37,9 @@ func TestParseConfig_EnvFallback(t *testing.T) {
 	if err := os.Setenv("KRATIS_SERVER_URL", "ws://env-server:8080"); err != nil {
 		t.Fatalf("failed to set env: %v", err)
 	}
-	if err := os.Setenv("KRATIS_CONTAINER_ID", "env-container"); err != nil {
-		t.Fatalf("failed to set env: %v", err)
-	}
 	defer func() {
 		_ = os.Unsetenv("KRATIS_TOKEN")
 		_ = os.Unsetenv("KRATIS_SERVER_URL")
-		_ = os.Unsetenv("KRATIS_CONTAINER_ID")
 	}()
 
 	cfg, err := ParseConfig([]string{})
@@ -59,9 +51,6 @@ func TestParseConfig_EnvFallback(t *testing.T) {
 	}
 	if cfg.ServerURL != "ws://env-server:8080" {
 		t.Errorf("expected server URL 'ws://env-server:8080', got '%s'", cfg.ServerURL)
-	}
-	if cfg.ContainerID != "env-container" {
-		t.Errorf("expected container ID 'env-container', got '%s'", cfg.ContainerID)
 	}
 }
 

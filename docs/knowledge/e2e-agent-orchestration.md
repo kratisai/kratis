@@ -212,7 +212,7 @@ E2E harnesses spawn real containers on the host Docker daemon (`kratis-e2e-test`
 
 | Resource | Owner | When it runs |
 |----------|--------|--------------|
-| Sandbox container (`spawnedContainerId`) | `AbstractAgentExecutionRealTest` teardown → `LocalDockerSandboxProvider.terminateSandbox` | `@AfterEach` — **only if the JVM exits the test normally** |
+| Sandbox container (`spawnedEnvId`) | `AbstractAgentExecutionRealTest` teardown → `LocalDockerSandboxProvider.terminateSandbox` | `@AfterEach` — **only if the JVM exits the test normally** |
 | Testcontainers Postgres / LiteLLM | Testcontainers Ryuk | JVM exit (clean process death) |
 | Anonymous volumes from sandboxes | Host `docker volume prune` (manual) | Not automatic |
 

@@ -175,7 +175,7 @@ func TestExecuteCheckout_RealHttpsClone_WithCredentialHelper(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "", destDir)
+	c := NewClient(wsURL(srv), "tok", destDir)
 	// Dial directly instead of using connectClient, which creates a second
 	// client that would re-bind the credential socket with an empty PAT.
 	wsConn, _, err := websocket.DefaultDialer.Dial(wsURL(srv), nil)

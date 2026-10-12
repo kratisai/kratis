@@ -2,10 +2,8 @@ package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.config.InstanceProperties;
 import com.kratisai.controlplane.config.SandboxProperties;
-import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionProviderType;
-import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -15,10 +13,16 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -44,26 +48,24 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             List.of("CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "SETGID", "SETUID", "AUDIT_WRITE");
 
     private final ProcessExecutor processExecutor;
-    private final ExecutionEnvironmentRepository executionEnvironmentRepository;
     private final String instanceId;
     private final String registryMirror;
     private final String runnerImage;
     private final boolean debug;
     private String connectUrl;
 
+    private final Map<String, Instant> danglingNetworkFirstSeen = new ConcurrentHashMap<>();
+
     public LocalDockerSandboxProvider(
             ProcessExecutor processExecutor,
-            ExecutionEnvironmentRepository executionEnvironmentRepository,
-            InstanceProperties instanceProperties,
-            SandboxProperties sandboxProperties) {
+            SandboxProperties sandboxProperties,
+            InstanceProperties instanceProperties) {
         this.processExecutor = processExecutor;
-        this.executionEnvironmentRepository = executionEnvironmentRepository;
         this.instanceId = instanceProperties.getId();
-        SandboxProperties.Docker docker = sandboxProperties.getDocker();
-        this.connectUrl = docker.getConnectUrl();
-        this.registryMirror = docker.getRegistryMirror();
-        this.runnerImage = docker.getRunnerImage();
-        this.debug = docker.isDebug();
+        this.registryMirror = sandboxProperties.getDocker().getRegistryMirror();
+        this.runnerImage = sandboxProperties.getDocker().getRunnerImage();
+        this.debug = sandboxProperties.getDocker().isDebug();
+        this.connectUrl = sandboxProperties.getDocker().getConnectUrl();
     }
 
     public void setConnectUrl(String connectUrl) {
@@ -77,138 +79,43 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
 
     private String resolveHostConnectorPath() {
         String envPath = System.getenv("KRATIS_CONNECTOR_PATH");
-        if (envPath != null && !envPath.isEmpty()) {
+        if (envPath != null && !envPath.isBlank()) {
             return envPath;
         }
         String sysProp = System.getProperty("kratis.connector.path");
-        if (sysProp != null && !sysProp.isEmpty()) {
+        if (sysProp != null && !sysProp.isBlank()) {
             return sysProp;
         }
-        java.io.File[] paths = new java.io.File[] {
-            new java.io.File("sidecar/kratis-connector"),
-            new java.io.File("../sidecar/kratis-connector"),
-            new java.io.File("/usr/local/bin/kratis-connector")
-        };
-        for (java.io.File file : paths) {
-            if (file.exists() && file.isFile()) {
-                return file.getAbsolutePath();
+        for (String candidate : List.of("../sidecar/kratis-connector", "sidecar/kratis-connector")) {
+            File f = new File(candidate);
+            if (f.exists()) {
+                try {
+                    return f.getCanonicalPath();
+                } catch (IOException e) {
+                    return f.getAbsolutePath();
+                }
             }
         }
         return "/usr/local/bin/kratis-connector";
     }
 
-    @Override
-    public String spawnSandbox(ExecutionEnvironment environment, String token) {
-        String envId = environment.getId() != null
-                ? environment.getId().toString()
-                : UUID.randomUUID().toString();
-        String networkName = "kratis-net-" + envId;
-        String dindName = "kratis-dind-" + envId;
-        String runnerName = "kratis-sandbox-" + envId;
-
-        try {
-            createSandboxNetwork(envId, networkName);
-            spawnDindSibling(envId, networkName, dindName);
-            return spawnRunnerContainer(environment, envId, networkName, dindName, runnerName, null);
-        } catch (RuntimeException e) {
-            terminateSandboxResources(envId, runnerName);
-            throw e;
+    private static String requireEnvId(ExecutionEnvironment environment) {
+        if (environment == null || environment.getId() == null) {
+            throw new IllegalArgumentException("Environment id is required to address sandbox resources");
         }
+        return environment.getId().toString();
     }
 
-    @Override
-    public boolean isContainerRunning(String envId) {
-        if (envId == null || envId.isBlank()) {
-            return false;
-        }
-        String runnerContainerId = resolveRunnerContainerId(envId);
-        if (runnerContainerId == null) {
-            return false;
-        }
-        try {
-            ProcessExecutor.ProcessResult result = processExecutor.execute(
-                    List.of("docker", "inspect", "--format", "{{.State.Running}}", runnerContainerId), null, null);
-            return result.exitCode() == 0 && "true".equals(new String(result.output()).trim());
-        } catch (IOException | InterruptedException e) {
-            // The runtime state is unobservable; report running so callers keep the suspend path.
-            logger.warn(
-                    "Failed to inspect running state of container {} for environment {}: {}",
-                    runnerContainerId,
-                    envId,
-                    e.getMessage());
-            return true;
-        }
+    private static String runnerName(String envId) {
+        return "kratis-sandbox-" + envId;
     }
 
-    @Override
-    public void suspend(String envId) {
-        if (envId == null || envId.isBlank()) {
-            throw new IllegalArgumentException("Environment id is required to suspend a sandbox");
-        }
-        logger.info("Suspending sandbox environment {}", envId);
-        String runnerContainerId = resolveRunnerContainerId(envId);
-        if (runnerContainerId == null) {
-            throw new IllegalStateException("No runner container found for environment " + envId);
-        }
-        commitSnapshot(envId, runnerContainerId);
-        terminateSandboxResources(envId, runnerContainerId);
+    private static String dindName(String envId) {
+        return "kratis-dind-" + envId;
     }
 
-    @Override
-    public String resume(String envId, ExecutionEnvironment environment, String token) {
-        if (envId == null || envId.isBlank()) {
-            throw new IllegalArgumentException("Environment id is required to resume a sandbox");
-        }
-        String snapshotRef = snapshotRef(envId);
-        if (imageIdOf(snapshotRef) == null) {
-            throw new IllegalStateException("No suspended snapshot exists for environment " + envId);
-        }
-        String networkName = "kratis-net-" + envId;
-        String dindName = "kratis-dind-" + envId;
-        String runnerName = "kratis-sandbox-" + envId;
-
-        try {
-            createSandboxNetwork(envId, networkName);
-            spawnDindSibling(envId, networkName, dindName);
-            return spawnRunnerContainer(environment, envId, networkName, dindName, runnerName, snapshotRef);
-        } catch (RuntimeException e) {
-            terminateSandboxResources(envId, runnerName);
-            throw e;
-        }
-    }
-
-    @Override
-    public void destroy(String envId) {
-        if (envId == null || envId.isBlank()) {
-            return;
-        }
-        String runnerContainerId = resolveRunnerContainerId(envId);
-        if (runnerContainerId != null) {
-            try {
-                terminateSandboxResources(envId, runnerContainerId);
-            } catch (RuntimeException e) {
-                logger.warn("Failed to terminate sandbox resources for environment {}: {}", envId, e.getMessage());
-            }
-        }
-        try {
-            removeSnapshot(envId);
-        } catch (Exception e) {
-            logger.warn("Failed to remove suspend snapshot for environment {}: {}", envId, e.getMessage());
-        }
-    }
-
-    private void removeSnapshot(String envId) {
-        String snapshotRef = snapshotRef(envId);
-        logger.info("Removing sandbox snapshot image {}", snapshotRef);
-        try {
-            ProcessExecutor.ProcessResult result =
-                    processExecutor.execute(List.of("docker", "rmi", "-f", snapshotRef), null, null);
-            if (result.exitCode() != 0) {
-                logger.debug("Snapshot image {} already absent", snapshotRef);
-            }
-        } catch (IOException | InterruptedException e) {
-            logger.warn("Failed to remove sandbox snapshot image {}: {}", snapshotRef, e.getMessage());
-        }
+    private static String networkName(String envId) {
+        return "kratis-net-" + envId;
     }
 
     // The committed image tag subsumes any prior version, so the mapping envId -> image is
@@ -217,64 +124,240 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         return "kratis-snapshot-" + envId + ":latest";
     }
 
-    private String resolveRunnerContainerId(String envId) {
-        String containerId = null;
+    @Override
+    public void spawnSandbox(ExecutionEnvironment environment) {
+        String envId = requireEnvId(environment);
+        logger.info("Spawning sandbox environment {}", envId);
+
         try {
-            containerId = executionEnvironmentRepository
-                    .findById(UUID.fromString(envId))
-                    .map(ExecutionEnvironment::getContainerId)
-                    .filter(id -> !id.isBlank())
-                    .orElse(null);
-        } catch (IllegalArgumentException e) {
-            logger.debug("Environment id {} is not a UUID; falling back to label lookup", envId);
+            createSandboxNetwork(envId, networkName(envId));
+            spawnDindSibling(envId, networkName(envId), dindName(envId));
+            spawnRunnerContainer(environment, envId, networkName(envId), dindName(envId), runnerName(envId), null);
+        } catch (RuntimeException e) {
+            terminateSandboxResources(envId);
+            throw e;
         }
-        if (containerId != null && containerExists(containerId)) {
-            return containerId;
-        }
-        return findRunnerContainerByLabel(envId);
     }
 
-    private boolean containerExists(String containerId) {
-        try {
-            ProcessExecutor.ProcessResult result = processExecutor.execute(
-                    List.of("docker", "inspect", "--format", "{{.Id}}", containerId), null, null);
-            return result.exitCode() == 0;
-        } catch (IOException | InterruptedException e) {
+    @Override
+    public boolean isSandboxRunning(UUID envId) {
+        if (envId == null) {
             return false;
         }
+        String runnerRef = resolveRunnerRef(envId.toString());
+        if (runnerRef == null) {
+            return false;
+        }
+        try {
+            ProcessExecutor.ProcessResult result = processExecutor.execute(
+                    List.of("docker", "inspect", "--format", "{{.State.Running}}", runnerRef), null, null);
+            return result.exitCode() == 0 && "true".equals(new String(result.output()).trim());
+        } catch (IOException | InterruptedException e) {
+            // The runtime state is unobservable; report running so callers keep the suspend path.
+            logger.warn(
+                    "Failed to inspect running state of container {} for environment {}: {}",
+                    runnerRef,
+                    envId,
+                    e.getMessage());
+            return true;
+        }
     }
 
-    private String findRunnerContainerByLabel(String envId) {
+    @Override
+    public void suspend(UUID envId) {
+        if (envId == null) {
+            throw new IllegalArgumentException("Environment id is required to suspend a sandbox");
+        }
+        logger.info("Suspending sandbox environment {}", envId);
+        String envKey = envId.toString();
+        String runnerRef = resolveRunnerRef(envKey);
+        if (runnerRef == null) {
+            throw new IllegalStateException("No runner container found for environment " + envId);
+        }
+        commitSnapshot(envKey, runnerRef);
+        terminateSandboxResources(envKey);
+    }
+
+    @Override
+    public void resume(ExecutionEnvironment environment) {
+        String envId = requireEnvId(environment);
+        String snapshot = snapshotRef(envId);
+        if (imageIdOf(snapshot) == null) {
+            throw new IllegalStateException("No suspended snapshot exists for environment " + envId);
+        }
+        logger.info("Resuming sandbox environment {} from snapshot {}", envId, snapshot);
+
+        try {
+            createSandboxNetwork(envId, networkName(envId));
+            spawnDindSibling(envId, networkName(envId), dindName(envId));
+            spawnRunnerContainer(environment, envId, networkName(envId), dindName(envId), runnerName(envId), snapshot);
+        } catch (RuntimeException e) {
+            terminateSandboxResources(envId);
+            throw e;
+        }
+    }
+
+    @Override
+    public void terminateSandbox(UUID envId) {
+        if (envId == null) {
+            return;
+        }
+        logger.info("Terminating sandbox runtime for environment {}", envId);
+        terminateSandboxResources(envId.toString());
+    }
+
+    @Override
+    public void destroy(UUID envId) {
+        if (envId == null) {
+            return;
+        }
+        String envKey = envId.toString();
+        try {
+            terminateSandboxResources(envKey);
+        } catch (RuntimeException e) {
+            logger.warn("Failed to terminate sandbox resources for environment {}: {}", envId, e.getMessage());
+        }
+        try {
+            removeSnapshot(envKey);
+        } catch (Exception e) {
+            logger.warn("Failed to remove suspend snapshot for environment {}: {}", envId, e.getMessage());
+        }
+    }
+
+    @Override
+    public void captureSidecarLogs(UUID envId) {
+        if (envId == null) {
+            return;
+        }
+        String runnerRef = resolveRunnerRef(envId.toString());
+        if (runnerRef == null) {
+            return;
+        }
+        extractAndLogSidecarLogs(runnerRef);
+    }
+
+    @Override
+    public Set<UUID> listActiveEnvIds() {
         List<String> command = List.of(
                 "docker",
                 "ps",
                 "-a",
                 "--filter",
-                "label=kratis.sandbox.id=" + envId,
+                "label=kratis.instance.id=" + instanceId,
                 "--filter",
                 "label=kratis.role=runner",
-                "--no-trunc",
-                "-q");
+                "--format",
+                "{{.Label \"kratis.sandbox.id\"}}");
         try {
             ProcessExecutor.ProcessResult result = processExecutor.execute(command, null, null);
             if (result.exitCode() != 0) {
-                return null;
+                logger.warn("Docker command failed with exit code: {}", result.exitCode());
+                return Set.of();
             }
             String output = new String(result.output()).trim();
-            return output.isBlank() ? null : output.split("\\s+")[0];
+            if (output.isEmpty()) {
+                return Set.of();
+            }
+            Set<UUID> envIds = new LinkedHashSet<>();
+            for (String line : output.split("\\s+")) {
+                if (line.isBlank()) {
+                    continue;
+                }
+                try {
+                    envIds.add(UUID.fromString(line));
+                } catch (IllegalArgumentException e) {
+                    logger.warn("Skipping sandbox resource with unparseable kratis.sandbox.id label: {}", line);
+                }
+            }
+            return envIds;
         } catch (IOException | InterruptedException e) {
-            logger.warn("Failed to locate runner container for environment {}: {}", envId, e.getMessage());
-            return null;
+            logger.warn("Failed to list active sandbox environments from Docker host: {}", e.getMessage());
+            return Set.of();
         }
     }
 
-    private void commitSnapshot(String envId, String runnerContainerId) {
-        String snapshotRef = snapshotRef(envId);
-        String previousImageId = imageIdOf(snapshotRef);
-        executeCommand(
-                "Committing sandbox suspend snapshot", List.of("docker", "commit", runnerContainerId, snapshotRef));
-        String committedImageId = imageIdOf(snapshotRef);
-        // Retagging leaves the previous image untagged; remove it so sleep cycles do not leak layers.
+    @Override
+    public void pruneOrphanNetworks(Duration gracePeriod) {
+        try {
+            Instant now = Instant.now();
+            // List networks created by this instance with role=network
+            List<String> listCmd = List.of(
+                    "docker",
+                    "network",
+                    "ls",
+                    "--filter",
+                    "label=kratis.instance.id=" + instanceId,
+                    "--filter",
+                    "label=kratis.role=network",
+                    "--format",
+                    "{{.Name}}");
+            ProcessExecutor.ProcessResult listResult = processExecutor.execute(listCmd, null, null);
+            if (listResult.exitCode() != 0) {
+                return;
+            }
+            String output = new String(listResult.output()).trim();
+            Set<String> listedNetworks = new HashSet<>();
+            if (!output.isEmpty()) {
+                String[] networkNames = output.split("\\s+");
+                for (String netName : networkNames) {
+                    if (netName.isBlank()) {
+                        continue;
+                    }
+                    listedNetworks.add(netName);
+                    // Check if any containers are attached to this network
+                    List<String> inspectCmd =
+                            List.of("docker", "network", "inspect", "--format", "{{len .Containers}}", netName);
+                    ProcessExecutor.ProcessResult inspectResult = processExecutor.execute(inspectCmd, null, null);
+                    if (inspectResult.exitCode() != 0) {
+                        continue;
+                    }
+                    String countStr = new String(inspectResult.output()).trim();
+                    if ("0".equals(countStr)) {
+                        Instant firstSeen = danglingNetworkFirstSeen.computeIfAbsent(netName, k -> now);
+                        long elapsed = Duration.between(firstSeen, now).toSeconds();
+                        if (elapsed >= gracePeriod.toSeconds()) {
+                            logger.info("Pruning dangling kratis network with 0 attached containers: {}", netName);
+                            processExecutor.execute(List.of("docker", "network", "rm", netName), null, null);
+                            danglingNetworkFirstSeen.remove(netName);
+                        } else {
+                            logger.debug(
+                                    "Dangling kratis network {} tracked ({}s elapsed / {}s grace)",
+                                    netName,
+                                    elapsed,
+                                    gracePeriod.toSeconds());
+                        }
+                    } else {
+                        // Network has attached containers; clear any dangling tracking
+                        danglingNetworkFirstSeen.remove(netName);
+                    }
+                }
+            }
+            // Drop tracking for networks that no longer exist
+            danglingNetworkFirstSeen.keySet().removeIf(name -> !listedNetworks.contains(name));
+        } catch (Exception e) {
+            logger.debug("Failed during orphan network pruning: {}", e.getMessage());
+        }
+    }
+
+    private void removeSnapshot(String envId) {
+        String snapshot = snapshotRef(envId);
+        logger.info("Removing sandbox snapshot image {}", snapshot);
+        try {
+            ProcessExecutor.ProcessResult result =
+                    processExecutor.execute(List.of("docker", "rmi", "-f", snapshot), null, null);
+            if (result.exitCode() != 0) {
+                logger.debug("Snapshot image {} already absent", snapshot);
+            }
+        } catch (IOException | InterruptedException e) {
+            logger.warn("Failed to remove sandbox snapshot image {}: {}", snapshot, e.getMessage());
+        }
+    }
+
+    private void commitSnapshot(String envId, String runnerRef) {
+        String snapshot = snapshotRef(envId);
+        String previousImageId = imageIdOf(snapshot);
+        executeCommand("Committing sandbox snapshot", List.of("docker", "commit", runnerRef, snapshot));
+        String committedImageId = imageIdOf(snapshot);
         if (previousImageId != null && !previousImageId.equals(committedImageId)) {
             try {
                 processExecutor.execute(List.of("docker", "rmi", "-f", previousImageId), null, null);
@@ -287,12 +370,12 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
     private String imageIdOf(String imageRef) {
         try {
             ProcessExecutor.ProcessResult result =
-                    processExecutor.execute(List.of("docker", "images", "-q", imageRef), null, null);
+                    processExecutor.execute(List.of("docker", "inspect", "--format", "{{.Id}}", imageRef), null, null);
             if (result.exitCode() != 0) {
                 return null;
             }
             String output = new String(result.output()).trim();
-            return output.isBlank() ? null : output;
+            return output.isEmpty() ? null : output;
         } catch (IOException | InterruptedException e) {
             logger.warn("Failed to inspect image {}: {}", imageRef, e.getMessage());
             return null;
@@ -447,7 +530,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         }
     }
 
-    private String spawnRunnerContainer(
+    private void spawnRunnerContainer(
             ExecutionEnvironment environment,
             String envId,
             String networkName,
@@ -492,10 +575,10 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         PACKAGE_MANAGEMENT_CAPABILITIES.forEach(capability -> command.add("--cap-add=" + capability));
         command.addAll(List.of("--user=1000", "--entrypoint", "", image, "sleep", "infinity"));
 
-        return executeCommand("Spawning runner container", command);
+        executeCommand("Spawning runner container", command);
     }
 
-    private String executeCommand(String actionDescription, List<String> command) {
+    private void executeCommand(String actionDescription, List<String> command) {
         logger.info("{}: {}", actionDescription, String.join(" ", command));
         try {
             ProcessExecutor.ProcessResult result = processExecutor.execute(command, null, null);
@@ -504,22 +587,16 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 logger.error("{} failed. Exit code: {}, Output: {}", actionDescription, result.exitCode(), errorMsg);
                 throw new RuntimeException("Failed to spawn docker sandbox: " + errorMsg);
             }
-            return new String(result.output()).trim();
         } catch (IOException | InterruptedException e) {
             logger.error("{} failed with exception", actionDescription, e);
             throw new RuntimeException("Failed to spawn docker sandbox: " + e.getMessage(), e);
         }
     }
 
-    private void verifySandboxDirectoryWritable(String containerId, String directory)
+    private void verifySandboxDirectoryWritable(String runnerRef, String directory)
             throws IOException, InterruptedException {
         List<String> command = List.of(
-                "docker",
-                "exec",
-                containerId,
-                "sh",
-                "-c",
-                "test -d '" + directory + "' && test -w '" + directory + "'");
+                "docker", "exec", runnerRef, "sh", "-c", "test -d '" + directory + "' && test -w '" + directory + "'");
         ProcessExecutor.ProcessResult result = processExecutor.execute(command, null, null);
         if (result.exitCode() != 0) {
             String errorDetail = String.format(
@@ -528,25 +605,25 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                             + "and chown this directory to that user at IMAGE BUILD TIME (see "
                             + "build/Dockerfile.runner-base for the reference implementation); ownership is never "
                             + "fixed up at container runtime.",
-                    containerId, directory);
+                    runnerRef, directory);
             logger.error(errorDetail);
             throw new RuntimeException(errorDetail);
         }
     }
 
     @Override
-    public void initializeWorkspace(String containerId) {
-        logger.info("Initializing workspace and installing sidecar for container {}", containerId);
+    public void initializeWorkspace(UUID envId, String token) {
+        String envKey = envId.toString();
+        String runnerRef = resolveRunnerRef(envKey);
+        if (runnerRef == null) {
+            throw new RuntimeException("No runner container found for environment " + envId);
+        }
+        logger.info("Initializing workspace and installing sidecar for environment {}", envId);
 
-        ExecutionEnvironment environment = executionEnvironmentRepository
-                .findByContainerId(containerId)
-                .orElseThrow(() -> new RuntimeException("Environment not found for container ID: " + containerId));
-        String token = environment.getAuthToken();
-
-        // 2. Inject the kratis-connector binary via docker cp
+        // Inject the kratis-connector binary via docker cp
         try {
             for (String directory : REQUIRED_SANDBOX_DIRECTORIES) {
-                verifySandboxDirectoryWritable(containerId, directory);
+                verifySandboxDirectoryWritable(runnerRef, directory);
             }
 
             String hostBinaryPath = resolveHostConnectorPath();
@@ -559,13 +636,10 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                             hostBinaryPath);
                 }
             }
-            logger.info(
-                    "Injecting connector from host {} to container {} at /usr/local/bin/kratis-connector",
-                    hostBinaryPath,
-                    containerId);
+            logger.info("Injecting connector from host {} to environment {}", hostBinaryPath, envId);
 
             ProcessExecutor.ProcessResult cpResult = processExecutor.execute(
-                    List.of("docker", "cp", hostBinaryPath, containerId + ":/usr/local/bin/kratis-connector"),
+                    List.of("docker", "cp", hostBinaryPath, runnerRef + ":/usr/local/bin/kratis-connector"),
                     null,
                     null);
             if (cpResult.exitCode() != 0) {
@@ -578,7 +652,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                     "-d",
                     "-w",
                     "/kratis/workspace",
-                    containerId,
+                    runnerRef,
                     "/usr/local/bin/kratis-connector",
                     "--mode=sidecar",
                     "--server-url",
@@ -586,166 +660,46 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                     "--token",
                     token,
                     "--log-file",
-                    SIDECAR_LOG_LOC,
-                    "--container-id",
-                    containerId));
+                    SIDECAR_LOG_LOC));
             if (debug) {
                 execCommand.add("--debug");
             }
 
-            logger.info(
-                    "Starting connector in container {} with command: {}", containerId, String.join(" ", execCommand));
+            logger.info("Starting connector in environment {} with command: {}", envId, String.join(" ", execCommand));
             ProcessExecutor.ProcessResult execResult = processExecutor.execute(execCommand, null, null);
             if (execResult.exitCode() != 0) {
                 throw new RuntimeException("docker exec to start connector failed: " + new String(execResult.output()));
             }
 
         } catch (RuntimeException | InterruptedException | IOException e) {
-            logger.error("Failed to inject/run connector in container {}", containerId, e);
-            terminateSandbox(containerId);
-            throw new RuntimeException("Failed to initialize connector in container: " + e.getMessage(), e);
+            logger.error("Failed to inject/run connector for environment {}", envId, e);
+            captureSidecarLogs(envId);
+            terminateSandboxResources(envKey);
+            throw new RuntimeException("Failed to initialize connector in environment: " + e.getMessage(), e);
         }
     }
 
-    @Override
-    public void terminateSandbox(String containerId) {
-        logger.info("Terminating docker sandbox container: {}", containerId);
-        if (shouldCaptureSidecarLogs(containerId)) {
-            extractAndLogSidecarLogs(containerId);
+    private String resolveRunnerRef(String envId) {
+        String byLabel = findRunnerContainerByLabel(envId);
+        if (byLabel != null) {
+            return byLabel;
         }
-
-        String sandboxId = resolveSandboxId(containerId);
-        terminateSandboxResources(sandboxId, containerId);
+        String name = runnerName(envId);
+        return containerExists(name) ? name : null;
     }
 
-    private boolean shouldCaptureSidecarLogs(String containerId) {
-        if (debug) {
-            return true;
-        }
-        try {
-            return executionEnvironmentRepository
-                    .findByContainerId(containerId)
-                    .map(environment -> environment.getStatus() != EnvironmentStatus.CONNECTED)
-                    .orElse(true);
-        } catch (Exception e) {
-            logger.debug("Failed to look up environment for container {}: {}", containerId, e.getMessage());
-            return true;
-        }
-    }
-
-    private String resolveSandboxId(String containerId) {
-        // Try to inspect kratis.sandbox.id label from the container
+    private boolean containerExists(String containerRef) {
         try {
             ProcessExecutor.ProcessResult result = processExecutor.execute(
-                    List.of(
-                            "docker",
-                            "inspect",
-                            "--format",
-                            "{{ index .Config.Labels \"kratis.sandbox.id\" }}",
-                            containerId),
-                    null,
-                    null);
-            if (result.exitCode() == 0) {
-                String labelVal = new String(result.output()).trim();
-                if (!labelVal.isEmpty() && !"<no value>".equals(labelVal)) {
-                    return labelVal;
-                }
-            }
-        } catch (Exception e) {
-            logger.debug("Failed to inspect sandbox id label for container {}: {}", containerId, e.getMessage());
-        }
-
-        // If container name follows kratis-sandbox-${envId}
-        if (containerId.startsWith("kratis-sandbox-")) {
-            return containerId.substring("kratis-sandbox-".length());
-        }
-
-        // Fallback: check ExecutionEnvironment repository
-        try {
-            Optional<ExecutionEnvironment> envOpt = executionEnvironmentRepository.findByContainerId(containerId);
-            if (envOpt.isPresent() && envOpt.get().getId() != null) {
-                return envOpt.get().getId().toString();
-            }
-        } catch (Exception e) {
-            logger.debug("Failed to look up environment for container {}: {}", containerId, e.getMessage());
-        }
-
-        return containerId;
-    }
-
-    private void terminateSandboxResources(String sandboxId, String runnerContainerId) {
-        // -v matters: docker:dind-rootless declares two VOLUMEs holding its image store, so each
-        // sibling leaks gigabytes without it.
-        // 1. Remove runner container
-        if (runnerContainerId != null && !runnerContainerId.isBlank()) {
-            try {
-                processExecutor.execute(List.of("docker", "rm", "-f", "-v", runnerContainerId), null, null);
-            } catch (IOException | InterruptedException e) {
-                logger.error("Failed to terminate runner container: {}", runnerContainerId, e);
-            }
-        }
-
-        // Also try removing by standard runner name if different
-        String runnerName = "kratis-sandbox-" + sandboxId;
-        if (!runnerName.equals(runnerContainerId)) {
-            try {
-                processExecutor.execute(List.of("docker", "rm", "-f", "-v", runnerName), null, null);
-            } catch (Exception e) {
-                logger.debug("Runner container {} already removed or not found", runnerName);
-            }
-        }
-
-        // 2. Remove DinD sibling container
-        String dindName = "kratis-dind-" + sandboxId;
-        try {
-            processExecutor.execute(List.of("docker", "rm", "-f", "-v", dindName), null, null);
+                    List.of("docker", "inspect", "--format", "{{.Id}}", containerRef), null, null);
+            return result.exitCode() == 0;
         } catch (IOException | InterruptedException e) {
-            logger.error("Failed to terminate dind container: {}", dindName, e);
-        }
-
-        // 3. Remove network
-        String networkName = "kratis-net-" + sandboxId;
-        try {
-            processExecutor.execute(List.of("docker", "network", "rm", networkName), null, null);
-        } catch (IOException | InterruptedException e) {
-            logger.error("Failed to remove docker network: {}", networkName, e);
+            logger.debug("Failed to inspect container {}: {}", containerRef, e.getMessage());
+            return false;
         }
     }
 
-    /**
-     * Extracts and logs the sidecar's log file from the container before it is
-     * removed.
-     */
-    private void extractAndLogSidecarLogs(String containerId) {
-        try {
-            Path tempLog = Files.createTempFile("kratis-sidecar-", ".log");
-            try {
-                ProcessExecutor.ProcessResult cpResult = processExecutor.execute(
-                        List.of("docker", "cp", containerId + ":" + SIDECAR_LOG_LOC, tempLog.toString()), null, null);
-                if (cpResult.exitCode() == 0) {
-                    String logs = Files.readString(tempLog);
-                    if (!logs.isBlank()) {
-                        logger.info("Sidecar logs for container {}:\n{}", containerId, logs);
-                    } else {
-                        logger.info("Sidecar log file is empty for container {}", containerId);
-                    }
-                } else {
-                    logger.warn(
-                            "Failed to extract sidecar log file from container {} (exit code {}): {}",
-                            containerId,
-                            cpResult.exitCode(),
-                            new String(cpResult.output()));
-                }
-            } finally {
-                Files.deleteIfExists(tempLog);
-            }
-        } catch (Exception e) {
-            logger.warn("Failed to extract container logs for {}: {}", containerId, e.getMessage());
-        }
-    }
-
-    @Override
-    public List<String> getActiveSandboxIds() {
+    private String findRunnerContainerByLabel(String envId) {
         List<String> command = List.of(
                 "docker",
                 "ps",
@@ -753,23 +707,90 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 "--filter",
                 "label=kratis.instance.id=" + instanceId,
                 "--filter",
+                "label=kratis.sandbox.id=" + envId,
+                "--filter",
                 "label=kratis.role=runner",
                 "--no-trunc",
                 "-q");
         try {
             ProcessExecutor.ProcessResult result = processExecutor.execute(command, null, null);
             if (result.exitCode() != 0) {
-                logger.warn("Docker command failed with exit code: {}", result.exitCode());
-                return List.of();
+                return null;
             }
             String output = new String(result.output()).trim();
             if (output.isEmpty()) {
-                return List.of();
+                return null;
             }
-            return List.of(output.split("\\s+"));
+            return output.split("\\s+")[0];
         } catch (IOException | InterruptedException e) {
-            logger.warn("Failed to retrieve running managed containers from Docker host: {}", e.getMessage());
-            return List.of();
+            logger.debug("Failed to resolve runner container by label for environment {}: {}", envId, e.getMessage());
+            return null;
+        }
+    }
+
+    private void terminateSandboxResources(String envId) {
+        // -v matters: docker:dind-rootless declares two VOLUMEs holding its image store, so each
+        // sibling leaks gigabytes without it.
+        String runnerRef = findRunnerContainerByLabel(envId);
+        String runnerName = runnerName(envId);
+        if (runnerRef != null) {
+            try {
+                processExecutor.execute(List.of("docker", "rm", "-f", "-v", runnerRef), null, null);
+            } catch (IOException | InterruptedException e) {
+                logger.error("Failed to terminate runner container: {}", runnerRef, e);
+            }
+        }
+        if (!runnerName.equals(runnerRef)) {
+            try {
+                processExecutor.execute(List.of("docker", "rm", "-f", "-v", runnerName), null, null);
+            } catch (Exception e) {
+                logger.debug("Runner container {} already removed or not found", runnerName);
+            }
+        }
+
+        // Remove DinD sibling container
+        String dindName = dindName(envId);
+        try {
+            processExecutor.execute(List.of("docker", "rm", "-f", "-v", dindName), null, null);
+        } catch (IOException | InterruptedException e) {
+            logger.error("Failed to terminate dind container: {}", dindName, e);
+        }
+
+        // Remove network
+        String networkName = networkName(envId);
+        try {
+            processExecutor.execute(List.of("docker", "network", "rm", networkName), null, null);
+        } catch (IOException | InterruptedException e) {
+            logger.error("Failed to remove docker network: {}", networkName, e);
+        }
+    }
+
+    /** Copies the sidecar's log file out of the container so abnormal teardowns leave a trace. */
+    private void extractAndLogSidecarLogs(String runnerRef) {
+        try {
+            Path tempLog = Files.createTempFile("kratis-sidecar-", ".log");
+            try {
+                ProcessExecutor.ProcessResult cpResult = processExecutor.execute(
+                        List.of("docker", "cp", runnerRef + ":" + SIDECAR_LOG_LOC, tempLog.toString()), null, null);
+                if (cpResult.exitCode() == 0) {
+                    String logs = Files.readString(tempLog);
+                    if (!logs.isBlank()) {
+                        logger.info("Sidecar logs for container {}:\n{}", runnerRef, logs);
+                    } else {
+                        logger.info("Sidecar log file is empty for container {}", runnerRef);
+                    }
+                } else {
+                    logger.warn(
+                            "Failed to extract sidecar log file from container {} (exit code {}): {}",
+                            runnerRef,
+                            cpResult.exitCode(),
+                            new String(cpResult.output()));
+                }
+            } finally {
+                Files.deleteIfExists(tempLog);
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to extract container logs for {}: {}", runnerRef, e.getMessage());
         }
     }
 }

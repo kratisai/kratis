@@ -14,7 +14,6 @@ export interface CreateEnvironmentResponse {
 }
 
 export interface ExecutionEnvironmentDto {
-  containerId?: null | string
   createdAt: string
   id: string
   lastActivity?: null | string

@@ -1,8 +1,8 @@
 import { Check, Copy } from 'lucide-react'
-import { useState } from 'react'
 
 import { MarkdownMessage } from '@/components/chat/markdown-message'
 import { Button } from '@/components/ui/button'
+import { useResetAfterDelay } from '@/hooks/use-reset-after-delay'
 import { copyToClipboard } from '@/lib/clipboard'
 import { useCanvasStore } from '@/store/canvas-store'
 import { useChatStore } from '@/store/chat-store'
@@ -15,13 +15,10 @@ interface CanvasDocumentProps {
 export function CanvasDocument({ chatId, documentId }: CanvasDocumentProps) {
   const canvases = useCanvasStore((state) => state.canvases)
   const messages = useChatStore((state) => state.messages)
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useResetAfterDelay(false, false, 1500)
 
   const handleCopy = (content: string) => {
-    void copyToClipboard(content).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
+    void copyToClipboard(content).then(() => setCopied(true))
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- messages[chatId] can be undefined at runtime despite the Record type

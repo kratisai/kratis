@@ -9,16 +9,15 @@ import static org.mockito.Mockito.*;
 import com.kratisai.controlplane.config.InstanceProperties;
 import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.EnvironmentProvider;
-import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionProviderType;
-import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.assertj.core.api.Assertions;
@@ -29,12 +28,10 @@ import org.mockito.InOrder;
 class LocalDockerSandboxProviderTest {
 
     private ProcessExecutor mockProcessExecutor;
-    private ExecutionEnvironmentRepository mockEnvRepository;
     private LocalDockerSandboxProvider provider;
 
     private static LocalDockerSandboxProvider sandboxProvider(
             ProcessExecutor processExecutor,
-            ExecutionEnvironmentRepository repository,
             String connectUrl,
             String registryMirror,
             String runnerImage,
@@ -46,20 +43,34 @@ class LocalDockerSandboxProviderTest {
         sandboxProperties.getDocker().setRegistryMirror(registryMirror);
         sandboxProperties.getDocker().setRunnerImage(runnerImage);
         sandboxProperties.getDocker().setDebug(debug);
-        return new LocalDockerSandboxProvider(processExecutor, repository, instanceProperties, sandboxProperties);
+        return new LocalDockerSandboxProvider(processExecutor, sandboxProperties, instanceProperties);
+    }
+
+    private static ExecutionEnvironment newEnvironment(UUID envId) {
+        ExecutionEnvironment env = new ExecutionEnvironment();
+        env.setId(envId);
+        return env;
     }
 
     @BeforeEach
     void setUp() {
         mockProcessExecutor = mock(ProcessExecutor.class);
-        mockEnvRepository = mock(ExecutionEnvironmentRepository.class);
         provider = sandboxProvider(
                 mockProcessExecutor,
-                mockEnvRepository,
                 "ws://localhost:8080/ws",
                 "http://host.docker.internal:5001",
                 "kratis-runner-base:latest",
                 false);
+    }
+
+    private void stubAllCommandsSucceed() throws Exception {
+        when(mockProcessExecutor.execute(any(), any(), any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
+    }
+
+    private void verifyRunnerRemoved(UUID envId) throws Exception {
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-sandbox-" + envId)), any(), any());
     }
 
     @Test
@@ -68,21 +79,27 @@ class LocalDockerSandboxProviderTest {
     }
 
     @Test
-    void testSpawnSandboxAndInitializeWorkspaceSuccessDefaultImage() throws Exception {
+    void testSpawnSandboxRejectsEnvironmentWithoutId() {
         ExecutionEnvironment env = new ExecutionEnvironment();
+
+        assertThatThrownBy(() -> provider.spawnSandbox(env))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Environment id is required");
+
+        verifyNoInteractions(mockProcessExecutor);
+    }
+
+    @Test
+    void testSpawnSandboxAndInitializeWorkspaceSuccessDefaultImage() throws Exception {
+        UUID envId = UUID.randomUUID();
+        ExecutionEnvironment env = newEnvironment(envId);
         env.setProvider(null);
-        env.setContainerId("mock-container-id");
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
-        env.setAuthToken("test-token");
 
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
-        when(mockEnvRepository.findByContainerId("mock-container-id")).thenReturn(Optional.of(env));
 
-        String containerId = provider.spawnSandbox(env, "test-token");
-        assertThat(containerId).isEqualTo("mock-container-id");
-
-        provider.initializeWorkspace("mock-container-id");
+        provider.spawnSandbox(env);
+        provider.initializeWorkspace(envId, "test-token");
 
         verify(mockProcessExecutor, atLeastOnce())
                 .execute(
@@ -122,13 +139,17 @@ class LocalDockerSandboxProviderTest {
                         any(),
                         any());
 
+        // The runner is addressed by its deterministic name; the connector is started
+        // with the token passed in as a parameter, and the protocol no longer carries a container id.
         verify(mockProcessExecutor, atLeastOnce())
                 .execute(
                         argThat(cmd -> cmd.contains("exec")
+                                && cmd.contains("--token")
                                 && cmd.contains("test-token")
+                                && cmd.contains("--server-url")
                                 && cmd.contains("ws://localhost:8080/ws")
-                                && cmd.contains("--container-id")
-                                && cmd.contains("mock-container-id")),
+                                && cmd.contains("--mode=sidecar")
+                                && cmd.stream().noneMatch(arg -> arg.equals("--container-id"))),
                         any(),
                         any());
     }
@@ -137,23 +158,17 @@ class LocalDockerSandboxProviderTest {
     void testSpawnSandboxUsesConfiguredRunnerImage() throws Exception {
         LocalDockerSandboxProvider customImageProvider = sandboxProvider(
                 mockProcessExecutor,
-                mockEnvRepository,
                 "ws://localhost:8080/ws",
                 "http://host.docker.internal:5001",
                 "ghcr.io/kratisai/kratis-runner-base:latest",
                 false);
 
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setProvider(null);
-        env.setContainerId("mock-container-id");
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
-        env.setAuthToken("test-token");
+        ExecutionEnvironment env = newEnvironment(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
-        when(mockEnvRepository.findByContainerId("mock-container-id")).thenReturn(Optional.of(env));
 
-        customImageProvider.spawnSandbox(env, "test-token");
+        customImageProvider.spawnSandbox(env);
 
         verify(mockProcessExecutor, atLeastOnce())
                 .execute(
@@ -167,22 +182,14 @@ class LocalDockerSandboxProviderTest {
     void testInitializeWorkspaceAppendsDebugFlagWhenEnabled() throws Exception {
         LocalDockerSandboxProvider debugProvider = sandboxProvider(
                 mockProcessExecutor,
-                mockEnvRepository,
                 "ws://localhost:8080/ws",
                 "http://host.docker.internal:5001",
                 "kratis-runner-base:latest",
                 true);
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setProvider(null);
-        env.setContainerId("mock-container-id");
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
-        env.setAuthToken("test-token");
 
-        when(mockEnvRepository.findByContainerId("mock-container-id")).thenReturn(Optional.of(env));
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
+        stubAllCommandsSucceed();
 
-        debugProvider.initializeWorkspace("mock-container-id");
+        debugProvider.initializeWorkspace(UUID.randomUUID(), "test-token");
 
         verify(mockProcessExecutor, atLeastOnce())
                 .execute(argThat(cmd -> cmd.contains("--mode=sidecar") && cmd.contains("--debug")), any(), any());
@@ -190,17 +197,9 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testInitializeWorkspaceOmitsDebugFlagByDefault() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setProvider(null);
-        env.setContainerId("mock-container-id");
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
-        env.setAuthToken("test-token");
+        stubAllCommandsSucceed();
 
-        when(mockEnvRepository.findByContainerId("mock-container-id")).thenReturn(Optional.of(env));
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
-
-        provider.initializeWorkspace("mock-container-id");
+        provider.initializeWorkspace(UUID.randomUUID(), "test-token");
 
         verify(mockProcessExecutor, atLeastOnce())
                 .execute(
@@ -212,13 +211,12 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testSpawnSandboxAddsOnlyPackageManagementCapabilities() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setProvider(null);
+        ExecutionEnvironment env = newEnvironment(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
 
-        provider.spawnSandbox(env, "test-token");
+        provider.spawnSandbox(env);
 
         // Every capability is dropped except the minimum required for package
         // management through sudo (apt-get/dpkg). The connector still runs as the
@@ -246,13 +244,12 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testSpawnSandboxNeverGrantsDockerEscapePaths() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setProvider(null);
+        ExecutionEnvironment env = newEnvironment(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
 
-        provider.spawnSandbox(env, "test-token");
+        provider.spawnSandbox(env);
 
         // The docker escape boundaries must stay intact even though sudo grants
         // root-in-container: the host docker socket is never mounted, the sandbox
@@ -273,13 +270,12 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testSpawnDindSiblingUnmasksProcWithoutPrivilegeOrExtraCapabilities() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setId(UUID.randomUUID());
+        ExecutionEnvironment env = newEnvironment(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
 
-        provider.spawnSandbox(env, "test-token");
+        provider.spawnSandbox(env);
 
         // systempaths=unconfined must stay the only relaxation. --cap-drop=ALL is asserted absent
         // because rootlesskit's setuid newuidmap needs SETUID/SETGID left in the bounding set.
@@ -298,8 +294,7 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testSpawnDindSiblingSkipsHostGatewayIpWhenNetworkGatewayIsUnknown() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setId(UUID.randomUUID());
+        ExecutionEnvironment env = newEnvironment(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
@@ -310,7 +305,7 @@ class LocalDockerSandboxProviderTest {
             return new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes());
         });
 
-        provider.spawnSandbox(env, "test-token");
+        provider.spawnSandbox(env);
 
         verify(mockProcessExecutor)
                 .execute(
@@ -331,17 +326,9 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testInitializeWorkspaceNeverExecutesAsRoot() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setProvider(null);
-        env.setContainerId("mock-container-id");
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
-        env.setAuthToken("test-token");
+        stubAllCommandsSucceed();
 
-        when(mockEnvRepository.findByContainerId("mock-container-id")).thenReturn(Optional.of(env));
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
-
-        provider.initializeWorkspace("mock-container-id");
+        provider.initializeWorkspace(UUID.randomUUID(), "test-token");
 
         // No command should ever run as root (`-u 0`) inside the sandbox: ownership of
         // /kratis/* is established once, at image build time, and never fixed up (or
@@ -355,17 +342,9 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testInitializeWorkspaceNeverTrustsAllDirectoriesForGit() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setProvider(null);
-        env.setContainerId("mock-container-id");
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
-        env.setAuthToken("test-token");
+        stubAllCommandsSucceed();
 
-        when(mockEnvRepository.findByContainerId("mock-container-id")).thenReturn(Optional.of(env));
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
-
-        provider.initializeWorkspace("mock-container-id");
+        provider.initializeWorkspace(UUID.randomUUID(), "test-token");
 
         verify(mockProcessExecutor, never())
                 .execute(argThat(cmd -> cmd.contains("git") && cmd.contains("safe.directory")), any(), any());
@@ -373,13 +352,7 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testInitializeWorkspaceFailsFastWhenSandboxImageContractViolated() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setProvider(null);
-        env.setContainerId("mock-container-id");
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
-        env.setAuthToken("test-token");
-
-        when(mockEnvRepository.findByContainerId("mock-container-id")).thenReturn(Optional.of(env));
+        UUID envId = UUID.randomUUID();
 
         // Simulate a non-conformant sandbox image: /kratis/workspace was never
         // pre-created/chowned to the sandbox user at image build time, so the
@@ -393,15 +366,15 @@ class LocalDockerSandboxProviderTest {
             return new ProcessExecutor.ProcessResult(0, "".getBytes());
         });
 
-        assertThatThrownBy(() -> provider.initializeWorkspace("mock-container-id"))
+        assertThatThrownBy(() -> provider.initializeWorkspace(envId, "test-token"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Sandbox image contract violation")
                 .hasMessageContaining("/kratis/workspace")
                 .hasMessageContaining("IMAGE BUILD TIME");
 
         // Must fail fast on the very first directory check, before ever attempting to
-        // inject the connector binary via `docker cp` (the log-extraction `docker cp`
-        // inside terminateSandbox is not the connector injection).
+        // inject the connector binary via `docker cp` (the diagnostic log extraction
+        // inside the failure path is not the connector injection).
         verify(mockProcessExecutor, never())
                 .execute(
                         argThat(cmd -> cmd.contains("cp") && cmd.contains("/usr/local/bin/kratis-connector")),
@@ -414,14 +387,13 @@ class LocalDockerSandboxProviderTest {
         EnvironmentProvider envProvider = new EnvironmentProvider();
         envProvider.setDockerImage("custom-image:v1");
 
-        ExecutionEnvironment env = new ExecutionEnvironment();
+        ExecutionEnvironment env = newEnvironment(UUID.randomUUID());
         env.setProvider(envProvider);
 
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
 
-        String containerId = provider.spawnSandbox(env, "test-token");
-        assertThat(containerId).isEqualTo("mock-container-id");
+        provider.spawnSandbox(env);
 
         verify(mockProcessExecutor, atLeastOnce())
                 .execute(
@@ -433,254 +405,164 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testSpawnSandboxFailureExitCode() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
+        ExecutionEnvironment env = newEnvironment(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(1, "error message".getBytes()));
 
-        assertThatThrownBy(() -> provider.spawnSandbox(env, "test-token"))
+        assertThatThrownBy(() -> provider.spawnSandbox(env))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Failed to spawn docker sandbox: error message");
     }
 
     @Test
     void testSpawnSandboxFailureException() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
+        ExecutionEnvironment env = newEnvironment(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any())).thenThrow(new IOException("Simulated IO error"));
 
-        assertThatThrownBy(() -> provider.spawnSandbox(env, "test-token"))
+        assertThatThrownBy(() -> provider.spawnSandbox(env))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Failed to spawn docker sandbox: Simulated IO error");
     }
 
     @Test
-    void testTerminateSandboxSuccess() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
+    void testTerminateSandboxSuccessRemovesDeterministicResources() throws Exception {
+        UUID envId = UUID.randomUUID();
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("ps")) {
+                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        });
 
-        provider.terminateSandbox("test-container-id");
+        provider.terminateSandbox(envId);
 
-        // Sidecar logs are extracted via docker cp before the container is removed
         InOrder inOrder = inOrder(mockProcessExecutor);
         inOrder.verify(mockProcessExecutor)
-                .execute(
-                        argThat(cmd ->
-                                cmd.get(1).equals("cp") && cmd.get(2).equals("test-container-id:" + SIDECAR_LOG_LOC)),
-                        any(),
-                        any());
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "runner-container-id")), any(), any());
+        verifyRunnerRemoved(envId);
         inOrder.verify(mockProcessExecutor)
-                .execute(
-                        eq(List.of(
-                                "docker",
-                                "inspect",
-                                "--format",
-                                "{{ index .Config.Labels \"kratis.sandbox.id\" }}",
-                                "test-container-id")),
-                        any(),
-                        any());
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-dind-" + envId)), any(), any());
         inOrder.verify(mockProcessExecutor)
-                .execute(eq(List.of("docker", "rm", "-f", "-v", "test-container-id")), any(), any());
-        inOrder.verify(mockProcessExecutor)
-                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-sandbox-test-container-id")), any(), any());
-        inOrder.verify(mockProcessExecutor)
-                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-dind-test-container-id")), any(), any());
-        inOrder.verify(mockProcessExecutor)
-                .execute(eq(List.of("docker", "network", "rm", "kratis-net-test-container-id")), any(), any());
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-" + envId)), any(), any());
+
+        // Teardown is pure resource removal: log capture is a separate, explicit call.
+        verify(mockProcessExecutor, never()).execute(argThat(cmd -> cmd.contains("cp")), any(), any());
     }
 
     @Test
-    void testTerminateSandboxLogsSidecarContentWhenCpSucceeds() throws Exception {
+    void testTerminateSandboxFallsBackToDeterministicRunnerName() throws Exception {
+        UUID envId = UUID.randomUUID();
+        stubAllCommandsSucceed();
+
+        provider.terminateSandbox(envId);
+
+        verifyRunnerRemoved(envId);
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-dind-" + envId)), any(), any());
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-" + envId)), any(), any());
+    }
+
+    @Test
+    void testTerminateSandboxRemovesResourcesWhenLabelLookupThrows() throws Exception {
+        UUID envId = UUID.randomUUID();
+        when(mockProcessExecutor.execute(any(), any(), any())).thenThrow(new IOException("Simulated IO error"));
+
+        // Should handle the exception gracefully without throwing
+        provider.terminateSandbox(envId);
+
+        verifyRunnerRemoved(envId);
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-" + envId)), any(), any());
+    }
+
+    @Test
+    void testTerminateSandboxWithLabelInspection() throws Exception {
+        UUID envId = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
-            if (cmd.get(1).equals("cp")) {
+            if (cmd.contains("ps")) {
+                return new ProcessExecutor.ProcessResult(0, "custom-runner-id\n".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        });
+
+        provider.terminateSandbox(envId);
+
+        // The runner is addressed by its label-discovered id; the sibling/network names
+        // are always derived from the environment id.
+        verify(mockProcessExecutor).execute(eq(List.of("docker", "rm", "-f", "-v", "custom-runner-id")), any(), any());
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-dind-" + envId)), any(), any());
+        verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-" + envId)), any(), any());
+    }
+
+    @Test
+    void testCaptureSidecarLogsCopiesLogFromResolvedRunner() throws Exception {
+        UUID envId = UUID.randomUUID();
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("ps")) {
+                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            }
+            if (cmd.size() > 1 && cmd.get(1).equals("cp")) {
                 Files.writeString(Path.of(cmd.get(3)), "sidecar log line 1\nsidecar log line 2\n");
                 return new ProcessExecutor.ProcessResult(0, "".getBytes());
             }
             return new ProcessExecutor.ProcessResult(0, "".getBytes());
         });
 
-        provider.terminateSandbox("test-container-id");
+        provider.captureSidecarLogs(envId);
 
         verify(mockProcessExecutor, times(1))
                 .execute(
                         argThat(cmd ->
-                                cmd.get(1).equals("cp") && cmd.get(2).equals("test-container-id:" + SIDECAR_LOG_LOC)),
-                        any(),
-                        any());
-        verify(mockProcessExecutor, times(1))
-                .execute(eq(List.of("docker", "rm", "-f", "-v", "test-container-id")), any(), any());
-    }
-
-    @Test
-    void testTerminateSandboxStillRemovesContainerWhenCpFailsWithExitCode() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
-            List<String> cmd = invocation.getArgument(0);
-            if (cmd.get(1).equals("cp")) {
-                return new ProcessExecutor.ProcessResult(1, "no such file".getBytes());
-            }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
-        });
-
-        provider.terminateSandbox("test-container-id");
-
-        verify(mockProcessExecutor, times(1))
-                .execute(eq(List.of("docker", "rm", "-f", "-v", "test-container-id")), any(), any());
-    }
-
-    @Test
-    void testTerminateSandboxStillRemovesContainerWhenCpThrows() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
-            List<String> cmd = invocation.getArgument(0);
-            if (cmd.get(1).equals("cp")) {
-                throw new IOException("Simulated IO error");
-            }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
-        });
-
-        provider.terminateSandbox("test-container-id");
-
-        verify(mockProcessExecutor, times(1))
-                .execute(eq(List.of("docker", "rm", "-f", "-v", "test-container-id")), any(), any());
-    }
-
-    @Test
-    void testTerminateSandboxException() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
-            List<String> cmd = invocation.getArgument(0);
-            if (cmd.get(1).equals("cp")) {
-                return new ProcessExecutor.ProcessResult(0, "".getBytes());
-            }
-            throw new IOException("Simulated IO error");
-        });
-
-        // Should handle the exception gracefully without throwing
-        provider.terminateSandbox("test-container-id");
-
-        verify(mockProcessExecutor, times(1))
-                .execute(eq(List.of("docker", "rm", "-f", "-v", "test-container-id")), any(), any());
-    }
-
-    @Test
-    void testTerminateSandboxSkipsSidecarLogExtractionWhenEnvironmentConnected() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setContainerId("test-container-id");
-        env.setStatus(EnvironmentStatus.CONNECTED);
-        when(mockEnvRepository.findByContainerId("test-container-id")).thenReturn(Optional.of(env));
-
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
-
-        provider.terminateSandbox("test-container-id");
-
-        // The sidecar already streamed its output live over env.output, so a clean
-        // (CONNECTED) teardown never copies the on-disk log.
-        verify(mockProcessExecutor, never())
-                .execute(
-                        argThat(cmd ->
-                                cmd.get(1).equals("cp") && cmd.get(2).equals("test-container-id:" + SIDECAR_LOG_LOC)),
-                        any(),
-                        any());
-        verify(mockProcessExecutor, times(1))
-                .execute(eq(List.of("docker", "rm", "-f", "-v", "test-container-id")), any(), any());
-    }
-
-    @Test
-    void testTerminateSandboxCapturesSidecarLogsWhenEnvironmentDisconnected() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setContainerId("test-container-id");
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
-        when(mockEnvRepository.findByContainerId("test-container-id")).thenReturn(Optional.of(env));
-
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
-
-        provider.terminateSandbox("test-container-id");
-
-        // A disconnected sidecar never streamed its output; fall back to the on-disk log.
-        verify(mockProcessExecutor, times(1))
-                .execute(
-                        argThat(cmd ->
-                                cmd.get(1).equals("cp") && cmd.get(2).equals("test-container-id:" + SIDECAR_LOG_LOC)),
+                                cmd.get(1).equals("cp") && cmd.get(2).equals("runner-container-id:" + SIDECAR_LOG_LOC)),
                         any(),
                         any());
     }
 
     @Test
-    void testTerminateSandboxCapturesSidecarLogsWhenEnvironmentPendingConnect() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setContainerId("test-container-id");
-        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
-        when(mockEnvRepository.findByContainerId("test-container-id")).thenReturn(Optional.of(env));
+    void testCaptureSidecarLogsFallsBackToDeterministicRunnerName() throws Exception {
+        UUID envId = UUID.randomUUID();
+        stubAllCommandsSucceed();
 
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
-
-        provider.terminateSandbox("test-container-id");
+        provider.captureSidecarLogs(envId);
 
         verify(mockProcessExecutor, times(1))
                 .execute(
-                        argThat(cmd ->
-                                cmd.get(1).equals("cp") && cmd.get(2).equals("test-container-id:" + SIDECAR_LOG_LOC)),
+                        argThat(cmd -> cmd.get(1).equals("cp")
+                                && cmd.get(2).equals("kratis-sandbox-" + envId + ":" + SIDECAR_LOG_LOC)),
                         any(),
                         any());
     }
 
     @Test
-    void testTerminateSandboxCapturesSidecarLogsWhenEnvironmentUnknown() throws Exception {
-        when(mockEnvRepository.findByContainerId("test-container-id")).thenReturn(Optional.empty());
-
+    void testCaptureSidecarLogsDoesNothingWhenNoRunnerExists() throws Exception {
+        UUID envId = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
+                .thenReturn(new ProcessExecutor.ProcessResult(1, "".getBytes()));
 
-        provider.terminateSandbox("test-container-id");
+        provider.captureSidecarLogs(envId);
 
-        // An orphan with no database record has unknown provenance, so its log is captured.
-        verify(mockProcessExecutor, times(1))
-                .execute(
-                        argThat(cmd ->
-                                cmd.get(1).equals("cp") && cmd.get(2).equals("test-container-id:" + SIDECAR_LOG_LOC)),
-                        any(),
-                        any());
+        verify(mockProcessExecutor, never()).execute(argThat(cmd -> cmd.contains("cp")), any(), any());
     }
 
     @Test
-    void testTerminateSandboxCapturesSidecarLogsInDebugMode() throws Exception {
-        LocalDockerSandboxProvider debugProvider = sandboxProvider(
-                mockProcessExecutor,
-                mockEnvRepository,
-                "ws://localhost:8080/ws",
-                "http://host.docker.internal:5001",
-                "kratis-runner-base:latest",
-                true);
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setContainerId("test-container-id");
-        env.setStatus(EnvironmentStatus.CONNECTED);
-        when(mockEnvRepository.findByContainerId("test-container-id")).thenReturn(Optional.of(env));
-
+    void testListActiveEnvIdsSuccessAndSkipsUnparseableLabels() throws Exception {
+        UUID envA = UUID.randomUUID();
+        UUID envB = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
+                .thenReturn(new ProcessExecutor.ProcessResult(0, (envA + "\nnot-a-uuid\n" + envB + "\n").getBytes()));
 
-        debugProvider.terminateSandbox("test-container-id");
+        Set<UUID> activeIds = provider.listActiveEnvIds();
+        assertThat(activeIds).containsExactlyInAnyOrder(envA, envB);
 
-        // Debug mode always captures the sidecar log regardless of connection health.
-        verify(mockProcessExecutor, times(1))
-                .execute(
-                        argThat(cmd ->
-                                cmd.get(1).equals("cp") && cmd.get(2).equals("test-container-id:" + SIDECAR_LOG_LOC)),
-                        any(),
-                        any());
-    }
-
-    @Test
-    void testGetActiveSandboxIdsSuccess() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "id1\nid2\n".getBytes()));
-
-        List<String> activeIds = provider.getActiveSandboxIds();
-        assertThat(activeIds).containsExactly("id1", "id2");
-
-        // The collector must only ever see runner containers owned by this instance.
+        // The provider must only ever see runner containers owned by this instance.
         verify(mockProcessExecutor)
                 .execute(
                         eq(List.of(
@@ -691,27 +573,34 @@ class LocalDockerSandboxProviderTest {
                                 "label=kratis.instance.id=unit-test-instance",
                                 "--filter",
                                 "label=kratis.role=runner",
-                                "--no-trunc",
-                                "-q")),
+                                "--format",
+                                "{{.Label \"kratis.sandbox.id\"}}")),
                         any(),
                         any());
     }
 
     @Test
-    void testGetActiveSandboxIdsEmptyOutput() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
+    void testListActiveEnvIdsEmptyOutput() throws Exception {
+        stubAllCommandsSucceed();
 
-        List<String> activeIds = provider.getActiveSandboxIds();
+        Set<UUID> activeIds = provider.listActiveEnvIds();
         assertThat(activeIds).isEmpty();
     }
 
     @Test
-    void testGetActiveSandboxIdsFailureExitCode() throws Exception {
+    void testListActiveEnvIdsFailureExitCode() throws Exception {
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(127, "command not found".getBytes()));
 
-        List<String> activeIds = provider.getActiveSandboxIds();
+        Set<UUID> activeIds = provider.listActiveEnvIds();
+        assertThat(activeIds).isEmpty();
+    }
+
+    @Test
+    void testListActiveEnvIdsException() throws Exception {
+        when(mockProcessExecutor.execute(any(), any(), any())).thenThrow(new IOException("Simulated IO error"));
+
+        Set<UUID> activeIds = provider.listActiveEnvIds();
         assertThat(activeIds).isEmpty();
     }
 
@@ -719,19 +608,17 @@ class LocalDockerSandboxProviderTest {
     void testSpawnSandboxWithCustomRegistryMirror() throws Exception {
         LocalDockerSandboxProvider customMirrorProvider = sandboxProvider(
                 mockProcessExecutor,
-                mockEnvRepository,
                 "ws://localhost:8080/ws",
                 "http://custom-mirror:5001",
                 "kratis-runner-base:latest",
                 false);
 
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setId(UUID.randomUUID());
+        ExecutionEnvironment env = newEnvironment(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
 
-        customMirrorProvider.spawnSandbox(env, "test-token");
+        customMirrorProvider.spawnSandbox(env);
 
         verify(mockProcessExecutor)
                 .execute(
@@ -739,32 +626,6 @@ class LocalDockerSandboxProviderTest {
                                 && cmd.contains("--registry-mirror=http://custom-mirror:5001")),
                         any(),
                         any());
-    }
-
-    @Test
-    void testTerminateSandboxWithLabelInspection() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
-            List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("inspect")) {
-                return new ProcessExecutor.ProcessResult(0, "custom-sandbox-uuid\n".getBytes());
-            }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
-        });
-
-        provider.terminateSandbox("test-container-id");
-
-        verify(mockProcessExecutor)
-                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-dind-custom-sandbox-uuid")), any(), any());
-        verify(mockProcessExecutor)
-                .execute(eq(List.of("docker", "network", "rm", "kratis-net-custom-sandbox-uuid")), any(), any());
-    }
-
-    @Test
-    void testGetActiveSandboxIdsException() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any())).thenThrow(new IOException("Simulated IO error"));
-
-        List<String> activeIds = provider.getActiveSandboxIds();
-        assertThat(activeIds).isEmpty();
     }
 
     @Test
@@ -786,13 +647,12 @@ class LocalDockerSandboxProviderTest {
 
     @Test
     void testSpawnSandboxGrantsRootlesskitApparmorProfileOnlyWhenUsernsRestricted() throws Exception {
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setId(UUID.randomUUID());
+        ExecutionEnvironment env = newEnvironment(UUID.randomUUID());
 
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes()));
 
-        provider.spawnSandbox(env, "test-token");
+        provider.spawnSandbox(env);
 
         boolean restricted = LocalDockerSandboxProvider.apparmorRestrictsUnprivilegedUserns();
         verify(mockProcessExecutor)
@@ -806,25 +666,22 @@ class LocalDockerSandboxProviderTest {
     @Test
     void testSuspendCommitsSnapshotAndTearsDownSandbox() throws Exception {
         UUID envUuid = UUID.randomUUID();
-        ExecutionEnvironment envRow = new ExecutionEnvironment();
-        envRow.setContainerId("runner-container-id");
-        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.of(envRow));
 
         AtomicInteger imageLookups = new AtomicInteger();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("images")) {
+            if (cmd.contains("inspect") && cmd.stream().anyMatch(arg -> arg.contains("kratis-snapshot-"))) {
                 return imageLookups.getAndIncrement() == 0
                         ? new ProcessExecutor.ProcessResult(0, "old-image-id".getBytes())
                         : new ProcessExecutor.ProcessResult(0, "new-image-id".getBytes());
             }
-            if (cmd.contains("inspect")) {
-                return new ProcessExecutor.ProcessResult(0, "runner-container-id".getBytes());
+            if (cmd.contains("ps")) {
+                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
             }
             return new ProcessExecutor.ProcessResult(0, "".getBytes());
         });
 
-        provider.suspend(envUuid.toString());
+        provider.suspend(envUuid);
 
         String snapshotRef = "kratis-snapshot-" + envUuid + ":latest";
         verify(mockProcessExecutor)
@@ -841,132 +698,127 @@ class LocalDockerSandboxProviderTest {
     @Test
     void testSuspendFailsWhenNoRunnerContainerExists() throws Exception {
         UUID envUuid = UUID.randomUUID();
-        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.empty());
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(1, "".getBytes()));
 
-        assertThatThrownBy(() -> provider.suspend(envUuid.toString())).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> provider.suspend(envUuid)).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
-    void testSuspendFallsBackToLabelLookupWhenDbContainerIdIsStale() throws Exception {
+    void testSuspendFallsBackToDeterministicRunnerNameWhenLabelLookupIsEmpty() throws Exception {
         UUID envUuid = UUID.randomUUID();
-        ExecutionEnvironment envRow = new ExecutionEnvironment();
-        envRow.setContainerId("stale-container-id");
-        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.of(envRow));
 
         AtomicInteger imageLookups = new AtomicInteger();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("images")) {
+            if (cmd.contains("inspect") && cmd.stream().anyMatch(arg -> arg.contains("kratis-snapshot-"))) {
                 return imageLookups.getAndIncrement() == 0
                         ? new ProcessExecutor.ProcessResult(0, "old-image-id".getBytes())
                         : new ProcessExecutor.ProcessResult(0, "new-image-id".getBytes());
             }
-            if (cmd.contains("inspect")) {
-                return cmd.stream().anyMatch(arg -> arg.contains("label="))
-                        ? new ProcessExecutor.ProcessResult(0, "".getBytes())
-                        : new ProcessExecutor.ProcessResult(1, "".getBytes());
-            }
             if (cmd.contains("ps")) {
-                return new ProcessExecutor.ProcessResult(0, "live-runner-id".getBytes());
+                // No container carries the sandbox label; the deterministic name resolves instead.
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
             }
             return new ProcessExecutor.ProcessResult(0, "".getBytes());
         });
 
-        provider.suspend(envUuid.toString());
+        provider.suspend(envUuid);
 
+        // The container-existence probe uses `docker inspect` on the deterministic name.
         verify(mockProcessExecutor)
-                .execute(argThat(cmd -> cmd.contains("commit") && cmd.contains("live-runner-id")), any(), any());
+                .execute(
+                        eq(List.of("docker", "inspect", "--format", "{{.Id}}", "kratis-sandbox-" + envUuid)),
+                        any(),
+                        any());
+        verify(mockProcessExecutor)
+                .execute(
+                        argThat(cmd -> cmd.contains("commit") && cmd.contains("kratis-sandbox-" + envUuid)),
+                        any(),
+                        any());
     }
 
     @Test
-    void testIsContainerRunningTrueWhenInspectReportsRunning() throws Exception {
+    void testIsSandboxRunningTrueWhenInspectReportsRunning() throws Exception {
         UUID envUuid = UUID.randomUUID();
-        ExecutionEnvironment envRow = new ExecutionEnvironment();
-        envRow.setContainerId("runner-container-id");
-        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.of(envRow));
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
             if (cmd.contains("{{.State.Running}}")) {
                 return new ProcessExecutor.ProcessResult(0, "true\n".getBytes());
             }
-            return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            if (cmd.contains("ps")) {
+                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
         });
 
-        assertThat(provider.isContainerRunning(envUuid.toString())).isTrue();
+        assertThat(provider.isSandboxRunning(envUuid)).isTrue();
     }
 
     @Test
-    void testIsContainerRunningFalseWhenInspectReportsStopped() throws Exception {
+    void testIsSandboxRunningFalseWhenInspectReportsStopped() throws Exception {
         UUID envUuid = UUID.randomUUID();
-        ExecutionEnvironment envRow = new ExecutionEnvironment();
-        envRow.setContainerId("runner-container-id");
-        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.of(envRow));
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
             if (cmd.contains("{{.State.Running}}")) {
                 return new ProcessExecutor.ProcessResult(0, "false\n".getBytes());
             }
-            return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            if (cmd.contains("ps")) {
+                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
         });
 
-        assertThat(provider.isContainerRunning(envUuid.toString())).isFalse();
+        assertThat(provider.isSandboxRunning(envUuid)).isFalse();
     }
 
     @Test
-    void testIsContainerRunningFalseWhenNoContainerExists() throws Exception {
+    void testIsSandboxRunningFalseWhenNoContainerExists() throws Exception {
         UUID envUuid = UUID.randomUUID();
-        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.empty());
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(1, "".getBytes()));
 
-        assertThat(provider.isContainerRunning(envUuid.toString())).isFalse();
+        assertThat(provider.isSandboxRunning(envUuid)).isFalse();
     }
 
     @Test
-    void testIsContainerRunningTrueWhenRuntimeStateUnobservable() throws Exception {
+    void testIsSandboxRunningTrueWhenRuntimeStateUnobservable() throws Exception {
         UUID envUuid = UUID.randomUUID();
-        ExecutionEnvironment envRow = new ExecutionEnvironment();
-        envRow.setContainerId("runner-container-id");
-        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.of(envRow));
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
             if (cmd.contains("{{.State.Running}}")) {
                 throw new IOException("docker down");
             }
-            return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            if (cmd.contains("ps")) {
+                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
         });
 
-        assertThat(provider.isContainerRunning(envUuid.toString())).isTrue();
+        assertThat(provider.isSandboxRunning(envUuid)).isTrue();
     }
 
     @Test
-    void testIsContainerRunningFalseForBlankEnvId() {
-        assertThat(provider.isContainerRunning(null)).isFalse();
-        assertThat(provider.isContainerRunning(" ")).isFalse();
+    void testIsSandboxRunningFalseForNullEnvId() {
+        assertThat(provider.isSandboxRunning(null)).isFalse();
         verifyNoInteractions(mockProcessExecutor);
     }
 
     @Test
     void testResumeStartsRunnerFromSnapshotImage() throws Exception {
         UUID envUuid = UUID.randomUUID();
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setId(envUuid);
+        ExecutionEnvironment env = newEnvironment(envUuid);
         env.setProvider(null);
-        env.setStatus(EnvironmentStatus.SLEEPING);
 
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("images")) {
+            if (cmd.contains("inspect") && cmd.stream().anyMatch(arg -> arg.contains("kratis-snapshot-"))) {
                 return new ProcessExecutor.ProcessResult(0, "snapshot-image-id".getBytes());
             }
             return new ProcessExecutor.ProcessResult(0, "mock-container-id\n".getBytes());
         });
 
-        String containerId = provider.resume(envUuid.toString(), env, "test-token");
-
-        assertThat(containerId).isEqualTo("mock-container-id");
+        provider.resume(env);
 
         verify(mockProcessExecutor, atLeastOnce())
                 .execute(
@@ -986,10 +838,9 @@ class LocalDockerSandboxProviderTest {
         UUID envUuid = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
-        ExecutionEnvironment env = new ExecutionEnvironment();
-        env.setId(envUuid);
+        ExecutionEnvironment env = newEnvironment(envUuid);
 
-        assertThatThrownBy(() -> provider.resume(envUuid.toString(), env, "test-token"))
+        assertThatThrownBy(() -> provider.resume(env))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("No suspended snapshot");
 
@@ -1000,10 +851,9 @@ class LocalDockerSandboxProviderTest {
     @Test
     void testDestroyRemovesSnapshotImageForSleepingEnvironment() throws Exception {
         UUID envUuid = UUID.randomUUID();
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
+        stubAllCommandsSucceed();
 
-        provider.destroy(envUuid.toString());
+        provider.destroy(envUuid);
 
         verify(mockProcessExecutor)
                 .execute(eq(List.of("docker", "rmi", "-f", "kratis-snapshot-" + envUuid + ":latest")), any(), any());
@@ -1012,19 +862,15 @@ class LocalDockerSandboxProviderTest {
     @Test
     void testDestroyTerminatesRunningResourcesAndRemovesSnapshot() throws Exception {
         UUID envUuid = UUID.randomUUID();
-        ExecutionEnvironment envRow = new ExecutionEnvironment();
-        envRow.setContainerId("runner-container-id");
-        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.of(envRow));
-
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("inspect")) {
-                return new ProcessExecutor.ProcessResult(0, "runner-container-id".getBytes());
+            if (cmd.contains("ps")) {
+                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
             }
             return new ProcessExecutor.ProcessResult(0, "".getBytes());
         });
 
-        provider.destroy(envUuid.toString());
+        provider.destroy(envUuid);
 
         verify(mockProcessExecutor)
                 .execute(eq(List.of("docker", "rm", "-f", "-v", "runner-container-id")), any(), any());
@@ -1035,10 +881,117 @@ class LocalDockerSandboxProviderTest {
     @Test
     void testDestroyIsTolerantOfMissingSnapshotAndContainer() throws Exception {
         UUID envUuid = UUID.randomUUID();
-        when(mockEnvRepository.findById(envUuid)).thenReturn(Optional.empty());
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(1, "No such image".getBytes()));
 
-        Assertions.assertThatCode(() -> provider.destroy(envUuid.toString())).doesNotThrowAnyException();
+        Assertions.assertThatCode(() -> provider.destroy(envUuid)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void testDestroyIsIdempotent() throws Exception {
+        UUID envUuid = UUID.randomUUID();
+        when(mockProcessExecutor.execute(any(), any(), any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(1, "No such image".getBytes()));
+
+        provider.destroy(envUuid);
+        provider.destroy(envUuid);
+
+        verify(mockProcessExecutor, times(2))
+                .execute(eq(List.of("docker", "rmi", "-f", "kratis-snapshot-" + envUuid + ":latest")), any(), any());
+    }
+
+    @Test
+    void testPruneOrphanNetworksKeepsNetworkWithinGracePeriod() throws Exception {
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("network") && cmd.contains("ls")) {
+                return new ProcessExecutor.ProcessResult(0, "kratis-net-orphan\n".getBytes());
+            }
+            if (cmd.contains("network") && cmd.contains("inspect")) {
+                return new ProcessExecutor.ProcessResult(0, "0\n".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        });
+
+        provider.pruneOrphanNetworks(Duration.ofSeconds(60));
+
+        verify(mockProcessExecutor, never())
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-orphan")), any(), any());
+    }
+
+    @Test
+    void testPruneOrphanNetworksRemovesNetworkAfterGracePeriod() throws Exception {
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("network") && cmd.contains("ls")) {
+                return new ProcessExecutor.ProcessResult(0, "kratis-net-orphan\n".getBytes());
+            }
+            if (cmd.contains("network") && cmd.contains("inspect")) {
+                return new ProcessExecutor.ProcessResult(0, "0\n".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        });
+
+        // A zero grace period makes the freshly-tracked network immediately eligible.
+        provider.pruneOrphanNetworks(Duration.ZERO);
+        provider.pruneOrphanNetworks(Duration.ZERO);
+
+        verify(mockProcessExecutor, atLeastOnce())
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-orphan")), any(), any());
+    }
+
+    @Test
+    void testPruneOrphanNetworksNeverRemovesNetworkWithAttachedContainers() throws Exception {
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("network") && cmd.contains("ls")) {
+                return new ProcessExecutor.ProcessResult(0, "kratis-net-inuse\n".getBytes());
+            }
+            if (cmd.contains("network") && cmd.contains("inspect")) {
+                return new ProcessExecutor.ProcessResult(0, "2\n".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        });
+
+        provider.pruneOrphanNetworks(Duration.ZERO);
+
+        verify(mockProcessExecutor, never())
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-inuse")), any(), any());
+    }
+
+    @Test
+    void testPruneOrphanNetworksListsOnlyThisInstancesNetworkRoleNetworks() throws Exception {
+        stubAllCommandsSucceed();
+
+        provider.pruneOrphanNetworks(Duration.ZERO);
+
+        verify(mockProcessExecutor)
+                .execute(
+                        eq(List.of(
+                                "docker",
+                                "network",
+                                "ls",
+                                "--filter",
+                                "label=kratis.instance.id=unit-test-instance",
+                                "--filter",
+                                "label=kratis.role=network",
+                                "--format",
+                                "{{.Name}}")),
+                        any(),
+                        any());
+    }
+
+    @Test
+    void testResolveContainerReachableHost() {
+        String gateway = "172.18.0.1";
+        String resolved = LocalDockerSandboxProvider.resolveContainerReachableHost(gateway);
+
+        if (Files.exists(Path.of("/.dockerenv"))) {
+            // Inside a container the bridge gateway points at the docker host, not this
+            // process, so the resolved address must differ from the gateway.
+            assertThat(resolved).isNotBlank();
+        } else {
+            assertThat(resolved).isEqualTo(gateway);
+        }
     }
 }

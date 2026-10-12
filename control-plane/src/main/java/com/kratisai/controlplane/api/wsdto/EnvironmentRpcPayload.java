@@ -99,7 +99,6 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
     /** Authenticate and connect a sidecar. */
     record Register(
             @JsonProperty("token") String token,
-            @JsonProperty("containerId") String containerId,
             @JsonProperty("isReconnect") Boolean isReconnect,
             @JsonProperty("activeAcpSessionId") String activeAcpSessionId,
             @JsonProperty("hasActiveAgent") Boolean hasActiveAgent,

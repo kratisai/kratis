@@ -134,7 +134,7 @@ class ExecutionEnvironmentWebSocketIntegrationTest {
                 // Send register message with connector token
                 JsonRpcInboundRequest registerRequest = new JsonRpcInboundRequest(
                         EnvironmentRpcPayload.Register.METHOD,
-                        objectMapper.valueToTree(Map.of("token", connectorToken, "containerId", "container-123")),
+                        objectMapper.valueToTree(Map.of("token", connectorToken)),
                         1);
                 session.sendMessage(new TextMessage(objectMapper.writeValueAsString(registerRequest)));
             }
@@ -173,7 +173,6 @@ class ExecutionEnvironmentWebSocketIntegrationTest {
         ExecutionEnvironment envAfterConnect =
                 executionEnvironmentRepository.findById(envId).orElseThrow();
         assertThat(envAfterConnect.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
-        assertThat(envAfterConnect.getContainerId()).isEqualTo("container-123");
 
         // Verify heartbeat succeeded
         boolean heartbeatOk = heartbeatLatch.await(5, TimeUnit.SECONDS);

@@ -80,8 +80,8 @@ class EnvironmentRegisterRpcHandlerTest {
         ExecutionEnvironment env = createEnvironment();
         when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
 
-        EnvironmentRpcPayload.Register params = new EnvironmentRpcPayload.Register(
-                authToken, "container-123", false, null, false, 0L, null, 1, "0.1.0");
+        EnvironmentRpcPayload.Register params =
+                new EnvironmentRpcPayload.Register(authToken, false, null, false, 0L, null, 1, "0.1.0");
         JsonRpcInboundRequest request =
                 new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
 
@@ -95,7 +95,6 @@ class EnvironmentRegisterRpcHandlerTest {
 
         verify(executionEnvironmentRepository).save(env);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
-        assertThat(env.getContainerId()).isEqualTo("container-123");
         assertThat(env.getLastHeartbeat()).isNotNull();
 
         verify(sessionRegistry).registerEnvironmentSession(any(String.class), eq(envId));
@@ -109,7 +108,7 @@ class EnvironmentRegisterRpcHandlerTest {
         when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
 
         EnvironmentRpcPayload.Register params =
-                new EnvironmentRpcPayload.Register(authToken, null, false, null, false, 0L, null, 1, "0.1.0");
+                new EnvironmentRpcPayload.Register(authToken, false, null, false, 0L, null, 1, "0.1.0");
         JsonRpcInboundRequest request =
                 new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
 
@@ -136,8 +135,8 @@ class EnvironmentRegisterRpcHandlerTest {
         when(pendingHitlRegistry.rebindBySession(eq(oldSessionId), any(String.class)))
                 .thenReturn(0);
 
-        EnvironmentRpcPayload.Register params = new EnvironmentRpcPayload.Register(
-                authToken, null, true, "acp-session-123", true, 42L, null, 1, "0.1.0");
+        EnvironmentRpcPayload.Register params =
+                new EnvironmentRpcPayload.Register(authToken, true, "acp-session-123", true, 42L, null, 1, "0.1.0");
         JsonRpcInboundRequest request =
                 new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
 
@@ -170,7 +169,7 @@ class EnvironmentRegisterRpcHandlerTest {
                 .thenReturn(3);
 
         EnvironmentRpcPayload.Register params = new EnvironmentRpcPayload.Register(
-                authToken, null, true, null, false, 0L, List.of("perm-1", "perm-2", "perm-3"), 1, "0.1.0");
+                authToken, true, null, false, 0L, List.of("perm-1", "perm-2", "perm-3"), 1, "0.1.0");
         JsonRpcInboundRequest request =
                 new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
 
@@ -189,7 +188,7 @@ class EnvironmentRegisterRpcHandlerTest {
                 .thenReturn(null);
 
         EnvironmentRpcPayload.Register params =
-                new EnvironmentRpcPayload.Register(authToken, null, true, null, false, 0L, null, 1, "0.1.0");
+                new EnvironmentRpcPayload.Register(authToken, true, null, false, 0L, null, 1, "0.1.0");
         JsonRpcInboundRequest request =
                 new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
 
@@ -206,7 +205,7 @@ class EnvironmentRegisterRpcHandlerTest {
         when(executionEnvironmentRepository.findByAuthToken("invalid-token")).thenReturn(Optional.empty());
 
         EnvironmentRpcPayload.Register params =
-                new EnvironmentRpcPayload.Register("invalid-token", null, false, null, false, 0L, null, 1, "0.1.0");
+                new EnvironmentRpcPayload.Register("invalid-token", false, null, false, 0L, null, 1, "0.1.0");
         JsonRpcInboundRequest request =
                 new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
 
@@ -230,7 +229,7 @@ class EnvironmentRegisterRpcHandlerTest {
         "NP_NULL_PARAM_DEREF_ALL_TARGETS_DANGEROUS"
     })
     private void registerWithMissingToken() {
-        new EnvironmentRpcPayload.Register(null, null, false, null, false, 0L, null, 1, "0.1.0");
+        new EnvironmentRpcPayload.Register(null, false, null, false, 0L, null, 1, "0.1.0");
     }
 
     @Test
@@ -258,7 +257,7 @@ class EnvironmentRegisterRpcHandlerTest {
         when(pendingHitlRegistry.rebindBySession(any(), any(String.class))).thenReturn(0);
 
         EnvironmentRpcPayload.Register params =
-                new EnvironmentRpcPayload.Register(authToken, null, true, null, false, 0L, null, 1, "0.1.0");
+                new EnvironmentRpcPayload.Register(authToken, true, null, false, 0L, null, 1, "0.1.0");
         JsonRpcInboundRequest request =
                 new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
 

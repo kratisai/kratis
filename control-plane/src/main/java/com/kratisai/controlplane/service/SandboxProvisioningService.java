@@ -13,7 +13,6 @@ import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.CanvasRepository;
-import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -36,14 +35,12 @@ public class SandboxProvisioningService {
     private static final long DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
 
     private final SandboxOrchestratorService sandboxOrchestratorService;
-    private final ExecutionEnvironmentRepository executionEnvironmentRepository;
     private final SandboxExecutionRepository sandboxExecutionRepository;
     private final CanvasRepository canvasRepository;
     private final GitCredentialResolver credentialResolver;
     private final VirtualKeyService virtualKeyService;
     private final LiteLLMProvisioningService litellmProvisioningService;
     private final LiteLLMProperties litellmProperties;
-    private final TransactionTemplate transactionTemplate;
     private final TransactionTemplate requiresNewTransactionTemplate;
     private final EnvironmentRpcClient environmentRpcClient;
     private final InstanceProperties instanceProperties;
@@ -54,7 +51,6 @@ public class SandboxProvisioningService {
     public SandboxProvisioningService(
             PlatformTransactionManager transactionManager,
             SandboxOrchestratorService sandboxOrchestratorService,
-            ExecutionEnvironmentRepository executionEnvironmentRepository,
             SandboxExecutionRepository sandboxExecutionRepository,
             CanvasRepository canvasRepository,
             GitCredentialResolver credentialResolver,
@@ -64,13 +60,11 @@ public class SandboxProvisioningService {
             EnvironmentRpcClient environmentRpcClient,
             InstanceProperties instanceProperties,
             HarnessesProperties harnessesProperties) {
-        this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(
                 org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
 
         this.sandboxOrchestratorService = sandboxOrchestratorService;
-        this.executionEnvironmentRepository = executionEnvironmentRepository;
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.canvasRepository = canvasRepository;
         this.credentialResolver = credentialResolver;
@@ -83,18 +77,11 @@ public class SandboxProvisioningService {
     }
 
     public void provisionEnvironment(ExecutionEnvironment environment, String token) {
+        Objects.requireNonNull(token, "token is required");
         SandboxProvider sandboxProvider =
                 sandboxOrchestratorService.getProvider(environment.getProvider().getType());
-        String containerId = sandboxProvider.spawnSandbox(environment, token);
-
-        transactionTemplate.executeWithoutResult(status -> {
-            ExecutionEnvironment env =
-                    executionEnvironmentRepository.findById(environment.getId()).orElseThrow();
-            env.setContainerId(containerId);
-            executionEnvironmentRepository.save(env);
-        });
-
-        sandboxProvider.initializeWorkspace(containerId);
+        sandboxProvider.spawnSandbox(environment);
+        sandboxProvider.initializeWorkspace(environment.getId(), token);
     }
 
     public void launchAgent(SandboxExecution execution) throws Exception {

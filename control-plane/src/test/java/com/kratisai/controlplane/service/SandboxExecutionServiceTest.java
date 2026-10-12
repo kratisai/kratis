@@ -155,7 +155,6 @@ class SandboxExecutionServiceTest {
         sandboxProvisioningService = new SandboxProvisioningService(
                 transactionManager,
                 sandboxOrchestratorService,
-                executionEnvironmentRepository,
                 sandboxExecutionRepository,
                 canvasRepository,
                 credentialResolver,
@@ -1258,7 +1257,6 @@ class SandboxExecutionServiceTest {
         SandboxProvisioningService provisioningService = new SandboxProvisioningService(
                 transactionManager,
                 sandboxOrchestratorService,
-                executionEnvironmentRepository,
                 sandboxExecutionRepository,
                 canvasRepository,
                 credentialResolver,
@@ -1364,7 +1362,7 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
-    void terminateExecution_cancelsEveryPendingHitl() throws Exception {
+    void terminateExecution_cancelsEveryPendingHitl() {
         SandboxExecution execution = createTestExecution();
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sessionRegistry.getSessionForEnvironment(execution.getEnvironment().getId()))
@@ -1572,15 +1570,8 @@ class SandboxExecutionServiceTest {
                     }
                     return env;
                 });
-        when(executionEnvironmentRepository.findById(any(UUID.class))).thenAnswer(inv -> {
-            ExecutionEnvironment env = new ExecutionEnvironment();
-            env.setId(inv.getArgument(0));
-            return Optional.of(env);
-        });
         when(sandboxOrchestratorService.getProvider(any(ExecutionProviderType.class)))
                 .thenReturn(sandboxProvider);
-        when(sandboxProvider.spawnSandbox(any(ExecutionEnvironment.class), any(String.class)))
-                .thenReturn("container-1");
 
         CreateSandboxExecutionRequest request = new CreateSandboxExecutionRequest(
                 envProvider.getId(),

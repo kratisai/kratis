@@ -72,7 +72,6 @@ describe('Environments Flow', () => {
     ])
     mockListEnvironments([
       {
-        containerId: null,
         createdAt: '2024-01-01T00:00:00Z',
         id: 'env-1',
         lastHeartbeat: null,
@@ -161,7 +160,6 @@ describe('Environments Flow', () => {
     ])
     mockListEnvironments([
       {
-        containerId: 'abc123',
         createdAt: '2024-01-01T00:00:00Z',
         id: 'env-connected',
         lastHeartbeat: '2024-01-01T00:00:00Z',
@@ -172,7 +170,6 @@ describe('Environments Flow', () => {
         updatedAt: '2024-01-01T00:00:00Z',
       },
       {
-        containerId: null,
         createdAt: '2024-01-01T00:00:00Z',
         id: 'env-pending',
         lastHeartbeat: null,
@@ -215,7 +212,6 @@ describe('Environments Flow', () => {
     ])
     mockListEnvironments([
       {
-        containerId: 'abc123',
         createdAt: '2024-01-01T00:00:00Z',
         id: 'env-connected',
         lastHeartbeat: '2024-01-01T00:00:00Z',
@@ -242,7 +238,6 @@ describe('Environments Flow', () => {
     })
     const cards = screen.getByTestId('environment-cards')
     expect(within(cards).getByText('Connected Env')).toBeInTheDocument()
-    expect(within(cards).getByText('abc123')).toBeInTheDocument()
     expect(within(cards).getByText('CONNECTOR')).toBeInTheDocument()
     expect(within(cards).getByRole('button', { name: /delete connected env/i })).toBeInTheDocument()
   })
@@ -260,7 +255,6 @@ describe('Environments Flow', () => {
     ])
     mockListEnvironments([
       {
-        containerId: null,
         createdAt: '2024-01-01T00:00:00Z',
         id: 'env-1',
         lastHeartbeat: null,
@@ -318,7 +312,6 @@ describe('Environments Flow', () => {
     ])
     mockListEnvironments([
       {
-        containerId: 'container-1',
         createdAt: '2024-01-01T00:00:00Z',
         id: 'env-sandbox',
         lastHeartbeat: '2024-01-01T00:00:00Z',
@@ -373,7 +366,6 @@ describe('Environments Flow', () => {
     ])
     mockListEnvironments([
       {
-        containerId: null,
         createdAt: '2024-01-01T00:00:00Z',
         id: 'env-1',
         lastHeartbeat: null,
@@ -384,7 +376,6 @@ describe('Environments Flow', () => {
         updatedAt: '2024-01-01T00:00:00Z',
       },
       {
-        containerId: 'container-stopped',
         createdAt: '2024-01-01T00:00:00Z',
         id: 'env-stopped',
         lastHeartbeat: null,
