@@ -83,6 +83,8 @@ usage and spend in PostgreSQL (Redis-free) and the key is revoked on termination
 On completion, termination, or reconnect-lease expiry the control plane:
 
 1. Sends `env.terminate` (connector cancels/closes the ACP session and stops the agent).
+   The resulting `env.complete` is marked `terminated: true`, so a deliberate stop (including
+   the idle-sleeper's gentle pause) is not recorded as an agent failure.
 2. Revokes the transient LiteLLM virtual key.
 3. Calls `destroy` on the provider (or `terminateSandbox` to keep a suspend snapshot) —
    idempotent, even if an earlier step fails.

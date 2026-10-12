@@ -241,10 +241,7 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 			c.mu.Unlock()
 		}
 	} else if promptErr != nil || (stopReason != "" && !ValidStopReasons[stopReason]) {
-		errMessage := ""
-		if result != nil {
-			errMessage = result.ErrMessage
-		}
+		errMessage := result.ErrMessage
 		c.reportPromptFailure(session.SessionID, promptErr, errMessage, stopReason)
 	}
 }
@@ -335,7 +332,7 @@ func (c *Client) ExecuteTerminate(_ TerminateParams, reqID interface{}) {
 
 	if sup == nil {
 		c.SendOutput("[Terminate] No active ACP session found - nothing to terminate", "stdout")
-		c.SendComplete(runner.CompletionInfo{ExitCode: 0, Reason: "terminated (no active agent session)"})
+		c.SendComplete(runner.CompletionInfo{ExitCode: 0, Reason: "terminated (no active agent session)", Terminated: true})
 		c.sendSuccessResponse(reqID, TerminateResult{Status: TerminateCompleted, ExitCode: 0})
 		return
 	}

@@ -541,6 +541,7 @@ func (c *Client) SendComplete(info runner.CompletionInfo) {
 		ExitCode:    info.ExitCode,
 		ExecutionID: execID,
 		Reason:      info.Reason,
+		Terminated:  info.Terminated,
 	})
 }
 
