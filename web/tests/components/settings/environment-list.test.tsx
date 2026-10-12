@@ -24,10 +24,8 @@ describe('EnvironmentList Component', () => {
     name: string,
     type: string,
     status: string,
-    containerId: null | string = null,
   ): ExecutionEnvironmentDto {
     return {
-      containerId,
       createdAt: '2026-01-01T00:00:00Z',
       id,
       lastActivity: null,
@@ -51,7 +49,6 @@ describe('EnvironmentList Component', () => {
     vi.mocked(useEnvironments).mockReturnValue({
       data: [
         {
-          containerId: null,
           createdAt: '2026-01-01T00:00:00Z',
           id: 'env-1',
           lastActivity: null,
@@ -74,7 +71,6 @@ describe('EnvironmentList Component', () => {
   it('renders environments sorted by latest activity descending and null activity at the bottom', () => {
     const mockEnvironments: ExecutionEnvironmentDto[] = [
       {
-        containerId: null,
         createdAt: '2026-01-01T00:00:00Z',
         id: 'env-inactive',
         lastActivity: null,
@@ -86,7 +82,6 @@ describe('EnvironmentList Component', () => {
         updatedAt: '2026-01-01T00:00:00Z',
       },
       {
-        containerId: null,
         createdAt: '2026-01-01T00:00:00Z',
         id: 'env-older',
         lastActivity: '2026-09-20T12:00:00Z',
@@ -98,7 +93,6 @@ describe('EnvironmentList Component', () => {
         updatedAt: '2026-01-01T00:00:00Z',
       },
       {
-        containerId: null,
         createdAt: '2026-01-01T00:00:00Z',
         id: 'env-recent',
         lastActivity: '2026-09-27T10:00:00Z',
@@ -157,7 +151,7 @@ describe('EnvironmentList Component', () => {
 
   it('offers Resume for a sleeping sandbox only', () => {
     const mockEnvironments: ExecutionEnvironmentDto[] = [
-      makeEnv('running-env', 'Running Sandbox', 'SANDBOX', 'CONNECTED', 'container-1'),
+      makeEnv('running-env', 'Running Sandbox', 'SANDBOX', 'CONNECTED'),
       makeEnv('sleeping-env', 'Sleeping Sandbox', 'SANDBOX', 'SLEEPING'),
     ]
     mockEnvironmentsData(mockEnvironments)

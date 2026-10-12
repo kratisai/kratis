@@ -9,6 +9,7 @@ import rehypeHighlight from 'rehype-highlight'
 import remarkGfm from 'remark-gfm'
 
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { useResetAfterDelay } from '@/hooks/use-reset-after-delay'
 import { copyToClipboard } from '@/lib/clipboard'
 import { cn } from '@/lib/utils'
 
@@ -239,16 +240,13 @@ function MermaidDiagram({ chart }: { chart: string }) {
   const [svg, setSvg] = useState<null | string>(null)
   const [error, setError] = useState<null | string>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useResetAfterDelay(false, false, 1500)
   const { resolvedTheme } = useTheme()
   const id = useId()
   const renderCounter = useRef(0)
 
   const handleCopy = () => {
-    void copyToClipboard(chart, 'Diagram source copied to clipboard').then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
+    void copyToClipboard(chart, 'Diagram source copied to clipboard').then(() => setCopied(true))
   }
 
   useEffect(() => {

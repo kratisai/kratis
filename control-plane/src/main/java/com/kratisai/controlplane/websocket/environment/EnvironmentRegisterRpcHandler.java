@@ -87,7 +87,7 @@ public class EnvironmentRegisterRpcHandler
                     params.pendingHitlIds() != null ? params.pendingHitlIds() : List.of());
             return Flux.just(handleReconnect(sessionId, env, reconnectState));
         }
-        return Flux.just(handleInitialRegistration(sessionId, env, params));
+        return Flux.just(handleInitialRegistration(sessionId, env));
     }
 
     private EnvironmentResponsePayload handleReconnect(
@@ -116,12 +116,8 @@ public class EnvironmentRegisterRpcHandler
         return EnvironmentRegisterResult.reconnected(env.getId().toString());
     }
 
-    private EnvironmentResponsePayload handleInitialRegistration(
-            String sessionId, ExecutionEnvironment env, EnvironmentRpcPayload.Register params) {
+    private EnvironmentResponsePayload handleInitialRegistration(String sessionId, ExecutionEnvironment env) {
         env.setStatus(EnvironmentStatus.CONNECTED);
-        if (params.containerId() != null) {
-            env.setContainerId(params.containerId());
-        }
         env.setLastHeartbeat(Instant.now());
         executionEnvironmentRepository.save(env);
 

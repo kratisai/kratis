@@ -1,0 +1,22 @@
+databaseChangeLog:
+- changeSet:
+    id: 008-sandbox-lifecycle-001
+    author: kratis
+    changes:
+    - addColumn:
+        tableName: execution_environments
+        columns:
+        - column:
+            name: suspended_at
+            type: TIMESTAMP WITH TIME ZONE
+    - sql:
+        dbms: postgresql
+        splitStatements: true
+        stripComments: true
+        sql: >-
+          UPDATE execution_environments
+          SET suspended_at = last_heartbeat
+          WHERE status = 'SLEEPING' AND suspended_at IS NULL;
+    - dropColumn:
+        tableName: execution_environments
+        columnName: container_id

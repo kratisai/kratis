@@ -74,7 +74,6 @@ public class TeamService {
         defaultEnv.setTeam(team);
         defaultEnv.setName("Default Sandbox");
         defaultEnv.setType(ExecutionEnvironmentType.SANDBOX);
-        defaultEnv.setContainerId(runnerImage);
         defaultEnv.setStatus(EnvironmentStatus.DISCONNECTED);
         executionEnvironmentRepository.save(defaultEnv);
 

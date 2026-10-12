@@ -164,7 +164,6 @@ const (
 
 type RegisterParams struct {
 	Token              string   `json:"token"`
-	ContainerID        string   `json:"containerId,omitempty"`
 	IsReconnect        bool     `json:"isReconnect,omitempty"`
 	ActiveAcpSessionID string   `json:"activeAcpSessionId,omitempty"`
 	HasActiveAgent     bool     `json:"hasActiveAgent,omitempty"`

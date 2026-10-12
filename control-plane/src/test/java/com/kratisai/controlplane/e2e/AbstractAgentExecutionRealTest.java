@@ -262,7 +262,7 @@ public abstract class AbstractAgentExecutionRealTest {
     private ChatEntity chat;
     private EnvironmentProvider provider;
     private String originalServerUrl;
-    private String spawnedContainerId;
+    private UUID spawnedEnvId;
     private WebSocketSession uiClientSession;
     private LineLogger lineLogger;
     protected WireMockLlmServer wireMockLlmServer;
@@ -402,11 +402,11 @@ public abstract class AbstractAgentExecutionRealTest {
      * @throws IllegalStateException if no container has been spawned yet
      */
     protected DockerExecVerifier createDockerVerifier() {
-        if (spawnedContainerId == null) {
+        if (spawnedEnvId == null) {
             throw new IllegalStateException(
                     "No container has been spawned yet. Call executeAgentInstallationAndExecutionFlow first.");
         }
-        return new DockerExecVerifier(processExecutor, spawnedContainerId);
+        return new DockerExecVerifier(processExecutor, "kratis-sandbox-" + spawnedEnvId);
     }
 
     public record ExpectedFile(String path, String expectedContent, String expectedPermissions, boolean executable) {
@@ -813,16 +813,16 @@ public abstract class AbstractAgentExecutionRealTest {
             }
         }
 
-        if (spawnedContainerId != null) {
+        if (spawnedEnvId != null) {
             // Extract container logs before terminating the sandbox
-            extractAndLogContainerLogs(spawnedContainerId);
+            extractAndLogContainerLogs("kratis-sandbox-" + spawnedEnvId);
 
             try {
-                localDockerSandboxProvider.terminateSandbox(spawnedContainerId);
+                localDockerSandboxProvider.terminateSandbox(spawnedEnvId);
             } catch (Exception e) {
                 // Ignore
             }
-            spawnedContainerId = null;
+            spawnedEnvId = null;
         }
     }
 
@@ -932,7 +932,7 @@ public abstract class AbstractAgentExecutionRealTest {
      * verifies the agent produced the expected output files.
      */
     private boolean allExpectedFilesExist() {
-        if (spawnedContainerId == null) {
+        if (spawnedEnvId == null) {
             return false;
         }
         List<ExpectedFile> expectedFiles = getExpectedFiles();
@@ -940,7 +940,7 @@ public abstract class AbstractAgentExecutionRealTest {
             return true;
         }
         try {
-            DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, spawnedContainerId);
+            DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, "kratis-sandbox-" + spawnedEnvId);
             for (ExpectedFile file : expectedFiles) {
                 if (!verifier.fileExists(file.path())) {
                     return false;
@@ -1025,8 +1025,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 .filter(e -> e.getName().startsWith("Sandbox -"))
                 .findFirst()
                 .orElseThrow();
-        assertThat(env.getContainerId()).isNotNull();
-        spawnedContainerId = env.getContainerId();
+        spawnedEnvId = env.getId();
 
         // Wait for the sidecar container to connect
         Awaitility.await()
@@ -1053,8 +1052,8 @@ public abstract class AbstractAgentExecutionRealTest {
         awaitFailureBroadcastIfFailed(env.getId());
         if (executionFailedEarly) {
             // Extract container logs immediately at point of failure for diagnostics
-            if (spawnedContainerId != null) {
-                extractAndLogContainerLogs(spawnedContainerId);
+            if (spawnedEnvId != null) {
+                extractAndLogContainerLogs("kratis-sandbox-" + spawnedEnvId);
             }
         }
         assertThat(executionFailedEarly)
@@ -1080,8 +1079,8 @@ public abstract class AbstractAgentExecutionRealTest {
                     "[test] Execution failed early while waiting for ACP completion. UI output:\n{}",
                     collectUiOutputMessages());
             // Extract container logs immediately at point of failure for diagnostics
-            if (spawnedContainerId != null) {
-                extractAndLogContainerLogs(spawnedContainerId);
+            if (spawnedEnvId != null) {
+                extractAndLogContainerLogs("kratis-sandbox-" + spawnedEnvId);
             }
         }
         assertThat(executionFailedEarly)

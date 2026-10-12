@@ -204,19 +204,19 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
               />
             </Button>
             {rememberOpen && (
-              <div className="bg-background/60 space-y-3 rounded-md border p-2">
+              <div className="bg-background/60 space-y-0 rounded-md border p-2">
                 <p className="text-muted-foreground text-xs">
                   Set rules for command roots. Allowed or blocked roots apply to all future commands
                   for this team.
                 </p>
                 {segments.map((segment, index) => (
                   <div
-                    className="flex items-center gap-1.5 py-0.5"
+                    className="flex items-center gap-0 py-0"
                     key={`${actionId}-segment-${index}`}
                   >
                     <Input
                       aria-label={`Command root: ${segment.suggestedRoot}`}
-                      className="h-7 min-w-0 flex-1 py-0.5 font-mono text-xs leading-tight"
+                      className="h-7 min-w-0 flex-1 py-0 font-mono text-xs leading-tight"
                       onChange={(event) =>
                         setRoots((prev) => ({ ...prev, [index]: event.target.value }))
                       }

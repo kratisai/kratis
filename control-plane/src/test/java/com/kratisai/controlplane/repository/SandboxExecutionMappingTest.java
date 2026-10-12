@@ -40,7 +40,6 @@ class SandboxExecutionMappingTest {
         env.setTeam(context.team());
         env.setName("Test Sandbox");
         env.setType(ExecutionEnvironmentType.SANDBOX);
-        env.setContainerId("test-container");
         env.setStatus(EnvironmentStatus.DISCONNECTED);
         executionEnvironmentRepository.save(env);
 

@@ -88,7 +88,6 @@ func DefaultClientTimeouts() ClientTimeouts {
 type Client struct {
 	serverURL       string
 	token           string
-	containerID     string
 	workspace       string
 	envFile         string
 	credentialsDir  string
@@ -169,11 +168,10 @@ type Client struct {
 	debug bool
 }
 
-func NewClient(serverURL, token, containerID, workspace string) *Client {
+func NewClient(serverURL, token, workspace string) *Client {
 	c := &Client{
 		serverURL:          serverURL,
 		token:              token,
-		containerID:        containerID,
 		workspace:          workspace,
 		envFile:            defaultEnvFile,
 		credentialsDir:     defaultCredentialsDir,
@@ -767,7 +765,6 @@ func (c *Client) register() error {
 
 	params := RegisterParams{
 		Token:             c.token,
-		ContainerID:       c.containerID,
 		IsReconnect:       isReconnect,
 		LastEventSequence: c.lastEventSequence,
 		PendingHitlIDs:    c.pendingHitlIDs,

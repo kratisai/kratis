@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
@@ -98,7 +99,7 @@ class ChatExecutionControllerTest {
     private ModelProvider modelProvider;
     private Repository repository;
     private String originalServerUrl;
-    private String spawnedContainerId;
+    private UUID spawnedEnvId;
 
     @SuppressWarnings("unchecked")
     private static Map<String, String> nullableStringMap() {
@@ -163,9 +164,10 @@ class ChatExecutionControllerTest {
         localDockerSandboxProvider.setConnectUrl(originalServerUrl);
 
         // Terminate any container that was spawned during test
-        if (spawnedContainerId != null) {
+        if (spawnedEnvId != null) {
+            String runnerName = "kratis-sandbox-" + spawnedEnvId;
             try {
-                Process p = new ProcessBuilder("docker", "logs", spawnedContainerId).start();
+                Process p = new ProcessBuilder("docker", "logs", runnerName).start();
                 p.waitFor();
                 String logs = new String(p.getInputStream().readAllBytes());
                 String errLogs = new String(p.getErrorStream().readAllBytes());
@@ -175,20 +177,26 @@ class ChatExecutionControllerTest {
                 System.err.println("Failed to read container logs: " + e.getMessage());
             }
             try {
-                localDockerSandboxProvider.terminateSandbox(spawnedContainerId);
+                localDockerSandboxProvider.terminateSandbox(spawnedEnvId);
             } catch (Exception e) {
                 // Ignore
             }
-            spawnedContainerId = null;
+            spawnedEnvId = null;
         }
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void launchExecution_withMockProcessExecutor_shouldSucceed() throws Exception {
-        // 1. Stub the ProcessExecutor to return a mock container ID
-        String mockContainerId = "mock-container-id-999888";
-        Mockito.doReturn(new ProcessExecutor.ProcessResult(0, mockContainerId.getBytes()))
+        // 1. Stub the ProcessExecutor: no real docker is needed, every command succeeds. The
+        // provider addresses resources by the deterministic runner name, not the docker run output.
+        Mockito.doAnswer(invocation -> {
+                    List<String> cmd = invocation.getArgument(0);
+                    if (cmd.contains("run") && cmd.contains("-d")) {
+                        return new ProcessExecutor.ProcessResult(0, "mock-container-id-999888".getBytes());
+                    }
+                    return new ProcessExecutor.ProcessResult(0, new byte[0]);
+                })
                 .when(processExecutor)
                 .execute(Mockito.anyList(), Mockito.nullable(File.class), nullableStringMap());
 
@@ -280,20 +288,13 @@ class ChatExecutionControllerTest {
                 .contains("TESTCONTAINERS_RYUK_DISABLED=true")
                 .contains("TESTCONTAINERS_REUSE_ENABLE=true");
 
-        // 4. Verify that the execution environment and container ID are persisted
+        // 4. Verify the connector was started in the deterministic runner container
         List<ExecutionEnvironment> envs =
                 executionEnvironmentRepository.findByTeamId(chat.getTeam().getId());
         ExecutionEnvironment env = envs.stream()
                 .filter(e -> e.getName().startsWith("Sandbox -"))
                 .findFirst()
                 .orElseThrow();
-
-        // Use the actual container ID from the persisted environment for the exec
-        // command assertion. The mock may or may not intercept the docker run
-        // call depending on the test environment, so we verify the exec command
-        // uses the same container ID that was persisted.
-        String actualContainerId = env.getContainerId();
-        assertThat(actualContainerId).isNotNull().isNotEmpty();
 
         List<String> execCommand = commandCaptor.getAllValues().stream()
                 .filter(cmd -> cmd.contains("exec") && cmd.contains("--mode=sidecar"))
@@ -306,7 +307,7 @@ class ChatExecutionControllerTest {
                         "-d",
                         "-w",
                         "/kratis/workspace",
-                        actualContainerId,
+                        "kratis-sandbox-" + env.getId(),
                         "/usr/local/bin/kratis-connector",
                         "--mode=sidecar",
                         "--server-url");
@@ -315,9 +316,6 @@ class ChatExecutionControllerTest {
         assertThat(execCommand.get(tokenIndex + 1)).isNotNull();
 
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
-
-        // Track container ID for cleanup in tearDown
-        spawnedContainerId = actualContainerId;
     }
 
     @Test
@@ -360,10 +358,9 @@ class ChatExecutionControllerTest {
                 .filter(e -> e.getName().startsWith("Sandbox -"))
                 .findFirst()
                 .orElseThrow();
-        assertThat(env.getContainerId()).isNotNull();
 
-        // Track container ID for cleanup in tearDown
-        spawnedContainerId = env.getContainerId();
+        // Track environment for cleanup in tearDown
+        spawnedEnvId = env.getId();
 
         // 4. Wait for the sidecar container to connect, send env.register and
         // env.heartbeat

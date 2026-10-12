@@ -262,7 +262,7 @@ describe('ActivityApproval', () => {
 
       const input = screen.getByLabelText('Command root: npm run test')
       expect(input).toHaveValue('npm run test')
-      expect(input).toHaveClass('h-7', 'py-0.5', 'leading-tight', 'text-xs', 'font-mono')
+      expect(input).toHaveClass('h-7', 'py-0', 'leading-tight', 'text-xs', 'font-mono')
       expect(screen.getByLabelText('Command root: git push')).toHaveValue('git push')
     })
 

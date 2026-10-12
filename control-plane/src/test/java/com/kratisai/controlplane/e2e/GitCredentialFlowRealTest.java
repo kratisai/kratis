@@ -36,6 +36,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.awaitility.Awaitility;
@@ -121,7 +122,7 @@ class GitCredentialFlowRealTest {
     private ChatEntity chat;
     private EnvironmentProvider provider;
     private ModelProvider modelProvider;
-    private String spawnedContainerId;
+    private UUID spawnedEnvId;
     private String originalServerUrl;
 
     @BeforeAll
@@ -174,13 +175,13 @@ class GitCredentialFlowRealTest {
     void tearDown() {
         localDockerSandboxProvider.setConnectUrl(originalServerUrl);
         Mockito.reset(processExecutor);
-        if (spawnedContainerId != null) {
+        if (spawnedEnvId != null) {
             try {
-                localDockerSandboxProvider.terminateSandbox(spawnedContainerId);
+                localDockerSandboxProvider.terminateSandbox(spawnedEnvId);
             } catch (Exception e) {
-                logger.warn("Failed to terminate sandbox {}", spawnedContainerId, e);
+                logger.warn("Failed to terminate sandbox {}", spawnedEnvId, e);
             }
-            spawnedContainerId = null;
+            spawnedEnvId = null;
         }
         databaseCleaner.cleanAll();
     }
@@ -192,7 +193,7 @@ class GitCredentialFlowRealTest {
 
         launchExecution(credential, "git-cred-canvas");
 
-        DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, spawnedContainerId);
+        DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, "kratis-sandbox-" + spawnedEnvId);
         Awaitility.await()
                 .atMost(90, TimeUnit.SECONDS)
                 .pollInterval(Duration.ofSeconds(1))
@@ -259,7 +260,7 @@ class GitCredentialFlowRealTest {
                 modelProvider.getId(),
                 "gpt-4o"));
 
-        DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, spawnedContainerId);
+        DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, "kratis-sandbox-" + spawnedEnvId);
         Awaitility.await()
                 .atMost(90, TimeUnit.SECONDS)
                 .pollInterval(Duration.ofSeconds(1))
@@ -283,7 +284,7 @@ class GitCredentialFlowRealTest {
     void realSidecarInitialisesNewRepository() throws Exception {
         launchNewRepositoryExecution("git-cred-newrepo-canvas", "fresh-repo");
 
-        DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, spawnedContainerId);
+        DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, "kratis-sandbox-" + spawnedEnvId);
         Awaitility.await()
                 .atMost(90, TimeUnit.SECONDS)
                 .pollInterval(Duration.ofSeconds(1))
@@ -337,8 +338,7 @@ class GitCredentialFlowRealTest {
                 .filter(e -> e.getName().startsWith("Sandbox -"))
                 .findFirst()
                 .orElseThrow();
-        assertThat(env.getContainerId()).isNotNull();
-        spawnedContainerId = env.getContainerId();
+        spawnedEnvId = env.getId();
 
         Awaitility.await()
                 .atMost(90, TimeUnit.SECONDS)
@@ -359,7 +359,11 @@ class GitCredentialFlowRealTest {
         }
         try {
             ProcessExecutor.ProcessResult result = processExecutor.execute(
-                    List.of("docker", "cp", spawnedContainerId + ":" + SIDECAR_LOG_LOC, tempLog.toString()),
+                    List.of(
+                            "docker",
+                            "cp",
+                            ("kratis-sandbox-" + spawnedEnvId) + ":" + SIDECAR_LOG_LOC,
+                            tempLog.toString()),
                     null,
                     null);
             if (result.exitCode() != 0) {

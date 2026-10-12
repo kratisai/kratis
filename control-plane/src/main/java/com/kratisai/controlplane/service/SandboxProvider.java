@@ -2,24 +2,31 @@ package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionProviderType;
-import java.util.List;
+import java.time.Duration;
+import java.util.Set;
+import java.util.UUID;
 
 public interface SandboxProvider {
+
     ExecutionProviderType getProviderType();
 
-    String spawnSandbox(ExecutionEnvironment environment, String token);
+    void spawnSandbox(ExecutionEnvironment environment);
 
-    void initializeWorkspace(String containerId);
+    void initializeWorkspace(UUID envId, String token);
 
-    boolean isContainerRunning(String envId);
+    boolean isSandboxRunning(UUID envId);
 
-    void suspend(String envId);
+    void suspend(UUID envId);
 
-    String resume(String envId, ExecutionEnvironment environment, String token);
+    void resume(ExecutionEnvironment environment);
 
-    void destroy(String envId);
+    void terminateSandbox(UUID envId);
 
-    void terminateSandbox(String containerId);
+    void destroy(UUID envId);
 
-    List<String> getActiveSandboxIds();
+    void captureSidecarLogs(UUID envId);
+
+    Set<UUID> listActiveEnvIds();
+
+    void pruneOrphanNetworks(Duration gracePeriod);
 }

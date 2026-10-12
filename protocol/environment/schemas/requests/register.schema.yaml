@@ -6,8 +6,6 @@ required:
 properties:
   token:
     type: string
-  containerId:
-    type: string
   isReconnect:
     type: boolean
   activeAcpSessionId:

@@ -240,7 +240,6 @@ public class TestDataFactory {
         defaultEnv.setTeam(team);
         defaultEnv.setName("Default Sandbox");
         defaultEnv.setType(ExecutionEnvironmentType.SANDBOX);
-        defaultEnv.setContainerId("kratis-runner-base:latest");
         defaultEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.DISCONNECTED);
         executionEnvironmentRepository.save(defaultEnv);
 

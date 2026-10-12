@@ -1,6 +1,5 @@
 package com.kratisai.controlplane.repository;
 
-import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import java.time.Instant;
 import java.util.List;
@@ -13,8 +12,6 @@ import org.springframework.data.repository.query.Param;
 public interface ExecutionEnvironmentRepository extends JpaRepository<ExecutionEnvironment, UUID> {
 
     List<ExecutionEnvironment> findByTeamId(UUID teamId);
-
-    List<ExecutionEnvironment> findByStatus(EnvironmentStatus status);
 
     @Query("""
             SELECT e, MAX(a.createdAt)
@@ -34,12 +31,23 @@ public interface ExecutionEnvironmentRepository extends JpaRepository<ExecutionE
 
     Optional<ExecutionEnvironment> findByAuthToken(String authToken);
 
-    Optional<ExecutionEnvironment> findByContainerId(String containerId);
+    @Query("""
+            SELECT e,
+                   MAX(CASE WHEN a.createdAt IS NOT NULL THEN a.createdAt ELSE x.startedAt END),
+                   MAX(CASE WHEN x.status = com.kratisai.controlplane.model.SandboxExecutionStatus.RUNNING
+                            THEN 1 ELSE 0 END)
+            FROM ExecutionEnvironment e
+            JOIN SandboxExecution x ON x.environment = e
+            LEFT JOIN SandboxExecutionActivity a ON a.executionId = x.id
+            WHERE e.status = com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED
+            GROUP BY e
+            """)
+    List<Object[]> findConnectedEnvironmentsWithLastActivity();
 
     @Query("""
             SELECT e FROM ExecutionEnvironment e
             WHERE e.status = com.kratisai.controlplane.model.EnvironmentStatus.SLEEPING
-              AND (e.lastHeartbeat IS NULL OR e.lastHeartbeat < :cutoff)
+              AND (e.suspendedAt IS NULL OR e.suspendedAt < :cutoff)
             """)
     List<ExecutionEnvironment> findExpiredSleeping(@Param("cutoff") Instant cutoff);
 }

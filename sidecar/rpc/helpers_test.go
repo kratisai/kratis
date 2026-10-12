@@ -86,7 +86,7 @@ func wsURL(srv *httptest.Server) string {
 // client with an active wsConn (waiting up to 500 ms).
 func connectClient(t *testing.T, url, token string) *Client {
 	t.Helper()
-	c := NewClient(url, token, "", "")
+	c := NewClient(url, token, "")
 	setTestClientTimeouts(c)
 	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {

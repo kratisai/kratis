@@ -10,13 +10,21 @@ connector, in turn, supervises one ACP agent (see [`acp-lifecycle.md`](acp-lifec
 
 The control plane talks to sandboxes only through the
 [`SandboxProvider`](../../control-plane/src/main/java/com/kratisai/controlplane/service/SandboxProvider.java)
-interface — `spawnSandbox`, `initializeWorkspace`, `terminateSandbox`,
-`getActiveSandboxIds` — plus a provider `type`. Beans implement the interface and are
+interface, keyed end-to-end by environment id: `spawnSandbox`, `initializeWorkspace`,
+`isSandboxRunning`, `suspend`, `resume`, `terminateSandbox` (runtime only), `destroy`
+(runtime and snapshot), `captureSidecarLogs`, `listActiveEnvIds`, and
+`pruneOrphanNetworks`, plus a provider `type`. Beans implement the interface and are
 resolved by type in
 [`SandboxOrchestratorService`](../../control-plane/src/main/java/com/kratisai/controlplane/service/SandboxOrchestratorService.java).
 `ExecutionProviderType` currently has one value, `DOCKER`. Teams name providers in the
 `environment_providers` table (`EnvironmentProvider`), each with an optional
 `dockerImage`.
+
+Every infrastructure handle — container ids, resource names, snapshot images — stays
+inside the provider. The control plane stores no container identity: the provider
+resolves resources from the environment id (deterministic names, with container labels as
+the discovery mechanism), which is what lets lifecycle reconciliation survive control
+plane restarts.
 
 This split is the extension point for new providers: a future provider is a new
 `SandboxProvider` bean with a new `ExecutionProviderType`. Everything below under
@@ -27,8 +35,10 @@ This split is the extension point for new providers: a future provider is a new
 [`SandboxProvisioningService`](../../control-plane/src/main/java/com/kratisai/controlplane/service/SandboxProvisioningService.java)
 drives every sandbox the same way, independent of provider:
 
-1. Resolve the provider by type; `spawnSandbox` returns a unique container/workspace id.
-2. Persist the id, then `initializeWorkspace` (inject and start the connector).
+1. Resolve the provider by type; `spawnSandbox` creates the runtime resources for the
+   environment.
+2. `initializeWorkspace` injects and starts the connector with the environment's
+   registration token.
 3. The connector connects to `/ws/env` and registers (`env.register`).
 4. Register the git author identity (`env.registerGitIdentity`) — always, with or
    without a credential. The connector persists `user.name`/`user.email` to
@@ -74,7 +84,8 @@ On completion, termination, or reconnect-lease expiry the control plane:
 
 1. Sends `env.terminate` (connector cancels/closes the ACP session and stops the agent).
 2. Revokes the transient LiteLLM virtual key.
-3. Calls `terminateSandbox` on the provider — idempotent, even if an earlier step fails.
+3. Calls `destroy` on the provider (or `terminateSandbox` to keep a suspend snapshot) —
+   idempotent, even if an earlier step fails.
 
 A transient `/ws/env` disconnect does not terminate the agent or discard its session; the
 connector reconnects and re-registers within the lease. See
@@ -95,7 +106,7 @@ sandbox it creates three labelled resources:
    rootless daemon, isolated from the host.
 
 Every resource carries `kratis.instance.id` and `kratis.sandbox.id` labels for
-instance-scoped cleanup (`ZombieContainerCollector`).
+instance-scoped cleanup (`SandboxLifecycleService`).
 
 **DinD security flags:** the sibling needs `systempaths=unconfined`. Docker's default
 masked paths leave non-empty, writable child mounts under `/proc`; the kernel then refuses

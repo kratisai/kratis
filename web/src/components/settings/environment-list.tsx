@@ -79,7 +79,7 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
   }
 
   const isRunningSandbox = (env: ExecutionEnvironmentDto) =>
-    env.type === 'SANDBOX' && !!env.containerId && env.status === 'CONNECTED'
+    env.type === 'SANDBOX' && env.status === 'CONNECTED'
 
   const isSleepingSandbox = (env: ExecutionEnvironmentDto) =>
     env.type === 'SANDBOX' && env.status === 'SLEEPING'
@@ -165,7 +165,6 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
                       <TableHead>Type</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Last Activity</TableHead>
-                      <TableHead>Container ID / Image</TableHead>
                       {isOwner && <TableHead className="w-25">Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
@@ -185,9 +184,6 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
                           {env.lastActivity
                             ? formatDistanceToNow(new Date(env.lastActivity), { addSuffix: true })
                             : '-'}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground max-w-50 truncate">
-                          {env.containerId || '-'}
                         </TableCell>
                         {isOwner && (
                           <TableCell>
@@ -270,11 +266,6 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
                         ? formatDistanceToNow(new Date(env.lastActivity), { addSuffix: true })
                         : '-'}
                     </p>
-                    {env.containerId && (
-                      <p className="text-muted-foreground mt-1.5 truncate text-xs">
-                        {env.containerId}
-                      </p>
-                    )}
                   </div>
                 ))}
               </div>

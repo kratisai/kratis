@@ -401,8 +401,8 @@ To prevent performance regressions and "flip-flopping" across different hardware
 - If a test takes **< 2%** of the total pure suite execution time and has `@SlowTest`, the build will fail (remove the annotation).
 - Any test annotated with context-polluting annotations (like `@DirtiesContext`) **must** be annotated with `@SlowTest` because tearing down and rebuilding the Spring Context blocks the execution thread significantly.
 
-**Zombie Container Collector Isolation:**
-Because parallel Spring Contexts execute concurrently and share the host Docker environment, each context's `ZombieContainerCollector` runs independently. To prevent a collector in one context from mistaking active containers from another context as "orphaned" and terminating them, the collector is disabled during tests by setting `kratis.sandbox.reconciliation.enabled=false` in `src/test/resources/application.properties`.
+**Sandbox Lifecycle Sweep Isolation:**
+Because parallel Spring Contexts execute concurrently and share the host Docker environment, each context's `SandboxLifecycleService` runs independently. To prevent a sweep in one context from mistaking active containers from another context as "orphaned" and destroying them, the sweep is disabled during tests by setting `kratis.sandbox.lifecycle.enabled=false` in `src/test/resources/application.properties`.
 
 
 If you are debugging a flaky test and want to disable parallel execution entirely, run `./mvnw test -Psequential`. This falls back to assigning standard thread-bound slots (0-3) sequentially on the main thread, ensuring isolated database schemas remain separated but without concurrent execution overlap.

@@ -45,7 +45,6 @@ docker run --rm -v "$(pwd)":/app -w /app golangci/golangci-lint:v2.13.1 golangci
 | `--mode` | — | `sidecar` | Run mode |
 | `--token` | `KRATIS_TOKEN` | required | Environment registration token |
 | `--server-url` | `KRATIS_SERVER_URL` | required | Control plane WebSocket, e.g. `ws://localhost:8080/ws/env` |
-| `--container-id` | `KRATIS_CONTAINER_ID` | — | Optional sandbox container id |
 | `--log-file` | — | — | Redirect logs (used when stdout is not captured) |
 | `--debug` | — | false | Relay connector diagnostics on `env.output` |
 
