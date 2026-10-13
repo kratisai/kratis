@@ -2,8 +2,6 @@ package com.kratisai.controlplane.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.IngestionStatus;
@@ -11,6 +9,8 @@ import com.kratisai.controlplane.model.LlmUsageSnapshot;
 import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.util.List;

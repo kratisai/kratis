@@ -2,11 +2,11 @@ package com.kratisai.controlplane.ingestion.research;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

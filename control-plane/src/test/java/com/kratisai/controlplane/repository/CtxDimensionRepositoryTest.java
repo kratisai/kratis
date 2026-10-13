@@ -2,8 +2,8 @@ package com.kratisai.controlplane.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.model.*;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;

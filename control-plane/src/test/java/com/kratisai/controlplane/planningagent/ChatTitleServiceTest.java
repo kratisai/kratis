@@ -10,13 +10,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.kratisai.controlplane.FakeChatModel;
-import com.kratisai.controlplane.PromptMatcher;
 import com.kratisai.controlplane.config.TitlesProperties;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.ChatService;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
+import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;

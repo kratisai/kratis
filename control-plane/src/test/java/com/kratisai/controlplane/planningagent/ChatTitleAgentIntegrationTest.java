@@ -3,13 +3,13 @@ package com.kratisai.controlplane.planningagent;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
-import com.kratisai.controlplane.FakeChatModel;
-import com.kratisai.controlplane.PromptMatcher;
-import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.ChatRepository;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
+import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;

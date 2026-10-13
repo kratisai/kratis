@@ -1,22 +1,22 @@
 package com.kratisai.controlplane.api.integration;
 
-import static com.kratisai.controlplane.TestDataFactory.DUMMY_PASSWORD;
+import static com.kratisai.controlplane.testsupport.TestDataFactory.DUMMY_PASSWORD;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.FakeChatModel;
-import com.kratisai.controlplane.PromptMatcher;
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.api.restdto.*;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.JwtService;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
+import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;

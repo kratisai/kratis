@@ -5,12 +5,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.api.restdto.*;
 import com.kratisai.controlplane.repository.UserRepository;
 import com.kratisai.controlplane.service.JwtService;
 import com.kratisai.controlplane.service.UserService;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

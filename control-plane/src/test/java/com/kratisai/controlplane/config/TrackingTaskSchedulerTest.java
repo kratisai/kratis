@@ -2,6 +2,7 @@ package com.kratisai.controlplane.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kratisai.controlplane.testsupport.TrackingTaskScheduler;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;

@@ -3,7 +3,6 @@ package com.kratisai.controlplane.planningagent;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.model.CanvasEntity;
 import com.kratisai.controlplane.model.CanvasType;
 import com.kratisai.controlplane.model.Repository;
@@ -13,6 +12,7 @@ import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.CanvasRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.service.CanvasService;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;

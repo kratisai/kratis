@@ -3,8 +3,6 @@ package com.kratisai.controlplane.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.model.ChatEntity;
@@ -14,6 +12,8 @@ import com.kratisai.controlplane.model.ExecutionEnvironmentType;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.util.List;

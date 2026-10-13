@@ -2,7 +2,7 @@ package com.kratisai.controlplane.git.provider;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.kratisai.controlplane.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.PrivateKey;

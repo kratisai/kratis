@@ -1,13 +1,13 @@
 package com.kratisai.controlplane.e2e;
 
-import com.kratisai.controlplane.HttpRequestMatcher;
-import com.kratisai.controlplane.LlmMockScenarios;
-import com.kratisai.controlplane.LlmResponseBuilders;
-import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.model.AgentHarness;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.llm.HttpRequestMatcher;
+import com.kratisai.controlplane.testsupport.llm.LlmMockScenarios;
+import com.kratisai.controlplane.testsupport.llm.LlmResponseBuilders;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 

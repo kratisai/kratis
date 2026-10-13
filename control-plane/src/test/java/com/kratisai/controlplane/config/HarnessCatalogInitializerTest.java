@@ -3,8 +3,8 @@ package com.kratisai.controlplane.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.kratisai.controlplane.HarnessCatalogFixture;
 import com.kratisai.controlplane.model.AgentHarness;
+import com.kratisai.controlplane.testsupport.HarnessCatalogFixture;
 import org.junit.jupiter.api.Test;
 
 class HarnessCatalogInitializerTest {

@@ -7,13 +7,13 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.git.GitTransportUrlBuilder;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.service.GitCredentialResolver;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;

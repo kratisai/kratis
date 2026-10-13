@@ -7,10 +7,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.FakeChatModel;
-import com.kratisai.controlplane.PromptMatcher;
-import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.api.restdto.LoginRequest;
 import com.kratisai.controlplane.api.restdto.RegisterUserRequest;
 import com.kratisai.controlplane.api.wsdto.ClientRpcPayload;
@@ -23,6 +19,10 @@ import com.kratisai.controlplane.repository.UserRepository;
 import com.kratisai.controlplane.service.CanvasService;
 import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ModelProviderService;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
+import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import com.kratisai.controlplane.websocket.client.ClientWebSocketHandler;
 import java.time.Duration;
 import java.util.List;

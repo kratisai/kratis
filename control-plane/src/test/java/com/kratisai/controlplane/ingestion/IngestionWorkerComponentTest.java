@@ -1,10 +1,9 @@
 package com.kratisai.controlplane.ingestion;
 
-import static com.kratisai.controlplane.FakeChatModelMatchers.ingestionPipelineMatchers;
+import static com.kratisai.controlplane.testsupport.llm.FakeChatModelMatchers.ingestionPipelineMatchers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.kratisai.controlplane.*;
 import com.kratisai.controlplane.model.CtxNode;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionModelUsage;
@@ -16,6 +15,10 @@ import com.kratisai.controlplane.repository.IngestionModelUsageRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ProcessExecutor;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;

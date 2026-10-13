@@ -2,9 +2,9 @@ package com.kratisai.controlplane.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
 import com.kratisai.controlplane.model.ChatMemoryEntity;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Lob;
 import java.lang.reflect.Field;

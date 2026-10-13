@@ -9,8 +9,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kratisai.controlplane.HarnessCatalogFixture;
-import com.kratisai.controlplane.ResourcelessTransactionManager;
 import com.kratisai.controlplane.api.restdto.CreateSandboxExecutionRequest;
 import com.kratisai.controlplane.api.restdto.SandboxExecutionDto;
 import com.kratisai.controlplane.api.restdto.SteerExecutionRequest;
@@ -37,6 +35,8 @@ import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.repository.*;
+import com.kratisai.controlplane.testsupport.HarnessCatalogFixture;
+import com.kratisai.controlplane.testsupport.ResourcelessTransactionManager;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;

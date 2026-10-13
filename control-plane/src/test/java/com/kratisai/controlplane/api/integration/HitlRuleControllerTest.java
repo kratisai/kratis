@@ -8,9 +8,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.api.restdto.CreateHitlRuleRequest;
 import com.kratisai.controlplane.model.HitlRule;
 import com.kratisai.controlplane.model.HitlRuleAction;
@@ -19,6 +16,9 @@ import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.HitlRuleRepository;
 import com.kratisai.controlplane.service.JwtService;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;

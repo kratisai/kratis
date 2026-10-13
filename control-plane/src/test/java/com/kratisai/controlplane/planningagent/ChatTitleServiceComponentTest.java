@@ -2,11 +2,6 @@ package com.kratisai.controlplane.planningagent;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.FakeChatModel;
-import com.kratisai.controlplane.PromptMatcher;
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
@@ -14,6 +9,11 @@ import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.service.ChatService;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
+import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;

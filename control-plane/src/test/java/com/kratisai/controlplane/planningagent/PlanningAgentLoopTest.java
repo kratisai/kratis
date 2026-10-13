@@ -10,11 +10,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.kratisai.controlplane.FakeChatModel;
-import com.kratisai.controlplane.PromptMatcher;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
 import com.kratisai.controlplane.service.ScratchpadService;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
+import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;

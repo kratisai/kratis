@@ -7,7 +7,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.kratisai.controlplane.ResourcelessTransactionManager;
 import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.LlmUsage;
@@ -21,6 +20,7 @@ import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionOutputEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
+import com.kratisai.controlplane.testsupport.ResourcelessTransactionManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;

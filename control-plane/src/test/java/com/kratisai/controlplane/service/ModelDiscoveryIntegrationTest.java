@@ -5,11 +5,11 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
-import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.api.restdto.ModelEntryDto;
 import com.kratisai.controlplane.client.ModelDiscoveryClient;
 import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.ProviderType;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
