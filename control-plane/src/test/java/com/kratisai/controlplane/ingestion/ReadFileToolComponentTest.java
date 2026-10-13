@@ -2,12 +2,12 @@ package com.kratisai.controlplane.ingestion;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;

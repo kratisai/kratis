@@ -6,10 +6,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.SandboxExecutionScenarioFactory;
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.api.restdto.ResolveHitlRequest;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
@@ -18,6 +14,10 @@ import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.HitlRule;
 import com.kratisai.controlplane.model.HitlRuleType;
 import com.kratisai.controlplane.repository.HitlRuleRepository;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SandboxExecutionScenarioFactory;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;

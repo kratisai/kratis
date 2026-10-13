@@ -2,9 +2,9 @@ package com.kratisai.controlplane.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.model.ScratchpadEntity;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -64,7 +64,7 @@ class ScratchpadServiceTest {
 
         List<ScratchpadEntity> facts = scratchpadService.getFacts(TEST_CHAT);
         assertThat(facts).hasSize(1);
-        assertThat(facts.get(0).getFact()).isEqualTo("Keep this");
+        assertThat(facts.getFirst().getFact()).isEqualTo("Keep this");
     }
 
     @Test

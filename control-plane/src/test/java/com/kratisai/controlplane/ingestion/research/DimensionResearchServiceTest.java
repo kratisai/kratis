@@ -1,18 +1,18 @@
 package com.kratisai.controlplane.ingestion.research;
 
-import static com.kratisai.controlplane.FakeChatModelMatchers.ingestionPipelineMatchers;
+import static com.kratisai.controlplane.testsupport.llm.FakeChatModelMatchers.ingestionPipelineMatchers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.FakeChatModel;
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.CtxDimensionRepository;
 import com.kratisai.controlplane.repository.CtxNodeDimensionRepository;
 import com.kratisai.controlplane.repository.CtxNodeRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import java.util.List;
 import org.hibernate.Hibernate;
 import org.junit.jupiter.api.AfterEach;
@@ -197,6 +197,6 @@ class DimensionResearchServiceTest {
 
         List<CtxDimension> updatedDimensions = ctxDimensionRepository.findByBatchId(batch.getId());
         assertThat(updatedDimensions).hasSize(1);
-        assertThat(updatedDimensions.get(0).getSynopsis()).isNotBlank();
+        assertThat(updatedDimensions.getFirst().getSynopsis()).isNotBlank();
     }
 }

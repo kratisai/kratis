@@ -2,14 +2,14 @@ package com.kratisai.controlplane.planningagent;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.FakeChatModel;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.service.JwtService;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import java.util.UUID;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.beans.factory.annotation.Autowired;

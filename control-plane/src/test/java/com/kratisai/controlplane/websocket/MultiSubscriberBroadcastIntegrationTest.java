@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.api.wsdto.ClientRpcPayload;
 import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
@@ -16,6 +15,7 @@ import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.websocket.client.ClientChatSubscribeRpcHandler;
 import java.util.ArrayList;
 import java.util.List;

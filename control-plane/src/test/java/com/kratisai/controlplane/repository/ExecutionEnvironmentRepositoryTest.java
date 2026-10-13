@@ -2,9 +2,6 @@ package com.kratisai.controlplane.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.model.ChatEntity;
@@ -15,6 +12,9 @@ import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -125,8 +125,8 @@ class ExecutionEnvironmentRepositoryTest {
 
         assertThat(results).hasSize(5);
 
-        ExecutionEnvironment firstEnv = (ExecutionEnvironment) results.get(0)[0];
-        Instant firstAct = (Instant) results.get(0)[1];
+        ExecutionEnvironment firstEnv = (ExecutionEnvironment) results.getFirst()[0];
+        Instant firstAct = (Instant) results.getFirst()[1];
         assertThat(firstEnv.getId()).isEqualTo(envRecent.getId());
         assertThat(firstAct).isEqualTo(timeRecent);
 

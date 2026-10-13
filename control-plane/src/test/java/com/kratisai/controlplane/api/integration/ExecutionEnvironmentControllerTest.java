@@ -7,9 +7,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.api.restdto.CreateExecutionEnvironmentRequest;
 import com.kratisai.controlplane.api.restdto.CreateTeamRequest;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
@@ -32,6 +29,9 @@ import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
 import com.kratisai.controlplane.service.ExecutionEnvironmentService;
 import com.kratisai.controlplane.service.JwtService;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;

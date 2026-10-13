@@ -2,6 +2,7 @@ package com.kratisai.controlplane;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kratisai.controlplane.testsupport.PostgresTestInitializer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;

@@ -2,6 +2,8 @@ package com.kratisai.controlplane;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.*;
 
+import com.kratisai.controlplane.testsupport.SlowTest;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.importer.ImportOption;

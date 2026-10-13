@@ -5,8 +5,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.SpringIntegrationTest;
 import com.kratisai.controlplane.api.restdto.LoginRequest;
 import com.kratisai.controlplane.api.restdto.RefreshTokenRequest;
 import com.kratisai.controlplane.api.restdto.RegisterUserRequest;
@@ -15,6 +13,8 @@ import com.kratisai.controlplane.model.RefreshToken;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.RefreshTokenRepository;
 import com.kratisai.controlplane.repository.UserRepository;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;

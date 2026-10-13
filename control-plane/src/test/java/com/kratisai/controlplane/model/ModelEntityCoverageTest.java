@@ -3,9 +3,9 @@ package com.kratisai.controlplane.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.kratisai.controlplane.HarnessCatalogFixture;
 import com.kratisai.controlplane.api.restdto.InstallationInfoDto;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
+import com.kratisai.controlplane.testsupport.HarnessCatalogFixture;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.time.Instant;
 import java.util.ArrayList;

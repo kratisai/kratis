@@ -1,19 +1,10 @@
 package com.kratisai.controlplane.ingestion;
 
-import static com.kratisai.controlplane.FakeChatModelMatchers.ingestionPipelineMatchers;
+import static com.kratisai.controlplane.testsupport.llm.FakeChatModelMatchers.ingestionPipelineMatchers;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.kratisai.controlplane.DatabaseCleaner;
-import com.kratisai.controlplane.FakeChatModel;
-import com.kratisai.controlplane.HttpRequestMatcher;
-import com.kratisai.controlplane.LlmResponseBuilders;
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
-import com.kratisai.controlplane.UseRealEmbeddingClient;
-import com.kratisai.controlplane.WireMockLlmServer;
 import com.kratisai.controlplane.api.restdto.UpdateTeamRequest;
 import com.kratisai.controlplane.config.LiteLLMProperties;
-import com.kratisai.controlplane.config.TestIngestionExecutorConfig;
 import com.kratisai.controlplane.model.CtxEmbedding;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionStatus;
@@ -32,6 +23,15 @@ import com.kratisai.controlplane.repository.TeamRepository;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ProcessExecutor;
 import com.kratisai.controlplane.service.TeamService;
+import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.TestIngestionExecutorConfig;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
+import com.kratisai.controlplane.testsupport.llm.HttpRequestMatcher;
+import com.kratisai.controlplane.testsupport.llm.LlmResponseBuilders;
+import com.kratisai.controlplane.testsupport.llm.UseRealEmbeddingClient;
+import com.kratisai.controlplane.testsupport.llm.WireMockLlmServer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;

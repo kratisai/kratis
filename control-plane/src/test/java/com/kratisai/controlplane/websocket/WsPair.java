@@ -1,7 +1,7 @@
 package com.kratisai.controlplane.websocket;
 
-import com.kratisai.controlplane.SandboxExecutionScenarioFactory.ExecutionScenario;
-import com.kratisai.controlplane.TestDataFactory.AuthContext;
+import com.kratisai.controlplane.testsupport.SandboxExecutionScenarioFactory.ExecutionScenario;
+import com.kratisai.controlplane.testsupport.TestDataFactory.AuthContext;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.UUID;

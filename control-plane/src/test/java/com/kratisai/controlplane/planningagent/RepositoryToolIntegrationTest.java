@@ -2,28 +2,24 @@ package com.kratisai.controlplane.planningagent;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.kratisai.controlplane.FakeChatModel;
-import com.kratisai.controlplane.FakeGitHubApiClientConfig.FakeGitHubApiClient;
-import com.kratisai.controlplane.PromptMatcher;
-import com.kratisai.controlplane.SpringIntegrationTest;
-import com.kratisai.controlplane.TestDataFactory;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
+import com.kratisai.controlplane.testsupport.FakeGitHubApiClientConfig.FakeGitHubApiClient;
+import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
+import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage.ToolCall;
 import org.springframework.beans.factory.annotation.Autowired;
 
 @SpringIntegrationTest
 class RepositoryToolIntegrationTest extends AgentTestHarness {
-
-    private static final Logger logger = LoggerFactory.getLogger(RepositoryToolIntegrationTest.class);
 
     @Autowired
     private PlanningAgentService planningAgentService;

@@ -3,8 +3,8 @@ package org.springframework.test.context.transaction;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
-import com.kratisai.controlplane.InheritedTransactionContextCleanupListener;
-import com.kratisai.controlplane.ResourcelessTransactionManager;
+import com.kratisai.controlplane.testsupport.InheritedTransactionContextCleanupListener;
+import com.kratisai.controlplane.testsupport.ResourcelessTransactionManager;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
