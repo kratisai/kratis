@@ -185,7 +185,7 @@ describe('Model Provider Flow', () => {
     return calls
   }
 
-  const chat = (modelName: string, contextWindowTokens?: number): ModelEntryDto => ({
+  const chat = (modelName: string, contextWindowTokens?: null | number): ModelEntryDto => ({
     contextWindowTokens,
     kind: 'CHAT',
     modelName,
@@ -620,6 +620,34 @@ describe('Model Provider Flow', () => {
 
     // Provider-reported context window is surfaced on the model row.
     expect(dialog().getByText('1M ctx')).toBeInTheDocument()
+  })
+
+  it('renders models with a null context window without the ctx badge', async () => {
+    // open-ai and aws-bedrock-mantis are known to not provide contextWindowTokens
+    mockListModelProviders([])
+    mockTestConnection({
+      models: [chat('gpt-4o', null), chat('gpt-4', 128000)],
+      success: true,
+    })
+
+    setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
+    const { user } = renderList()
+    await openWizard(user)
+
+    await selectProvider(user, /^OpenAI/)
+    await connectFromConfigure(user, undefined, 'sk-test-key')
+    await waitFor(() => {
+      expect(dialog().getByRole('checkbox', { name: 'gpt-4o' })).toBeInTheDocument()
+    })
+
+    const nullRow = dialog().getByRole('checkbox', { name: 'gpt-4o' }).closest('label')
+    expect(nullRow).not.toBeNull()
+    expect(within(nullRow as HTMLElement).queryByText(/ctx$/)).not.toBeInTheDocument()
+    expect(within(nullRow as HTMLElement).queryByText('128K ctx')).not.toBeInTheDocument()
+
+    const tokenRow = dialog().getByRole('checkbox', { name: 'gpt-4' }).closest('label')
+    expect(tokenRow).not.toBeNull()
+    expect(within(tokenRow as HTMLElement).getByText('128K ctx')).toBeInTheDocument()
   })
 
   it('connects keyless Ollama with a pre-filled base URL', async () => {

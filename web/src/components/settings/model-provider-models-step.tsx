@@ -88,7 +88,7 @@ export function ModelProviderModelsStep({
                       onCheckedChange={() => onToggle(model.modelName)}
                     />
                     <span className="truncate text-sm">{model.modelName}</span>
-                    {model.contextWindowTokens !== undefined && (
+                    {model.contextWindowTokens != null && (
                       <Badge
                         className="shrink-0 text-[10px]"
                         title={`${model.contextWindowTokens.toLocaleString()} token context window`}
