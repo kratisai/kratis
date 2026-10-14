@@ -60,13 +60,33 @@ To run from source without building a Docker image (JVM mode), use the dev quick
 | `LITELLM_MASTER_KEY` | see `.env.example` | yes | LiteLLM master key |
 | `LITELLM_SALT_KEY` | see `.env.example` | yes | LiteLLM salt |
 | `LITELLM_PORT` | `4000` | no | LiteLLM host port |
-| `KRATIS_GITHUB_APP_ID` | empty | no | GitHub App id (all three GitHub vars required to enable) |
+| `KRATIS_GITHUB_APP_ID` | empty | no | GitHub App id (app id + name required to enable) |
 | `KRATIS_GITHUB_APP_NAME` | empty | no | GitHub App slug |
-| `KRATIS_GITHUB_PRIVATE_KEY_PATH` | empty | no | PEM path inside the container |
+| `KRATIS_GITHUB_PRIVATE_KEY_PATH` | `/data/config/gh-app.pem` | no | PEM path inside the container (supports PKCS#8 and PKCS#1). Place the file in the config volume, or override this to a path you mount. |
 | `KRATIS_TELEMETRY_DISABLED` | `0` | no | Set `1` to disable anonymous usage telemetry |
-| `KRATIS_HARNESSES_DIRECTORY` | `/opt/kratis/harnesses` | no | Directory of harness definitions inside the container. Mount a volume and point here to replace the built-in catalogue without rebuilding the image. |
+| `KRATIS_HARNESSES_DIRECTORY` | `/opt/kratis/harnesses` | no | Directory of harness definitions inside the container. Set to `/data/config/harnesses` (with the catalogue in `KRATIS_CONFIG_DIR`) or another mounted directory to replace the built-in catalogue without rebuilding the image. |
 | `MEM_LIMIT` | `512m` | no | Memory cap for the kratis container |
 | `LITELLM_MEM_LIMIT` | `2g` | no | Memory cap for the LiteLLM container |
+| `KRATIS_DB_DIR` | `kratis-data` (named volume) | no | Host directory for PostgreSQL data. Must be writable by uid/gid 1000. |
+| `KRATIS_CONFIG_DIR` | `kratis-config` (named volume) | no | Host directory for `/data/config`: the credential-encryption key, plus optional `gh-app.pem` and `harnesses/`. Must be writable by uid/gid 1000. |
+| `KRATIS_BLOBS_DIR` | `kratis-blobs` (named volume) | no | Host directory for blob storage. Must be writable by uid/gid 1000. |
+| `KRATIS_REGISTRY_DIR` | `kratis-image-cache` (named volume) | no | Host directory for the registry pull-through cache. |
+
+### Storage locations
+
+Every volume defaults to a Docker-managed named volume, so a plain `docker compose up` needs no
+configuration. Setting a `KRATIS_*_DIR` variable binds that volume to a host directory instead
+(useful for placing data on a chosen disk or making backups a directory copy). The target
+directories must be writable by uid/gid 1000 (the container user):
+
+```bash
+mkdir -p /srv/kratis/{postgres,config,blobs,registry}
+chown -R 1000:1000 /srv/kratis
+```
+
+`KRATIS_CONFIG_DIR` is the one directory that carries files as well as state: the generated
+`encryption.key`, an optional GitHub App `gh-app.pem` (see `KRATIS_GITHUB_PRIVATE_KEY_PATH`), and an
+optional `harnesses/` catalogue (`KRATIS_HARNESSES_DIRECTORY=/data/config/harnesses`).
 
 
 ## Commands

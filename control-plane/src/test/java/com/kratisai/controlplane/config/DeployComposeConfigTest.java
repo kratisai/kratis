@@ -87,11 +87,53 @@ class DeployComposeConfigTest {
         }
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void kratisService_volumeLocationsDefaultToNamedVolumes_withEnvOverride() {
+        Map<String, Object> root = loadRoot();
+        Map<String, Object> services = (Map<String, Object>) root.get("services");
+
+        assertThat((Map<String, Object>) root.get("volumes"))
+                .as("every override falls back to a declared named volume, so an unset .env keeps "
+                        + "the previous storage behavior")
+                .containsKeys("kratis-data", "kratis-config", "kratis-blobs", "kratis-image-cache");
+
+        List<String> dbVolumes = (List<String>) ((Map<String, Object>) services.get("kratis-db")).get("volumes");
+        assertThat(dbVolumes)
+                .as("KRATIS_DB_DIR must relocate PostgreSQL data to a host path")
+                .contains("${KRATIS_DB_DIR:-kratis-data}:/var/lib/postgresql/data");
+
+        assertThat((List<String>) kratisService().get("volumes"))
+                .as("config and blobs must be relocatable to host directories")
+                .contains(
+                        "${KRATIS_CONFIG_DIR:-kratis-config}:/data/config",
+                        "${KRATIS_BLOBS_DIR:-kratis-blobs}:/data/blobs");
+
+        assertThat((List<String>) ((Map<String, Object>) services.get("registry-cache")).get("volumes"))
+                .as("the registry cache must be relocatable like the other volumes")
+                .contains("${KRATIS_REGISTRY_DIR:-kratis-image-cache}:/var/lib/registry");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void kratisService_defaultsGitHubAppKeyPathIntoTheConfigVolume() {
+        List<String> environment = (List<String>) kratisService().get("environment");
+
+        assertThat(environment)
+                .as("dropping gh-app.pem into the config volume must be enough; the App stays "
+                        + "disabled until app-id and app-name are set")
+                .contains("KRATIS_GITHUB_PRIVATE_KEY_PATH=${KRATIS_GITHUB_PRIVATE_KEY_PATH:-/data/config/gh-app.pem}");
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Object> kratisService() {
+        Map<String, Object> root = loadRoot();
+        return (Map<String, Object>) ((Map<String, Object>) root.get("services")).get("kratis");
+    }
+
+    private static Map<String, Object> loadRoot() {
         try (InputStream in = Files.newInputStream(DEPLOY_COMPOSE)) {
-            Map<String, Object> root = new Yaml().load(in);
-            return (Map<String, Object>) ((Map<String, Object>) root.get("services")).get("kratis");
+            return new Yaml().load(in);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

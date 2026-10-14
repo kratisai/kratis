@@ -36,7 +36,7 @@ Your provider key stays in the control plane. Kratis registers the models with L
 | Bitbucket | App password, API token, or workspace access token | Repositories Read & write, Pull requests Read & write. Add Repositories Admin to create new repositories; optional workspace scope |
 | Azure DevOps | PAT | Code Read & write. Add Code Read, write, & manage to create new repositories; organization required, project required for repository creation; server base URL for self-hosted |
 
-The GitHub App choice only appears when `KRATIS_GITHUB_APP_ID`, `KRATIS_GITHUB_APP_NAME`, and `KRATIS_GITHUB_PRIVATE_KEY_PATH` are all set in e.g. the compose `.env` file. Otherwise GitHub falls back to PAT.
+The GitHub App choice only appears when `KRATIS_GITHUB_APP_ID` and `KRATIS_GITHUB_APP_NAME` are set in e.g. the compose `.env` file and a private key is available at `KRATIS_GITHUB_PRIVATE_KEY_PATH`. Otherwise GitHub falls back to PAT.
 
 ### GitHub App setup
 
@@ -44,7 +44,7 @@ Create your own personal GitHub app under GitHub → Settings → Developer sett
 
 1. Permissions: Contents Read & write, Pull requests Read & write, Metadata Read-only, and Administration Read & write. Administration is required only for Kratis to create new repositories; omit it when you publish only to existing repositories. No webhook needed.
 2. Generate a private key (.pem); note the App ID and the App slug from the URL.
-3. Set `KRATIS_GITHUB_APP_ID`, `KRATIS_GITHUB_APP_NAME`, and `KRATIS_GITHUB_PRIVATE_KEY_PATH` (PEM path inside the container), then restart the stack.
+3. Set `KRATIS_GITHUB_APP_ID` and `KRATIS_GITHUB_APP_NAME`, place the PEM in the config volume at `gh-app.pem` (or set `KRATIS_GITHUB_PRIVATE_KEY_PATH` to a path you mount), then restart the stack.
 4. Install the App on the target organization or repositories. Creating new repositories requires an organization installation. In **Repos → Add Repository**, follow **Install GitHub App** and copy the Installation ID from the resulting GitHub URL.
 
 A GitLab service account must also be invited to the group as Reporter or Developer, or every request returns `404 Group Not Found`. Creating projects in a group needs the Developer role.
