@@ -1,3 +1,12 @@
+# Storage locations. Each mount falls back to a Docker-managed named volume, so a
+# default `up` needs no configuration; set the matching KRATIS_*_DIR in .env to
+# bind it to a host directory instead (which must be writable by uid/gid 1000).
+x-storage:
+  db: &db-mount ${KRATIS_DB_DIR:-kratis-data}:/var/lib/postgresql/data
+  config: &config-mount ${KRATIS_CONFIG_DIR:-kratis-config}:/data/config
+  blobs: &blobs-mount ${KRATIS_BLOBS_DIR:-kratis-blobs}:/data/blobs
+  registry: &registry-mount ${KRATIS_REGISTRY_DIR:-kratis-image-cache}:/var/lib/registry
+
 services:
   kratis-db:
     image: 'pgvector/pgvector:pg16'
@@ -10,7 +19,7 @@ services:
     # ports:
     #   - '127.0.0.1:${DB_PORT:-5432}:5432'
     volumes:
-      - kratis-data:/var/lib/postgresql/data
+      - *db-mount
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${DB_USERNAME:-kratis}']
       interval: 10s
@@ -37,7 +46,7 @@ services:
       - 'KRATIS_TELEMETRY_DISABLED=${KRATIS_TELEMETRY_DISABLED:-0}'
       - 'KRATIS_GITHUB_APP_ID=${KRATIS_GITHUB_APP_ID:-}'
       - 'KRATIS_GITHUB_APP_NAME=${KRATIS_GITHUB_APP_NAME:-}'
-      - 'KRATIS_GITHUB_PRIVATE_KEY_PATH=${KRATIS_GITHUB_PRIVATE_KEY_PATH:-}'
+      - 'KRATIS_GITHUB_PRIVATE_KEY_PATH=${KRATIS_GITHUB_PRIVATE_KEY_PATH:-/data/config/gh-app.pem}'
     ports:
       - '${API_PORT:-8080}:8080'
     healthcheck:
@@ -49,8 +58,8 @@ services:
       retries: 12
       start_period: 30s
     volumes:
-      - kratis-config:/data/config
-      - kratis-blobs:/data/blobs
+      - *config-mount
+      - *blobs-mount
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       kratis-db:
@@ -117,7 +126,7 @@ services:
     environment:
       - 'REGISTRY_PROXY_REMOTEURL=https://registry-1.docker.io'
     volumes:
-      - kratis-image-cache:/var/lib/registry
+      - *registry-mount
 
 volumes:
   kratis-data:

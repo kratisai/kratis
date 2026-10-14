@@ -45,8 +45,9 @@ class BlobStorageConfigTest {
                         + "./data happens to resolve")
                 .contains("KRATIS_STORAGE_LOCAL_PATH=/data/blobs");
         assertThat((List<String>) kratis.get("volumes"))
-                .as("diff patches must survive container replacement")
-                .contains("kratis-blobs:/data/blobs");
+                .as("diff patches must survive container replacement; KRATIS_BLOBS_DIR may relocate "
+                        + "the volume to a host path without changing the default")
+                .contains("${KRATIS_BLOBS_DIR:-kratis-blobs}:/data/blobs");
     }
 
     @Test
