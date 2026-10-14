@@ -878,4 +878,127 @@ class MermaidDiagramValidatorTest {
 
         assertThat(validator.findIssues(content)).isEmpty();
     }
+
+    @Test
+    void findIssues_flagsInvalidSequenceArrow_reverseArrows() {
+        String content = """
+                ```mermaid
+                sequenceDiagram
+                    participant User as Developer / CI
+                    participant Build as scripts/build.sh
+                    participant Firmware as scripts/extract_wintv_firmware.sh
+                    participant ImageGen as rpi-image-gen / mmdebstrap
+
+                    User->>Build: Execute build.sh
+                    Build->>Firmware: Extract WinTV firmware binaries
+                    Firmware--<Build: Output si2168 / si2158 firmware
+                    Build->>ImageGen: Setup rpi-image-gen environment
+                    ImageGen->>ImageGen: Process config/tuner-box.yaml & layers
+                    ImageGen--<Build: Generate deployable Raspberry Pi OS image
+                    Build--<User: Final image ready in deploy/
+                ```
+                """;
+
+        List<String> issues = validator.findIssues(content);
+
+        assertThat(issues).hasSize(3);
+        assertThat(issues.get(0))
+                .contains("diagram #1, line 9")
+                .contains("invalid sequence diagram arrow \"--<\"")
+                .contains("use \"-->>\"");
+        assertThat(issues.get(1))
+                .contains("diagram #1, line 12")
+                .contains("invalid sequence diagram arrow \"--<\"")
+                .contains("use \"-->>\"");
+        assertThat(issues.get(2))
+                .contains("diagram #1, line 13")
+                .contains("invalid sequence diagram arrow \"--<\"")
+                .contains("use \"-->>\"");
+    }
+
+    @Test
+    void findIssues_flagsOtherLeftPointingSequenceArrows() {
+        String content = """
+                ```mermaid
+                sequenceDiagram
+                    participant A
+                    participant B
+                    A<--B: msg 1
+                    A-<B: msg 2
+                    A<-B: msg 3
+                    A<<--B: msg 4
+                ```
+                """;
+
+        List<String> issues = validator.findIssues(content);
+
+        assertThat(issues).hasSize(4);
+        assertThat(issues.get(0)).contains("diagram #1, line 4").contains("invalid sequence diagram arrow \"<--\"");
+        assertThat(issues.get(1)).contains("diagram #1, line 5").contains("invalid sequence diagram arrow \"-<\"");
+        assertThat(issues.get(2)).contains("diagram #1, line 6").contains("invalid sequence diagram arrow \"<-\"");
+        assertThat(issues.get(3)).contains("diagram #1, line 7").contains("invalid sequence diagram arrow \"<<--\"");
+    }
+
+    @Test
+    void findIssues_acceptsValidSequenceArrows() {
+        String content = """
+                ```mermaid
+                sequenceDiagram
+                    participant A
+                    participant B
+                    A->>B: solid filled
+                    B-->>A: dotted filled
+                    A->B: solid open
+                    B-->A: dotted open
+                    A-xB: solid cross
+                    B--xA: dotted cross
+                    A-)B: async solid
+                    B--)A: async dotted
+                    activate B
+                    deactivate B
+                ```
+                """;
+
+        assertThat(validator.findIssues(content)).isEmpty();
+    }
+
+    @Test
+    void findIssues_ignoresLessThanSignsInNoteText() {
+        String content = """
+                ```mermaid
+                sequenceDiagram
+                    participant A
+                    participant B
+                    Note over A: count < 10
+                    note right of B: count <= 5
+                    A->>B: check if value < 5
+                    B-->>A: return x < y and a <= b
+                ```
+                """;
+
+        assertThat(validator.findIssues(content)).isEmpty();
+    }
+
+    @Test
+    void findIssues_acceptsCorrectedSequenceDiagram() {
+        String content = """
+                ```mermaid
+                sequenceDiagram
+                    participant User as Developer / CI
+                    participant Build as scripts/build.sh
+                    participant Firmware as scripts/extract_wintv_firmware.sh
+                    participant ImageGen as rpi-image-gen / mmdebstrap
+
+                    User->>Build: Execute build.sh
+                    Build->>Firmware: Extract WinTV firmware binaries
+                    Firmware-->>Build: Output si2168 / si2158 firmware
+                    Build->>ImageGen: Setup rpi-image-gen environment
+                    ImageGen->>ImageGen: Process config/tuner-box.yaml & layers
+                    ImageGen-->>Build: Generate deployable Raspberry Pi OS image
+                    Build-->>User: Final image ready in deploy/
+                ```
+                """;
+
+        assertThat(validator.findIssues(content)).isEmpty();
+    }
 }

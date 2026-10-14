@@ -22,6 +22,7 @@ import org.springframework.stereotype.Component;
  *   <li>erDiagram relationship syntax used inside flowchart/graph diagrams (flowchart)
  *   <li>Missing {@code end} keywords for subgraphs (flowchart)
  *   <li>Missing {@code end} keywords for sequence diagram blocks (sequenceDiagram)
+ *   <li>Invalid left-pointing arrows in sequence diagrams (sequenceDiagram)
  *   <li>Unbalanced braces in class/state diagram blocks
  * </ul>
  *
@@ -38,6 +39,8 @@ public class MermaidDiagramValidator {
     private static final Pattern SUBGRAPH_LINE = Pattern.compile("^\\s*subgraph\\s+(.+?)\\s*$");
     private static final Pattern SEQUENCE_BLOCK_START =
             Pattern.compile("^\\s*(loop|alt|opt|par|rect|critical|break)\\b");
+    private static final Pattern INVALID_SEQUENCE_ARROW =
+            Pattern.compile("(?<=[\\w\"'\\-\\]])\\s*(<<--|<--|<-|--<|-<)\\s*(?=[\\w\"'\\-\\[])");
     private static final Pattern END_LINE = Pattern.compile("^\\s*end\\s*$");
     private static final Pattern BRACE_COUNT = Pattern.compile("[{}]");
     private static final Pattern DOUBLE_QUOTED_SECTION = Pattern.compile("\"[^\"]*\"");
@@ -183,10 +186,12 @@ public class MermaidDiagramValidator {
     }
 
     private List<String> checkSequenceDiagramRules(String[] lines, int diagramIndex) {
+        List<String> issues = new ArrayList<>();
         int blockStartCount = 0;
         int endCount = 0;
 
-        for (String line : lines) {
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
             if (isCommentLine(line)) {
                 continue;
             }
@@ -196,14 +201,33 @@ public class MermaidDiagramValidator {
             if (END_LINE.matcher(line).matches()) {
                 endCount++;
             }
+
+            String trimmed = line.trim();
+            if (trimmed.isEmpty() || isNoteLine(trimmed)) {
+                continue;
+            }
+
+            int colonIndex = line.indexOf(':');
+            String interaction = colonIndex >= 0 ? line.substring(0, colonIndex) : line;
+            Matcher arrowMatcher = INVALID_SEQUENCE_ARROW.matcher(interaction);
+            while (arrowMatcher.find()) {
+                String arrow = arrowMatcher.group(1);
+                issues.add(
+                        "Mermaid diagram #%d, line %d: invalid sequence diagram arrow \"%s\". Sequence diagrams do not support left-pointing arrows. Interactions must point from sender to receiver; use \"-->>\" for response messages (e.g. B-->>A: response)."
+                                .formatted(diagramIndex, i + 1, arrow));
+            }
         }
 
         if (blockStartCount > endCount) {
-            return List.of(
+            issues.add(
                     "Mermaid diagram #%d: found %d sequence block(s) (loop/alt/opt/par/rect/critical/break) but only %d 'end' keyword(s). Each block must be closed with 'end'."
                             .formatted(diagramIndex, blockStartCount, endCount));
         }
-        return List.of();
+        return issues;
+    }
+
+    private boolean isNoteLine(String trimmedLine) {
+        return trimmedLine.startsWith("note ") || trimmedLine.startsWith("Note ");
     }
 
     private List<String> checkBraceBalanceRules(String[] lines, int diagramIndex) {
