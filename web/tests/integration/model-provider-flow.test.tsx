@@ -687,6 +687,22 @@ describe('Model Provider Flow', () => {
     expect(connection.getCalls()).toBe(0)
   })
 
+  it('guides Anthropic users toward a workspace-scoped API key', async () => {
+    mockListModelProviders([])
+    mockTestConnection({ models: [chat('claude-3-5-sonnet-20241022')], success: true })
+
+    setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
+    const { user } = renderList()
+    await openWizard(user)
+
+    await selectProvider(user, /^Anthropic/)
+    await waitFor(() => {
+      expect(
+        dialog().getByText('Enter a workspace-scoped API key created inside a Claude workspace.'),
+      ).toBeInTheDocument()
+    })
+  })
+
   it('shows connection errors and retries on the next click', async () => {
     mockListModelProviders([])
     const connection = mockTestConnection({ error: 'Invalid API key', success: false })

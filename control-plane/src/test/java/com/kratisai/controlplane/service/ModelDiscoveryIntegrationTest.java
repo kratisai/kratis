@@ -1,8 +1,10 @@
 package com.kratisai.controlplane.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.kratisai.controlplane.api.restdto.ModelEntryDto;
@@ -14,6 +16,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -193,6 +196,56 @@ class ModelDiscoveryIntegrationTest {
                 .extracting(ModelEntryDto::modelName)
                 .containsExactly("us.anthropic.claude-sonnet-4-6", "amazon.titan-embed-text-v2:0");
         assertThat(models).extracting(ModelEntryDto::kind).containsExactly(ModelKind.CHAT, ModelKind.EMBEDDING);
+        server.verify();
+    }
+
+    @Test
+    void shouldExplainWorkspaceKeyWhenAnthropicRejectsOrganizationKey() {
+        String responseBody = "{\"type\": \"error\", \"error\": {\"type\": \"invalid_request_error\","
+                + " \"message\": \"This organization API key is not scoped to a workspace. Include the"
+                + " anthropic-workspace-id header.\"}}";
+        server.expect(requestTo("https://api.anthropic.com/v1/models"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(responseBody));
+
+        assertThatThrownBy(() -> modelDiscoveryService.discoverModels(ProviderType.ANTHROPIC, "org-key", null))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Anthropic organization API keys are not supported")
+                .hasMessageContaining("workspace-scoped API key");
+        server.verify();
+    }
+
+    @Test
+    void shouldPreserveGenericAnthropicBadRequest() {
+        String responseBody =
+                "{\"type\": \"error\", \"error\": {\"type\": \"invalid_request_error\", \"message\": \"Bad request\"}}";
+        server.expect(requestTo("https://api.anthropic.com/v1/models"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(responseBody));
+
+        assertThatThrownBy(() -> modelDiscoveryService.discoverModels(ProviderType.ANTHROPIC, "dummy-key", null))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to discover Anthropic models");
+        server.verify();
+    }
+
+    @Test
+    void shouldPreserveAnthropicAuthenticationError() {
+        String responseBody =
+                "{\"type\": \"error\", \"error\": {\"type\": \"authentication_error\", \"message\": \"invalid x-api-key\"}}";
+        server.expect(requestTo("https://api.anthropic.com/v1/models"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(responseBody));
+
+        assertThatThrownBy(() -> modelDiscoveryService.discoverModels(ProviderType.ANTHROPIC, "bad-key", null))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to discover Anthropic models");
         server.verify();
     }
 }

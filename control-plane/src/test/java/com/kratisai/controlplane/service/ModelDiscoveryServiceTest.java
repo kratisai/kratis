@@ -12,6 +12,7 @@ import com.kratisai.controlplane.client.ModelDiscoveryClient;
 import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.ProviderType;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 
 @ExtendWith(MockitoExtension.class)
@@ -232,6 +235,87 @@ class ModelDiscoveryServiceTest {
                 .thenThrow(new RestClientException("Connection refused"));
 
         assertThatThrownBy(() -> service.discoverModels(ProviderType.ANTHROPIC, "test-key", null))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to discover Anthropic models");
+    }
+
+    @Test
+    void discoverModels_anthropicOrganizationKey_shouldExplainWorkspaceKey() {
+        String body = "{\"type\": \"error\", \"error\": {\"type\": \"invalid_request_error\","
+                + " \"message\": \"This organization API key is not scoped to a workspace.\"}}";
+        when(modelDiscoveryClient.getModelsWithXApiKey(any(), any(), any()))
+                .thenThrow(new HttpClientErrorException(
+                        HttpStatus.BAD_REQUEST,
+                        "Bad Request",
+                        body.getBytes(StandardCharsets.UTF_8),
+                        StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> service.discoverModels(ProviderType.ANTHROPIC, "org-key", null))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Anthropic organization API keys are not supported")
+                .hasMessageContaining("workspace-scoped API key");
+    }
+
+    @Test
+    void discoverModels_anthropicWorkspaceHeaderHint_shouldExplainWorkspaceKey() {
+        String body = "{\"type\": \"error\", \"error\": {\"type\": \"invalid_request_error\","
+                + " \"message\": \"Include the anthropic-workspace-id header.\"}}";
+        when(modelDiscoveryClient.getModelsWithXApiKey(any(), any(), any()))
+                .thenThrow(new HttpClientErrorException(
+                        HttpStatus.BAD_REQUEST,
+                        "Bad Request",
+                        body.getBytes(StandardCharsets.UTF_8),
+                        StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> service.discoverModels(ProviderType.ANTHROPIC, "org-key", null))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Anthropic organization API keys are not supported");
+    }
+
+    @Test
+    void discoverModels_anthropicPlainTextWorkspaceError_shouldExplainWorkspaceKey() {
+        String body = "not scoped to a workspace";
+        when(modelDiscoveryClient.getModelsWithXApiKey(any(), any(), any()))
+                .thenThrow(new HttpClientErrorException(
+                        HttpStatus.BAD_REQUEST,
+                        "Bad Request",
+                        body.getBytes(StandardCharsets.UTF_8),
+                        StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> service.discoverModels(ProviderType.ANTHROPIC, "org-key", null))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Anthropic organization API keys are not supported");
+    }
+
+    @Test
+    void discoverModels_anthropicGenericBadRequest_shouldPreserveOriginalError() {
+        String body =
+                "{\"type\": \"error\", \"error\": {\"type\": \"invalid_request_error\", \"message\": \"Bad request\"}}";
+        when(modelDiscoveryClient.getModelsWithXApiKey(any(), any(), any()))
+                .thenThrow(new HttpClientErrorException(
+                        HttpStatus.BAD_REQUEST,
+                        "Bad Request",
+                        body.getBytes(StandardCharsets.UTF_8),
+                        StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> service.discoverModels(ProviderType.ANTHROPIC, "test-key", null))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to discover Anthropic models")
+                .hasMessageNotContaining("organization API keys");
+    }
+
+    @Test
+    void discoverModels_anthropicUnauthorized_shouldPreserveOriginalError() {
+        String body =
+                "{\"type\": \"error\", \"error\": {\"type\": \"authentication_error\", \"message\": \"invalid x-api-key\"}}";
+        when(modelDiscoveryClient.getModelsWithXApiKey(any(), any(), any()))
+                .thenThrow(new HttpClientErrorException(
+                        HttpStatus.UNAUTHORIZED,
+                        "Unauthorized",
+                        body.getBytes(StandardCharsets.UTF_8),
+                        StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> service.discoverModels(ProviderType.ANTHROPIC, "bad-key", null))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Failed to discover Anthropic models");
     }

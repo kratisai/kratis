@@ -13,8 +13,10 @@ import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 @Service
 public class ModelDiscoveryService {
@@ -125,10 +127,39 @@ public class ModelDiscoveryService {
             URI uri = URI.create(modelsUrl);
             String response = modelDiscoveryClient.getModelsWithXApiKey(uri, apiKey, ANTHROPIC_VERSION);
             return parseDataArrayModels(response);
+        } catch (RestClientResponseException e) {
+            if (isAnthropicOrganizationKeyError(e)) {
+                throw new RuntimeException(
+                        "Anthropic organization API keys are not supported. Please use a workspace-scoped API key"
+                                + " created inside a Claude workspace (Claude Console -> Workspaces -> [Select"
+                                + " Workspace] -> API Keys).",
+                        e);
+            }
+            throw new RuntimeException("Failed to discover Anthropic models: " + e.getMessage(), e);
         } catch (RestClientException e) {
             throw new RuntimeException("Failed to discover Anthropic models: " + e.getMessage(), e);
         } catch (Exception e) {
             throw new RuntimeException("Failed to parse Anthropic models response: " + e.getMessage(), e);
+        }
+    }
+
+    private boolean isAnthropicOrganizationKeyError(RestClientResponseException e) {
+        if (e.getStatusCode().value() != HttpStatus.BAD_REQUEST.value()) {
+            return false;
+        }
+        String body = e.getResponseBodyAsString();
+        if (body == null || body.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode error = objectMapper.readTree(body).path("error");
+            if (!"invalid_request_error".equals(error.path("type").asText(null))) {
+                return body.contains("not scoped to a workspace");
+            }
+            String message = error.path("message").asText("");
+            return message.contains("not scoped to a workspace") || message.contains("anthropic-workspace-id");
+        } catch (JsonProcessingException parsingFailed) {
+            return body.contains("not scoped to a workspace");
         }
     }
 
