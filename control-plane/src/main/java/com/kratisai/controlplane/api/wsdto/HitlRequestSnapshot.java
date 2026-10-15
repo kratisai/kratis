@@ -12,6 +12,7 @@ public record HitlRequestSnapshot(
         String message,
         String command,
         List<CommandSegment> commandSegments,
+        String parseWarning,
         String title,
         String toolKind,
         List<PermissionOption> options,

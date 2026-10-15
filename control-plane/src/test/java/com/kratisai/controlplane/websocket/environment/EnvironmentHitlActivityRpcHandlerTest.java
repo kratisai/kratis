@@ -404,6 +404,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
                                 "Approve rm -rf /",
                                 "rm -rf /",
                                 List.of(new CommandSegment("rm -rf /", "rm -rf", HitlRuleType.PREFIX_WILD)),
+                                null,
                                 "Run rm -rf /",
                                 "execute",
                                 sanitizedOptions,
@@ -561,6 +562,7 @@ class EnvironmentHitlActivityRpcHandlerTest {
                                 "el-1",
                                 HitlKind.QUESTION,
                                 "Choose a target",
+                                null,
                                 null,
                                 null,
                                 null,
@@ -970,6 +972,53 @@ class EnvironmentHitlActivityRpcHandlerTest {
 
         assertThat(EnvironmentHitlActivityRpcHandler.sanitizeOptions(null)).isNull();
         assertThat(EnvironmentHitlActivityRpcHandler.sanitizeOptions(List.of())).isEmpty();
+    }
+
+    @Test
+    void handle_approvalCommandWithCommandSubstitution_setsParseWarningAndEmptySegments() {
+        stubSessionAndEnvironment();
+        when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of());
+
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.HitlActivity params =
+                approvalParams("echo $(whoami)", "tool-call-sub", execution.getId());
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-sub");
+
+        handler.handle(sessionId, request, params).blockLast();
+
+        ArgumentCaptor<HitlRequestSnapshot> payloadCaptor = ArgumentCaptor.forClass(HitlRequestSnapshot.class);
+        verify(pendingHitlRegistry).register(payloadCaptor.capture(), any(), any(), any());
+
+        HitlRequestSnapshot snapshot = payloadCaptor.getValue();
+        assertThat(snapshot.commandSegments()).isEmpty();
+        assertThat(snapshot.parseWarning())
+                .isEqualTo("Command contains complex shell syntax and cannot be split into remembered rules.");
+    }
+
+    @Test
+    void handle_approvalCleanCommand_setsNullParseWarningAndExtractsSegments() {
+        stubSessionAndEnvironment();
+        when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of());
+
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.HitlActivity params = approvalParams("ls -la", "tool-call-clean", execution.getId());
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-clean");
+
+        handler.handle(sessionId, request, params).blockLast();
+
+        ArgumentCaptor<HitlRequestSnapshot> payloadCaptor = ArgumentCaptor.forClass(HitlRequestSnapshot.class);
+        verify(pendingHitlRegistry).register(payloadCaptor.capture(), any(), any(), any());
+
+        HitlRequestSnapshot snapshot = payloadCaptor.getValue();
+        assertThat(snapshot.commandSegments())
+                .containsExactly(new CommandSegment("ls -la", "ls -la", HitlRuleType.PREFIX_WILD));
+        assertThat(snapshot.parseWarning()).isNull();
     }
 
     @Test

@@ -36,6 +36,7 @@ export interface ActivityHitl {
   message: string
   optionId?: string
   options?: PermissionOption[]
+  parseWarning?: string
   resolvedBy?: HitlResolver
   response?: HitlResponse
   state?: HitlState

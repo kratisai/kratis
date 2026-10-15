@@ -630,6 +630,25 @@ describe('activity-store', () => {
       expect(activities[0].permissionDiff).toEqual({ newText: 'new', oldText: 'old', path: 'a.ts' })
     })
 
+    it('stores permissionParseWarning on the pending activity when present', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        approvalActivity({
+          actionId: 'tc-9',
+          hitl: {
+            parseWarning:
+              'Command contains complex shell syntax and cannot be split into remembered rules.',
+          },
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
+      expect(activities[0].permissionParseWarning).toBe(
+        'Command contains complex shell syntax and cannot be split into remembered rules.',
+      )
+    })
+
     it('produces two records for a message and a thought sharing one messageId', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(

@@ -219,6 +219,46 @@ describe('ActivityApproval', () => {
     expect(screen.queryByRole('button', { name: /Remember choices/ })).not.toBeInTheDocument()
   })
 
+  it('renders the warning notice when permissionParseWarning is present', () => {
+    const warning =
+      'Command contains complex shell syntax and cannot be split into remembered rules.'
+    render(
+      <ActivityApproval
+        activity={pendingActivity({
+          permissionOptions: [ALLOW_ONCE, REJECT_ONCE],
+          permissionParseWarning: warning,
+        })}
+        executionId="exec-1"
+      />,
+    )
+
+    expect(screen.getByText(warning)).toBeInTheDocument()
+    expect(screen.getByText(warning)).toHaveClass('italic', 'text-muted-foreground')
+  })
+
+  it('hides remember choices and displays single actions when permissionParseWarning is present', () => {
+    const warning =
+      'Command contains complex shell syntax and cannot be split into remembered rules.'
+    render(
+      <ActivityApproval
+        activity={pendingActivity({
+          permissionOptions: [ALLOW_ONCE, REJECT_ONCE],
+          permissionParseWarning: warning,
+          permissionSegments: [],
+        })}
+        executionId="exec-1"
+      />,
+    )
+
+    expect(screen.getByText(warning)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Remember choices/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Allow once/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Reject/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Cancel/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Allow and remember/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Reject and remember/ })).not.toBeInTheDocument()
+  })
+
   describe('remember choices panel', () => {
     const segments = [
       { suggestedRoot: 'npm run test', text: 'npm run test src/foo.test.ts' },

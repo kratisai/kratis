@@ -132,6 +132,14 @@ public class EnvironmentHitlActivityRpcHandler
 
         List<HitlRule> rules = ruleRepository.findByTeamId(teamId);
 
+        String parseWarning = null;
+        if (ActivityKind.isCommandLike(toolKind)) {
+            var parse = ShellCommandSplitter.parse(command);
+            if (!parse.fullyParsed()) {
+                parseWarning = "Command contains complex shell syntax and cannot be split into remembered rules.";
+            }
+        }
+
         HitlRequestSnapshot payload = new HitlRequestSnapshot(
                 execution.getId(),
                 params.actionId(),
@@ -139,6 +147,7 @@ public class EnvironmentHitlActivityRpcHandler
                 params.message(),
                 command,
                 approvalSegments(command, toolKind, rules),
+                parseWarning,
                 params.title(),
                 toolKind,
                 sanitizeOptions(params.options()),
@@ -231,6 +240,7 @@ public class EnvironmentHitlActivityRpcHandler
                 null,
                 null,
                 null,
+                null,
                 params.form(),
                 null);
 
@@ -296,6 +306,9 @@ public class EnvironmentHitlActivityRpcHandler
     private static List<CommandSegment> approvalSegments(String command, String toolKind, List<HitlRule> rules) {
         if (ActivityKind.isCommandLike(toolKind)) {
             var parse = ShellCommandSplitter.parse(command);
+            if (!parse.fullyParsed()) {
+                return List.of();
+            }
             return parse.uniqueRoots().stream()
                     .map(segment -> {
                         Boolean preApproved = null;
