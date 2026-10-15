@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.CreateSandboxExecutionRequest;
 import com.kratisai.controlplane.model.AgentHarness;
@@ -31,12 +33,14 @@ import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SlowTest;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.websocket.environment.EnvironmentCheckoutCompleteRpcHandler;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.awaitility.Awaitility;
@@ -45,13 +49,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mockito;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.system.CapturedOutput;
-import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
@@ -66,7 +67,6 @@ import org.springframework.web.context.WebApplicationContext;
  */
 @SpringIntegrationTest
 @SlowTest(slotGroup = "E2E_GIT_CREDENTIAL")
-@ExtendWith(OutputCaptureExtension.class)
 class GitCredentialFlowRealTest {
 
     private static final Logger logger = LoggerFactory.getLogger(GitCredentialFlowRealTest.class);
@@ -214,33 +214,45 @@ class GitCredentialFlowRealTest {
     }
 
     @Test
-    void wrongCredentialsFailCheckoutWithVisibleErrorInControlPlaneLogs(CapturedOutput capturedOutput)
-            throws Exception {
+    void wrongCredentialsFailCheckoutWithVisibleErrorInControlPlaneLogs() throws Exception {
         RepoCredential credential = testDataFactory.createCredential(
                 testContext.team(), "Wrong PAT", CredentialType.PAT, "definitely-wrong-token");
 
-        launchExecution(credential, "git-cred-wrong-canvas");
+        // Capture only the checkout handler's logger. Asserting on the global CapturedOutput is
+        // unreliable under parallel test execution, where other tests' output interleaves with and
+        // can drop this line.
+        ch.qos.logback.classic.Logger checkoutLogger =
+                (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(EnvironmentCheckoutCompleteRpcHandler.class);
+        ListAppender<ILoggingEvent> checkoutLogs = new ListAppender<>();
+        checkoutLogs.list = new CopyOnWriteArrayList<>();
+        checkoutLogs.start();
+        checkoutLogger.addAppender(checkoutLogs);
+        try {
+            launchExecution(credential, "git-cred-wrong-canvas");
 
-        Awaitility.await()
-                .atMost(90, TimeUnit.SECONDS)
-                .pollInterval(Duration.ofSeconds(1))
-                .untilAsserted(() -> {
-                    SandboxExecution execution = sandboxExecutionRepository.findAll().stream()
-                            .filter(e -> e.getEnvironment().getId() != null)
-                            .findFirst()
-                            .orElseThrow();
-                    assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
-                });
+            Awaitility.await()
+                    .atMost(90, TimeUnit.SECONDS)
+                    .pollInterval(Duration.ofSeconds(1))
+                    .untilAsserted(() -> {
+                        SandboxExecution execution = sandboxExecutionRepository.findAll().stream()
+                                .filter(e -> e.getEnvironment().getId() != null)
+                                .findFirst()
+                                .orElseThrow();
+                        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+                    });
 
-        // The actual cause must be visible in the control-plane logs: the
-        // checkout_complete error carries the real git failure.
-        String captured = capturedOutput.getOut() + capturedOutput.getErr();
-        assertThat(captured)
-                .as("control-plane logs must report the checkout failure")
-                .contains("Checkout failed for execution");
-        assertThat(captured)
-                .as("the git authentication failure must be visible in the checkout error")
-                .contains("Authentication failed for '" + gitFixture.getGitHttpUrl());
+            // The actual cause must be visible in the control-plane logs: the
+            // checkout_complete error carries the real git failure.
+            Awaitility.await()
+                    .atMost(30, TimeUnit.SECONDS)
+                    .pollInterval(Duration.ofMillis(200))
+                    .untilAsserted(() -> assertThat(checkoutLogs.list)
+                            .map(ILoggingEvent::getFormattedMessage)
+                            .anyMatch(message -> message.contains("Checkout failed for execution")
+                                    && message.contains("Authentication failed for '" + gitFixture.getGitHttpUrl())));
+        } finally {
+            checkoutLogger.detachAppender(checkoutLogs);
+        }
     }
 
     @Test

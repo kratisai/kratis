@@ -561,7 +561,7 @@ public class SandboxExecutionPublishService {
         }
 
         // New-repo executions choose credentials at publish time, so register git auth before the seed push.
-        registerNewRepoGitAuth(execution, credential);
+        registerNewRepoGitAuth(execution);
 
         executeGitSetRemote(execution.getEnvironment().getId(), execution.getId(), remote.cloneUrl(), defaultBranch);
 
@@ -579,9 +579,9 @@ public class SandboxExecutionPublishService {
         return repository;
     }
 
-    private void registerNewRepoGitAuth(SandboxExecution execution, RepoCredential credential) {
+    private void registerNewRepoGitAuth(SandboxExecution execution) {
         try {
-            sandboxProvisioningService.registerGitAuth(execution, credential);
+            sandboxProvisioningService.registerGitCredentials(execution);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Git auth registration interrupted", e);

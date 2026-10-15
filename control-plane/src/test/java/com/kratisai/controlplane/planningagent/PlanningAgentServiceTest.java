@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -195,11 +196,12 @@ class PlanningAgentServiceTest {
         assertThat(agentCancelledLatch.await(3, TimeUnit.SECONDS)).isTrue();
         assertThat(wasInterrupted.get()).isTrue();
 
-        // Wait for thread to finish and verify error was NOT persisted to DB
-        verify(chatService, never()).saveAssistantErrorMessage(any(), anyString(), anyInt());
+        // The interrupt reaches the worker before its finally block runs, so wait for the usage
+        // sync that finally performs before asserting the terminal state.
+        verify(chatUsageSessionService, timeout(5000)).syncUsage(chatId, "vk-123");
 
-        // Usage must still be synced
-        verify(chatUsageSessionService).syncUsage(chatId, "vk-123");
+        // Once the worker has finished, the error must NOT have been persisted to DB
+        verify(chatService, never()).saveAssistantErrorMessage(any(), anyString(), anyInt());
 
         // Verify task was removed from activeAgentTasks
         Field tasksField = PlanningAgentService.class.getDeclaredField("activeAgentTasks");

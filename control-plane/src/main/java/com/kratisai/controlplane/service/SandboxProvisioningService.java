@@ -77,10 +77,23 @@ public class SandboxProvisioningService {
     }
 
     public void provisionEnvironment(ExecutionEnvironment environment, String token) {
+        startRuntime(environment, token, false);
+    }
+
+    /** Brings a sleeping sandbox back from its suspend snapshot; spawn and resume share every other step. */
+    public void reprovisionEnvironment(ExecutionEnvironment environment) {
+        startRuntime(environment, environment.getAuthToken(), true);
+    }
+
+    private void startRuntime(ExecutionEnvironment environment, String token, boolean resume) {
         Objects.requireNonNull(token, "token is required");
         SandboxProvider sandboxProvider =
                 sandboxOrchestratorService.getProvider(environment.getProvider().getType());
-        sandboxProvider.spawnSandbox(environment);
+        if (resume) {
+            sandboxProvider.resume(environment);
+        } else {
+            sandboxProvider.spawnSandbox(environment);
+        }
         sandboxProvider.initializeWorkspace(environment.getId(), token);
     }
 
@@ -176,20 +189,30 @@ public class SandboxProvisioningService {
         }
     }
 
+    public void registerGitCredentials(SandboxExecution execution) throws InterruptedException, TimeoutException {
+        registerGitIdentity(execution);
+        RepoCredential credential = resolveExecutionCredential(execution);
+        if (credential != null) {
+            registerGitAuth(execution, credential);
+            logger.info(
+                    "Deployed git auth to execution environment {}",
+                    execution.getEnvironment().getId());
+        }
+    }
+
+    // A checked-out repository carries its credential; a not-yet-published new repository carries it
+    // on the execution until the repository row is created at publish time.
+    private static RepoCredential resolveExecutionCredential(SandboxExecution execution) {
+        Repository repository = execution.getRepository();
+        return repository != null ? repository.getCredential() : execution.getNewRepoCredential();
+    }
+
     public void dispatchCheckout(SandboxExecution execution) throws Exception {
         Repository repository = execution.getRepository();
         String url = repository.getUrl();
         String branch = repository.getBranch();
 
-        RepoCredential credential = repository.getCredential();
-
-        registerGitIdentity(execution);
-        if (credential != null) {
-            registerGitAuth(execution, credential);
-            logger.info(
-                    "Registered git auth with execution environment {}",
-                    execution.getEnvironment().getId());
-        }
+        registerGitCredentials(execution);
 
         Map<String, String> gitEnv = Map.of("GIT_TERMINAL_PROMPT", "0", "SSH_ASKPASS", "");
         environmentRpcClient.send(
@@ -207,16 +230,7 @@ public class SandboxProvisioningService {
     }
 
     private void prepareNewRepository(SandboxExecution execution) throws Exception {
-        registerGitIdentity(execution);
-
-        RepoCredential credential = execution.getNewRepoCredential();
-        if (credential != null) {
-            registerGitAuth(execution, credential);
-            logger.info(
-                    "Registered git auth for new repository '{}' with execution environment {}",
-                    execution.getNewRepoName(),
-                    execution.getEnvironment().getId());
-        }
+        registerGitCredentials(execution);
 
         String initCommand =
                 "if [ -n \"$(ls -A | grep -v '^\\.kratis$')\" ]; then echo \"Workspace is not empty\" >&2; exit 1; fi; git init -b main && git commit --allow-empty -m \"Initial commit\"";

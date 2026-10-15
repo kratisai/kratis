@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
@@ -30,6 +31,7 @@ import com.kratisai.controlplane.config.InstanceProperties;
 import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.*;
+import com.kratisai.controlplane.model.event.EnvironmentRegisteredEvent;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
@@ -40,6 +42,7 @@ import com.kratisai.controlplane.testsupport.ResourcelessTransactionManager;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -683,6 +686,113 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
+    void registerGitAccess_withNewRepoCredential_registersIdentityAndAuth() throws Exception {
+        SandboxExecution execution = createTestExecution();
+
+        RepoCredential credential = new RepoCredential();
+        credential.setType(CredentialType.PAT);
+        execution.setNewRepoCredential(credential);
+
+        when(credentialResolver.resolve(credential)).thenReturn(GitAuthMaterial.ofToken("pat-secret"));
+        when(environmentRpcClient.request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitAuth.class)))
+                .thenReturn(new EnvironmentConnectorResult.RegisterGitAuth(GitRegistrationStatus.SUCCESS));
+
+        sandboxProvisioningService.registerGitCredentials(execution);
+
+        verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitIdentity.class));
+        verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitAuth.class));
+    }
+
+    @Test
+    void reprovisionEnvironment_resumesAndInitializesWorkspace() {
+        EnvironmentProvider envProvider = new EnvironmentProvider();
+        envProvider.setId(UUID.fromString("77777777-7777-7777-7777-777777777777"));
+
+        ExecutionEnvironment environment = new ExecutionEnvironment();
+        environment.setId(ENVIRONMENT_ID);
+        environment.setAuthToken("token-123");
+        environment.setProvider(envProvider);
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+
+        sandboxProvisioningService.reprovisionEnvironment(environment);
+
+        verify(sandboxProvider).resume(environment);
+        verify(sandboxProvider, never()).spawnSandbox(any());
+        verify(sandboxProvider).initializeWorkspace(ENVIRONMENT_ID, "token-123");
+    }
+
+    @Test
+    void handleEnvironmentRegistered_withoutRunningExecution_reestablishesGitAccess() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        RepoCredential credential = new RepoCredential();
+        credential.setType(CredentialType.PAT);
+        Repository repository = new Repository();
+        repository.setId(UUID.fromString("33333333-4444-5555-6666-777777777777"));
+        repository.setUrl("https://github.com/test/repo.git");
+        repository.setCredential(credential);
+        execution.setRepository(repository);
+
+        when(sandboxExecutionRepository.findByEnvironmentIdAndStatus(ENVIRONMENT_ID, SandboxExecutionStatus.RUNNING))
+                .thenReturn(List.of());
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENVIRONMENT_ID))
+                .thenReturn(Optional.of(execution));
+        when(credentialResolver.resolve(credential)).thenReturn(GitAuthMaterial.ofToken("pat-secret"));
+        when(environmentRpcClient.request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitAuth.class)))
+                .thenReturn(new EnvironmentConnectorResult.RegisterGitAuth(GitRegistrationStatus.SUCCESS));
+
+        sandboxExecutionService.handleEnvironmentRegistered(new EnvironmentRegisteredEvent(ENVIRONMENT_ID));
+
+        verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitIdentity.class));
+        verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitAuth.class));
+        verify(environmentRpcClient, never()).request(any(), any(EnvironmentRpcPayload.LaunchAcpAgent.class));
+    }
+
+    @Test
+    void handleEnvironmentRegistered_withoutActiveExecution_isNoOp() throws Exception {
+        when(sandboxExecutionRepository.findByEnvironmentIdAndStatus(ENVIRONMENT_ID, SandboxExecutionStatus.RUNNING))
+                .thenReturn(List.of());
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENVIRONMENT_ID))
+                .thenReturn(Optional.empty());
+
+        sandboxExecutionService.handleEnvironmentRegistered(new EnvironmentRegisteredEvent(ENVIRONMENT_ID));
+
+        verify(environmentRpcClient, never()).request(any(), any(EnvironmentRpcPayload.RegisterGitIdentity.class));
+    }
+
+    @Test
+    void handleEnvironmentRegistered_whenReestablishFails_doesNotThrow() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        when(sandboxExecutionRepository.findByEnvironmentIdAndStatus(ENVIRONMENT_ID, SandboxExecutionStatus.RUNNING))
+                .thenReturn(List.of());
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENVIRONMENT_ID))
+                .thenReturn(Optional.of(execution));
+        when(environmentRpcClient.request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitIdentity.class)))
+                .thenThrow(new EnvironmentRpcClient.EnvironmentRpcException(-32000, "environment offline"));
+
+        assertThatCode(() -> sandboxExecutionService.handleEnvironmentRegistered(
+                        new EnvironmentRegisteredEvent(ENVIRONMENT_ID)))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void handleEnvironmentRegistered_withRunningExecution_dispatchesWithoutReestablishing() {
+        SandboxExecution execution = createTestExecution();
+        when(sandboxExecutionRepository.findByEnvironmentIdAndStatus(ENVIRONMENT_ID, SandboxExecutionStatus.RUNNING))
+                .thenReturn(List.of(execution));
+        when(sessionRegistry.getSessionForEnvironment(ENVIRONMENT_ID)).thenReturn(webSocketSession);
+        when(webSocketSession.isOpen()).thenReturn(true);
+
+        List<Runnable> submitted = new ArrayList<>();
+        SandboxExecutionService service = newSandboxExecutionService(submitted::add);
+
+        service.handleEnvironmentRegistered(new EnvironmentRegisteredEvent(ENVIRONMENT_ID));
+
+        assertThat(submitted).hasSize(1);
+        verify(sandboxExecutionRepository, never()).findFirstByEnvironmentIdOrderByStartedAtDesc(any());
+    }
+
+    @Test
     void completeAcpPrompt_withEndTurn_transitionsToIdle() {
         SandboxExecution execution = createTestExecution();
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
@@ -1210,7 +1320,7 @@ class SandboxExecutionServiceTest {
 
     @Test
     void onSandboxExecutionCompleteEvent_runsFinalizeAsynchronouslyOnExecutor() {
-        List<Runnable> submitted = new java.util.ArrayList<>();
+        List<Runnable> submitted = new ArrayList<>();
         Executor capturingExecutor = submitted::add;
         SandboxExecutionService asyncService = newSandboxExecutionService(capturingExecutor);
 
@@ -1240,7 +1350,7 @@ class SandboxExecutionServiceTest {
 
     @Test
     void dispatchExecution_submitsDispatchToInjectedExecutor() {
-        List<Runnable> submitted = new java.util.ArrayList<>();
+        List<Runnable> submitted = new ArrayList<>();
         SandboxExecutionService service = newSandboxExecutionService(submitted::add);
         SandboxExecution execution = createTestExecution();
 
