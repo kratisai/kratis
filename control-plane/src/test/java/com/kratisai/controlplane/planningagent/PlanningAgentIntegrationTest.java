@@ -399,4 +399,45 @@ class PlanningAgentIntegrationTest extends AgentTestHarness {
                 .anyMatch(r -> r instanceof ClientPayload.MessageChunkResult
                         && ((ClientPayload.MessageChunkResult) r).content().contains("Search completed"));
     }
+
+    @Test
+    void shouldCancelExecutionAndNotPersistErrorToDatabaseWhenClientDisconnects() throws Exception {
+        java.util.concurrent.CountDownLatch startedLatch = new java.util.concurrent.CountDownLatch(1);
+        mockModel.addMatcher(PromptMatcher.builder()
+                .contains("Slow long thinking task")
+                .response((org.springframework.ai.chat.prompt.Prompt prompt) -> {
+                    startedLatch.countDown();
+                    try {
+                        Thread.sleep(5000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("interrupted", e);
+                    }
+                    return org.springframework.ai.chat.model.ChatResponse.builder()
+                            .generations(List.of(new org.springframework.ai.chat.model.Generation(
+                                    new org.springframework.ai.chat.messages.AssistantMessage("Done"))))
+                            .build();
+                })
+                .build());
+
+        var result =
+                planningAgentService.streamMessage(teamId, providerId, "gpt-4o", sessionId, "Slow long thinking task");
+
+        reactor.core.Disposable subscription = result.subscribe();
+
+        // Wait for LLM invocation to begin
+        assertThat(startedLatch.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+        // Simulate client disconnect / cancellation
+        subscription.dispose();
+
+        // Wait a short moment for background thread cleanup
+        Thread.sleep(500);
+
+        // Verify database: only user message was saved; no assistant error message was persisted!
+        var messages = chatMemoryRepository.findByChatIdOrderByCreatedAtAsc(sessionId);
+        assertThat(messages).hasSize(1);
+        assertThat(messages.getFirst().getMessageType())
+                .isEqualTo(com.kratisai.controlplane.api.wsdto.MessageRole.USER);
+    }
 }

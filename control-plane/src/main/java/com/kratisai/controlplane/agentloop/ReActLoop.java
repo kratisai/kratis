@@ -131,6 +131,10 @@ public final class ReActLoop<T> {
         ReActToolInvoker toolInvoker = new ReActToolInvoker(tools, onToolEvent);
 
         for (int turn = 0; turn <= maxIterations; turn++) {
+            if (Thread.currentThread().isInterrupted()) {
+                log.info("ReAct loop cancelled by thread interruption.");
+                return null;
+            }
             boolean finalTurn = turn >= (maxIterations - 1);
             try {
                 applyFeedback(
@@ -178,6 +182,10 @@ public final class ReActLoop<T> {
                         e.getMessage());
                 history.add(new UserMessage(e.getMessage()));
             } catch (RuntimeException e) {
+                if (Thread.currentThread().isInterrupted() || hasInterruptedException(e)) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
                 if (e instanceof ReActLoopFatalException fatal) {
                     throw fatal;
                 }
@@ -209,6 +217,9 @@ public final class ReActLoop<T> {
         AtomicBoolean emitted = new AtomicBoolean();
         int attempt = 0;
         while (true) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new IllegalStateException("ReAct loop cancelled by thread interruption");
+            }
             try {
                 List<ChatResponse> chunks = chatClient
                         .prompt()
@@ -226,6 +237,10 @@ public final class ReActLoop<T> {
                         .block();
                 return mergeChunks(chunks);
             } catch (RuntimeException e) {
+                if (Thread.currentThread().isInterrupted() || hasInterruptedException(e)) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("ReAct loop cancelled by thread interruption", e);
+                }
                 LlmErrorCategory category = LlmExceptionClassifier.classify(e);
                 if (category.isFatal()) {
                     throw new ReActLoopFatalException(category, e);
@@ -245,6 +260,17 @@ public final class ReActLoop<T> {
                 sleepBeforeRetry(attempt);
             }
         }
+    }
+
+    private static boolean hasInterruptedException(Throwable t) {
+        Throwable curr = t;
+        while (curr != null) {
+            if (curr instanceof InterruptedException) {
+                return true;
+            }
+            curr = curr.getCause();
+        }
+        return false;
     }
 
     private static void sleepBeforeRetry(int attempt) {

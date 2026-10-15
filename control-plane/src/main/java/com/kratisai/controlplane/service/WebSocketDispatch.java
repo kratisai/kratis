@@ -24,6 +24,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 
 /**
@@ -45,6 +46,7 @@ public class WebSocketDispatch {
     private final SubscriptionRegistry subscriptionRegistry;
     private final Executor broadcastExecutor;
     private final Map<String, SerialExecutor> clientBroadcastExecutors = new ConcurrentHashMap<>();
+    private final Map<String, Set<Disposable>> sessionSubscriptions = new ConcurrentHashMap<>();
 
     public WebSocketDispatch(
             ObjectMapper objectMapper,
@@ -101,10 +103,19 @@ public class WebSocketDispatch {
 
     public void removeSession(String sessionId) {
         clientBroadcastExecutors.remove(sessionId);
+        Set<Disposable> subscriptions = sessionSubscriptions.remove(sessionId);
+        if (subscriptions != null) {
+            subscriptions.forEach(Disposable::dispose);
+        }
     }
 
     int getBroadcastExecutorCount() {
         return clientBroadcastExecutors.size();
+    }
+
+    int getSessionSubscriptionCount(String sessionId) {
+        Set<Disposable> subscriptions = sessionSubscriptions.get(sessionId);
+        return subscriptions != null ? subscriptions.size() : 0;
     }
 
     private void broadcastToSession(WebSocketSession session, JsonRpcResponse<?> notification) {
@@ -143,14 +154,41 @@ public class WebSocketDispatch {
     }
 
     private <R> void subscribeAndSend(WebSocketSession to, Object requestId, Flux<R> flux, ResponseSender<R> sender) {
-        flux.subscribe(payload -> sender.send(to, requestId, payload), error -> {
-            if (error instanceof RpcErrorException rpcError) {
-                sendError(to, requestId, rpcError.error());
-                return;
-            }
-            logger.error("WebSocket stream failed for session {}", to.getId(), error);
-            sendError(to, requestId, JsonRpcError.InternalError(error));
-        });
+        String sessionId = to.getId();
+        Set<Disposable> subscriptions = sessionId != null
+                ? sessionSubscriptions.computeIfAbsent(sessionId, k -> ConcurrentHashMap.newKeySet())
+                : null;
+        Disposable[] disposableRef = new Disposable[1];
+        Disposable disposable = flux.subscribe(
+                payload -> sender.send(to, requestId, payload),
+                error -> {
+                    if (subscriptions != null && disposableRef[0] != null) {
+                        subscriptions.remove(disposableRef[0]);
+                        if (subscriptions.isEmpty()) {
+                            sessionSubscriptions.remove(sessionId, subscriptions);
+                        }
+                    }
+                    if (error instanceof RpcErrorException rpcError) {
+                        sendError(to, requestId, rpcError.error());
+                        return;
+                    }
+                    logger.error("WebSocket stream failed for session {}", to.getId(), error);
+                    sendError(to, requestId, JsonRpcError.InternalError(error));
+                },
+                () -> {
+                    if (subscriptions != null && disposableRef[0] != null) {
+                        subscriptions.remove(disposableRef[0]);
+                        if (subscriptions.isEmpty()) {
+                            sessionSubscriptions.remove(sessionId, subscriptions);
+                        }
+                    }
+                });
+        disposableRef[0] = disposable;
+        if (subscriptions != null && !disposable.isDisposed()) {
+            subscriptions.add(disposable);
+        } else if (subscriptions != null && subscriptions.isEmpty()) {
+            sessionSubscriptions.remove(sessionId, subscriptions);
+        }
     }
 
     private void writeAndSend(WebSocketSession session, Object envelope) {
