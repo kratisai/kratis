@@ -75,6 +75,11 @@ export function ModelProviderConfigureStep({
                   {...field}
                 />
               </FormControl>
+              {providerType === 'ANTHROPIC' && (
+                <FormDescription>
+                  Enter a workspace-scoped API key created inside a Claude workspace.
+                </FormDescription>
+              )}
               <FormMessage />
             </FormItem>
           )}
