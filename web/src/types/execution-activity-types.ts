@@ -62,6 +62,7 @@ export interface BaseActivity {
   permissionDiff?: ActivityDiff
   permissionKind?: string
   permissionOptions?: PermissionOption[]
+  permissionParseWarning?: string
   permissionSegments?: CommandSegment[]
   permissionTitle?: string
   resolvedBy?: HitlResolver

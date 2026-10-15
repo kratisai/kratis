@@ -149,6 +149,9 @@ properties:
                   - "TOOL_KIND"
                 preApproved:
                   type: boolean
+          parseWarning:
+            type: string
+            description: "Warning message when shell syntax prevents safe segment splitting."
           title:
             type: string
           toolKind:

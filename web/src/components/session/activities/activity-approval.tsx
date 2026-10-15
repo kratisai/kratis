@@ -50,6 +50,7 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
   const resolveHitl = useActivityStore((s) => s.resolveHitl)
   const command = activityCommand(activity)
   const hitlDetail = activity.detail?.hitl
+  const parseWarning = activity.permissionParseWarning ?? hitlDetail?.parseWarning
   const options = activity.permissionOptions ?? hitlDetail?.options ?? []
   const segments = activity.permissionSegments ?? hitlDetail?.commandSegments ?? []
   const [marks, setMarks] = useState<Record<number, SegmentMark>>(() => {
@@ -177,6 +178,9 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
           <pre className="bg-muted mt-1 overflow-x-auto rounded p-2 font-mono text-xs">
             {command}
           </pre>
+          {parseWarning && (
+            <p className="text-muted-foreground mt-1 text-xs italic">{parseWarning}</p>
+          )}
         </div>
 
         {diff && (
