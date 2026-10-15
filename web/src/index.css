@@ -768,6 +768,55 @@
   font-size: 0.875rem;
 }
 
+/* Canvas documents are technical reference: keep them tighter than the editorial wiki. */
+.prose-document {
+  line-height: 1.4;
+}
+
+.prose-document p {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.prose-document h1 {
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.prose-document h2 {
+  margin-top: 0.875rem;
+  margin-bottom: 0.375rem;
+}
+
+.prose-document h3,
+.prose-document h4 {
+  margin-top: 0.75rem;
+  margin-bottom: 0.375rem;
+}
+
+.prose-document ul,
+.prose-document ol {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.prose-document li {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.prose-document pre,
+.prose-document blockquote,
+.prose-document .md-table-wrapper {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.prose-document hr {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
 .prose-xs p {
   margin-top: 0.375rem;
   margin-bottom: 0.375rem;

@@ -25,3 +25,17 @@ describe('index.css app-shell lock', () => {
     expect(mobileBlock).not.toMatch(/body\s*\{[^}]*overflow:\s*hidden/)
   })
 })
+
+describe('index.css prose density', () => {
+  function lineHeightFor(selector: string): number {
+    const rule = indexCss.match(new RegExp(`\\.${selector}\\s*\\{[^}]*\\}`))
+    if (!rule) throw new Error(`No rule found for .${selector}`)
+    const lineHeight = /line-height:\s*([\d.]+)/.exec(rule[0])
+    if (!lineHeight) throw new Error(`No line-height declared for .${selector}`)
+    return Number(lineHeight[1])
+  }
+
+  it('keeps canvas document prose tighter than editorial wiki prose', () => {
+    expect(lineHeightFor('prose-document')).toBeLessThan(lineHeightFor('prose-wiki'))
+  })
+})
