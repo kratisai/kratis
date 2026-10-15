@@ -54,6 +54,7 @@ public class ExecutionEnvironmentService {
     private final EnvironmentSessionRegistry sessionRegistry;
     private final VirtualKeyService virtualKeyService;
     private final SandboxExecutionService sandboxExecutionService;
+    private final SandboxProvisioningService sandboxProvisioningService;
     private final ExecutionActivityPersistenceService executionActivityPersistenceService;
     private final String connectUrl;
     private final TransactionTemplate terminationTemplate;
@@ -70,6 +71,7 @@ public class ExecutionEnvironmentService {
             EnvironmentSessionRegistry sessionRegistry,
             VirtualKeyService virtualKeyService,
             SandboxExecutionService sandboxExecutionService,
+            SandboxProvisioningService sandboxProvisioningService,
             ExecutionActivityPersistenceService executionActivityPersistenceService,
             SandboxProperties sandboxProperties,
             PlatformTransactionManager transactionManager) {
@@ -83,6 +85,7 @@ public class ExecutionEnvironmentService {
         this.sessionRegistry = sessionRegistry;
         this.virtualKeyService = virtualKeyService;
         this.sandboxExecutionService = sandboxExecutionService;
+        this.sandboxProvisioningService = sandboxProvisioningService;
         this.executionActivityPersistenceService = executionActivityPersistenceService;
         this.connectUrl = sandboxProperties.getConnectUrl();
         this.terminationTemplate = new TransactionTemplate(transactionManager);
@@ -395,11 +398,8 @@ public class ExecutionEnvironmentService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Environment has no configured sandbox provider");
         }
 
-        SandboxProvider sandboxProvider;
         try {
-            sandboxProvider =
-                    sandboxOrchestratorService.getProvider(env.getProvider().getType());
-            sandboxProvider.resume(env);
+            sandboxProvisioningService.reprovisionEnvironment(env);
         } catch (ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
@@ -416,7 +416,6 @@ public class ExecutionEnvironmentService {
                 .ifPresent(execution -> eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
                         teamId, execution.getChat().getId(), execution.getId())));
 
-        sandboxProvider.initializeWorkspace(envId, env.getAuthToken());
         return toDto(env);
     }
 

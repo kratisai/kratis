@@ -71,6 +71,9 @@ class ExecutionEnvironmentServiceTest {
     private SandboxExecutionService sandboxExecutionService;
 
     @Mock
+    private SandboxProvisioningService sandboxProvisioningService;
+
+    @Mock
     private PlatformTransactionManager transactionManager;
 
     @Mock
@@ -106,6 +109,7 @@ class ExecutionEnvironmentServiceTest {
                 sessionRegistry,
                 virtualKeyService,
                 sandboxExecutionService,
+                sandboxProvisioningService,
                 activityPersistenceService,
                 sandboxProperties,
                 transactionManager);
@@ -283,20 +287,17 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
-    void resumeEnvironment_resumesFromSnapshotAndInitializesWorkspace() {
+    void resumeEnvironment_delegatesReprovisioningAndMarksPendingConnect() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);
         env.setAuthToken("test-token");
         when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
         when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
-        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
-                .thenReturn(sandboxProvider);
 
         ExecutionEnvironmentDto dto = executionEnvironmentService.resumeEnvironment(USER_ID, TEAM_ID, ENV_ID);
 
         assertThat(dto.status()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
-        verify(sandboxProvider).resume(env);
-        verify(sandboxProvider).initializeWorkspace(ENV_ID, "test-token");
+        verify(sandboxProvisioningService).reprovisionEnvironment(env);
         verify(executionEnvironmentRepository).save(env);
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
     }
@@ -309,8 +310,6 @@ class ExecutionEnvironmentServiceTest {
         SandboxExecution execution = createRunningExecution(env);
         when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
         when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
-        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
-                .thenReturn(sandboxProvider);
         when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
                 .thenReturn(Optional.of(execution));
 
@@ -332,7 +331,7 @@ class ExecutionEnvironmentServiceTest {
                 .isInstanceOfSatisfying(
                         org.springframework.web.server.ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode().value()).isEqualTo(410));
-        verifyNoInteractions(sandboxProvider);
+        verifyNoInteractions(sandboxProvisioningService);
     }
 
     @Test
@@ -343,7 +342,7 @@ class ExecutionEnvironmentServiceTest {
 
         assertThatThrownBy(() -> executionEnvironmentService.resumeEnvironment(USER_ID, TEAM_ID, ENV_ID))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
-        verifyNoInteractions(sandboxProvider);
+        verifyNoInteractions(sandboxProvisioningService);
     }
 
     @Test

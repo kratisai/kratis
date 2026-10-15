@@ -629,20 +629,36 @@ public abstract class AbstractAgentExecutionRealTest {
         StandardWebSocketClient wsClient = new StandardWebSocketClient(wsContainer);
         uiClientSession = wsClient.execute(uiClientFixture, "ws://localhost:" + port + "/ws/client")
                 .get(5, TimeUnit.SECONDS);
-        uiClientFixture.awaitSubscription(5, TimeUnit.SECONDS);
+        assertThat(uiClientFixture.awaitSubscription(10, TimeUnit.SECONDS))
+                .as(
+                        "UI client must complete its team subscription before the agent runs, or HITL "
+                                + "activities broadcast to the team will never reach it for harness '%s'",
+                        getHarness().getName())
+                .isTrue();
         logger.info(
                 "[UI] Client WebSocket connected for team {}",
                 testContext.team().getId());
     }
 
     private static String firstAllowOptionId(List<PermissionOption> options) {
-        return options.stream()
-                .filter(option -> option != null
-                        && (option.kind() == ApprovalOptionKind.ALLOW_ONCE
-                                || option.kind() == ApprovalOptionKind.ALLOW_ALWAYS))
-                .map(PermissionOption::optionId)
-                .findFirst()
-                .orElse(null);
+        // Prefer allow_once, mirroring EnvironmentHitlActivityRpcHandler.selectAllowOptionId.
+        // Resolving with allow_always seeds the agent's own session memory, which then lets the
+        // agent satisfy a later permission without a control-plane round-trip, so the UI never
+        // receives that second awaiting_human activity and the deterministic mocked agent looks
+        // non-deterministic.
+        String allowOnce = null;
+        String allowAlways = null;
+        for (PermissionOption option : options) {
+            if (option == null) {
+                continue;
+            }
+            if (option.kind() == ApprovalOptionKind.ALLOW_ONCE && allowOnce == null) {
+                allowOnce = option.optionId();
+            } else if (option.kind() == ApprovalOptionKind.ALLOW_ALWAYS && allowAlways == null) {
+                allowAlways = option.optionId();
+            }
+        }
+        return allowOnce != null ? allowOnce : allowAlways;
     }
 
     /** Accumulates detail.output from every COMMAND activity for the tool-output relay assertion. */
@@ -1164,9 +1180,17 @@ public abstract class AbstractAgentExecutionRealTest {
                 .pollInterval(Duration.ofMillis(500))
                 .untilAsserted(() -> assertThat(hitlRequestCount.get())
                         .as(
-                                "Harness '%s' HITL permission request count mismatch. "
-                                        + "Expected %d requests but got %d.",
-                                getHarness().getName(), expectedHitl, hitlRequestCount.get())
+                                "Harness '%s' HITL permission request count mismatch. Expected %d requests but got %d. "
+                                        + "Diagnostics: wireMockMatched=%d (>=2 means the mocked agent requested both "
+                                        + "tool calls), activities=%s, timeline=%s. A short count with >=2 matched "
+                                        + "LLM requests means a permission was not surfaced to the client (Kratis "
+                                        + "delivery race), not agent variation.",
+                                getHarness().getName(),
+                                expectedHitl,
+                                hitlRequestCount.get(),
+                                wireMockLlmServer.getTotalMatchedRequests(),
+                                receivedActivityTypes,
+                                activityTimeline)
                         .isEqualTo(expectedHitl));
 
         assertAcpConformanceAndReportMatrix();

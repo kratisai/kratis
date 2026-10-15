@@ -93,6 +93,20 @@ A transient `/ws/env` disconnect does not terminate the agent or discard its ses
 connector reconnects and re-registers within the lease. See
 [`acp-lifecycle.md`](acp-lifecycle.md) for reconnect and lease behaviour.
 
+## Suspend and resume
+
+Suspend commits the runner container to a snapshot image and tears the runtime down;
+resume restores that snapshot as a fresh container and starts a **new** connector
+process. `SandboxProvisioningService.reprovisionEnvironment` therefore reuses steps 1–2
+(`resume` + `initializeWorkspace`) exactly as `provisionEnvironment` does for a spawn.
+
+Because git credentials live only in connector memory, a resumed connector starts
+without them. On every fresh `env.register` — spawn or resume — the control plane
+re-deploys the git identity and auth for the environment's active execution (steps 4–5)
+before dispatching any execution, so publishing works after a sandbox wakes. Transient
+reconnects keep the original connector process and its credentials, so they are left
+untouched.
+
 ## Current provider: Local Docker
 
 [`LocalDockerSandboxProvider`](../../control-plane/src/main/java/com/kratisai/controlplane/service/LocalDockerSandboxProvider.java)

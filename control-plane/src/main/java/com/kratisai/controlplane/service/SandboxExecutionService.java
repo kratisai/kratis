@@ -797,6 +797,7 @@ public class SandboxExecutionService {
         List<SandboxExecution> pendingExecutions = sandboxExecutionRepository.findByEnvironmentIdAndStatus(
                 event.environmentId(), SandboxExecutionStatus.RUNNING);
         if (pendingExecutions.isEmpty()) {
+            reestablishGitCredentials(event.environmentId());
             return;
         }
         WebSocketSession envSession = sessionRegistry.getSessionForEnvironment(event.environmentId());
@@ -808,6 +809,26 @@ public class SandboxExecutionService {
             logger.warn(
                     "WebSocket session for environment {} not found or closed during asynchronous dispatch",
                     event.environmentId());
+        }
+    }
+
+    private void reestablishGitCredentials(UUID environmentId) {
+        // Load the execution graph inside a transaction; the credential RPCs run detached from it.
+        SandboxExecution active = transactionTemplate.execute(status -> sandboxExecutionRepository
+                .findFirstByEnvironmentIdOrderByStartedAtDesc(environmentId)
+                .map(execution -> {
+                    touchExecutionGraph(execution);
+                    return execution;
+                })
+                .orElse(null));
+        if (active == null) {
+            return;
+        }
+        try {
+            sandboxProvisioningService.registerGitCredentials(active);
+        } catch (Exception e) {
+            // Credential re-deploy must not block the environment from coming online.
+            logger.warn("Failed to re-establish git access for environment {}: {}", environmentId, e.getMessage());
         }
     }
 

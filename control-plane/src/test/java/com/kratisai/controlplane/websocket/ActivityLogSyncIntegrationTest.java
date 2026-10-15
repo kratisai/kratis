@@ -199,8 +199,14 @@ class ActivityLogSyncIntegrationTest {
         WebSocketSession client2Session = client.execute(client2Fixture, "ws://localhost:" + port + "/ws/client")
                 .get(5, TimeUnit.SECONDS);
 
-        // Allow subscription registry to process both subscribers
-        Thread.sleep(500);
+        // The server registers the subscription before acknowledging it, so awaiting the
+        // SubscriptionResult guarantees the broadcast below reaches both clients.
+        assertThat(client1Fixture.awaitSubscription(5, TimeUnit.SECONDS))
+                .as("Client 1 must be subscribed before the permission broadcast")
+                .isTrue();
+        assertThat(client2Fixture.awaitSubscription(5, TimeUnit.SECONDS))
+                .as("Client 2 must be subscribed before the permission broadcast")
+                .isTrue();
 
         // 4. Connect Sidecar and simulate agent requesting permission
         SidecarWebSocketFixture sidecarFixture = new SidecarWebSocketFixture(connectorToken)
@@ -362,7 +368,14 @@ class ActivityLogSyncIntegrationTest {
         WebSocketSession client2Session = client.execute(client2Fixture, "ws://localhost:" + port + "/ws/client")
                 .get(5, TimeUnit.SECONDS);
 
-        Thread.sleep(500);
+        // The server registers the subscription before acknowledging it, so awaiting the
+        // SubscriptionResult guarantees the broadcast below reaches both clients.
+        assertThat(client1Fixture.awaitSubscription(5, TimeUnit.SECONDS))
+                .as("Client 1 must be subscribed before the permission broadcast")
+                .isTrue();
+        assertThat(client2Fixture.awaitSubscription(5, TimeUnit.SECONDS))
+                .as("Client 2 must be subscribed before the permission broadcast")
+                .isTrue();
 
         // 4. Connect sidecar
         SidecarWebSocketFixture sidecarFixture =

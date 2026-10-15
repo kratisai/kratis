@@ -790,7 +790,7 @@ class SandboxExecutionPublishServiceTest {
         assertThat(execution.getRepository().getCredential()).isEqualTo(selected);
         InOrder inOrder = inOrder(sandboxExecutionRepository, sandboxProvisioningService, environmentRpcClient);
         inOrder.verify(sandboxExecutionRepository).updateNewRepoCredential(executionId, selected.getId());
-        inOrder.verify(sandboxProvisioningService).registerGitAuth(execution, selected);
+        inOrder.verify(sandboxProvisioningService).registerGitCredentials(execution);
         inOrder.verify(environmentRpcClient)
                 .request(eq(envId), any(EnvironmentRpcPayload.GitSetRemote.class), anyLong(), eq(TimeUnit.SECONDS));
     }
@@ -835,7 +835,7 @@ class SandboxExecutionPublishServiceTest {
         verify(provider).createRepository(eq(selected), any(GitAuthMaterial.class), any(CreateRepositoryCommand.class));
         assertThat(execution.getNewRepoName()).isNull();
         verify(sandboxExecutionRepository).updateNewRepoCredential(executionId, selected.getId());
-        verify(sandboxProvisioningService).registerGitAuth(execution, selected);
+        verify(sandboxProvisioningService).registerGitCredentials(execution);
     }
 
     @Test
