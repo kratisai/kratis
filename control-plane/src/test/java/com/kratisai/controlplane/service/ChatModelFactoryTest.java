@@ -3,6 +3,8 @@ package com.kratisai.controlplane.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.google.genai.Client;
+import com.kratisai.controlplane.config.PlanningProperties;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
 import com.kratisai.controlplane.model.Team;
@@ -11,12 +13,14 @@ import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import jakarta.persistence.EntityManager;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import okhttp3.OkHttpClient;
 import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,6 +54,9 @@ class ChatModelFactoryTest {
     @Autowired
     private EntityManager entityManager;
 
+    @Autowired
+    private PlanningProperties planningProperties;
+
     private Team team;
 
     @BeforeEach
@@ -57,6 +64,54 @@ class ChatModelFactoryTest {
         databaseCleaner.cleanAll();
         TestDataFactory.TestContext ctx = testDataFactory.createUserAndTeam();
         team = ctx.team();
+    }
+
+    @Test
+    void shouldConfigureTimeoutOnAnthropicChatModel() {
+        ModelProvider provider = new ModelProvider("Anthropic", ProviderType.ANTHROPIC, "sk-ant-fake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        AnthropicChatModel chatModel =
+                (AnthropicChatModel) chatModelFactory.createChatModel(provider, "claude-3-5-sonnet");
+
+        assertThat(chatModel.getOptions().getTimeout()).isEqualTo(planningProperties.getLlmTimeout());
+    }
+
+    @Test
+    void shouldConfigureTimeoutOnOpenAiChatModel() {
+        ModelProvider provider = new ModelProvider("OpenAI Account", ProviderType.OPENAI, "sk-fake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        OpenAiChatModel chatModel = (OpenAiChatModel) chatModelFactory.createChatModel(provider, "gpt-4o");
+
+        assertThat(chatModel.getOptions().getTimeout()).isEqualTo(planningProperties.getLlmTimeout());
+    }
+
+    @Test
+    void shouldConfigureTimeoutOnGoogleGenAiChatModel() throws Exception {
+        ModelProvider provider = new ModelProvider("Google Cloud", ProviderType.GOOGLE, "AIzaSyFake", null);
+        provider.setTeam(team);
+        modelProviderRepository.saveAndFlush(provider);
+
+        GoogleGenAiChatModel chatModel =
+                (GoogleGenAiChatModel) chatModelFactory.createChatModel(provider, "gemini-1.5-pro");
+
+        Field genAiClientField = GoogleGenAiChatModel.class.getDeclaredField("genAiClient");
+        genAiClientField.setAccessible(true);
+        Client client = (Client) genAiClientField.get(chatModel);
+
+        Field apiClientField = Client.class.getDeclaredField("apiClient");
+        apiClientField.setAccessible(true);
+        Object apiClient = apiClientField.get(client);
+
+        Field httpClientField = apiClient.getClass().getSuperclass().getDeclaredField("httpClient");
+        httpClientField.setAccessible(true);
+        OkHttpClient httpClient = (OkHttpClient) httpClientField.get(apiClient);
+
+        assertThat(httpClient.callTimeoutMillis())
+                .isEqualTo((int) planningProperties.getLlmTimeout().toMillis());
     }
 
     @Test

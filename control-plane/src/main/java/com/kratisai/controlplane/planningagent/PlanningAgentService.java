@@ -13,9 +13,11 @@ import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ChatUsageSessionService;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ScratchpadService;
-import java.util.Set;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Future;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,7 +29,7 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.augment.AugmentedToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.core.task.TaskExecutor;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
@@ -44,8 +46,8 @@ public class PlanningAgentService {
     private final LiteLLMProvisioningService liteLLMProvisioningService;
     private final PlanningAgentLoop orchestrationLoop;
     private final ChatTitleService chatTitleService;
-    private final TaskExecutor agentTaskExecutor;
-    private final Set<UUID> activeAgentLoops = ConcurrentHashMap.newKeySet();
+    private final AsyncTaskExecutor agentTaskExecutor;
+    private final Map<UUID, Future<?>> activeAgentTasks = new ConcurrentHashMap<>();
 
     public PlanningAgentService(
             ModelProviderRepository modelProviderRepository,
@@ -63,7 +65,7 @@ public class PlanningAgentService {
             WebSearchTool webSearchTool,
             ScratchpadService scratchpadService,
             PlanningProperties planningProperties,
-            @Qualifier("agentTaskExecutor") TaskExecutor agentTaskExecutor) {
+            @Qualifier("agentTaskExecutor") AsyncTaskExecutor agentTaskExecutor) {
 
         this.modelProviderRepository = modelProviderRepository;
         this.chatModelFactory = chatModelFactory;
@@ -126,9 +128,17 @@ public class PlanningAgentService {
                 chatModelFactory.createChatModelViaLiteLLM(modelProvider, litellmModelName, virtualKey, true);
         ChatClient chatClient = ChatClient.builder(chatModel).build();
 
-        agentTaskExecutor.execute(
+        Future<?> task = agentTaskExecutor.submit(
                 () -> execute(chatClient, context, sink, modelProvider, modelName, virtualKey, sessionId));
-        return sink.asFlux();
+        activeAgentTasks.put(context.chatId(), task);
+        return sink.asFlux().doOnCancel(() -> cancelExecution(sessionId));
+    }
+
+    public void cancelExecution(UUID chatId) {
+        Future<?> task = activeAgentTasks.remove(chatId);
+        if (task != null) {
+            task.cancel(true);
+        }
     }
 
     public String initialPlaceholderTitle(String userQuery) {
@@ -175,30 +185,60 @@ public class PlanningAgentService {
             String modelName,
             String virtualKey,
             UUID sessionId) {
-        activeAgentLoops.add(context.chatId());
         try {
             orchestrationLoop.run(chatClient, context, sink);
+            if (Thread.currentThread().isInterrupted()) {
+                logger.info("Planning agent cancelled by thread interruption for chat {}", context.chatId());
+                sink.tryEmitComplete();
+                return;
+            }
             sink.tryEmitNext(new ClientPayload.CompleteResult(context.messageId()));
             sink.tryEmitComplete();
         } catch (Exception e) {
-            logger.error("Planning agent failed for chat {}", context.chatId(), e);
-            ClientPayload.ChatErrorResult error = chatErrorResult(context, e);
-            try {
-                chatService.saveAssistantErrorMessage(context.chatId(), error.message(), error.code());
-            } catch (Exception persistError) {
-                logger.warn("Failed to persist chat error for chat {}", context.chatId(), persistError);
+            if (isCancellation(e)) {
+                logger.info("Planning agent cancelled for chat {}", context.chatId());
+                sink.tryEmitComplete();
+            } else {
+                logger.error("Planning agent failed for chat {}", context.chatId(), e);
+                ClientPayload.ChatErrorResult error = chatErrorResult(context, e);
+                try {
+                    chatService.saveAssistantErrorMessage(context.chatId(), error.message(), error.code());
+                } catch (Exception persistError) {
+                    logger.warn("Failed to persist chat error for chat {}", context.chatId(), persistError);
+                }
+                sink.tryEmitNext(error);
+                sink.tryEmitComplete();
             }
-            sink.tryEmitNext(error);
-            sink.tryEmitComplete();
         } finally {
-            activeAgentLoops.remove(context.chatId());
+            activeAgentTasks.remove(context.chatId());
             chatUsageSessionService.syncUsage(sessionId, virtualKey);
         }
-        try {
-            chatTitleService.maybeUpdateTitle(provider, modelName, context.teamId(), context.chatId());
-        } catch (Exception e) {
-            logger.warn("Failed to auto-generate title for chat {}", context.chatId(), e);
+        if (!Thread.currentThread().isInterrupted()) {
+            try {
+                chatTitleService.maybeUpdateTitle(provider, modelName, context.teamId(), context.chatId());
+            } catch (Exception e) {
+                logger.warn("Failed to auto-generate title for chat {}", context.chatId(), e);
+            }
         }
+    }
+
+    private static boolean isCancellation(Exception e) {
+        if (Thread.currentThread().isInterrupted()
+                || e instanceof InterruptedException
+                || e instanceof CancellationException) {
+            return true;
+        }
+        Throwable curr = e;
+        while (curr != null) {
+            if (curr instanceof InterruptedException || curr instanceof CancellationException) {
+                return true;
+            }
+            if (curr.getMessage() != null && curr.getMessage().contains("cancelled by thread interruption")) {
+                return true;
+            }
+            curr = curr.getCause();
+        }
+        return false;
     }
 
     private static ClientPayload.ChatErrorResult chatErrorResult(PlanningContext context, Exception e) {

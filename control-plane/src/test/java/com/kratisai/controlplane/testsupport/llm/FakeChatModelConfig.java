@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.testsupport.llm;
 
 import com.kratisai.controlplane.config.LiteLLMProperties;
+import com.kratisai.controlplane.config.PlanningProperties;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.EmbeddingModelFactory;
@@ -39,8 +40,9 @@ public class FakeChatModelConfig {
 
     @Bean
     @Primary
-    public ChatModelFactory fakeChatModelFactory(FakeChatModel chatModel, LiteLLMProperties liteLLMProperties) {
-        return new ChatModelFactory(liteLLMProperties) {
+    public ChatModelFactory fakeChatModelFactory(
+            FakeChatModel chatModel, LiteLLMProperties liteLLMProperties, PlanningProperties planningProperties) {
+        return new ChatModelFactory(liteLLMProperties, planningProperties) {
             @Override
             public ChatModel createChatModel(ModelProvider provider, String modelNameOverride) {
                 if (useRealModel.get()) {

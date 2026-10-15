@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,6 +33,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Sinks;
 
 @ExtendWith(MockitoExtension.class)
 class WebSocketDispatchTest {
@@ -227,5 +229,43 @@ class WebSocketDispatchTest {
                         dispatch.sendRequest(mockSession, new EnvironmentRpcPayload.Exec("x", false, "exec-1"), "1"))
                 .isInstanceOf(WebSocketSendException.class)
                 .hasMessageContaining("ws-1");
+    }
+
+    @Test
+    void removeSession_disposesActiveSubscriptions() {
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        Sinks.Many<ClientPayload> sink = Sinks.many().unicast().onBackpressureBuffer();
+        Flux<ClientPayload> flux = sink.asFlux().doOnCancel(() -> cancelled.set(true));
+
+        dispatch.streamClientResponses(mockSession, 1, flux);
+        assertThat(dispatch.getSessionSubscriptionCount("session-1")).isEqualTo(1);
+        assertThat(cancelled.get()).isFalse();
+
+        dispatch.removeSession("session-1");
+
+        assertThat(cancelled.get()).isTrue();
+        assertThat(dispatch.getSessionSubscriptionCount("session-1")).isEqualTo(0);
+    }
+
+    @Test
+    void completedSubscription_cleanedUpAutomatically() {
+        Sinks.Many<ClientPayload> sink = Sinks.many().unicast().onBackpressureBuffer();
+        dispatch.streamClientResponses(mockSession, 1, sink.asFlux());
+        assertThat(dispatch.getSessionSubscriptionCount("session-1")).isEqualTo(1);
+
+        sink.tryEmitComplete();
+
+        assertThat(dispatch.getSessionSubscriptionCount("session-1")).isEqualTo(0);
+    }
+
+    @Test
+    void erroredSubscription_cleanedUpAutomatically() {
+        Sinks.Many<ClientPayload> sink = Sinks.many().unicast().onBackpressureBuffer();
+        dispatch.streamClientResponses(mockSession, 1, sink.asFlux());
+        assertThat(dispatch.getSessionSubscriptionCount("session-1")).isEqualTo(1);
+
+        sink.tryEmitError(new RuntimeException("stream failed"));
+
+        assertThat(dispatch.getSessionSubscriptionCount("session-1")).isEqualTo(0);
     }
 }

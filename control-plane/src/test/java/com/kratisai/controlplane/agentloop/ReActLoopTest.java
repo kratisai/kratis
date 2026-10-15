@@ -606,4 +606,39 @@ class ReActLoopTest {
         });
         return tool;
     }
+
+    @Test
+    void run_returnsNullWhenThreadAlreadyInterrupted() {
+        FakeChatModel model = model(assistant("should not be called"));
+        Thread.currentThread().interrupt();
+        try {
+            String result = ReActLoop.text(client(model), noTools())
+                    .executor(Runnable::run)
+                    .run(List.of(new UserMessage("go")), TOOL_CONTEXT);
+            assertThat(result).isNull();
+        } finally {
+            Thread.interrupted(); // clear interrupted status
+        }
+    }
+
+    @Test
+    void invokeLlm_throwsCancellationWhenInterruptedDuringStreaming() {
+        ChatOptions options = defaultOptionsMock();
+        ChatModel mockModel = mock(ChatModel.class);
+        when(mockModel.getDefaultOptions()).thenReturn(options);
+        when(mockModel.stream(any(Prompt.class))).thenAnswer(inv -> {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("stream error", new InterruptedException("cancelled"));
+        });
+
+        assertThatThrownBy(() -> ReActLoop.text(ChatClient.builder(mockModel).build(), noTools())
+                        .executor(Runnable::run)
+                        .run(List.of(new UserMessage("go")), TOOL_CONTEXT))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("ReAct loop cancelled by thread interruption");
+
+        // Thread interrupted status should be preserved
+        assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        Thread.interrupted(); // clear
+    }
 }

@@ -3,6 +3,7 @@ package com.kratisai.controlplane.service;
 import com.google.genai.Client;
 import com.google.genai.types.HttpOptions;
 import com.kratisai.controlplane.config.LiteLLMProperties;
+import com.kratisai.controlplane.config.PlanningProperties;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
@@ -31,12 +32,14 @@ public class ChatModelFactory {
     private static final int MAX_OUTPUT_TOKENS = OUTPUT_TOKEN_BUDGET + THINKING_BUDGET_TOKENS;
 
     private final LiteLLMProperties liteLLMProperties;
+    private final PlanningProperties planningProperties;
 
     public record ChatModelSpec(
             ProviderType providerType, String modelName, String apiKey, String baseUrl, boolean enableThinking) {}
 
-    public ChatModelFactory(LiteLLMProperties liteLLMProperties) {
+    public ChatModelFactory(LiteLLMProperties liteLLMProperties, PlanningProperties planningProperties) {
         this.liteLLMProperties = liteLLMProperties;
+        this.planningProperties = planningProperties;
     }
 
     public ChatModel createChatModel(ModelProvider provider, String modelNameOverride) {
@@ -84,7 +87,8 @@ public class ChatModelFactory {
         OpenAiChatOptions.Builder optionsBuilder = OpenAiChatOptions.builder()
                 .model(spec.modelName())
                 .apiKey(spec.apiKey())
-                .baseUrl(spec.baseUrl());
+                .baseUrl(spec.baseUrl())
+                .timeout(planningProperties.getLlmTimeout());
         if (spec.enableThinking()) {
             optionsBuilder.reasoningEffort("high").maxCompletionTokens(MAX_OUTPUT_TOKENS);
         }
@@ -95,7 +99,8 @@ public class ChatModelFactory {
         AnthropicChatOptions.Builder optionsBuilder = AnthropicChatOptions.builder()
                 .model(spec.modelName())
                 .apiKey(spec.apiKey())
-                .baseUrl(spec.baseUrl());
+                .baseUrl(spec.baseUrl())
+                .timeout(planningProperties.getLlmTimeout());
         if (spec.enableThinking()) {
             optionsBuilder.thinkingEnabled(THINKING_BUDGET_TOKENS).maxTokens(MAX_OUTPUT_TOKENS);
         }
@@ -107,10 +112,12 @@ public class ChatModelFactory {
     @SuppressFBWarnings("BC_UNCONFIRMED_CAST_OF_RETURN_VALUE")
     private ChatModel createGoogleChatModel(ChatModelSpec spec) {
         Client.Builder clientBuilder = Client.builder().apiKey(spec.apiKey());
+        HttpOptions.Builder httpOptionsBuilder = HttpOptions.builder()
+                .timeout((int) planningProperties.getLlmTimeout().toMillis());
         if (StringUtils.hasText(spec.baseUrl())) {
-            clientBuilder.httpOptions(
-                    HttpOptions.builder().baseUrl(spec.baseUrl()).build());
+            httpOptionsBuilder.baseUrl(spec.baseUrl());
         }
+        clientBuilder.httpOptions(httpOptionsBuilder.build());
         Client client = clientBuilder.build();
         GoogleGenAiChatOptions.Builder optionsBuilder =
                 GoogleGenAiChatOptions.builder().model(spec.modelName());
