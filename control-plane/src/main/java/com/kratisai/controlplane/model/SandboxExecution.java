@@ -1,7 +1,11 @@
 package com.kratisai.controlplane.model;
 
 import jakarta.persistence.*;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -36,6 +40,18 @@ public class SandboxExecution {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /**
+     * Active time from RUNNING segments that have already closed, in milliseconds. The open segment
+     * is tracked by {@link #activeSince} and is deliberately NOT included, so the live total is
+     * {@code previousActiveMs + (now - activeSince)}. Named "previous" relative to the open segment.
+     */
+    @Column(name = "previous_active_ms", nullable = false)
+    private long previousActiveMs = 0L;
+
+    /** Start of the currently-open RUNNING segment, or {@code null} when the execution is not running. */
+    @Column(name = "active_since")
+    private Instant activeSince;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(
             name = "repository_id",
@@ -64,16 +80,9 @@ public class SandboxExecution {
     @JoinColumn(name = "canvas_id", nullable = true, foreignKey = @ForeignKey(name = "fk_sandbox_executions_canvas"))
     private CanvasEntity canvas;
 
-    @Embedded
-    @AttributeOverrides({
-        @AttributeOverride(name = "virtualKey", column = @Column(name = "virtual_key", columnDefinition = "TEXT")),
-        @AttributeOverride(name = "totalSpend", column = @Column(name = "total_spend")),
-        @AttributeOverride(name = "totalTokens", column = @Column(name = "total_tokens")),
-        @AttributeOverride(name = "promptTokens", column = @Column(name = "prompt_tokens")),
-        @AttributeOverride(name = "completionTokens", column = @Column(name = "completion_tokens")),
-        @AttributeOverride(name = "usageLastUpdatedAt", column = @Column(name = "usage_last_updated_at"))
-    })
-    private LlmUsage usage = new LlmUsage();
+    @OneToMany(mappedBy = "execution", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("startedAt ASC")
+    private List<SandboxExecutionUsage> usages = new ArrayList<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(
@@ -104,6 +113,9 @@ public class SandboxExecution {
         }
         if (startedAt == null) {
             startedAt = Instant.now();
+        }
+        if (status == SandboxExecutionStatus.RUNNING && activeSince == null) {
+            activeSince = startedAt;
         }
     }
 
@@ -146,7 +158,44 @@ public class SandboxExecution {
     }
 
     public void setStatus(SandboxExecutionStatus status) {
+        boolean wasRunning = this.status == SandboxExecutionStatus.RUNNING;
+        boolean willRun = status == SandboxExecutionStatus.RUNNING;
+        Instant now = Instant.now();
+        if (willRun && !wasRunning) {
+            activeSince = now;
+        } else if (!willRun && wasRunning) {
+            endActive(now);
+        }
         this.status = status;
+    }
+
+    private void endActive(Instant now) {
+        if (activeSince != null) {
+            previousActiveMs += Duration.between(activeSince, now).toMillis();
+            activeSince = null;
+        }
+    }
+
+    /** Total active seconds: previous closed segments plus the open RUNNING segment when active. */
+    public long getTotalActiveSeconds() {
+        long millis = previousActiveMs;
+        if (activeSince != null) {
+            millis += Duration.between(activeSince, Instant.now()).toMillis();
+        }
+        return millis / 1000;
+    }
+
+    /** Active seconds from previous closed segments only (excludes the open RUNNING segment). */
+    public long getPreviousActiveSeconds() {
+        return previousActiveMs / 1000;
+    }
+
+    public Instant getActiveSince() {
+        return activeSince;
+    }
+
+    public void setActiveSince(Instant activeSince) {
+        this.activeSince = activeSince;
     }
 
     public Instant getStartedAt() {
@@ -213,60 +262,67 @@ public class SandboxExecution {
         this.canvas = canvas;
     }
 
-    public Long getTotalTokens() {
-        return usage.getTotalTokens();
+    public List<SandboxExecutionUsage> getUsages() {
+        return usages;
     }
 
-    public void setTotalTokens(Long totalTokens) {
-        usage.setTotalTokens(totalTokens);
+    public SandboxExecutionUsage getActiveUsage() {
+        for (int i = usages.size() - 1; i >= 0; i--) {
+            if (usages.get(i).isActive()) {
+                return usages.get(i);
+            }
+        }
+        return null;
     }
 
-    public Long getPromptTokens() {
-        return usage.getPromptTokens();
-    }
-
-    public void setPromptTokens(Long promptTokens) {
-        usage.setPromptTokens(promptTokens);
-    }
-
-    public Long getCompletionTokens() {
-        return usage.getCompletionTokens();
-    }
-
-    public void setCompletionTokens(Long completionTokens) {
-        usage.setCompletionTokens(completionTokens);
-    }
-
-    public Double getTotalSpend() {
-        return usage.getTotalSpend();
-    }
-
-    public void setTotalSpend(Double totalSpend) {
-        usage.setTotalSpend(totalSpend);
-    }
-
-    public Instant getUsageLastUpdatedAt() {
-        return usage.getUsageLastUpdatedAt();
-    }
-
-    public void setUsageLastUpdatedAt(Instant usageLastUpdatedAt) {
-        usage.setUsageLastUpdatedAt(usageLastUpdatedAt);
-    }
-
-    public String getVirtualKey() {
-        return usage.getVirtualKey();
-    }
-
-    public void setVirtualKey(String virtualKey) {
-        usage.setVirtualKey(virtualKey);
-    }
-
-    public LlmUsage getUsage() {
+    public SandboxExecutionUsage startUsage(String virtualKey, String modelName) {
+        SandboxExecutionUsage usage = new SandboxExecutionUsage(this, virtualKey, modelName);
+        usages.add(usage);
         return usage;
     }
 
-    public void setUsage(LlmUsage usage) {
-        this.usage = usage;
+    public String getVirtualKey() {
+        SandboxExecutionUsage active = getActiveUsage();
+        if (active != null) {
+            return active.getVirtualKey();
+        }
+        return usages.isEmpty() ? null : usages.get(usages.size() - 1).getVirtualKey();
+    }
+
+    public Long getTotalTokens() {
+        return usages.stream().mapToLong(this::tokenCount).sum();
+    }
+
+    public Long getPromptTokens() {
+        return usages.stream().mapToLong(u -> tokenCount(u.getPromptTokens())).sum();
+    }
+
+    public Long getCompletionTokens() {
+        return usages.stream()
+                .mapToLong(u -> tokenCount(u.getCompletionTokens()))
+                .sum();
+    }
+
+    public Double getTotalSpend() {
+        return usages.stream()
+                .mapToDouble(u -> u.getTotalSpend() != null ? u.getTotalSpend() : 0.0)
+                .sum();
+    }
+
+    public Instant getUsageLastUpdatedAt() {
+        return usages.stream()
+                .map(SandboxExecutionUsage::getUsageLastUpdatedAt)
+                .filter(Objects::nonNull)
+                .max(Instant::compareTo)
+                .orElse(null);
+    }
+
+    private long tokenCount(SandboxExecutionUsage usage) {
+        return tokenCount(usage.getTotalTokens());
+    }
+
+    private static long tokenCount(Long value) {
+        return value != null ? value : 0L;
     }
 
     public ModelProvider getModelProvider() {

@@ -113,11 +113,11 @@ public class SandboxProvisioningService {
         String virtualKey = requiresNewTransactionTemplate.execute(status -> {
             SandboxExecution persisted =
                     sandboxExecutionRepository.findById(execution.getId()).orElse(execution);
-            String existingKey = persisted.getUsage().getVirtualKey();
-            if (existingKey != null && !existingKey.isBlank()) {
-                logger.info("Virtual key already exists for execution {}, reusing it", execution.getId());
-                execution.getUsage().setVirtualKey(existingKey);
-                return existingKey;
+            SandboxExecutionUsage active = persisted.getActiveUsage();
+            if (active != null && !isBlank(active.getVirtualKey())) {
+                logger.info("Virtual key already active for execution {}, reusing it", execution.getId());
+                sandboxExecutionRepository.saveAndFlush(persisted);
+                return active.getVirtualKey();
             }
 
             String keyAlias = litellmProvisioningService.buildVirtualKeyAlias(
@@ -125,8 +125,8 @@ public class SandboxProvisioningService {
             String litellmModelName = litellmProvisioningService.buildLiteLLMModelName(
                     execution.getModelProvider(), execution.getModelName());
             String token = virtualKeyService.generateKey(keyAlias, List.of(litellmModelName));
-            execution.getUsage().setVirtualKey(token);
-            sandboxExecutionRepository.saveAndFlush(execution);
+            persisted.startUsage(token, execution.getModelName());
+            sandboxExecutionRepository.saveAndFlush(persisted);
             return token;
         });
 

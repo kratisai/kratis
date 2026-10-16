@@ -23,7 +23,6 @@ const (
 	StateSessionActive
 	StatePrompting
 	StateCancelling
-	StateSessionClosing
 	StateTerminating
 	StateTerminated
 	StateFailed
@@ -34,7 +33,6 @@ const (
 	DefaultExitWait          = 1 * time.Second
 	DefaultSigkillWait       = 3 * time.Second
 	DefaultDrainWait         = 3 * time.Second
-	DefaultSessionCloseWait  = 2 * time.Second
 	DefaultRequestTimeout    = 15 * time.Second
 	DefaultInitializeTimeout = 30 * time.Second
 )
@@ -44,7 +42,6 @@ type SupervisorTimeouts struct {
 	ExitWait          time.Duration
 	SigkillWait       time.Duration
 	DrainWait         time.Duration
-	SessionCloseWait  time.Duration
 	RequestTimeout    time.Duration
 	InitializeTimeout time.Duration
 }
@@ -55,7 +52,6 @@ func DefaultSupervisorTimeouts() SupervisorTimeouts {
 		ExitWait:          DefaultExitWait,
 		SigkillWait:       DefaultSigkillWait,
 		DrainWait:         DefaultDrainWait,
-		SessionCloseWait:  DefaultSessionCloseWait,
 		RequestTimeout:    DefaultRequestTimeout,
 		InitializeTimeout: DefaultInitializeTimeout,
 	}
@@ -77,8 +73,6 @@ func (s AgentState) String() string {
 		return "Prompting"
 	case StateCancelling:
 		return "Cancelling"
-	case StateSessionClosing:
-		return "SessionClosing"
 	case StateTerminating:
 		return "Terminating"
 	case StateTerminated:
@@ -106,6 +100,9 @@ type AgentSupervisor struct {
 	permLock   sync.Mutex
 	debug      bool
 	lastLaunch *LaunchResult
+	// resumeSessionID, when non-empty, makes the next Launch re-attach to a
+	// stored ACP session (session/resume or session/load) instead of session/new.
+	resumeSessionID string
 
 	promptMu       sync.Mutex
 	queuedPrompts  []queuedPrompt
@@ -286,6 +283,12 @@ func (s *AgentSupervisor) SetAgentLogFiles(paths []string) {
 	s.agentLogPaths = paths
 }
 
+// SetResumeSessionID asks the next Launch to re-attach to a stored session id
+// rather than creating a new one. Must be called before Launch.
+func (s *AgentSupervisor) SetResumeSessionID(sessionID string) {
+	s.resumeSessionID = sessionID
+}
+
 func (s *AgentSupervisor) RequestPermission(req acp.PermissionRequest) (string, error) {
 	return s.eventSink.RequestPermission(req)
 }
@@ -361,8 +364,10 @@ func (s *AgentSupervisor) terminate(emitComplete bool) (int, error) {
 
 	s.setState(StateTerminating)
 
-	_ = s.CloseSession()
-
+	// The ACP session is deliberately left open: the agent persists it under the
+	// sandbox's own filesystem, so a later relaunch can session/resume or
+	// session/load it. session/close is never sent because the sandbox owns the
+	// session's lifetime (it is discarded only when the sandbox itself is).
 	if transport != nil {
 		if err := transport.Close(); err != nil {
 			log.Printf("[Supervisor] Failed to close transport: %v", err)
@@ -477,53 +482,13 @@ func (s *AgentSupervisor) SetStateCancelling() error {
 	return nil
 }
 
-func (s *AgentSupervisor) CloseSession() error {
-	s.stateLock.RLock()
-	session := s.session
-	transport := s.transport
-	s.stateLock.RUnlock()
-
-	if session == nil || session.SessionID == "" || transport == nil {
-		return nil
-	}
-
-	s.setState(StateSessionClosing)
-
-	params := map[string]interface{}{
-		"sessionId": session.SessionID,
-	}
-
-	type result struct {
-		resp map[string]interface{}
-		err  error
-	}
-
-	done := make(chan result, 1)
-
-	go func() {
-		resp, err := transport.SendRequest("session/close", params, s.Timeouts.RequestTimeout)
-		done <- result{resp, err}
-	}()
-
-	select {
-	case res := <-done:
-		if res.err != nil {
-			log.Printf("[Supervisor] session/close failed: %v", res.err)
-			return res.err
-		}
-		log.Printf("[Supervisor] session/close succeeded for session %s", session.SessionID)
-		s.setState(StateReady)
-		return nil
-	case <-time.After(s.Timeouts.SessionCloseWait):
-		log.Printf("[Supervisor] session/close timed out for session %s", session.SessionID)
-		return fmt.Errorf("session/close timed out")
-	}
-}
-
 type LaunchResult struct {
 	Session      *acp.AcpSession
 	AgentName    string
 	AgentVersion string
+	// Resumed is true when this launch re-attached to a stored session rather
+	// than creating a new one, so the caller can suppress task re-dispatch.
+	Resumed bool
 }
 
 func (s *AgentSupervisor) Launch(cmd *exec.Cmd) (*LaunchResult, error) {
@@ -607,30 +572,9 @@ func (s *AgentSupervisor) Launch(cmd *exec.Cmd) (*LaunchResult, error) {
 		s.eventSink.SendOutput(fmt.Sprintf("[ACP] Connected to %s%s v%s", agentName, titleStr, agentVersion), "stdout")
 	}
 
-	s.eventSink.SendOutput("[ACP] Sending session/new request...", "stdout")
-
-	sessionNewReq := acp.AcpSessionNewRequest{
-		Cwd:        s.workspace,
-		McpServers: []interface{}{},
-	}
-	resp, err = transport.SendRequest("session/new", sessionNewReq, s.Timeouts.InitializeTimeout)
+	sessionID, resumed, err := s.establishSession(transport, initResp)
 	if err != nil {
-		s.cleanupFailedLaunch(fmt.Sprintf("ACP session/new failed: %v", err))
-		return nil, fmt.Errorf("ACP session/new failed: %w", err)
-	}
-	if resp["error"] != nil {
-		s.cleanupFailedLaunch(fmt.Sprintf("ACP session/new error: %v", resp["error"]))
-		return nil, fmt.Errorf("ACP session/new error: %v", resp["error"])
-	}
-
-	s.eventSink.SendOutput("[ACP] session/new successful", "stdout")
-	log.Printf("[ACP][TIMING] session/new completed at %v", time.Now())
-
-	var sessionID string
-	if result, ok := resp["result"].(map[string]interface{}); ok {
-		if sID, ok := result["sessionId"].(string); ok {
-			sessionID = sID
-		}
+		return nil, err
 	}
 
 	session := &acp.AcpSession{
@@ -663,11 +607,102 @@ func (s *AgentSupervisor) Launch(cmd *exec.Cmd) (*LaunchResult, error) {
 		Session:      session,
 		AgentName:    agentName,
 		AgentVersion: agentVersion,
+		Resumed:      resumed,
 	}
 	s.stateLock.Lock()
 	s.lastLaunch = result
 	s.stateLock.Unlock()
 	return result, nil
+}
+
+// establishSession re-attaches to the stored session when one was requested and
+// the agent supports it, otherwise creates a new session. session/resume is
+// preferred over session/load because it does not replay history (Kratis already
+// owns the transcript). A failed re-attach falls back to session/new.
+func (s *AgentSupervisor) establishSession(
+	transport *acp.AcpTransport,
+	initResp acp.AcpInitializeResponse,
+) (string, bool, error) {
+	if s.resumeSessionID == "" {
+		return s.newSession(transport)
+	}
+	sessionID, err := s.resumeSession(transport, initResp)
+	if err != nil {
+		s.eventSink.SendOutput(
+			fmt.Sprintf("[ACP] Session re-attach failed (%v); creating a new session", err), "stderr")
+		return s.newSession(transport)
+	}
+	return sessionID, true, nil
+}
+
+func (s *AgentSupervisor) resumeSession(transport *acp.AcpTransport, initResp acp.AcpInitializeResponse) (string, error) {
+	switch {
+	case initResp.AgentCapabilities.SupportsResume():
+		s.eventSink.SendOutput(
+			fmt.Sprintf("[ACP] Resuming stored session %s (session/resume)", s.resumeSessionID), "stdout")
+		resp, err := transport.SendRequest("session/resume", acp.AcpSessionResumeRequest{
+			SessionID: s.resumeSessionID,
+			Cwd:       s.workspace,
+		}, s.Timeouts.InitializeTimeout)
+		if err != nil {
+			return "", err
+		}
+		if resp["error"] != nil {
+			return "", fmt.Errorf("session/resume error: %v", resp["error"])
+		}
+		return s.resumeSessionID, nil
+	case initResp.AgentCapabilities.LoadSession:
+		s.eventSink.SendOutput(
+			fmt.Sprintf("[ACP] Loading stored session %s (session/load)", s.resumeSessionID), "stdout")
+		if s.handler != nil {
+			s.handler.SetSuppressSessionUpdates(true)
+		}
+		resp, err := transport.SendRequest("session/load", acp.AcpSessionLoadRequest{
+			SessionID:  s.resumeSessionID,
+			Cwd:        s.workspace,
+			McpServers: []interface{}{},
+		}, s.Timeouts.InitializeTimeout)
+		if s.handler != nil {
+			s.handler.SetSuppressSessionUpdates(false)
+		}
+		if err != nil {
+			return "", err
+		}
+		if resp["error"] != nil {
+			return "", fmt.Errorf("session/load error: %v", resp["error"])
+		}
+		return s.resumeSessionID, nil
+	default:
+		return "", fmt.Errorf("agent advertises neither session/resume nor session/load")
+	}
+}
+
+func (s *AgentSupervisor) newSession(transport *acp.AcpTransport) (string, bool, error) {
+	s.eventSink.SendOutput("[ACP] Sending session/new request...", "stdout")
+
+	resp, err := transport.SendRequest("session/new", acp.AcpSessionNewRequest{
+		Cwd:        s.workspace,
+		McpServers: []interface{}{},
+	}, s.Timeouts.InitializeTimeout)
+	if err != nil {
+		s.cleanupFailedLaunch(fmt.Sprintf("ACP session/new failed: %v", err))
+		return "", false, fmt.Errorf("ACP session/new failed: %w", err)
+	}
+	if resp["error"] != nil {
+		s.cleanupFailedLaunch(fmt.Sprintf("ACP session/new error: %v", resp["error"]))
+		return "", false, fmt.Errorf("ACP session/new error: %v", resp["error"])
+	}
+
+	s.eventSink.SendOutput("[ACP] session/new successful", "stdout")
+	log.Printf("[ACP][TIMING] session/new completed at %v", time.Now())
+
+	var sessionID string
+	if result, ok := resp["result"].(map[string]interface{}); ok {
+		if sID, ok := result["sessionId"].(string); ok {
+			sessionID = sID
+		}
+	}
+	return sessionID, false, nil
 }
 
 // LastLaunchResult returns the handshake result of the most recent successful

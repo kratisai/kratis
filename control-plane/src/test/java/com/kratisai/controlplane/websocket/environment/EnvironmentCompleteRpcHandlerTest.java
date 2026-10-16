@@ -99,7 +99,7 @@ class EnvironmentCompleteRpcHandlerTest {
     }
 
     @Test
-    void handle_withExitCodeZero_setsCompletedStatus() {
+    void handle_withExitCodeZero_setsIdleStatus() {
         stubOwnedExecution();
 
         EnvironmentRpcPayload.Complete params = new EnvironmentRpcPayload.Complete(0, executionId.toString());
@@ -109,7 +109,7 @@ class EnvironmentCompleteRpcHandlerTest {
         handler.handle(sessionId, request, params);
         ArgumentCaptor<SandboxExecution> savedCaptor = ArgumentCaptor.forClass(SandboxExecution.class);
         verify(executionRepository).save(savedCaptor.capture());
-        assertThat(savedCaptor.getValue().getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
+        assertThat(savedCaptor.getValue().getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(savedCaptor.getValue().getExitCode()).isEqualTo(0);
 
         ArgumentCaptor<SandboxExecutionCompleteEvent> captor =
@@ -186,7 +186,7 @@ class EnvironmentCompleteRpcHandlerTest {
     }
 
     @Test
-    void handle_withTerminatedCompletion_recordsNoErrorActivity() {
+    void handle_withDeliberateStop_staysIdleAndRecordsNoErrorActivity() {
         stubOwnedExecution();
 
         EnvironmentRpcPayload.Complete params = new EnvironmentRpcPayload.Complete(
@@ -198,7 +198,7 @@ class EnvironmentCompleteRpcHandlerTest {
 
         ArgumentCaptor<SandboxExecution> savedCaptor = ArgumentCaptor.forClass(SandboxExecution.class);
         verify(executionRepository).save(savedCaptor.capture());
-        assertThat(savedCaptor.getValue().getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+        assertThat(savedCaptor.getValue().getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(savedCaptor.getValue().getExitCode()).isEqualTo(143);
 
         verify(activityRepository, never()).save(any());

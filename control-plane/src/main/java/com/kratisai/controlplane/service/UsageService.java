@@ -120,11 +120,8 @@ public class UsageService {
             if (title.length() > 60) {
                 title = title.substring(0, 60) + "...";
             }
-            Long duration = null;
-            if (exec.getStartedAt() != null && exec.getCompletedAt() != null) {
-                duration = exec.getCompletedAt().getEpochSecond()
-                        - exec.getStartedAt().getEpochSecond();
-            }
+            // Active time only: IDLE gaps (between turns or while the sandbox sleeps) are excluded.
+            Long duration = exec.getTotalActiveSeconds();
 
             allEntries.add(new UsageLogEntryDto(
                     "exec-" + exec.getId(),
@@ -136,8 +133,8 @@ public class UsageService {
                     userEmail,
                     models,
                     "EXECUTION",
-                    exec.getTotalTokens() != null ? exec.getTotalTokens() : 0L,
-                    exec.getTotalSpend() != null ? exec.getTotalSpend() : 0.0));
+                    exec.getTotalTokens(),
+                    exec.getTotalSpend()));
         }
 
         // 2. Fetch Ingestion Batches for team

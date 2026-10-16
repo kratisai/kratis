@@ -346,6 +346,51 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
+    void launchAgent_mintsFreshKeyAndOpensNewSegmentWhenNoActiveUsage() throws Exception {
+        ModelProvider provider = createTestModelProvider();
+        SandboxExecution execution = createTestExecution(AgentHarness.valueOf("OPENHANDS"), provider, "gpt-4o");
+        // The previous key was revoked on detach, so a resume must mint a fresh one.
+        execution.startUsage("sk-old", "gpt-4o").setRevokedAt(Instant.now());
+
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.saveAndFlush(any(SandboxExecution.class)))
+                .thenAnswer(i -> i.getArgument(0));
+        when(litellmProvisioningService.buildLiteLLMModelName(provider, "gpt-4o"))
+                .thenReturn("model-alias");
+        when(litellmProvisioningService.verifyModelRegistered(provider, "gpt-4o"))
+                .thenReturn(true);
+        when(litellmProvisioningService.buildVirtualKeyAlias(any(), any())).thenReturn("test-alias");
+        when(virtualKeyService.generateKey(any(), any())).thenReturn("sk-new");
+        stubSuccessfulExec();
+
+        sandboxProvisioningService.launchAgent(execution);
+
+        verify(virtualKeyService).generateKey(any(), any());
+        assertThat(execution.getUsages()).hasSize(2);
+        assertThat(execution.getActiveUsage().getVirtualKey()).isEqualTo("sk-new");
+    }
+
+    @Test
+    void launchAgent_reusesActiveKeyWithoutMintingANewOne() throws Exception {
+        ModelProvider provider = createTestModelProvider();
+        SandboxExecution execution = createTestExecution(AgentHarness.valueOf("OPENHANDS"), provider, "gpt-4o");
+        execution.startUsage("sk-live", "gpt-4o");
+
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(litellmProvisioningService.buildLiteLLMModelName(provider, "gpt-4o"))
+                .thenReturn("model-alias");
+        when(litellmProvisioningService.verifyModelRegistered(provider, "gpt-4o"))
+                .thenReturn(true);
+        stubSuccessfulExec();
+
+        sandboxProvisioningService.launchAgent(execution);
+
+        verify(virtualKeyService, never()).generateKey(any(), any());
+        assertThat(execution.getUsages()).hasSize(1);
+        assertThat(execution.getActiveUsage().getVirtualKey()).isEqualTo("sk-live");
+    }
+
+    @Test
     void launchAgent_withInvalidModel_throwsException() {
         ModelProvider provider = createTestModelProvider();
         SandboxExecution execution = createTestExecution(provider);
@@ -790,6 +835,27 @@ class SandboxExecutionServiceTest {
 
         assertThat(submitted).hasSize(1);
         verify(sandboxExecutionRepository, never()).findFirstByEnvironmentIdOrderByStartedAtDesc(any());
+    }
+
+    @Test
+    void handleEnvironmentRegistered_withIdleExecution_relaunchesAgent() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+        when(sandboxExecutionRepository.findByEnvironmentIdAndStatus(ENVIRONMENT_ID, SandboxExecutionStatus.RUNNING))
+                .thenReturn(List.of());
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENVIRONMENT_ID))
+                .thenReturn(Optional.of(execution));
+
+        List<Runnable> submitted = new ArrayList<>();
+        SandboxExecutionService service = newSandboxExecutionService(submitted::add);
+
+        service.handleEnvironmentRegistered(new EnvironmentRegisteredEvent(ENVIRONMENT_ID));
+
+        // A resumed sandbox (latest execution IDLE) relaunches the agent instead of only
+        // re-deploying git credentials.
+        assertThat(submitted).hasSize(1);
+        verify(environmentRpcClient, never())
+                .request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitIdentity.class));
     }
 
     @Test
@@ -1265,7 +1331,7 @@ class SandboxExecutionServiceTest {
     void onSandboxExecutionCompleteEvent_finalizesUsageAndRevokesKey() {
         UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
         SandboxExecution execution = createTestExecution();
-        execution.setUsage(LlmUsage.withKey("sk-final-key"));
+        execution.startUsage("sk-final-key", null);
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.findByIdForUpdate(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
@@ -1293,7 +1359,7 @@ class SandboxExecutionServiceTest {
     void onSandboxExecutionCompleteEvent_fetchFailure_stillRevokesKey() {
         UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
         SandboxExecution execution = createTestExecution();
-        execution.setUsage(LlmUsage.withKey("sk-final-key"));
+        execution.startUsage("sk-final-key", null);
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(virtualKeyService.fetchUsage("sk-final-key")).thenThrow(new RuntimeException("litellm unreachable"));
 
@@ -1326,7 +1392,7 @@ class SandboxExecutionServiceTest {
 
         UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
         SandboxExecution execution = createTestExecution();
-        execution.setUsage(LlmUsage.withKey("sk-final-key"));
+        execution.startUsage("sk-final-key", null);
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.findByIdForUpdate(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
@@ -1723,6 +1789,9 @@ class SandboxExecutionServiceTest {
         assertThat(dto.status()).isEqualTo(SandboxExecutionStatus.RUNNING);
         assertThat(dto.environmentId()).isEqualTo(ENVIRONMENT_ID);
         assertThat(dto.environmentStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+        // A RUNNING execution exposes the in-flight segment start so clients can tick the count.
+        assertThat(dto.activeSince()).isNotNull();
+        assertThat(dto.previousActiveSeconds()).isZero();
     }
 
     @Test

@@ -82,10 +82,12 @@ usage and spend in PostgreSQL (Redis-free) and the key is revoked on termination
 
 On completion, termination, or reconnect-lease expiry the control plane:
 
-1. Sends `env.terminate` (connector cancels/closes the ACP session and stops the agent).
+1. Sends `env.terminate` (connector cancels and stops the agent, deliberately leaving the ACP
+   session on disk so a later resume can re-attach).
    The resulting `env.complete` is marked `terminated: true`, so a deliberate stop (including
-   the idle-sleeper's gentle pause) is not recorded as an agent failure.
-2. Revokes the transient LiteLLM virtual key.
+   the idle-sleeper's gentle pause) is not recorded as an agent failure; the execution settles to
+   `IDLE`, not `COMPLETED`.
+2. Revokes the active transient LiteLLM virtual key and seals its usage segment.
 3. Calls `destroy` on the provider (or `terminateSandbox` to keep a suspend snapshot) —
    idempotent, even if an earlier step fails.
 
@@ -106,6 +108,28 @@ re-deploys the git identity and auth for the environment's active execution (ste
 before dispatching any execution, so publishing works after a sandbox wakes. Transient
 reconnects keep the original connector process and its credentials, so they are left
 untouched.
+
+When the latest execution for a resumed environment is `IDLE` (a paused sandbox), the fresh
+`env.register` also **relaunches the agent**. The connector reads the ACP session id it persisted
+at `<credentials-dir>/acp_session_id` (inside the sandbox, so it survives the snapshot and is
+never seen by the control plane) and re-attaches with `session/resume` when the agent advertises
+`sessionCapabilities.resume`, else `session/load` when it advertises `loadSession`, else falls
+back to `session/new`. On re-attach the connector reports `env.acp_initialized` with
+`relaunch: true`, so the control plane does not re-dispatch the task prompt; the execution stays
+`IDLE` and steerable.
+
+A resume mints a **fresh** LiteLLM virtual key (the previous one was revoked on detach) and opens
+a new `sandbox_execution_usage` segment for it. The execution's reported totals are the sum of all
+segments, so usage from every run lifetime aggregates rather than resetting. Each segment records
+its own model name, which also leaves room for per-segment model changes later.
+
+Execution duration is tracked as **active time**: `previous_active_ms` holds the total of closed
+`RUNNING` segments and `active_since` marks the start of the open segment, so the live total is
+`previous_active_ms + (now - active_since)`. Time spent `IDLE` (between turns, or paused while the
+sandbox sleeps) is excluded, so the duration shown for a resumed execution reflects work actually
+done rather than wall-clock elapsed time. Clients tick this count locally from the two fields (as
+`previousActiveSeconds` + `activeSince` in the DTO); the server never republishes per second.
+`completedAt` is no longer used as a duration anchor and is left unset on a pause.
 
 ## Current provider: Local Docker
 

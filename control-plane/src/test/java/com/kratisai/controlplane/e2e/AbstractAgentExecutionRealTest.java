@@ -1275,11 +1275,10 @@ public abstract class AbstractAgentExecutionRealTest {
 
         // Verify LiteLLM recorded non-zero usage against the execution's virtual key.
         if (expectedMinRequests > 0) {
-            SandboxExecution usageExec = sandboxExecutionRepository.findAll().stream()
-                    .filter(e -> e.getEnvironment().getId().equals(env.getId()))
+            // The usages collection is lazy; read the active key via a projection instead.
+            String virtualKey = sandboxExecutionRepository.findActiveVirtualKeysByEnvironmentId(env.getId()).stream()
                     .findFirst()
                     .orElseThrow();
-            String virtualKey = usageExec.getUsage().getVirtualKey();
             assertThat(virtualKey)
                     .as(
                             "Execution for harness '%s' must have a LiteLLM virtual key",
@@ -1339,9 +1338,9 @@ public abstract class AbstractAgentExecutionRealTest {
 
                     assertThat(updatedExecution.getStatus())
                             .as(
-                                    "Execution for harness '%s' must reach terminal state",
+                                    "Execution for harness '%s' must settle after sleep",
                                     getHarness().getName())
-                            .isIn(SandboxExecutionStatus.COMPLETED, SandboxExecutionStatus.FAILED);
+                            .isIn(SandboxExecutionStatus.IDLE, SandboxExecutionStatus.FAILED);
                 });
 
         // The environment must have transitioned to SLEEPING

@@ -252,7 +252,7 @@ export function TopicStageNav({
       {visibleExecutions.map((exec) => {
         const isSelected = currentStage === 'execution' && activeExecutionId === exec.id
         const launchedStr = exec.startedAt ? formatRelativeTime(exec.startedAt) : ''
-        const durationStr = formatDuration(exec.startedAt, exec.completedAt ?? undefined)
+        const durationStr = activeDurationStr(exec.previousActiveSeconds, exec.activeSince)
         const harnessName = harnessDisplayName(exec.harness ?? '')
         const displayStatus = executionDisplayStatus(exec)
         const isAsleep = displayStatus === 'SLEEPING'
@@ -339,7 +339,7 @@ export function TopicStageNav({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-60">
             {overflowExecutions.map((exec) => {
-              const durationStr = formatDuration(exec.startedAt, exec.completedAt ?? undefined)
+              const durationStr = activeDurationStr(exec.previousActiveSeconds, exec.activeSince)
               const launchedStr = exec.startedAt ? formatRelativeTime(exec.startedAt) : ''
               const isSelected = currentStage === 'execution' && activeExecutionId === exec.id
               const displayStatus = executionDisplayStatus(exec)
@@ -401,6 +401,18 @@ export function TopicStageNav({
   )
 }
 
+function activeDurationStr(
+  previousActiveSeconds?: null | number,
+  activeSince?: null | string,
+): string {
+  let seconds = previousActiveSeconds ?? 0
+  if (activeSince) {
+    seconds += Math.max(0, Math.floor((Date.now() - new Date(activeSince).getTime()) / 1000))
+  }
+  if (seconds <= 0) return ''
+  return formatDurationSeconds(seconds)
+}
+
 function ExecutionStatusIcon({ status }: { status: ExecutionDisplayStatus }) {
   switch (status) {
     case 'COMPLETED':
@@ -421,12 +433,4 @@ function ExecutionStatusIcon({ status }: { status: ExecutionDisplayStatus }) {
     default:
       return <Bot className="text-muted-foreground h-3.5 w-3.5" />
   }
-}
-
-function formatDuration(startTime?: string, endTime?: string): string {
-  if (!startTime) return ''
-  const start = new Date(startTime).getTime()
-  const end = endTime ? new Date(endTime).getTime() : Date.now()
-  const totalSeconds = Math.max(0, Math.floor((end - start) / 1000))
-  return formatDurationSeconds(totalSeconds)
 }

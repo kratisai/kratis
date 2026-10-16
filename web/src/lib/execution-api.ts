@@ -27,6 +27,8 @@ export type ExecutionDisplayStatus = 'SLEEPING' | ExecutionStatus
 export type ExecutionStatus = 'COMPLETED' | 'FAILED' | 'IDLE' | 'RUNNING'
 
 export interface SandboxExecutionDto {
+  // Start of the open RUNNING segment, or null when the execution is not running.
+  activeSince?: null | string
   chatId: string
   completedAt?: null | string
   completionTokens?: null | number
@@ -35,6 +37,9 @@ export interface SandboxExecutionDto {
   exitCode?: null | number
   harness?: string
   id: string
+  // Active seconds from closed RUNNING segments. While RUNNING the live total is
+  // previousActiveSeconds + (now - activeSince).
+  previousActiveSeconds?: null | number
   promptTokens?: null | number
   startedAt: string
   status: ExecutionStatus

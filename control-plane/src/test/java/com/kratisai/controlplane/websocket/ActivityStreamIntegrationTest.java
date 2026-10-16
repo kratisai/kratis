@@ -359,8 +359,8 @@ class ActivityStreamIntegrationTest {
         assertThat(completeReceived)
                 .as("UI client should receive execution_complete")
                 .isTrue();
-        assertThat(clientFixture.hasReceivedMessageContaining("execution_complete", "COMPLETED"))
-                .as("Execution complete event should contain COMPLETED status")
+        assertThat(clientFixture.hasReceivedMessageContaining("execution_complete", "IDLE"))
+                .as("Execution complete event should contain IDLE status")
                 .isTrue();
         assertThat(clientFixture.hasReceivedMessageContaining("execution_complete", executionId.toString()))
                 .as("Execution complete event should contain the correct executionId")

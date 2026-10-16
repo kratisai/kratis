@@ -1,0 +1,106 @@
+databaseChangeLog:
+- changeSet:
+    id: 009-sandbox-execution-usage-001
+    author: kratis
+    changes:
+    - createTable:
+        columns:
+        - column:
+            constraints:
+              nullable: false
+              primaryKey: true
+              primaryKeyName: sandbox_execution_usage_pkey
+            defaultValueComputed: gen_random_uuid()
+            name: id
+            type: UUID
+        - column:
+            constraints:
+              nullable: false
+            name: execution_id
+            type: UUID
+        - column:
+            name: virtual_key
+            type: TEXT
+        - column:
+            name: model_name
+            type: VARCHAR(255)
+        - column:
+            defaultValueNumeric: 0
+            name: total_tokens
+            type: BIGINT
+        - column:
+            defaultValueNumeric: 0
+            name: prompt_tokens
+            type: BIGINT
+        - column:
+            defaultValueNumeric: 0
+            name: completion_tokens
+            type: BIGINT
+        - column:
+            defaultValueComputed: 0
+            name: total_spend
+            type: FLOAT8
+        - column:
+            name: usage_last_updated_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            constraints:
+              nullable: false
+            defaultValueComputed: now()
+            name: started_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            name: revoked_at
+            type: TIMESTAMP WITH TIME ZONE
+        tableName: sandbox_execution_usage
+    - addForeignKeyConstraint:
+        baseColumnNames: execution_id
+        baseTableName: sandbox_execution_usage
+        constraintName: fk_sandbox_execution_usage_execution
+        deferrable: false
+        initiallyDeferred: false
+        onDelete: CASCADE
+        onUpdate: NO ACTION
+        referencedColumnNames: id
+        referencedTableName: sandbox_executions
+        validate: true
+    - createIndex:
+        columns:
+        - column:
+            name: execution_id
+        indexName: idx_sandbox_execution_usage_execution
+        tableName: sandbox_execution_usage
+- changeSet:
+    id: 009-sandbox-execution-usage-002
+    author: kratis
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: true
+        stripComments: true
+        sql: >-
+          INSERT INTO sandbox_execution_usage
+            (execution_id, virtual_key, model_name, total_tokens, prompt_tokens,
+             completion_tokens, total_spend, usage_last_updated_at, started_at)
+          SELECT id, virtual_key, model_name, total_tokens, prompt_tokens,
+                 completion_tokens, total_spend, usage_last_updated_at, started_at
+          FROM sandbox_executions
+          WHERE virtual_key IS NOT NULL;
+    - dropColumn:
+        tableName: sandbox_executions
+        columnName: virtual_key
+    - dropColumn:
+        tableName: sandbox_executions
+        columnName: total_spend
+    - dropColumn:
+        tableName: sandbox_executions
+        columnName: total_tokens
+    - dropColumn:
+        tableName: sandbox_executions
+        columnName: prompt_tokens
+    - dropColumn:
+        tableName: sandbox_executions
+        columnName: completion_tokens
+    - dropColumn:
+        tableName: sandbox_executions
+        columnName: usage_last_updated_at

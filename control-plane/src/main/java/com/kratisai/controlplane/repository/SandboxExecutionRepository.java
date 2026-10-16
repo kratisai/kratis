@@ -27,8 +27,13 @@ public interface SandboxExecutionRepository extends JpaRepository<SandboxExecuti
     @Query("select e from SandboxExecution e where e.id = :id")
     Optional<SandboxExecution> findByIdForUpdate(@Param("id") UUID id);
 
-    @Query("SELECT COALESCE(SUM(e.usage.totalSpend), 0.0) FROM SandboxExecution e")
+    @Query("SELECT COALESCE(SUM(u.totalSpend), 0.0) FROM SandboxExecutionUsage u")
     double sumTotalSpend();
+
+    @Query("SELECT u.virtualKey FROM SandboxExecutionUsage u"
+            + " WHERE u.execution.environment.id = :environmentId AND u.revokedAt IS NULL"
+            + " ORDER BY u.startedAt DESC")
+    List<String> findActiveVirtualKeysByEnvironmentId(@Param("environmentId") UUID environmentId);
 
     @Modifying
     @Query(

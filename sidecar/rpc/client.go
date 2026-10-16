@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -230,6 +232,40 @@ func (c *Client) envFilePath() string {
 		return c.envFile
 	}
 	return defaultEnvFile
+}
+
+// acpSessionIDPath returns the location of the persisted ACP session id. It sits
+// beside the environment file (outside the workspace) so it survives a sandbox
+// suspend snapshot and is never part of the git working tree. The sandbox is the
+// single owner of this id: the control plane never sees it.
+func (c *Client) acpSessionIDPath() string {
+	return filepath.Join(filepath.Dir(c.envFilePath()), "acp_session_id")
+}
+
+// readPersistedSessionID returns the stored ACP session id, or "" when none has
+// been recorded yet (a first launch).
+func (c *Client) readPersistedSessionID() string {
+	data, err := os.ReadFile(c.acpSessionIDPath())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// persistSessionID records the session id so a later agent process can re-attach
+// to it via session/resume or session/load.
+func (c *Client) persistSessionID(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	path := c.acpSessionIDPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		log.Printf("[ACP] Failed to create session id directory %s: %v", filepath.Dir(path), err)
+		return
+	}
+	if err := os.WriteFile(path, []byte(sessionID), 0o600); err != nil {
+		log.Printf("[ACP] Failed to persist session id to %s: %v", path, err)
+	}
 }
 
 // Start initiates the connection, registration, and heartbeat loop.
