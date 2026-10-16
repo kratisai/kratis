@@ -379,7 +379,7 @@ public class SandboxExecutionService {
             execution.getCanvas().getContent();
         }
         execution.getHarness();
-        execution.getUsage();
+        execution.getUsages().size();
     }
 
     public void dispatchAcpPrompt(SandboxExecution execution) {
@@ -707,6 +707,8 @@ public class SandboxExecutionService {
                 execution.getStatus(),
                 execution.getStartedAt(),
                 execution.getCompletedAt(),
+                execution.getPreviousActiveSeconds(),
+                execution.getActiveSince(),
                 execution.getRepository() != null ? execution.getRepository().getId() : null,
                 execution.getHarness(),
                 execution.getTaskPrompt(),
@@ -714,7 +716,7 @@ public class SandboxExecutionService {
                 execution.getPromptTokens(),
                 execution.getCompletionTokens(),
                 execution.getTotalSpend(),
-                execution.getUsage().getUsageLastUpdatedAt(),
+                execution.getUsageLastUpdatedAt(),
                 execution.getEnvironment() != null ? execution.getEnvironment().getId() : null,
                 execution.getEnvironment() != null ? execution.getEnvironment().getStatus() : null);
     }
@@ -796,20 +798,36 @@ public class SandboxExecutionService {
 
         List<SandboxExecution> pendingExecutions = sandboxExecutionRepository.findByEnvironmentIdAndStatus(
                 event.environmentId(), SandboxExecutionStatus.RUNNING);
-        if (pendingExecutions.isEmpty()) {
-            reestablishGitCredentials(event.environmentId());
+        if (!pendingExecutions.isEmpty()) {
+            WebSocketSession envSession = sessionRegistry.getSessionForEnvironment(event.environmentId());
+            if (envSession != null && envSession.isOpen()) {
+                for (SandboxExecution exec : pendingExecutions) {
+                    dispatchExecution(exec, envSession);
+                }
+            } else {
+                logger.warn(
+                        "WebSocket session for environment {} not found or closed during asynchronous dispatch",
+                        event.environmentId());
+            }
             return;
         }
-        WebSocketSession envSession = sessionRegistry.getSessionForEnvironment(event.environmentId());
-        if (envSession != null && envSession.isOpen()) {
-            for (SandboxExecution exec : pendingExecutions) {
-                dispatchExecution(exec, envSession);
-            }
-        } else {
-            logger.warn(
-                    "WebSocket session for environment {} not found or closed during asynchronous dispatch",
+
+        SandboxExecution latest = transactionTemplate.execute(status -> sandboxExecutionRepository
+                .findFirstByEnvironmentIdOrderByStartedAtDesc(event.environmentId())
+                .map(execution -> {
+                    touchExecutionGraph(execution);
+                    return execution;
+                })
+                .orElse(null));
+        if (latest != null && latest.getStatus() == SandboxExecutionStatus.IDLE) {
+            logger.info(
+                    "Relaunching agent for paused execution {} on resumed environment {}",
+                    latest.getId(),
                     event.environmentId());
+            dispatchExecutor.execute(() -> runDispatch(latest.getId(), true));
+            return;
         }
+        reestablishGitCredentials(event.environmentId());
     }
 
     private void reestablishGitCredentials(UUID environmentId) {
@@ -896,8 +914,9 @@ public class SandboxExecutionService {
         try {
             SandboxExecution execution =
                     sandboxExecutionRepository.findById(executionId).orElse(null);
-            if (execution != null && execution.getUsage() != null) {
-                token = execution.getUsage().getVirtualKey();
+            SandboxExecutionUsage active = execution != null ? execution.getActiveUsage() : null;
+            if (active != null) {
+                token = active.getVirtualKey();
             }
         } catch (Exception e) {
             logger.warn("Failed to retrieve virtual key for execution {}: {}", executionId, e.getMessage());
@@ -933,7 +952,13 @@ public class SandboxExecutionService {
                     if (execution == null) {
                         return;
                     }
-                    execution.getUsage().apply(finalSnapshot);
+                    SandboxExecutionUsage active = execution.getActiveUsage();
+                    if (active == null) {
+                        return;
+                    }
+                    // Seal the segment so a later resume opens a fresh one and totals keep summing.
+                    active.apply(finalSnapshot);
+                    active.setRevokedAt(Instant.now());
                     sandboxExecutionRepository.save(execution);
                     eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
                             execution.getChat().getTeam().getId(),

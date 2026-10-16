@@ -4,6 +4,7 @@ import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.model.LlmUsageSnapshot;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.model.SandboxExecutionUsage;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionAcpInitializedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
@@ -135,15 +136,16 @@ public class SandboxExecutionUsageRefresher {
             transactionTemplate.executeWithoutResult(status -> {
                 SandboxExecution execution =
                         executionRepository.findByIdForUpdate(executionId).orElse(null);
+                SandboxExecutionUsage activeUsage = execution != null ? execution.getActiveUsage() : null;
                 if (execution == null
                         || (execution.getStatus() != SandboxExecutionStatus.RUNNING
                                 && execution.getStatus() != SandboxExecutionStatus.IDLE)
-                        || execution.getUsage().getVirtualKey() == null) {
+                        || activeUsage == null
+                        || activeUsage.getVirtualKey() == null) {
                     return;
                 }
-                LlmUsageSnapshot snapshot =
-                        virtualKeyService.fetchUsage(execution.getUsage().getVirtualKey());
-                execution.getUsage().apply(snapshot);
+                LlmUsageSnapshot snapshot = virtualKeyService.fetchUsage(activeUsage.getVirtualKey());
+                activeUsage.apply(snapshot);
                 executionRepository.save(execution);
                 eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
                         execution.getChat().getTeam().getId(),

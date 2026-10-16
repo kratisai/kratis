@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -36,6 +37,19 @@ type AcpSessionNewRequest struct {
 	McpServers []interface{} `json:"mcpServers"`
 }
 
+// AcpSessionResumeRequest re-attaches to a stored session without replaying its
+// history; AcpSessionLoadRequest re-attaches and replays it via session/update.
+type AcpSessionResumeRequest struct {
+	SessionID string `json:"sessionId"`
+	Cwd       string `json:"cwd"`
+}
+
+type AcpSessionLoadRequest struct {
+	SessionID  string        `json:"sessionId"`
+	Cwd        string        `json:"cwd"`
+	McpServers []interface{} `json:"mcpServers"`
+}
+
 type AcpSessionPromptRequest struct {
 	SessionID string        `json:"sessionId"`
 	Prompt    []interface{} `json:"prompt"`
@@ -57,7 +71,7 @@ type AcpAgentCapabilities struct {
 	PromptCapabilities *AcpPromptCapabilities  `json:"promptCapabilities,omitempty"`
 	McpCapabilities    *AcpMcpCapabilities     `json:"mcpCapabilities,omitempty"`
 	Auth               *AcpAuthCapabilities    `json:"auth,omitempty"`
-	Session            *AcpSessionCapabilities `json:"session,omitempty"`
+	Session            *AcpSessionCapabilities `json:"sessionCapabilities,omitempty"`
 }
 
 type AcpPromptCapabilities struct {
@@ -76,7 +90,19 @@ type AcpAuthCapabilities struct {
 }
 
 type AcpSessionCapabilities struct {
-	Load bool `json:"load"`
+	// Resume is the presence-only `sessionCapabilities.resume` marker; the schema
+	// defines an object or null, so only its presence matters.
+	Resume json.RawMessage `json:"resume"`
+}
+
+// SupportsResume reports whether the agent advertises session/resume, which
+// re-attaches without replaying history (preferred over session/load).
+func (c AcpAgentCapabilities) SupportsResume() bool {
+	if c.Session == nil {
+		return false
+	}
+	v := bytes.TrimSpace(c.Session.Resume)
+	return len(v) > 0 && !bytes.Equal(v, []byte("null"))
 }
 
 type AcpAgentInfo struct {

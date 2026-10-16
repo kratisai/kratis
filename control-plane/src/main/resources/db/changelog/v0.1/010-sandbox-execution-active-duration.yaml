@@ -1,0 +1,17 @@
+databaseChangeLog:
+- changeSet:
+    id: 010-sandbox-execution-active-duration-001
+    author: kratis
+    changes:
+    - addColumn:
+        tableName: sandbox_executions
+        columns:
+        - column:
+            constraints:
+              nullable: false
+            defaultValueNumeric: 0
+            name: previous_active_ms
+            type: BIGINT
+        - column:
+            name: active_since
+            type: TIMESTAMP WITH TIME ZONE

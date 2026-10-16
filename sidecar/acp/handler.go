@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -171,6 +172,11 @@ type Handler struct {
 	workspace string
 	debug     bool
 
+	// suppressUpdates drops session/update notifications while session/load
+	// replays a stored transcript: Kratis already owns that history, so
+	// relaying it would duplicate every message in the UI.
+	suppressUpdates atomic.Bool
+
 	mu                      sync.Mutex
 	toolCalls               map[string]*ToolCallInfo
 	permissionActionAliases map[string]string
@@ -245,6 +251,12 @@ func (h *Handler) CloseChunkRun(reason string) {
 	h.closeChunkRunLocked(reason)
 }
 
+// SetSuppressSessionUpdates toggles dropping of session/update notifications,
+// used around session/load so the replayed transcript is not re-emitted.
+func (h *Handler) SetSuppressSessionUpdates(suppress bool) {
+	h.suppressUpdates.Store(suppress)
+}
+
 func (h *Handler) NotificationHandler(transport *AcpTransport) func(string, map[string]interface{}, interface{}, bool) {
 	return func(method string, params map[string]interface{}, id interface{}, hasID bool) {
 		if hasID {
@@ -254,6 +266,10 @@ func (h *Handler) NotificationHandler(transport *AcpTransport) func(string, map[
 		}
 
 		if method == "session/update" {
+			if h.suppressUpdates.Load() {
+				h.debugf("[NOTIF] Dropping replayed session/update during session/load")
+				return
+			}
 			h.handleSessionUpdate(params)
 		}
 

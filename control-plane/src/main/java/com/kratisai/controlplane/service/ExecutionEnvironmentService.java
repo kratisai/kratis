@@ -10,6 +10,7 @@ import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionEnvironmentType;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.model.SandboxExecutionUsage;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.model.event.EnvironmentDisconnectedEvent;
@@ -201,6 +202,7 @@ public class ExecutionEnvironmentService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Environment is not a running sandbox");
         }
     }
+
     /**
      * Terminates the running execution in its own {@code REQUIRES_NEW} transaction so the terminal
      * status write and its events commit independently of the container teardown that follows. A
@@ -240,17 +242,16 @@ public class ExecutionEnvironmentService {
     }
 
     /**
-     * Polls for the execution reaching a non-RUNNING state. Each read runs in its own {@code
-     * REQUIRES_NEW} transaction so the poll observes the {@code env.complete} handler's committed
-     * update instead of the caller's first-level cache.
+     * Polls for the execution leaving RUNNING. An agent settles the execution to IDLE, which counts
+     * as finished. Each read runs in its own {@code REQUIRES_NEW} transaction so the poll observes
+     * the {@code env.complete} handler's committed update instead of the caller's first-level cache.
      */
     private boolean waitForExecutionCompletion(UUID executionId, Duration timeout) {
         Instant deadline = Instant.now().plus(timeout);
         while (Instant.now().isBefore(deadline)) {
             Boolean completed = pollTemplate.execute(status -> sandboxExecutionRepository
                     .findById(executionId)
-                    .map(execution -> execution.getStatus() != SandboxExecutionStatus.RUNNING
-                            && execution.getStatus() != SandboxExecutionStatus.IDLE)
+                    .map(execution -> execution.getStatus() != SandboxExecutionStatus.RUNNING)
                     .orElse(true));
             if (Boolean.TRUE.equals(completed)) {
                 return true;
@@ -279,9 +280,11 @@ public class ExecutionEnvironmentService {
         String reason = "execution force-terminated because its environment was deleted";
         executionActivityPersistenceService.recordExecutionError(executionId, reason, 1);
 
-        if (execution.getVirtualKey() != null) {
+        SandboxExecutionUsage activeUsage = execution.getActiveUsage();
+        if (activeUsage != null && activeUsage.getVirtualKey() != null) {
             try {
-                virtualKeyService.revokeKey(execution.getVirtualKey());
+                virtualKeyService.revokeKey(activeUsage.getVirtualKey());
+                activeUsage.setRevokedAt(Instant.now());
                 logger.info("Revoked virtual key for execution {}", execution.getId());
             } catch (Exception e) {
                 logger.error("Failed to revoke virtual key for execution {}", execution.getId(), e);

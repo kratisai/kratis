@@ -148,7 +148,7 @@ class TelemetryServiceIntegrationTest {
         execution.setStatus(SandboxExecutionStatus.COMPLETED);
         execution.setModelName("gpt-4o");
         execution.setHarness(AgentHarness.valueOf("OPENCODE"));
-        execution.getUsage().setTotalSpend(0.125);
+        execution.startUsage("sk-telemetry-key", "gpt-4o").setTotalSpend(0.125);
         sandboxExecutionRepository.save(execution);
     }
 

@@ -131,6 +131,30 @@ describe('TopicStageNav', () => {
     expect(screen.getByText('3h ago')).toBeInTheDocument()
   })
 
+  it('adds the in-flight RUNNING segment to the active duration', () => {
+    render(
+      <TopicStageNav
+        canvasCount={0}
+        chatId="chat-1"
+        currentStage="execution"
+        executions={[
+          {
+            activeSince: new Date(Date.now() - 5000).toISOString(),
+            chatId: 'chat-1',
+            harness: 'PI',
+            id: 'exec-running',
+            previousActiveSeconds: 60,
+            startedAt: new Date(Date.now() - 5000).toISOString(),
+            status: 'RUNNING',
+          },
+        ]}
+      />,
+    )
+
+    // 60s of finished segments plus ~5s in the in-flight RUNNING segment.
+    expect(screen.getByText(/^1m \d+s$/)).toBeInTheDocument()
+  })
+
   it('navigates to chat when clicking the Design & Plan card', () => {
     render(
       <TopicStageNav

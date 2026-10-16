@@ -9,10 +9,10 @@ import static org.mockito.Mockito.when;
 
 import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.model.ChatEntity;
-import com.kratisai.controlplane.model.LlmUsage;
 import com.kratisai.controlplane.model.LlmUsageSnapshot;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.model.SandboxExecutionUsage;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionAcpInitializedEvent;
@@ -75,7 +75,7 @@ class SandboxExecutionUsageRefresherTest {
     private final List<ScheduledFuture<?>> windowFutures = new ArrayList<>();
 
     private SandboxExecutionUsageRefresher refresher;
-    private LlmUsage usage;
+    private SandboxExecutionUsage usage;
     private UUID teamId;
     private UUID chatId;
     private UUID executionId;
@@ -108,12 +108,12 @@ class SandboxExecutionUsageRefresherTest {
         teamId = UUID.randomUUID();
         chatId = UUID.randomUUID();
         executionId = UUID.randomUUID();
-        usage = LlmUsage.withKey("sk-test-key");
+        usage = new SandboxExecutionUsage(execution, "sk-test-key", null);
         when(team.getId()).thenReturn(teamId);
         when(chat.getId()).thenReturn(chatId);
         when(chat.getTeam()).thenReturn(team);
         when(execution.getChat()).thenReturn(chat);
-        when(execution.getUsage()).thenReturn(usage);
+        when(execution.getActiveUsage()).thenReturn(usage);
         when(executionRepository.findByIdForUpdate(executionId)).thenReturn(Optional.of(execution));
     }
 

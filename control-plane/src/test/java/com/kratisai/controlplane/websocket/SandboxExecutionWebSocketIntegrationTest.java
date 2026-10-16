@@ -124,13 +124,13 @@ class SandboxExecutionWebSocketIntegrationTest {
 
             assertThat(pair.client().awaitTrigger("execution_complete", 5, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.client().hasReceivedMessageContaining("execution_complete", "COMPLETED"))
+            assertThat(pair.client().hasReceivedMessageContaining("execution_complete", "IDLE"))
                     .isTrue();
         }
 
         SandboxExecution finalExec =
                 sandboxExecutionRepository.findById(executionId).orElseThrow();
-        assertThat(finalExec.getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
+        assertThat(finalExec.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(finalExec.getExitCode()).isEqualTo(0);
     }
 

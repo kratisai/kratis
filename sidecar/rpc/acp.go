@@ -23,7 +23,7 @@ func (c *Client) ExecuteLaunchAcpAgent(params LaunchAcpAgentParams, reqID interf
 		c.currentExecutionID = params.ExecutionID
 		c.mu.Unlock()
 	}
-	if err := c.launchAcpAgentProcess(params.AgentCommand, params.AgentLogFiles); err != nil {
+	if err := c.launchAcpAgentProcess(params.AgentCommand, params.AgentLogFiles, c.readPersistedSessionID()); err != nil {
 		c.sendSuccessResponse(reqID, LaunchAcpAgentResult{
 			Status: LaunchFailed,
 			Error:  err.Error(),
@@ -34,6 +34,7 @@ func (c *Client) ExecuteLaunchAcpAgent(params LaunchAcpAgentParams, reqID interf
 	sup := c.currentSupervisor()
 	result := sup.LastLaunchResult()
 	c.SendOutput(fmt.Sprintf("[ACP] Agent process started with PID: %d", sup.PID()), "stdout")
+	c.persistSessionID(result.Session.SessionID)
 
 	// Send env.acp_initialized notification (ACP-agnostic payload)
 	c.mu.Lock()
@@ -44,6 +45,7 @@ func (c *Client) ExecuteLaunchAcpAgent(params LaunchAcpAgentParams, reqID interf
 		AgentName:    result.AgentName,
 		AgentVersion: result.AgentVersion,
 		ExecutionID:  execID,
+		Relaunch:     result.Resumed,
 	})
 	c.sendSuccessResponse(reqID, LaunchAcpAgentResult{
 		Status:       LaunchLaunched,
@@ -55,7 +57,7 @@ func (c *Client) ExecuteLaunchAcpAgent(params LaunchAcpAgentParams, reqID interf
 
 // launchAcpAgentProcess tears down any existing ACP agent, spawns a fresh
 // agent subprocess for the given command, and performs the ACP handshake.
-func (c *Client) launchAcpAgentProcess(agentCommand string, logFiles []string) error {
+func (c *Client) launchAcpAgentProcess(agentCommand string, logFiles []string, resumeSessionID string) error {
 	envFile := c.envFilePath()
 
 	// Ensure env file exists so sourcing is a no-op when no prior env.exec ran
@@ -90,6 +92,7 @@ func (c *Client) launchAcpAgentProcess(agentCommand string, logFiles []string) e
 	sup.SetDebug(c.debug)
 	sup.Timeouts = c.supervisorTimeouts
 	sup.SetAgentLogFiles(logFiles)
+	sup.SetResumeSessionID(resumeSessionID)
 	c.mu.Lock()
 	c.supervisor = sup
 	c.mu.Unlock()
@@ -293,13 +296,14 @@ func (c *Client) relaunchAgent() error {
 		c.mu.Unlock()
 	}
 
-	if err := c.launchAcpAgentProcess(agentCommand, logFiles); err != nil {
+	if err := c.launchAcpAgentProcess(agentCommand, logFiles, ""); err != nil {
 		return err
 	}
 
 	// Notify the control plane about the fresh session so the UI tracks the
 	// new ACP session id.
 	result := c.currentSupervisor().LastLaunchResult()
+	c.persistSessionID(result.Session.SessionID)
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	c.mu.Unlock()

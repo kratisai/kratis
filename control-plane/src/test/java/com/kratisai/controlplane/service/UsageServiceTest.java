@@ -81,8 +81,9 @@ class UsageServiceTest {
         exec.setCompletedAt(Instant.now());
         exec.setModelName("gpt-4o");
         exec.setHarness(AgentHarness.valueOf("OPENCODE"));
-        exec.setTotalTokens(100L);
-        exec.setTotalSpend(0.005);
+        SandboxExecutionUsage execUsage = exec.startUsage("sk-exec-key", "gpt-4o");
+        execUsage.setTotalTokens(100L);
+        execUsage.setTotalSpend(0.005);
         sandboxExecutionRepository.save(exec);
 
         Repository repo = new Repository("test-repo", "https://github.com/test/repo", "main", RepositoryType.GENERIC);
@@ -240,9 +241,9 @@ class UsageServiceTest {
         SandboxExecution longTitle = new SandboxExecution();
         longTitle.setEnvironment(env);
         longTitle.setChat(chat);
+        longTitle.setStatus(SandboxExecutionStatus.RUNNING);
+        longTitle.setActiveSince(Instant.now().minusSeconds(100));
         longTitle.setStatus(SandboxExecutionStatus.COMPLETED);
-        longTitle.setStartedAt(Instant.now().minusSeconds(100));
-        longTitle.setCompletedAt(Instant.now());
         longTitle.setTaskPrompt("x".repeat(100));
         sandboxExecutionRepository.save(longTitle);
 

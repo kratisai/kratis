@@ -59,31 +59,30 @@ public class EnvironmentCompleteRpcHandler
         UUID execId = UUID.fromString(params.executionId());
         SandboxExecution execution = executionGuard.requireExecutionInEnvironment(sessionId, execId);
 
-        execution.setStatus(SandboxExecutionStatus.COMPLETED);
-        execution.setCompletedAt(Instant.now());
-
         int exitCode = params.exitCode();
+        boolean deliberateStop = Boolean.TRUE.equals(params.terminated());
+        boolean failed = exitCode != 0 && !deliberateStop;
         execution.setExitCode(exitCode);
-        if (exitCode != 0) {
+        if (failed) {
             execution.setStatus(SandboxExecutionStatus.FAILED);
+            execution.setCompletedAt(Instant.now());
+        } else {
+            // A pause is not a completion: the execution stays IDLE.
+            execution.setStatus(SandboxExecutionStatus.IDLE);
         }
 
         executionRepository.save(execution);
 
-        // Any pending permission/elicitation request is moot once the execution has ended
-        // (natural completion or the terminal ack of a terminate). Cancel it so the UI activity
-        // log and persisted activity rows are resolved for the whole team.
+        // Any pending permission/elicitation request is moot once the agent process has stopped.
         sandboxExecutionService.cancelPendingPermissions(execution, "execution completed");
         sandboxExecutionService.forgetActivePrompt(execution.getId());
 
         UUID teamId = execution.getChat().getTeam().getId();
 
-        // Persist a faithful ERROR activity for any abnormal termination so the
-        // activity log records the agent's own error message. A deliberate stop
-        // (control-plane terminate or internal teardown) reports a non-zero exit
-        // code when the process is signalled, but is an expected pause, not an
-        // agent failure, so it must not surface as an error activity.
-        if (exitCode != 0 && !Boolean.TRUE.equals(params.terminated())) {
+        // Persist a faithful ERROR activity for any abnormal termination so the activity log
+        // records the agent's own error message. A deliberate stop reports a non-zero exit code
+        // when the process is signalled, but is an expected pause, not an agent failure.
+        if (failed) {
             activityPersistenceService.recordExecutionError(execution.getId(), params.reason(), exitCode);
         }
 

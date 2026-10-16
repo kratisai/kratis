@@ -109,7 +109,6 @@ sleep 30
 		ExitWait:          100 * time.Millisecond,
 		SigkillWait:       300 * time.Millisecond,
 		DrainWait:         100 * time.Millisecond,
-		SessionCloseWait:  200 * time.Millisecond,
 		RequestTimeout:    1 * time.Second,
 		InitializeTimeout: 5 * time.Second,
 	}

@@ -19,7 +19,6 @@ func SetTestTimeouts(s *AgentSupervisor) {
 		ExitWait:          100 * time.Millisecond,
 		SigkillWait:       300 * time.Millisecond,
 		DrainWait:         100 * time.Millisecond,
-		SessionCloseWait:  200 * time.Millisecond,
 		RequestTimeout:    2 * time.Second,
 		InitializeTimeout: 2 * time.Second,
 	}

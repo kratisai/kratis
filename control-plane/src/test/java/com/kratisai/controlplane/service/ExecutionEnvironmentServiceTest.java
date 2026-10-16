@@ -443,7 +443,7 @@ class ExecutionEnvironmentServiceTest {
     void terminateEnvironment_withTimeout_forceTerminatesAndRevokesKey() {
         ExecutionEnvironment env = createSandboxEnvironment();
         SandboxExecution execution = createRunningExecution(env);
-        execution.setVirtualKey("sk-virtual-key-123");
+        execution.startUsage("sk-virtual-key-123", null);
 
         when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
         when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
@@ -457,7 +457,7 @@ class ExecutionEnvironmentServiceTest {
         doNothing().when(sandboxExecutionService).terminateExecution(EXECUTION_ID);
 
         SandboxExecution stillRunning = createRunningExecution(env);
-        stillRunning.setVirtualKey("sk-virtual-key-123");
+        stillRunning.startUsage("sk-virtual-key-123", null);
         when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(stillRunning));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(stillRunning);
 
@@ -570,7 +570,7 @@ class ExecutionEnvironmentServiceTest {
     void terminateEnvironment_withVirtualKeyRevocationError_continuesTermination() {
         ExecutionEnvironment env = createSandboxEnvironment();
         SandboxExecution execution = createRunningExecution(env);
-        execution.setVirtualKey("sk-virtual-key-123");
+        execution.startUsage("sk-virtual-key-123", null);
 
         when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
         when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));

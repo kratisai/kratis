@@ -53,11 +53,6 @@ stateDiagram-v2
     Prompting --> Cancelling : send session/cancel
     Cancelling --> SessionActive : prompt response with stopReason=cancelled
 
-    SessionActive --> SessionClosing : send session/close
-    Prompting --> SessionClosing : send session/close
-    SessionClosing --> Ready : close OK, session released
-    SessionClosing --> Failed : close error
-
     Ready --> Terminating : control-plane sends terminate
     SessionActive --> Terminating : control-plane sends terminate
     Prompting --> Terminating : control-plane sends terminate
@@ -144,7 +139,6 @@ and the agent is ready to receive prompts.
 
 **Valid transitions:**
 - → `Prompting` — client sends `session/prompt`
-- → `SessionClosing` — client sends `session/close` (if supported)
 - → `Terminating` — control-plane requests termination
 
 **Allowed operations while idle:**
@@ -152,7 +146,10 @@ and the agent is ready to receive prompts.
 - `session/set_mode` — switch agent mode (if modes available)
 - `session/set_config_option` — change config (if config options available)
 - `session/cancel` — cancel an in-flight prompt (only valid during `Prompting`)
-- `session/close` — close the session (if `sessionCapabilities.close` supported)
+
+`session/close` is intentionally never sent: the sandbox owns the session's lifetime, so
+the session is left on disk and re-attached (`session/resume`/`session/load`) by the next
+agent process. It is discarded only when the sandbox itself is destroyed.
 
 ### 3.6 `Prompting`
 
@@ -169,7 +166,6 @@ The agent is actively processing the prompt. During this state the agent may:
 - → `SessionActive` — prompt response received with a `stopReason`
   (`end_turn`, `max_tokens`, `max_turn_requests`, `refusal`)
 - → `Cancelling` — client sends `session/cancel`
-- → `SessionClosing` — client sends `session/close` (if supported)
 - → `Terminating` — control-plane forces termination
 
 **Critical rules:**
@@ -198,15 +194,13 @@ The client has requested cancellation. The agent should:
 **Valid transitions:**
 - → `SessionActive` — prompt response received with `stopReason: "cancelled"`
 
-### 3.8 `SessionClosing`
+### 3.8 `SessionClosing` (removed)
 
-**Entry:** `session/close` request sent.
-
-The agent must cancel any ongoing work and free session resources.
-
-**Valid transitions:**
-- → `Ready` — close succeeded, session resources freed
-- → `Failed` — close error
+Kratis never sends `session/close`. A stopped agent is a *detach*, not a close: the
+session stays on disk inside the sandbox filesystem and is re-attached on relaunch.
+Verified empirically: Codex, Claude, OpenCode, Kilo, Qwen, Gemini, Vibe, Pi and
+OpenHands all persist their session incrementally and can `session/resume`/`session/load`
+it from a fresh process after the agent is stopped (SIGTERM or SIGKILL).
 
 ### 3.9 `Terminating`
 
@@ -214,14 +208,15 @@ The agent must cancel any ongoing work and free session resources.
 
 Termination sequence:
 1. If session is active and prompting: send `session/cancel` (advisory)
-2. If session is active: send `session/close` (if supported)
-3. Close stdin (signals EOF to agent)
-4. Wait briefly for graceful exit
-5. Send `SIGTERM` to process group
-6. Wait for exit
-7. If still running: `SIGKILL` to process group
-8. Wait for stdout/stderr readers to drain
-9. Send `env.complete` notification to control-plane
+2. Close stdin (signals EOF to agent)
+3. Wait briefly for graceful exit
+4. Send `SIGTERM` to process group
+5. Wait for exit
+6. If still running: `SIGKILL` to process group
+7. Wait for stdout/stderr readers to drain
+8. Send `env.complete` notification to control-plane
+
+The session is deliberately *not* closed; it remains on disk for a later re-attach.
 
 **Valid transitions:**
 - → `Terminated` — process exited and all readers drained
@@ -466,6 +461,12 @@ The sidecar translates ACP events into Kratis-native WebSocket messages:
 | Deliberate stop (`env.terminate` or internal teardown) | `env.complete` with `exitCode` and `terminated: true`; an expected pause, not an error, even when signal-terminated |
 | Launch failure | `env.complete` with `exitCode: -1` |
 
+On `env.complete` the control plane sets the execution status to `FAILED` only for an
+unexpected non-zero exit (`terminated: true` excluded); every other outcome — a sandbox
+sleep, an explicit stop, or a finished turn — leaves it `IDLE`. The agent process ending is a
+pause, not task completion: an execution becomes `COMPLETED` only once its change is merged
+(not tracked in this flow), so it stays steerable across a sandbox sleep and resume.
+
 ### 9.1 `session/update` relay model
 
 Every `session/update` discriminator has an explicit relay path (terminal line,
@@ -572,14 +573,16 @@ in [`supervisor.go`](../../sidecar/runner/supervisor.go), which owns the complet
 agent process lifecycle:
 
 **Implemented:**
-- Explicit state machine with all states (`Uninitialized` → `Initializing` → `Ready` → `SessionCreating` → `SessionActive` → `Prompting` → `Cancelling` → `SessionClosing` → `Terminating` → `Terminated` → `Failed`)
+- Explicit state machine with all states (`Uninitialized` → `Initializing` → `Ready` → `SessionCreating` → `SessionActive` → `Prompting` → `Cancelling` → `Terminating` → `Terminated` → `Failed`)
 - Process spawn and stdio transport ([`transport.go`](../../sidecar/acp/transport.go))
 - `initialize` handshake with version negotiation (owned by `supervisor.Launch()`)
-- `session/new` to create a session (owned by `supervisor.Launch()`)
+- `session/new` to create a session; `session/resume` (preferred) or `session/load` to re-attach to a
+  stored session id persisted at `<credentials-dir>/acp_session_id` (owned by `supervisor.Launch()`)
 - `session/prompt` to send prompts (owned by `supervisor.Prompt()`)
-- `session/close` during termination (owned by `supervisor.CloseSession()`)
 - `session/cancel` as a notification (no `id` field) during terminate
-- Termination sequence (cancel permissions → session/cancel → session/close → stdin close → SIGTERM → SIGKILL)
+- Session updates replayed by `session/load` are suppressed so the control plane's transcript is not duplicated
+- Termination sequence (cancel permissions → session/cancel → stdin close → SIGTERM → SIGKILL); the
+  session is deliberately left open so a later process can re-attach
 - Notification handling for `session/update`, `session/request_permission`
 - Terminal operations (`terminal/*`)
 - Filesystem operations (`fs/*`)
@@ -590,7 +593,9 @@ Authentication and logout are intentionally out of scope; agents must be
 pre-authenticated through Kratis agent configuration.
 
 **Implementation gaps for the supported lifecycle:**
-1. No `session/load`, `session/resume`, `session/list`, `session/delete` (intentionally deferred until product requires persistent sessions)
+1. No `session/list`, `session/delete` (intentionally deferred); `session/load` and `session/resume`
+   are implemented and capability-gated (`agentCapabilities.loadSession`,
+   `agentCapabilities.sessionCapabilities.resume`)
 2. No `session/set_mode` or `session/set_config_option` (intentionally deferred)
 3. No optional `$/cancel_request` handling (intentionally deferred)
 4. No capability gating on outbound operations (intentionally deferred; baseline operations are always supported)

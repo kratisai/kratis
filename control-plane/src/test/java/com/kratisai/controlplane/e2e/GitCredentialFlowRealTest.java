@@ -234,9 +234,10 @@ class GitCredentialFlowRealTest {
                     .atMost(90, TimeUnit.SECONDS)
                     .pollInterval(Duration.ofSeconds(1))
                     .untilAsserted(() -> {
-                        SandboxExecution execution = sandboxExecutionRepository.findAll().stream()
-                                .filter(e -> e.getEnvironment().getId() != null)
-                                .findFirst()
+                        // Scope to this test's environment; findAll().findFirst() matches other
+                        // tests' executions under parallel E2E and observes their FAILED state.
+                        SandboxExecution execution = sandboxExecutionRepository
+                                .findFirstByEnvironmentIdOrderByStartedAtDesc(spawnedEnvId)
                                 .orElseThrow();
                         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
                     });
