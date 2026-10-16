@@ -909,19 +909,11 @@ public class SandboxExecutionService {
     }
 
     private void finalizeUsageAndRevokeKey(UUID executionId) {
-        // Step-by-step to avoid holding a transaction open while we sleep.
-        String token = null;
-        try {
-            SandboxExecution execution =
-                    sandboxExecutionRepository.findById(executionId).orElse(null);
-            SandboxExecutionUsage active = execution != null ? execution.getActiveUsage() : null;
-            if (active != null) {
-                token = active.getVirtualKey();
-            }
-        } catch (Exception e) {
-            logger.warn("Failed to retrieve virtual key for execution {}: {}", executionId, e.getMessage());
-            return;
-        }
+        // Step-by-step to avoid holding a transaction open while we sleep. This runs on a worker
+        // thread with no session, so read the key through a projection rather than the lazy usages.
+        String token = sandboxExecutionRepository.findActiveVirtualKeysByExecutionId(executionId).stream()
+                .findFirst()
+                .orElse(null);
 
         if (token == null) {
             return;

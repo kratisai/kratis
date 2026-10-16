@@ -133,6 +133,17 @@ class SandboxExecutionUsageMappingTest {
     }
 
     @Test
+    void findActiveVirtualKeysByExecutionId_returnsOnlyUnrevokedSegments() {
+        SandboxExecution execution = createExecution();
+        execution.startUsage("sk-old", null).setRevokedAt(Instant.now());
+        execution.startUsage("sk-new", null);
+        sandboxExecutionRepository.saveAndFlush(execution);
+
+        assertThat(sandboxExecutionRepository.findActiveVirtualKeysByExecutionId(execution.getId()))
+                .containsExactly("sk-new");
+    }
+
+    @Test
     void sumTotalSpend_sumsAcrossEverySegment() {
         SandboxExecution first = createExecution();
         first.startUsage("sk-a", null).apply(new LlmUsageSnapshot(1.5, 100L, 80L, 20L));

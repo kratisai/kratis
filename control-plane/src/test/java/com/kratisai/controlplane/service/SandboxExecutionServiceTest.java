@@ -1332,7 +1332,8 @@ class SandboxExecutionServiceTest {
         UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
         SandboxExecution execution = createTestExecution();
         execution.startUsage("sk-final-key", null);
-        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.findActiveVirtualKeysByExecutionId(execution.getId()))
+                .thenReturn(List.of("sk-final-key"));
         when(sandboxExecutionRepository.findByIdForUpdate(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
         when(virtualKeyService.fetchUsage("sk-final-key")).thenReturn(new LlmUsageSnapshot(0.99, 2000L, 1200L, 800L));
@@ -1360,7 +1361,8 @@ class SandboxExecutionServiceTest {
         UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
         SandboxExecution execution = createTestExecution();
         execution.startUsage("sk-final-key", null);
-        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.findActiveVirtualKeysByExecutionId(execution.getId()))
+                .thenReturn(List.of("sk-final-key"));
         when(virtualKeyService.fetchUsage("sk-final-key")).thenThrow(new RuntimeException("litellm unreachable"));
 
         sandboxExecutionService.onSandboxExecutionCompleteEvent(
@@ -1374,7 +1376,8 @@ class SandboxExecutionServiceTest {
     void onSandboxExecutionCompleteEvent_withoutVirtualKey_doesNothing() {
         UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
         SandboxExecution execution = createTestExecution();
-        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.findActiveVirtualKeysByExecutionId(execution.getId()))
+                .thenReturn(List.of());
 
         sandboxExecutionService.onSandboxExecutionCompleteEvent(
                 new SandboxExecutionCompleteEvent(teamId, execution.getId(), 0, SandboxExecutionStatus.COMPLETED));
@@ -1393,7 +1396,8 @@ class SandboxExecutionServiceTest {
         UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
         SandboxExecution execution = createTestExecution();
         execution.startUsage("sk-final-key", null);
-        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.findActiveVirtualKeysByExecutionId(execution.getId()))
+                .thenReturn(List.of("sk-final-key"));
         when(sandboxExecutionRepository.findByIdForUpdate(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
         when(virtualKeyService.fetchUsage("sk-final-key")).thenReturn(new LlmUsageSnapshot(0.99, 2000L, 1200L, 800L));
