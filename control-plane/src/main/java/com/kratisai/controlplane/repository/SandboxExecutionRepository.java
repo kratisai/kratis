@@ -35,6 +35,11 @@ public interface SandboxExecutionRepository extends JpaRepository<SandboxExecuti
             + " ORDER BY u.startedAt DESC")
     List<String> findActiveVirtualKeysByEnvironmentId(@Param("environmentId") UUID environmentId);
 
+    @Query("SELECT u.virtualKey FROM SandboxExecutionUsage u"
+            + " WHERE u.execution.id = :executionId AND u.revokedAt IS NULL"
+            + " ORDER BY u.startedAt DESC")
+    List<String> findActiveVirtualKeysByExecutionId(@Param("executionId") UUID executionId);
+
     @Modifying
     @Query(
             value = "UPDATE sandbox_executions SET new_repo_credential_id = :credentialId WHERE id = :executionId",

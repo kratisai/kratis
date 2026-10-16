@@ -230,27 +230,22 @@ class GitCredentialFlowRealTest {
         try {
             launchExecution(credential, "git-cred-wrong-canvas");
 
+            // The checkout_complete error carries the real git failure; await it as the
+            // authoritative signal. Gating first on execution status is unreliable here: the
+            // execution can also fail for unrelated reasons, and a wrong-credential checkout can
+            // take a while under parallel load.
             Awaitility.await()
-                    .atMost(90, TimeUnit.SECONDS)
-                    .pollInterval(Duration.ofSeconds(1))
-                    .untilAsserted(() -> {
-                        // Scope to this test's environment; findAll().findFirst() matches other
-                        // tests' executions under parallel E2E and observes their FAILED state.
-                        SandboxExecution execution = sandboxExecutionRepository
-                                .findFirstByEnvironmentIdOrderByStartedAtDesc(spawnedEnvId)
-                                .orElseThrow();
-                        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
-                    });
-
-            // The actual cause must be visible in the control-plane logs: the
-            // checkout_complete error carries the real git failure.
-            Awaitility.await()
-                    .atMost(30, TimeUnit.SECONDS)
+                    .atMost(180, TimeUnit.SECONDS)
                     .pollInterval(Duration.ofMillis(200))
                     .untilAsserted(() -> assertThat(checkoutLogs.list)
                             .map(ILoggingEvent::getFormattedMessage)
                             .anyMatch(message -> message.contains("Checkout failed for execution")
                                     && message.contains("Authentication failed for '" + gitFixture.getGitHttpUrl())));
+
+            SandboxExecution execution = sandboxExecutionRepository
+                    .findFirstByEnvironmentIdOrderByStartedAtDesc(spawnedEnvId)
+                    .orElseThrow();
+            assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
         } finally {
             checkoutLogger.detachAppender(checkoutLogs);
         }

@@ -321,6 +321,26 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
+    void resumeEnvironment_withCompletedExecution_recoversItToIdle() {
+        // Correct execution wrongly stored as COMPLETED
+        // TODO - revert.
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setAuthToken("test-token");
+        SandboxExecution execution = createRunningExecution(env);
+        execution.setStatus(SandboxExecutionStatus.COMPLETED);
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
+                .thenReturn(Optional.of(execution));
+
+        executionEnvironmentService.resumeEnvironment(USER_ID, TEAM_ID, ENV_ID);
+
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
+        verify(sandboxExecutionRepository).save(execution);
+    }
+
+    @Test
     void resumeEnvironment_fromTerminatedEnvironment_returns410() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.TERMINATED);
