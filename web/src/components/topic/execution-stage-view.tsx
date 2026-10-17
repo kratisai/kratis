@@ -19,10 +19,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useResumeEnvironment } from '@/hooks/use-environments'
-import { useChatExecutions } from '@/hooks/use-executions'
+import { useChatExecutions, useHaltExecution } from '@/hooks/use-executions'
 import { useIsMobile } from '@/hooks/use-is-mobile'
 import { downloadActivityLog } from '@/lib/activity-log-export'
-import { terminateExecution } from '@/lib/execution-api'
 import { useActivityStore } from '@/store/activity-store'
 import { useDiffReviewStore } from '@/store/diff-review-store'
 import { useExecutionStore } from '@/store/execution-store'
@@ -49,6 +48,7 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
   const { data: executions = [] } = useChatExecutions(chatId)
   const execution = executions.find((e) => e.id === executionId)
   const resumeEnvironment = useResumeEnvironment()
+  const haltExecution = useHaltExecution()
   const environmentId = execution?.environmentId ?? null
   const environmentStatus = execution?.environmentStatus
   const isEnvironmentSleeping = environmentStatus === 'SLEEPING'
@@ -124,20 +124,15 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
     lastScrollTopRef.current = currentScrollTop
   }
 
-  const handleTerminate = async () => {
+  const handleHalt = () => {
     if (!execution) return
-    try {
-      await terminateExecution(chatId, execution.id)
-      toast.success('Terminate request sent')
-    } catch {
-      toast.error('Failed to terminate execution')
-    }
+    haltExecution.mutate({ chatId, executionId: execution.id })
   }
 
   const hasActiveExecution = execution?.status === 'RUNNING' || execution?.status === 'IDLE'
-  // The console is viewable for any execution with an environment, including one whose
-  // sandbox went to sleep or was resumed afterwards, not only while the agent is live.
-  const canViewTerminal = hasActiveExecution || Boolean(environmentId)
+  const canHalt =
+    hasActiveExecution || (Boolean(environmentId) && environmentStatus !== 'TERMINATED')
+  const canViewTerminal = hasActiveExecution && !isEnvironmentSleeping
 
   return (
     <div
@@ -201,17 +196,16 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
                 <Download className="mr-2 h-3.5 w-3.5" />
                 Download
               </DropdownMenuItem>
-              {hasActiveExecution && (
+              {canHalt && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="text-destructive focus:text-destructive"
-                    onClick={() => {
-                      void handleTerminate()
-                    }}
+                    disabled={haltExecution.isPending}
+                    onClick={handleHalt}
                   >
                     <Square className="mr-2 h-3.5 w-3.5 fill-current" />
-                    Terminate
+                    Halt
                   </DropdownMenuItem>
                 </>
               )}

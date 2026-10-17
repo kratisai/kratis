@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ExecutionStageView } from '@/components/topic/execution-stage-view'
 import { useResumeEnvironment } from '@/hooks/use-environments'
-import { useChatExecutions } from '@/hooks/use-executions'
+import { useChatExecutions, useHaltExecution } from '@/hooks/use-executions'
 import * as diffApi from '@/lib/diff-api'
 import * as execApi from '@/lib/execution-api'
 import { useActivityStore } from '@/store/activity-store'
@@ -14,6 +14,7 @@ import { useExecutionStore } from '@/store/execution-store'
 
 let mockSearch: { tab?: string } = { tab: undefined }
 const resumeMutateMock = vi.fn()
+const haltMutateMock = vi.fn()
 
 vi.mock('@tanstack/react-router', () => ({
   useSearch: () => mockSearch,
@@ -36,6 +37,7 @@ vi.mock('@/hooks/use-executions', () => ({
     data: [],
     refetch: vi.fn(),
   })),
+  useHaltExecution: vi.fn(() => ({ isPending: false, mutate: vi.fn() })),
 }))
 
 vi.mock('@/lib/activity-log-export', () => ({
@@ -79,6 +81,10 @@ describe('ExecutionStageView', () => {
       isPending: false,
       mutate: resumeMutateMock,
     } as unknown as ReturnType<typeof useResumeEnvironment>)
+    vi.mocked(useHaltExecution).mockReturnValue({
+      isPending: false,
+      mutate: haltMutateMock,
+    } as unknown as ReturnType<typeof useHaltExecution>)
     useActivityStore.setState({ activitiesByExecution: {} })
     useExecutionStore.setState({
       logs: {},
@@ -228,9 +234,8 @@ describe('ExecutionStageView', () => {
     expect(useExecutionStore.getState().terminalOpen).toBe(false)
   })
 
-  it('terminates the execution via the execution-scoped endpoint from the options menu', async () => {
+  it('halts the execution via the execution halt API from the options menu', async () => {
     const user = userEvent.setup()
-    const terminateMock = vi.spyOn(execApi, 'terminateExecution').mockResolvedValue(undefined)
     vi.mocked(useChatExecutions).mockReturnValue({
       data: [{ ...completedExecution(), completedAt: null, status: 'RUNNING' }],
       refetch: vi.fn(),
@@ -240,15 +245,13 @@ describe('ExecutionStageView', () => {
     renderView()
 
     await user.click(screen.getByRole('button', { name: /activity log options/i }))
-    await user.click(screen.getByRole('menuitem', { name: /terminate/i }))
+    await user.click(screen.getByRole('menuitem', { name: /halt/i }))
 
-    await waitFor(() => {
-      expect(terminateMock).toHaveBeenCalledWith('session-1', 'exec-1')
-    })
+    expect(haltMutateMock).toHaveBeenCalledWith({ chatId: 'session-1', executionId: 'exec-1' })
     expect(useExecutionStore.getState().logs['exec-1']).toBeUndefined()
   })
 
-  it('hides terminal and terminate options when there is no active execution', async () => {
+  it('hides terminal and halt options when there is no execution', async () => {
     const user = userEvent.setup()
 
     renderView()
@@ -256,7 +259,7 @@ describe('ExecutionStageView', () => {
     await user.click(screen.getByRole('button', { name: /activity log options/i }))
     expect(screen.getByRole('menuitem', { name: /download/i })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /show terminal/i })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: /terminate/i })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /halt/i })).toBeNull()
   })
 
   it('allows content to flow into the mobile document and keeps the desktop bounded layout', () => {
@@ -326,7 +329,7 @@ describe('ExecutionStageView', () => {
     expect(screen.queryByTestId('execution-sleeping-banner')).not.toBeInTheDocument()
   })
 
-  it('offers the terminal and resume while the environment is asleep', async () => {
+  it('hides the terminal while the environment is asleep even though the run is active', async () => {
     const user = userEvent.setup()
     vi.mocked(useChatExecutions).mockReturnValue({
       data: [
@@ -334,7 +337,7 @@ describe('ExecutionStageView', () => {
           ...completedExecution(),
           completedAt: null,
           environmentStatus: 'SLEEPING',
-          status: 'FAILED',
+          status: 'IDLE',
         },
       ],
       refetch: vi.fn(),
@@ -343,11 +346,11 @@ describe('ExecutionStageView', () => {
     renderView()
 
     await user.click(screen.getByRole('button', { name: /activity log options/i }))
-    expect(screen.getByRole('menuitem', { name: /show terminal/i })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /show terminal/i })).toBeNull()
     expect(screen.getByRole('menuitem', { name: /resume environment/i })).toBeInTheDocument()
   })
 
-  it('offers the terminal for a resumed execution that is not live', async () => {
+  it('does not offer the terminal for a resumed execution that is not live', async () => {
     const user = userEvent.setup()
     vi.mocked(useChatExecutions).mockReturnValue({
       data: [
@@ -364,8 +367,9 @@ describe('ExecutionStageView', () => {
     renderView()
 
     await user.click(screen.getByRole('button', { name: /activity log options/i }))
-    expect(screen.getByRole('menuitem', { name: /show terminal/i })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /show terminal/i })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: /resume environment/i })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: /terminate/i })).toBeNull()
+    // The environment is still live, so the run can be halted even though it is not live itself.
+    expect(screen.getByRole('menuitem', { name: /halt/i })).toBeInTheDocument()
   })
 })

@@ -14,6 +14,8 @@ export interface CreateEnvironmentResponse {
 }
 
 export interface ExecutionEnvironmentDto {
+  activeChatId?: null | string
+  activeExecutionId?: null | string
   createdAt: string
   id: string
   lastActivity?: null | string
@@ -55,12 +57,6 @@ export async function resumeEnvironment(
     method: 'POST',
   })
   return response.json()
-}
-
-export async function terminateEnvironment(teamId: string, envId: string): Promise<void> {
-  await fetchWithAuth(`/api/v1/teams/${teamId}/environments/${envId}/terminate`, {
-    method: 'POST',
-  })
 }
 
 async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {

@@ -200,7 +200,8 @@ class SandboxExecutionServiceTest {
                 environmentRpcClient,
                 litellmProperties,
                 dispatchExecutor,
-                activityPersistenceService);
+                activityPersistenceService,
+                sandboxOrchestratorService);
     }
 
     private void stubSuccessfulExec() throws Exception {
@@ -1659,6 +1660,81 @@ class SandboxExecutionServiceTest {
         verify(environmentRpcClient)
                 .request(
                         eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.Terminate.class), anyLong(), any(TimeUnit.class));
+    }
+
+    @Test
+    void haltExecution_sandboxPurgesEnvironmentAndCompletesExecution() {
+        SandboxExecution execution = createTestExecution();
+        EnvironmentProvider provider = new EnvironmentProvider();
+        provider.setId(UUID.randomUUID());
+        ExecutionEnvironment environment = execution.getEnvironment();
+        environment.setType(ExecutionEnvironmentType.SANDBOX);
+        environment.setProvider(provider);
+        environment.setStatus(EnvironmentStatus.SLEEPING);
+        environment.setSuspendedAt(Instant.now());
+        Team haltTeam = new Team();
+        haltTeam.setId(TEAM_ID);
+        environment.setTeam(haltTeam);
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(executionEnvironmentRepository.findById(ENVIRONMENT_ID)).thenReturn(Optional.of(environment));
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+
+        sandboxExecutionService.haltExecution(USER_ID, CHAT_ID, EXECUTION_ID);
+
+        verify(sandboxProvider).destroy(ENVIRONMENT_ID);
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
+        assertThat(execution.getCompletedAt()).isNotNull();
+        assertThat(environment.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
+        assertThat(environment.getSuspendedAt()).isNull();
+        verify(eventPublisher).publishEvent(any(SandboxExecutionCompleteEvent.class));
+        // Halting a sleeping/disconnected sandbox must not require a live connector session.
+        verify(sessionRegistry, never()).getSessionForEnvironment(any());
+    }
+
+    @Test
+    void haltExecution_connectorStopsAgentAndKeepsEnvironmentReusable() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.getEnvironment().setType(ExecutionEnvironmentType.CONNECTOR);
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(sessionRegistry.getSessionForEnvironment(ENVIRONMENT_ID)).thenReturn(webSocketSession);
+        when(webSocketSession.isOpen()).thenReturn(true);
+
+        sandboxExecutionService.haltExecution(USER_ID, CHAT_ID, EXECUTION_ID);
+
+        verify(environmentRpcClient)
+                .request(
+                        eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.Terminate.class), anyLong(), any(TimeUnit.class));
+        verify(sandboxProvider, never()).destroy(any());
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
+        assertThat(execution.getEnvironment().getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+    }
+
+    @Test
+    void haltExecution_offlineConnectorStillSettlesExecution() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.getEnvironment().setType(ExecutionEnvironmentType.CONNECTOR);
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(sessionRegistry.getSessionForEnvironment(ENVIRONMENT_ID)).thenReturn(null);
+
+        sandboxExecutionService.haltExecution(USER_ID, CHAT_ID, EXECUTION_ID);
+
+        verify(environmentRpcClient, never()).request(any(), any(), anyLong(), any(TimeUnit.class));
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
+    }
+
+    @Test
+    void haltExecution_unknownExecutionThrowsNotFound() {
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> sandboxExecutionService.haltExecution(USER_ID, CHAT_ID, EXECUTION_ID))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Execution not found");
     }
 
     @Test

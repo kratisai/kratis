@@ -73,6 +73,7 @@ public class SandboxExecutionService {
     private final LiteLLMProperties litellmProperties;
     private final Executor dispatchExecutor;
     private final ExecutionActivityPersistenceService activityPersistenceService;
+    private final SandboxOrchestratorService sandboxOrchestratorService;
 
     final Map<UUID, String> activePromptIds = new ConcurrentHashMap<>();
 
@@ -93,7 +94,8 @@ public class SandboxExecutionService {
             EnvironmentRpcClient environmentRpcClient,
             LiteLLMProperties litellmProperties,
             @Qualifier("dispatchExecutor") Executor dispatchExecutor,
-            ExecutionActivityPersistenceService activityPersistenceService) {
+            ExecutionActivityPersistenceService activityPersistenceService,
+            SandboxOrchestratorService sandboxOrchestratorService) {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.finalizeUsageTransactionTemplate = new TransactionTemplate(transactionManager);
         this.sandboxExecutionRepository = sandboxExecutionRepository;
@@ -112,6 +114,7 @@ public class SandboxExecutionService {
         this.litellmProperties = litellmProperties;
         this.dispatchExecutor = dispatchExecutor;
         this.activityPersistenceService = activityPersistenceService;
+        this.sandboxOrchestratorService = sandboxOrchestratorService;
     }
 
     private void requireTeamMembership(UUID userId, UUID teamId) {
@@ -604,23 +607,100 @@ public class SandboxExecutionService {
                 .toList();
     }
 
-    public void terminateExecution(UUID userId, UUID chatId, UUID executionId) {
-        // Validate execution exists
+    public void haltExecution(UUID userId, UUID chatId, UUID executionId) {
         SandboxExecution execution = sandboxExecutionRepository
                 .findById(executionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Execution not found"));
 
-        // Validate execution belongs to the specified chat
         if (!execution.getChat().getId().equals(chatId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Execution not found in this chat");
         }
 
-        // Validate team membership
-        UUID teamId = execution.getChat().getTeam().getId();
-        requireTeamMembership(userId, teamId);
+        requireTeamMembership(userId, execution.getChat().getTeam().getId());
 
-        // Delegate to the internal termination method
-        terminateExecution(executionId);
+        ExecutionEnvironment environment = execution.getEnvironment();
+        UUID environmentId = environment != null ? environment.getId() : null;
+        ExecutionEnvironmentType environmentType = environment != null ? environment.getType() : null;
+
+        cancelPendingPermissions(execution, "execution halted");
+        forgetActivePrompt(executionId);
+        settleHaltedExecution(executionId);
+
+        if (environmentId == null) {
+            return;
+        }
+        if (environmentType == ExecutionEnvironmentType.SANDBOX) {
+            purgeSandboxEnvironment(environmentId);
+        } else {
+            stopConnectorAgent(environmentId);
+        }
+    }
+
+    private void settleHaltedExecution(UUID executionId) {
+        transactionTemplate.executeWithoutResult(status -> {
+            SandboxExecution execution =
+                    sandboxExecutionRepository.findById(executionId).orElse(null);
+            if (execution == null
+                    || execution.getStatus() == SandboxExecutionStatus.COMPLETED
+                    || execution.getStatus() == SandboxExecutionStatus.FAILED) {
+                return;
+            }
+            activePromptIds.remove(executionId);
+            execution.setStatus(SandboxExecutionStatus.COMPLETED);
+            execution.setCompletedAt(Instant.now());
+            sandboxExecutionRepository.save(execution);
+            UUID teamId = execution.getChat().getTeam().getId();
+            String reason = "execution halted";
+            eventPublisher.publishEvent(new SandboxExecutionCompleteEvent(
+                    teamId, executionId, 0, SandboxExecutionStatus.COMPLETED, reason));
+            eventPublisher.publishEvent(
+                    new ExecutionStatusChangedEvent(teamId, execution.getChat().getId(), executionId));
+        });
+    }
+
+    private void purgeSandboxEnvironment(UUID environmentId) {
+        ExecutionEnvironment environment =
+                executionEnvironmentRepository.findById(environmentId).orElse(null);
+        if (environment == null) {
+            return;
+        }
+        if (environment.getProvider() != null) {
+            SandboxProvider provider = sandboxOrchestratorService.getProvider(
+                    environment.getProvider().getType());
+            try {
+                provider.destroy(environmentId);
+            } catch (Exception e) {
+                logger.error("Failed to purge sandbox resources for environment {}", environmentId, e);
+            }
+        }
+        transactionTemplate.executeWithoutResult(status -> {
+            ExecutionEnvironment managed =
+                    executionEnvironmentRepository.findById(environmentId).orElse(null);
+            if (managed == null) {
+                return;
+            }
+            managed.setStatus(EnvironmentStatus.TERMINATED);
+            managed.setSuspendedAt(null);
+            executionEnvironmentRepository.save(managed);
+            eventPublisher.publishEvent(
+                    new TeamEntityChangedEvent(managed.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
+        });
+    }
+
+    private void stopConnectorAgent(UUID environmentId) {
+        WebSocketSession session = sessionRegistry.getSessionForEnvironment(environmentId);
+        if (session == null || !session.isOpen()) {
+            logger.info(
+                    "Connector for environment {} is offline; halted execution recorded without stopping the agent",
+                    environmentId);
+            return;
+        }
+        try {
+            environmentRpcClient.request(
+                    environmentId, new EnvironmentRpcPayload.Terminate(), TERMINATE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            logger.warn("Failed to stop agent on connector environment {}: {}", environmentId, e.getMessage());
+        }
     }
 
     public void terminateExecution(UUID executionId) {

@@ -300,6 +300,15 @@ export function mockGetWikiPage(pageId: string, page: Record<string, unknown>) {
   })
 }
 
+export function mockHaltExecution(chatId: string, executionId: string) {
+  addFetchHandler((url, options) => {
+    if (url.includes(`/chats/${chatId}/executions/${executionId}/halt`) && options.method === 'POST') {
+      return new Response(null, { status: 202 })
+    }
+    return null
+  })
+}
+
 export function mockInviteMember() {
   addFetchHandler((url, options) => {
     if (
@@ -322,6 +331,10 @@ export function mockInviteMember() {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Environment mocks
+// ---------------------------------------------------------------------------
+
 export function mockListChatExecutions(executions: Array<Record<string, unknown>> = []) {
   addFetchHandler((url, options) => {
     const match = url.match(/\/api\/v1\/chats\/[^/]+\/executions$/)
@@ -331,10 +344,6 @@ export function mockListChatExecutions(executions: Array<Record<string, unknown>
     return null
   })
 }
-
-// ---------------------------------------------------------------------------
-// Environment mocks
-// ---------------------------------------------------------------------------
 
 export function mockListChats(chats: Array<ChatDto> = []) {
   addFetchHandler((url, options) => {
@@ -398,6 +407,10 @@ export function mockListProviders(providers: Array<Record<string, unknown>> = []
   })
 }
 
+// ---------------------------------------------------------------------------
+// Model provider mocks
+// ---------------------------------------------------------------------------
+
 export function mockListRemoteRepositories(repos: Array<Record<string, unknown>> = []) {
   addFetchHandler((url) => {
     if (url.includes('/available-repos')) {
@@ -408,7 +421,7 @@ export function mockListRemoteRepositories(repos: Array<Record<string, unknown>>
 }
 
 // ---------------------------------------------------------------------------
-// Model provider mocks
+// Repository mocks
 // ---------------------------------------------------------------------------
 
 export function mockListRepositories(repos: Array<RepositoryDto> = []) {
@@ -420,10 +433,6 @@ export function mockListRepositories(repos: Array<RepositoryDto> = []) {
     return null
   })
 }
-
-// ---------------------------------------------------------------------------
-// Repository mocks
-// ---------------------------------------------------------------------------
 
 export function mockListTeams(teams: Array<TeamDto> = []) {
   addFetchHandler((url) => {
@@ -455,7 +464,9 @@ export function mockListWikiPages(pages: Array<Record<string, unknown>> = []) {
   })
 }
 
-
+// ---------------------------------------------------------------------------
+// Session mocks
+// ---------------------------------------------------------------------------
 
 export function mockLogin(response?: Partial<AuthTokensResponse>) {
   addFetchHandler((url, options) => {
@@ -478,7 +489,7 @@ export function mockLogin(response?: Partial<AuthTokensResponse>) {
 }
 
 // ---------------------------------------------------------------------------
-// Session mocks
+// Team mocks
 // ---------------------------------------------------------------------------
 
 export function mockLoginShouldFail(errorMessage = 'Invalid credentials') {
@@ -489,10 +500,6 @@ export function mockLoginShouldFail(errorMessage = 'Invalid credentials') {
     return null
   })
 }
-
-// ---------------------------------------------------------------------------
-// Team mocks
-// ---------------------------------------------------------------------------
 
 export function mockRefreshToken(shouldFail = false) {
   addFetchHandler((url, options) => {
@@ -538,6 +545,10 @@ export function mockResolvePermission(shouldFail = false) {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Wiki mocks
+// ---------------------------------------------------------------------------
+
 export function mockSupportedProviderTypes(
   types: Array<Record<string, unknown>> = [
     {
@@ -569,22 +580,6 @@ export function mockSupportedProviderTypes(
   addFetchHandler((url) => {
     if (url.includes('/model-providers/supported-types')) {
       return jsonResponse(types)
-    }
-    return null
-  })
-}
-
-// ---------------------------------------------------------------------------
-// Wiki mocks
-// ---------------------------------------------------------------------------
-
-export function mockTerminateEnvironment(envId: string) {
-  addFetchHandler((url, options) => {
-    if (
-      url.includes(`/environments/${envId}/terminate`) &&
-      options.method === 'POST'
-    ) {
-      return new Response(null, { status: 204 })
     }
     return null
   })

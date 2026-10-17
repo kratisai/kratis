@@ -58,13 +58,11 @@ public class ChatExecutionController {
         return ResponseEntity.accepted().build();
     }
 
-    @PostMapping("/{chatId}/executions/{executionId}/terminate")
-    @Operation(
-            summary = "Terminate execution",
-            description = "Gracefully terminates a running execution by sending env.terminate to the connector")
-    public ResponseEntity<Void> terminateExecution(@PathVariable UUID chatId, @PathVariable UUID executionId) {
+    @PostMapping("/{chatId}/executions/{executionId}/halt")
+    @Operation(summary = "Halt execution", description = "Ends an execution; purging any redundant resources")
+    public ResponseEntity<Void> haltExecution(@PathVariable UUID chatId, @PathVariable UUID executionId) {
         UUID userId = SecurityUtil.getCurrentUserId();
-        sandboxExecutionService.terminateExecution(userId, chatId, executionId);
+        sandboxExecutionService.haltExecution(userId, chatId, executionId);
         return ResponseEntity.accepted().build();
     }
 }

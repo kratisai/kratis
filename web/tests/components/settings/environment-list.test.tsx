@@ -5,13 +5,17 @@ import type { ExecutionEnvironmentDto } from '@/lib/environment-api'
 
 import { EnvironmentList } from '@/components/settings/environment-list'
 import { useEnvironments, useResumeEnvironment } from '@/hooks/use-environments'
+import { useHaltExecution } from '@/hooks/use-executions'
 
 vi.mock('@/hooks/use-environments', () => ({
   useCreateConnector: vi.fn(() => ({ isPending: false, mutate: vi.fn() })),
   useDeleteEnvironment: vi.fn(() => ({ mutate: vi.fn() })),
   useEnvironments: vi.fn(),
   useResumeEnvironment: vi.fn(() => ({ mutate: vi.fn() })),
-  useTerminateEnvironment: vi.fn(() => ({ mutate: vi.fn() })),
+}))
+
+vi.mock('@/hooks/use-executions', () => ({
+  useHaltExecution: vi.fn(() => ({ isPending: false, mutate: vi.fn() })),
 }))
 
 describe('EnvironmentList Component', () => {
@@ -177,5 +181,31 @@ describe('EnvironmentList Component', () => {
     const deleteButtons = screen.getAllByRole('button', { name: 'Delete Terminated Sandbox' })
     expect(deleteButtons.length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: /Resume/ })).not.toBeInTheDocument()
+  })
+
+  it('halts an environment through the execution halt API', () => {
+    const haltMutate = vi.fn()
+    vi.mocked(useHaltExecution).mockReturnValue({ isPending: false, mutate: haltMutate } as never)
+    mockEnvironmentsData([
+      {
+        ...makeEnv('env-sandbox', 'Sleeping Sandbox', 'SANDBOX', 'SLEEPING'),
+        activeChatId: 'chat-1',
+        activeExecutionId: 'exec-1',
+      },
+    ])
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<EnvironmentList isOwner={true} />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Halt Sleeping Sandbox' })[0])
+    expect(haltMutate).toHaveBeenCalledWith({ chatId: 'chat-1', executionId: 'exec-1' })
+  })
+
+  it('offers no halt action when an environment has no active execution', () => {
+    mockEnvironmentsData([makeEnv('env-idle', 'Idle Sandbox', 'SANDBOX', 'DISCONNECTED')])
+
+    render(<EnvironmentList isOwner={true} />)
+
+    expect(screen.queryByRole('button', { name: /Halt/ })).not.toBeInTheDocument()
   })
 })

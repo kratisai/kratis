@@ -5,7 +5,6 @@ import {
   deleteEnvironment,
   getEnvironments,
   resumeEnvironment,
-  terminateEnvironment,
 } from '@/lib/environment-api'
 import { useAuthStore } from '@/store/auth-store'
 
@@ -101,35 +100,6 @@ describe('environment-api', () => {
             Authorization: 'Bearer mock-token',
           }),
         }),
-      )
-    })
-  })
-
-  describe('terminateEnvironment', () => {
-    it('should terminate an environment successfully', async () => {
-      mockFetch.mockResolvedValueOnce({
-        json: async () => ({}),
-        ok: true,
-      })
-
-      await terminateEnvironment('team-1', 'env-1')
-      expect(mockFetch).toHaveBeenCalledWith(
-        '/api/v1/teams/team-1/environments/env-1/terminate',
-        expect.objectContaining({
-          method: 'POST',
-        }),
-      )
-    })
-
-    it('should throw an error on failure', async () => {
-      mockFetch.mockResolvedValueOnce({
-        json: async () => ({ message: 'Environment is not a running sandbox' }),
-        ok: false,
-        status: 400,
-      })
-
-      await expect(terminateEnvironment('team-1', 'env-1')).rejects.toThrow(
-        'Environment is not a running sandbox',
       )
     })
   })

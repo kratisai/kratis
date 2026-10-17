@@ -6,9 +6,9 @@ import {
   jsonResponse,
   mockCreateEnvironment,
   mockDeleteEnvironment,
+  mockHaltExecution,
   mockListEnvironments,
   mockListTeams,
-  mockTerminateEnvironment,
   setupFetchMock,
 } from '../support/test-fetch-mocks'
 import {
@@ -299,7 +299,7 @@ describe('Environments Flow', () => {
     })
   })
 
-  it('terminates a running sandbox environment with confirmation', async () => {
+  it('halts a running sandbox environment through the execution halt API', async () => {
     mockListTeams([
       {
         createdAt: '2024-01-01T00:00:00Z',
@@ -312,6 +312,8 @@ describe('Environments Flow', () => {
     ])
     mockListEnvironments([
       {
+        activeChatId: 'chat-1',
+        activeExecutionId: 'exec-1',
         createdAt: '2024-01-01T00:00:00Z',
         id: 'env-sandbox',
         lastHeartbeat: '2024-01-01T00:00:00Z',
@@ -322,7 +324,7 @@ describe('Environments Flow', () => {
         updatedAt: '2024-01-01T00:00:00Z',
       },
     ])
-    mockTerminateEnvironment('env-sandbox')
+    mockHaltExecution('chat-1', 'exec-1')
     mockListModelProvidersEmpty()
     mockListCredentialsEmpty()
 
@@ -340,20 +342,20 @@ describe('Environments Flow', () => {
       expect(screen.getAllByText('Running Sandbox').length).toBeGreaterThan(0)
     })
 
-    const terminateButton = within(screen.getByRole('table')).getByRole('button', {
-      name: /terminate running sandbox/i,
+    const haltButton = within(screen.getByRole('table')).getByRole('button', {
+      name: /halt running sandbox/i,
     })
-    await user.click(terminateButton)
+    await user.click(haltButton)
 
-    expect(confirmSpy).toHaveBeenCalledWith('Are you sure you want to terminate "Running Sandbox"?')
+    expect(confirmSpy).toHaveBeenCalledWith('Are you sure you want to halt "Running Sandbox"?')
     confirmSpy.mockRestore()
 
     await waitFor(() => {
-      expect(screen.getByText('Environment terminated successfully')).toBeInTheDocument()
+      expect(screen.getByText('Execution halted')).toBeInTheDocument()
     })
   })
 
-  it('does not show terminate button for non-sandbox or disconnected environments', async () => {
+  it('does not show a halt button when an environment has no active execution', async () => {
     mockListTeams([
       {
         createdAt: '2024-01-01T00:00:00Z',
@@ -401,7 +403,7 @@ describe('Environments Flow', () => {
       expect(screen.getAllByText('My Connector').length).toBeGreaterThan(0)
     })
 
-    expect(screen.queryByRole('button', { name: /terminate/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /halt/i })).not.toBeInTheDocument()
   })
 
   it('shows connector created dialog with install command after creation', async () => {

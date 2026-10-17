@@ -85,24 +85,6 @@ public class ExecutionEnvironmentController {
         return ResponseEntity.ok(executionEnvironmentService.updateEnvironment(userId, teamId, envId, request));
     }
 
-    @PostMapping("/{envId}/terminate")
-    @Operation(summary = "Terminate an environment", description = "Terminates a running sandbox execution environment")
-    @ApiResponses(
-            value = {
-                @ApiResponse(responseCode = "204", description = "Environment terminated"),
-                @ApiResponse(
-                        responseCode = "400",
-                        description = "Environment is not a running sandbox",
-                        content = @Content),
-                @ApiResponse(responseCode = "403", description = "Not a member of this team", content = @Content),
-                @ApiResponse(responseCode = "404", description = "Environment not found", content = @Content)
-            })
-    public ResponseEntity<Void> terminateEnvironment(@PathVariable UUID teamId, @PathVariable UUID envId) {
-        UUID userId = SecurityUtil.getCurrentUserId();
-        executionEnvironmentService.terminateEnvironment(userId, teamId, envId);
-        return ResponseEntity.noContent().build();
-    }
-
     @PostMapping("/{envId}/resume")
     @Operation(
             summary = "Resume an environment",

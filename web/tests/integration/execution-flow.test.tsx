@@ -154,11 +154,11 @@ describe('Execution and Sandbox Flow', () => {
       return null
     })
 
-    // Track terminate API requests (execution-scoped endpoint)
-    let terminatedExecutionId: null | string = null
+    // Track halt API requests (execution-scoped endpoint)
+    let haltedExecutionId: null | string = null
     addFetchHandler((url, options) => {
-      if (url.includes('/api/v1/chats/session-1/executions/execution-1/terminate') && options.method === 'POST') {
-        terminatedExecutionId = 'execution-1'
+      if (url.includes('/api/v1/chats/session-1/executions/execution-1/halt') && options.method === 'POST') {
+        haltedExecutionId = 'execution-1'
         return new Response(null, { status: 202 })
       }
       return null
@@ -243,11 +243,11 @@ describe('Execution and Sandbox Flow', () => {
     expect(screen.queryByText(/Launching sandbox execution/i)).not.toBeInTheDocument()
     const optionsButton = screen.getByRole('button', { name: /activity log options/i })
     await user.click(optionsButton)
-    await user.click(screen.getByRole('menuitem', { name: /terminate/i }))
+    await user.click(screen.getByRole('menuitem', { name: /halt/i }))
 
-    // Check that the execution terminate endpoint was called
+    // Check that the execution halt endpoint was called
     await waitFor(() => {
-      expect(terminatedExecutionId).toBe('execution-1')
+      expect(haltedExecutionId).toBe('execution-1')
     })
   })
 
