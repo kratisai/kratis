@@ -91,7 +91,7 @@ func main() {
 		}
 	}
 
-	log.Printf("Starting Kratis Connector (kratis-connector) in mode: %s", cfg.Mode)
+	log.Printf("Starting Kratis Connector (kratis-connector) version %s in mode: %s", rpc.ConnectorVersion(), cfg.Mode)
 	log.Printf("Server URL: %s", cfg.ServerURL) //nolint:gosec // G706: config value, not attacker-controlled
 	log.Printf("Workspace directory: %s", cfg.Workspace)
 

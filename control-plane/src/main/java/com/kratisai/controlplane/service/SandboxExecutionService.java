@@ -829,7 +829,11 @@ public class SandboxExecutionService {
                     "Relaunching agent for paused execution {} on resumed environment {}",
                     latest.getId(),
                     event.environmentId());
-            dispatchExecutor.execute(() -> runDispatch(latest.getId(), true));
+            // Credentials live only in the connector's memory; the relaunched sandbox needs them too.
+            dispatchExecutor.execute(() -> {
+                reestablishGitCredentials(event.environmentId());
+                runDispatch(latest.getId(), true);
+            });
             return;
         }
         reestablishGitCredentials(event.environmentId());
@@ -920,6 +924,10 @@ public class SandboxExecutionService {
             return;
         }
 
+        // Seal the segment before the usage delay: a resume inside that window must mint a fresh
+        // key, not reuse one this method is about to revoke.
+        sealUsageSegment(executionId, token);
+
         try {
             Thread.sleep(litellmProperties.getUsageFinalizeDelay().toMillis());
         } catch (InterruptedException e) {
@@ -936,37 +944,55 @@ public class SandboxExecutionService {
         }
 
         if (snapshot != null) {
-            final LlmUsageSnapshot finalSnapshot = snapshot;
-            try {
-                finalizeUsageTransactionTemplate.executeWithoutResult(status -> {
-                    SandboxExecution execution = sandboxExecutionRepository
-                            .findByIdForUpdate(executionId)
-                            .orElse(null);
-                    if (execution == null) {
-                        return;
-                    }
-                    SandboxExecutionUsage active = execution.getActiveUsage();
-                    if (active == null) {
-                        return;
-                    }
-                    // Seal the segment so a later resume opens a fresh one and totals keep summing.
-                    active.apply(finalSnapshot);
-                    active.setRevokedAt(Instant.now());
-                    sandboxExecutionRepository.save(execution);
-                    eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
-                            execution.getChat().getTeam().getId(),
-                            execution.getChat().getId(),
-                            executionId));
-                });
-            } catch (Exception e) {
-                logger.error("Failed to persist final usage for execution {}", executionId, e);
-            }
+            applyFinalUsage(executionId, token, snapshot);
         }
 
         try {
             virtualKeyService.revokeKey(token);
         } catch (Exception e) {
             logger.warn("Failed to revoke virtual key for execution {}: {}", executionId, e.getMessage());
+        }
+    }
+
+    private void sealUsageSegment(UUID executionId, String token) {
+        try {
+            finalizeUsageTransactionTemplate.executeWithoutResult(status -> {
+                SandboxExecution execution = sandboxExecutionRepository
+                        .findByIdForUpdate(executionId)
+                        .orElse(null);
+                if (execution == null) {
+                    return;
+                }
+                execution.getUsages().stream()
+                        .filter(usage -> usage.isActive() && token.equals(usage.getVirtualKey()))
+                        .forEach(usage -> usage.setRevokedAt(Instant.now()));
+                sandboxExecutionRepository.save(execution);
+            });
+        } catch (Exception e) {
+            logger.error("Failed to seal usage segment for execution {}", executionId, e);
+        }
+    }
+
+    private void applyFinalUsage(UUID executionId, String token, LlmUsageSnapshot snapshot) {
+        try {
+            finalizeUsageTransactionTemplate.executeWithoutResult(status -> {
+                SandboxExecution execution = sandboxExecutionRepository
+                        .findByIdForUpdate(executionId)
+                        .orElse(null);
+                if (execution == null) {
+                    return;
+                }
+                execution.getUsages().stream()
+                        .filter(usage -> token.equals(usage.getVirtualKey()))
+                        .forEach(usage -> usage.apply(snapshot));
+                sandboxExecutionRepository.save(execution);
+                eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
+                        execution.getChat().getTeam().getId(),
+                        execution.getChat().getId(),
+                        executionId));
+            });
+        } catch (Exception e) {
+            logger.error("Failed to persist final usage for execution {}", executionId, e);
         }
     }
 }

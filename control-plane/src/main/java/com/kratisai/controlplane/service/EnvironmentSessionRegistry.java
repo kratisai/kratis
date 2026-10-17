@@ -101,10 +101,17 @@ public class EnvironmentSessionRegistry {
         pendingSessions.remove(wsSessionId);
 
         UUID envId = sessionEnvironmentIds.remove(wsSessionId);
-        if (envId != null) {
-            environmentSessionIds.remove(envId);
+        if (envId == null) {
+            return;
+        }
+        // A superseded session (e.g. the pre-suspend connector) can close after its replacement
+        // registered; it must not drop the live mapping or report the environment disconnected.
+        if (environmentSessionIds.remove(envId, wsSessionId)) {
             logger.info("Environment {} session closed. Publishing disconnection event.", envId);
             eventPublisher.publishEvent(new EnvironmentDisconnectedEvent(envId));
+        } else {
+            logger.info(
+                    "Superseded session {} of environment {} closed; a newer session is active", wsSessionId, envId);
         }
     }
 

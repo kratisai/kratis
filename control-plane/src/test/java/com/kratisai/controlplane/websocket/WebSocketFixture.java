@@ -113,6 +113,11 @@ public abstract class WebSocketFixture<T extends WebSocketFixture<T>> extends Te
         return (T) this;
     }
 
+    /** Snapshot of every payload received so far, in arrival order. */
+    public List<String> receivedMessages() {
+        return List.copyOf(receivedMessages);
+    }
+
     /**
      * Check if any of the received messages contain all specified substrings.
      */

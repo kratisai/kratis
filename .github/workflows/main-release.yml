@@ -56,6 +56,10 @@ jobs:
             type=raw,value=${{ inputs.custom_tag }},enable=${{ inputs.custom_tag != '' }}
             type=sha,prefix=sha-
 
+      - name: Resolve connector build stamp
+        id: connector-stamp
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Build Docker Image
         uses: docker/build-push-action@v6
         with:
@@ -70,6 +74,7 @@ jobs:
             NATIVE_HEAP=${{ vars.NATIVE_HEAP || '24g' }}
             VERSION=${{ steps.meta.outputs.version || inputs.custom_tag || 'dev' }}
             BUILD_TAG=sha-${{ github.sha }}
+            GIT_COMMIT=${{ steps.connector-stamp.outputs.commit }}
           cache-from: type=gha,scope=native-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=native-${{ matrix.arch }}
 

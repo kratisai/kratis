@@ -54,6 +54,7 @@ func setupTestGitRepoWithRemote(t *testing.T) (string, string) {
 	runGitIn(workDir, "add", "README.md")
 	runGitIn(workDir, "commit", "-m", "Initial commit")
 	runGitIn(workDir, "push", "-u", "origin", "main")
+	runGitIn(workDir, "remote", "set-head", "origin", "main")
 
 	return bareDir, workDir
 }

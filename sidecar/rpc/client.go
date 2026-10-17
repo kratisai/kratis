@@ -268,6 +268,65 @@ func (c *Client) persistSessionID(sessionID string) {
 	}
 }
 
+// diffBaseBranchPath returns the location of the persisted diff base branch. It
+// sits beside the environment file (outside the workspace) so it survives a
+// sandbox suspend snapshot and is never part of the git working tree.
+func (c *Client) diffBaseBranchPath() string {
+	return filepath.Join(filepath.Dir(c.envFilePath()), "diff_base_branch")
+}
+
+// readPersistedBaseBranch returns the branch recorded at checkout, or "" when no
+// checkout has happened in this sandbox.
+func (c *Client) readPersistedBaseBranch() string {
+	data, err := os.ReadFile(c.diffBaseBranchPath())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// persistBaseBranch records the checked-out branch so a connector restarted from
+// a suspend snapshot - which never re-runs env.checkout - can still resolve the
+// git-owned origin/<branch> base for workspace diff notifications.
+func (c *Client) persistBaseBranch(branch string) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return
+	}
+	path := c.diffBaseBranchPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		log.Printf("[DIFF] Failed to create base branch directory %s: %v", filepath.Dir(path), err)
+		return
+	}
+	if err := os.WriteFile(path, []byte(branch), 0o600); err != nil {
+		log.Printf("[DIFF] Failed to persist diff base branch to %s: %v", path, err)
+	}
+}
+
+// diffBaseBranch returns the branch the workspace diff is computed against. It
+// prefers the in-memory branch recorded by env.checkout, then the value that
+// checkout persisted to disk, so a restart without a checkout still has a base.
+func (c *Client) diffBaseBranch() string {
+	c.mu.Lock()
+	branch := strings.TrimSpace(c.baseBranch)
+	c.mu.Unlock()
+	if branch != "" {
+		return branch
+	}
+
+	persisted := c.readPersistedBaseBranch()
+	if persisted == "" {
+		return ""
+	}
+	c.mu.Lock()
+	if strings.TrimSpace(c.baseBranch) == "" {
+		c.baseBranch = persisted
+	}
+	branch = c.baseBranch
+	c.mu.Unlock()
+	return branch
+}
+
 // Start initiates the connection, registration, and heartbeat loop.
 func (c *Client) Start(ctx context.Context) {
 	for {
@@ -806,7 +865,7 @@ func (c *Client) register() error {
 		LastEventSequence: c.lastEventSequence,
 		PendingHitlIDs:    c.pendingHitlIDs,
 		ProtocolVersion:   1,
-		ConnectorVersion:  "0.1.0",
+		ConnectorVersion:  ConnectorVersion(),
 	}
 
 	if c.supervisor != nil {

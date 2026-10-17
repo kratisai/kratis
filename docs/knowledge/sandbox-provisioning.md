@@ -109,8 +109,16 @@ before dispatching any execution, so publishing works after a sandbox wakes. Tra
 reconnects keep the original connector process and its credentials, so they are left
 untouched.
 
+A resume never re-dispatches `env.checkout`, so the connector's in-memory diff base
+branch is gone. The connector persists the checked-out branch to
+`<credentials-dir>/diff_base_branch` at checkout and reloads it on start; when it is
+absent, `origin/HEAD` (git's own default branch) is used. A workspace with an origin
+remote is therefore never treated as new and never reports the whole tree in the diff.
+See [`publish-rebase-flow.md`](publish-rebase-flow.md).
+
 When the latest execution for a resumed environment is `IDLE` (a paused sandbox), the fresh
-`env.register` also **relaunches the agent**. The connector reads the ACP session id it persisted
+`env.register` also **relaunches the agent**, after redeploying the git identity and auth (the new
+connector holds no credentials, and the relaunched agent needs them). The connector reads the ACP session id it persisted
 at `<credentials-dir>/acp_session_id` (inside the sandbox, so it survives the snapshot and is
 never seen by the control plane) and re-attaches with `session/resume` when the agent advertises
 `sessionCapabilities.resume`, else `session/load` when it advertises `loadSession`, else falls

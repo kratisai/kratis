@@ -185,6 +185,19 @@ The control plane owns permission policy:
 | Cancellation | Pending permission receives cancelled outcome and prompt returns `cancelled`. |
 | Reconnect | Agent process and ACP session survive `/ws/env` interruption; registration and event delivery resume within the lease. |
 | Cleanup | `env.complete` is received, the virtual key is revoked, and the sandbox is removed. |
+| Suspend/resume | The resumed disk equals the suspended disk (git `HEAD`, `origin`, ACP session id, diff base branch). The agent session is re-attached (`relaunch: true`) without a second task prompt or LLM call. A fresh virtual key opens a second usage segment. The diff lists only sandbox-local files. Git credentials work again. |
+
+## Suspend/Resume Coverage
+
+| Tier | Test | What it proves |
+|------|------|----------------|
+| Real E2E | `SuspendResumeMainBranchRealTest`, `SuspendResumeDevelopBranchRealTest` (base `AbstractSuspendResumeRealTest`) | Real agent turn, `docker commit` snapshot, REST resume, real git server with several commits and a non-default branch. Asserts disk/git state, fresh key and usage segments, no LLM replay, credentials redeployed, diff lists only local files, a second suspend/resume cycle, and the legacy-snapshot `origin/HEAD` fallback. |
+| Real connector | `SuspendResumeConnectorIntegrationTest` | No agent. Provider snapshot contract (disk survives, one snapshot image, `destroy` removes it) and the git state a woken connector inherits. |
+| WebSocket | `SandboxResumeWebSocketIntegrationTest` | Scripted sidecar re-registers: relaunch order, no checkout or prompt replay, non-idle executions only redeploy credentials, failed relaunch fails the execution. |
+| Go | `git_resume_test.go` | Resumed connector manifest lists only local files; `resolveDiffBase` matrix; persisted-branch edge cases. |
+| Web | `use-resume-environment.test.tsx`, `environment-api.test.ts` | Resume mutation, 410/400 errors, no-team guard. |
+
+The fixture repository (`GitFixtureContainer`) has three commits on `main` and one extra on `develop`, so the root commit never equals a branch tip: a diff base wrongly resolved to the root commit reports upstream files as changes. Suspend tests tear down with `destroy` so the `kratis-snapshot-<envId>` image is removed; a leftover snapshot image is a leak (`docker images 'kratis-snapshot-*'`).
 
 ## Known race conditions in the ACP-init fan-out (CI-only timeouts)
 
@@ -239,6 +252,9 @@ docker ps -a --filter "status=exited" -q | xargs -r docker rm -f
 # Any remaining kratis E2E sandboxes
 docker ps -a --format '{{.ID}} {{.Image}} {{.Names}}' | grep -E 'kratis-e2e|kratis-runner' \
   | awk '{print $1}' | xargs -r docker rm -f
+
+# Suspend snapshot images left by interrupted suspend/resume runs
+docker images -q 'kratis-snapshot-*' | xargs -r docker rmi -f
 
 # Volumes left by removed containers
 docker volume prune -f

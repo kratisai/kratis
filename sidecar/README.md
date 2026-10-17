@@ -7,7 +7,7 @@ See the [root README](../README.md) for product context.
 Sandbox provisioning copies the host binary. After any `sidecar/` change, rebuild before you launch an execution:
 
 ```bash
-go build -o kratis-connector main.go
+./build.sh
 ```
 
 ## Prerequisites
@@ -27,7 +27,7 @@ go build -o kratis-connector main.go
 
 ```bash
 go run main.go --server-url=ws://localhost:8080/ws/env --token=...
-go build -o kratis-connector main.go
+./build.sh
 go vet ./... && golangci-lint run ./... && go test -v -cover ./...
 ```
 
