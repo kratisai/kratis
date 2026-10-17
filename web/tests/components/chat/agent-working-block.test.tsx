@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkingItem } from '@/types/telemetry-types'
 
 import { AgentWorkingBlock } from '@/components/chat/agent-working-block'
+import { useChatStore } from '@/store/chat-store'
 
 vi.mock('next-themes', () => ({
   useTheme: () => ({ resolvedTheme: 'light' }),
@@ -258,6 +259,53 @@ describe('AgentWorkingBlock', () => {
         />,
       )
       expect(screen.getByTestId('agent-working-items')).toHaveStyle({ gridTemplateRows: '0fr' })
+    })
+  })
+
+  describe('paused continuation prompt', () => {
+    it('renders polite message and Continue Planning button when isPaused is true', () => {
+      render(
+        <AgentWorkingBlock
+          chatId="chat-1"
+          endTime={Date.now()}
+          isPaused
+          isStreaming={false}
+          items={[]}
+          startTime={null}
+        />,
+      )
+
+      expect(
+        screen.getByText(
+          'The agent completed maximum exploration steps for this turn. Would you like to continue planning?',
+        ),
+      ).toBeInTheDocument()
+
+      const button = screen.getByRole('button', { name: 'Continue Planning' })
+      expect(button).toBeInTheDocument()
+      expect(button).not.toBeDisabled()
+    })
+
+    it('disables Continue Planning button immediately on click and invokes continuePlanning', () => {
+      const continuePlanningMock = vi.fn()
+      useChatStore.setState({ continuePlanning: continuePlanningMock })
+
+      render(
+        <AgentWorkingBlock
+          chatId="chat-1"
+          endTime={Date.now()}
+          isPaused
+          isStreaming={false}
+          items={[]}
+          startTime={null}
+        />,
+      )
+
+      const button = screen.getByRole('button', { name: 'Continue Planning' })
+      fireEvent.click(button)
+
+      expect(button).toBeDisabled()
+      expect(continuePlanningMock).toHaveBeenCalledWith('chat-1')
     })
   })
 })

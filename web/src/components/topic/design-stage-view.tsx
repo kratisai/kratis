@@ -165,10 +165,13 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
               {chatMessages.map((msg) =>
                 msg.role === 'working' ? (
                   <AgentWorkingBlock
+                    chatId={chatId}
                     endTime={msg.endTime}
+                    isPaused={msg.isPaused}
                     isStreaming={msg.isStreaming}
                     items={msg.items}
                     key={msg.id}
+                    pauseReason={msg.pauseReason}
                     startTime={msg.startTime}
                   />
                 ) : (

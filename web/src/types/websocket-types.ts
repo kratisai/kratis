@@ -65,6 +65,13 @@ export interface CanvasResult {
   type: 'canvas'
 }
 
+export interface ChatContinueParams {
+  chatId: string
+  modelName?: string
+  providerId?: string
+  teamId?: string
+}
+
 export interface ChatErrorResult {
   chatId: string
   code: number
@@ -98,6 +105,7 @@ export interface ChatUnsubscribeParams {
 
 export interface ClientRpcMethods {
   auth: AuthParams
+  'chat.continue': ChatContinueParams
   'chat.send': ChatSendParams
   'chat.subscribe': ChatSubscribeParams
   'chat.unsubscribe': ChatUnsubscribeParams
@@ -255,6 +263,7 @@ export type JsonRpcResult =
   | MessageChunkResult
   | MessageResult
   | PingResult
+  | PlanningStatusResult
   | SubscriptionResult
   | TeamEntityChangedResult
   | TelemetryResult
@@ -298,6 +307,14 @@ export interface PlanEntry {
 export type PlanEntryPriority = 'high' | 'low' | 'medium'
 
 export type PlanEntryStatus = 'completed' | 'in_progress' | 'pending'
+
+export interface PlanningStatusResult {
+  chatId: string
+  metadata?: Record<string, unknown>
+  reason?: string
+  status: 'paused' | 'resumed' | 'running'
+  type: 'planning_status'
+}
 
 export interface SubscribeParams {
   teamId: string

@@ -1,5 +1,9 @@
 package com.kratisai.controlplane.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kratisai.controlplane.api.restdto.ChatDto;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
 import com.kratisai.controlplane.model.ChatEntity;
@@ -16,7 +20,9 @@ import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
 import com.kratisai.controlplane.repository.UserRepository;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -28,6 +34,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class ChatService {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final ChatRepository chatRepository;
     private final TeamRepository teamRepository;
@@ -98,6 +106,58 @@ public class ChatService {
         ChatMemoryEntity entity =
                 new ChatMemoryEntity(chatId, nextIndex, MessageRole.ASSISTANT, message, null, null, metadata);
         chatMemoryRepository.save(entity);
+    }
+
+    /** Persist an interstitial paused record into chat memory. */
+    @Transactional
+    public void saveInterstitialMessage(UUID chatId, String status, String reason, String directive) {
+        List<ChatMemoryEntity> existing = chatMemoryRepository.findByChatIdOrderByCreatedAtAsc(chatId);
+        int nextIndex = existing.size();
+        Map<String, Object> metadataMap = new HashMap<>();
+        metadataMap.put("interstitial", true);
+        metadataMap.put("status", status);
+        if (reason != null) {
+            metadataMap.put("reason", reason);
+        }
+        if (directive != null) {
+            metadataMap.put("directive", directive);
+        }
+        String metadata;
+        try {
+            metadata = MAPPER.writeValueAsString(metadataMap);
+        } catch (JsonProcessingException e) {
+            metadata = "{\"interstitial\":true,\"status\":\"" + status + "\"}";
+        }
+        ChatMemoryEntity entity =
+                new ChatMemoryEntity(chatId, nextIndex, MessageRole.ASSISTANT, "", null, null, metadata);
+        chatMemoryRepository.save(entity);
+    }
+
+    /**
+     * Reads the directive from any active interstitial paused record and marks the record resolved.
+     */
+    @Transactional
+    public Optional<String> readAndResolveInterstitialDirective(UUID chatId) {
+        List<ChatMemoryEntity> entities = chatMemoryRepository.findByChatIdOrderByCreatedAtAsc(chatId);
+        String directive = null;
+        for (ChatMemoryEntity entity : entities) {
+            String metadata = entity.getMetadata();
+            if (metadata != null && !metadata.isBlank()) {
+                try {
+                    JsonNode node = MAPPER.readTree(metadata);
+                    if (node.path("interstitial").asBoolean(false)
+                            && "paused".equals(node.path("status").asText())) {
+                        directive = node.path("directive").asText(null);
+                        ObjectNode obj = (ObjectNode) node;
+                        obj.put("status", "resolved");
+                        entity.setMetadata(MAPPER.writeValueAsString(obj));
+                        chatMemoryRepository.save(entity);
+                    }
+                } catch (JsonProcessingException ignored) {
+                }
+            }
+        }
+        return Optional.ofNullable(directive);
     }
 
     /** List chats for a team, optionally filtered to only the current user's chats and status. */

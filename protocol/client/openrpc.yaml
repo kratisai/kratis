@@ -71,6 +71,7 @@ methods:
       - $ref: ./schemas/results/complete.schema.yaml
       - $ref: ./schemas/results/chat_error.schema.yaml
       - $ref: ./schemas/results/canvas.schema.yaml
+      - $ref: ./schemas/results/planning_status.schema.yaml
 - name: chat.subscribe
   summary: Subscribe to chat; result replays history then streams live payloads, correlated with the request id
   x-kratis-direction: web-to-control-plane
@@ -91,6 +92,7 @@ methods:
       - $ref: ./schemas/results/complete.schema.yaml
       - $ref: ./schemas/results/chat_error.schema.yaml
       - $ref: ./schemas/results/canvas.schema.yaml
+      - $ref: ./schemas/results/planning_status.schema.yaml
 - name: chat.unsubscribe
   summary: Unsubscribe from chat updates
   x-kratis-direction: web-to-control-plane
@@ -104,6 +106,26 @@ methods:
     name: result
     schema:
       $ref: ./schemas/results/chat_subscription.schema.yaml
+- name: chat.continue
+  summary: Continue paused planning agent; result is a stream of chat payloads correlated with the request id
+  x-kratis-direction: web-to-control-plane
+  x-kratis-message-kind: request
+  x-kratis-streaming: true
+  params:
+  - name: params
+    required: true
+    schema:
+      $ref: ./schemas/requests/chat_continue.schema.yaml
+  result:
+    name: result
+    schema:
+      oneOf:
+      - $ref: ./schemas/results/message_chunk.schema.yaml
+      - $ref: ./schemas/results/telemetry.schema.yaml
+      - $ref: ./schemas/results/complete.schema.yaml
+      - $ref: ./schemas/results/chat_error.schema.yaml
+      - $ref: ./schemas/results/canvas.schema.yaml
+      - $ref: ./schemas/results/planning_status.schema.yaml
 - name: execution.replay_activities
   summary: Replay persisted activities for an execution; result is a stream of execution_activity payloads plus a final execution_replay_complete marker
   x-kratis-direction: web-to-control-plane

@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.websocket.client;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.wsdto.CanvasEvent;
@@ -157,27 +158,26 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
     }
 
     public static ClientPayload buildHistoryPayload(ChatMemoryEntity entity, UUID chatId) {
-        Integer errorCode = errorCode(entity);
-        if (errorCode != null) {
-            return new ClientPayload.ChatErrorResult(
-                    chatId, entity.getId().toString(), errorCode, entity.getMessageText());
+        String metadata = entity.getMetadata();
+        if (metadata != null && !metadata.isBlank()) {
+            try {
+                JsonNode node = MAPPER.readTree(metadata);
+                if (node.path("interstitial").asBoolean(false)) {
+                    String status = node.path("status").asText("paused");
+                    String reason = node.has("reason") ? node.path("reason").asText() : null;
+                    java.util.Map<String, Object> metaMap =
+                            MAPPER.convertValue(node, new TypeReference<java.util.Map<String, Object>>() {});
+                    return new ClientPayload.PlanningStatusResult(chatId, status, reason, metaMap);
+                }
+                if (node.path("isError").asBoolean(false)) {
+                    int code = node.path("code").asInt(JsonRpcErrorCodes.INTERNAL_ERROR);
+                    return new ClientPayload.ChatErrorResult(
+                            chatId, entity.getId().toString(), code, entity.getMessageText());
+                }
+            } catch (JsonProcessingException ignored) {
+                // Malformed metadata is treated as a regular message.
+            }
         }
         return buildMessagePayload(entity, chatId);
-    }
-
-    private static Integer errorCode(ChatMemoryEntity entity) {
-        String metadata = entity.getMetadata();
-        if (metadata == null || metadata.isBlank()) {
-            return null;
-        }
-        try {
-            JsonNode node = MAPPER.readTree(metadata);
-            if (node.path("isError").asBoolean(false)) {
-                return node.path("code").asInt(JsonRpcErrorCodes.INTERNAL_ERROR);
-            }
-        } catch (JsonProcessingException ignored) {
-            // Malformed metadata is treated as a regular message.
-        }
-        return null;
     }
 }

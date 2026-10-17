@@ -1,0 +1,9 @@
+{
+  "type": "planning_status",
+  "chatId": "00000000-0000-0000-0000-000000000002",
+  "status": "paused",
+  "reason": "max_iterations",
+  "metadata": {
+    "directive": "Continue planning"
+  }
+}

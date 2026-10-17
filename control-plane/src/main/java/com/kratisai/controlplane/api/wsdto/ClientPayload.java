@@ -8,6 +8,7 @@ import com.kratisai.controlplane.model.event.UserEntityType;
 import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -356,6 +357,23 @@ public sealed interface ClientPayload {
 
         public ExecutionDiffChangedResult(UUID executionId, UUID chatId, UUID teamId) {
             this(ClientPayloadType.EXECUTION_DIFF_CHANGED, executionId, chatId, teamId);
+        }
+    }
+
+    record PlanningStatusResult(
+            ClientPayloadType type, UUID chatId, String status, String reason, Map<String, Object> metadata)
+            implements ClientPayload, ChatStreamPayload, ChatHistoryPayload {
+        public PlanningStatusResult {
+            Objects.requireNonNull(type, "type is required");
+            Objects.requireNonNull(chatId, "chatId is required");
+            Objects.requireNonNull(status, "status is required");
+            if (metadata == null) {
+                metadata = Map.of();
+            }
+        }
+
+        public PlanningStatusResult(UUID chatId, String status, String reason, Map<String, Object> metadata) {
+            this(ClientPayloadType.PLANNING_STATUS, chatId, status, reason, metadata != null ? metadata : Map.of());
         }
     }
 }

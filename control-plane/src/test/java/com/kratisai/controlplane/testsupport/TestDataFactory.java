@@ -302,8 +302,8 @@ public class TestDataFactory {
     @Transactional(readOnly = true)
     public Team getTeamWithProviders(UUID teamId) {
         Team team = teamRepository.findById(teamId).orElseThrow();
-        team.getIngestionProvider().getDisplayName();
-        team.getEmbeddingProvider().getDisplayName();
+        Objects.requireNonNull(team.getIngestionProvider().getDisplayName());
+        Objects.requireNonNull(team.getEmbeddingProvider().getDisplayName());
         return team;
     }
 

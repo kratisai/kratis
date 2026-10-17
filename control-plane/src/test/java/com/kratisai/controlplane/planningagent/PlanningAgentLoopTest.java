@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.planningagent;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -15,6 +16,7 @@ import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
 import com.kratisai.controlplane.service.ScratchpadService;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -161,6 +163,40 @@ class PlanningAgentLoopTest {
         assertThat(thoughts).hasSize(1);
         assertThat(((TelemetryEvent.Thought) thoughts.getFirst()).text()).isEqualTo("thinking...");
         verify(chatMemory).add(eq(chatId.toString()), argThat(isAssistantText("final")));
+    }
+
+    @Test
+    void run_withContinuationDirective_appendsItAsUserMessage() {
+        AtomicReference<String> prompt = new AtomicReference<>();
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(p -> {
+                    prompt.set(p.getContents());
+                    return new ChatResponse(List.of(new Generation(new AssistantMessage("continued"))));
+                })
+                .maxMatches(1)
+                .build());
+
+        loop(noTools())
+                .run(
+                        chatClient,
+                        PlanningContext.continuation(context.teamId(), chatId, "build on existing findings"),
+                        sink);
+
+        assertThat(prompt.get()).contains("build on existing findings");
+        assertThat(emissions)
+                .anyMatch(e ->
+                        e instanceof ClientPayload.MessageChunkResult chunk && "continued".equals(chunk.content()));
+        verify(chatMemory).add(eq(chatId.toString()), argThat(isAssistantText("continued")));
+    }
+
+    @Test
+    void continuation_requiresNonNullDirective() {
+        assertThatThrownBy(() -> nullDirectiveContext(context)).isInstanceOf(NullPointerException.class);
+    }
+
+    @SuppressFBWarnings("NP_NULL_PARAM_DEREF_ALL_TARGETS_DANGEROUS")
+    private static void nullDirectiveContext(PlanningContext context) {
+        PlanningContext.continuation(context.teamId(), context.chatId(), null);
     }
 
     private List<TelemetryEvent> telemetryEvents() {

@@ -9,6 +9,7 @@ import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.AgentChatMemoryRepository;
 import com.kratisai.controlplane.repository.ModelProviderRepository;
+import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ScratchpadService;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
@@ -40,6 +41,9 @@ class PlanningAgentIntegrationTest extends AgentTestHarness {
 
     @Autowired
     private ScratchpadService scratchpadService;
+
+    @Autowired
+    private ChatService chatService;
 
     @Autowired
     private ModelProviderRepository modelProviderRepo;
@@ -303,8 +307,9 @@ class PlanningAgentIntegrationTest extends AgentTestHarness {
     }
 
     @Test
-    void shouldEmitChatErrorAndPersistWhenLoopExhausts() {
+    void shouldPauseGracefullyAndPersistInterstitialWhenLoopExhausts() {
         mockModel.addMatcher(PromptMatcher.builder()
+                .contains("Keep looping")
                 .response(
                         "Still working...",
                         List.of(new ToolCall(
@@ -313,24 +318,99 @@ class PlanningAgentIntegrationTest extends AgentTestHarness {
                                 "save_to_scratchpad",
                                 "{\"sessionId\":\"" + sessionId + "\",\"fact\":\"looping\"}")))
                 .build());
+        mockModel.addMatcher(PromptMatcher.builder()
+                .contains("iteration limit")
+                .response("Build upon existing findings and complete remaining tasks.")
+                .build());
 
         var result = planningAgentService.streamMessage(teamId, providerId, "gpt-4o", sessionId, "Keep looping");
 
         List<ClientPayload.ChatStreamPayload> results = result.collectList().block();
         assertThat(results).isNotNull();
 
-        ClientPayload.ChatErrorResult error = results.stream()
-                .filter(ClientPayload.ChatErrorResult.class::isInstance)
-                .map(ClientPayload.ChatErrorResult.class::cast)
+        assertThat(results).noneMatch(ClientPayload.ChatErrorResult.class::isInstance);
+
+        ClientPayload.PlanningStatusResult status = results.stream()
+                .filter(ClientPayload.PlanningStatusResult.class::isInstance)
+                .map(ClientPayload.PlanningStatusResult.class::cast)
                 .findFirst()
                 .orElseThrow();
-        assertThat(error.code()).isEqualTo(JsonRpcErrorCodes.MAX_ITERATIONS_EXCEEDED);
-        assertThat(error.message()).contains("exceeded maximum iterations");
+        assertThat(status.status()).isEqualTo("paused");
+        assertThat(status.reason()).isEqualTo("max_iterations");
 
         var persisted = chatMemoryRepository.findByChatIdOrderByCreatedAtAsc(sessionId);
         assertThat(persisted)
+                .anyMatch(e -> e.getMessageType() == MessageRole.ASSISTANT && isInterstitialWithStatus(e, "paused"));
+    }
+
+    @Test
+    void shouldContinueAndCompleteTurnAfterExhaustion() {
+        mockModel.addMatcher(PromptMatcher.builder()
+                .contains("Keep looping")
+                .response(
+                        "Still working...",
+                        List.of(new ToolCall(
+                                "call-1",
+                                "function",
+                                "save_to_scratchpad",
+                                "{\"sessionId\":\"" + sessionId + "\",\"fact\":\"looping\"}")))
+                .maxMatches(4)
+                .build());
+        mockModel.addMatcher(PromptMatcher.builder()
+                .contains("iteration limit")
+                .response("Build upon existing findings and complete remaining tasks.")
+                .maxMatches(1)
+                .build());
+
+        var result = planningAgentService.streamMessage(teamId, providerId, "gpt-4o", sessionId, "Keep looping");
+        List<ClientPayload.ChatStreamPayload> results = result.collectList().block();
+        assertThat(results).isNotNull();
+        assertThat(results).anyMatch(ClientPayload.PlanningStatusResult.class::isInstance);
+
+        // Directive was saved into interstitial record
+        String directive =
+                chatService.readAndResolveInterstitialDirective(sessionId).orElseThrow();
+        assertThat(directive).isNotBlank();
+
+        // Continue planning turn with continuation directive
+        mockModel.addMatcher(PromptMatcher.builder()
+                .response("Planning complete after continuation.")
+                .build());
+
+        var continueResult = planningAgentService.continuePlanning(teamId, providerId, "gpt-4o", sessionId, directive);
+        List<ClientPayload.ChatStreamPayload> continueResults =
+                continueResult.collectList().block();
+        assertThat(continueResults).isNotNull();
+        assertThat(continueResults)
+                .anyMatch(r -> r instanceof ClientPayload.MessageChunkResult
+                        && ((ClientPayload.MessageChunkResult) r)
+                                .content()
+                                .contains("Planning complete after continuation."));
+        assertThat(continueResults).anyMatch(ClientPayload.CompleteResult.class::isInstance);
+
+        // Interstitial is marked resolved and assistant message was saved
+        var persisted = chatMemoryRepository.findByChatIdOrderByCreatedAtAsc(sessionId);
+        assertThat(persisted)
+                .anyMatch(e -> e.getMessageType() == MessageRole.ASSISTANT && isInterstitialWithStatus(e, "resolved"));
+        assertThat(persisted)
                 .anyMatch(e -> e.getMessageType() == MessageRole.ASSISTANT
-                        && error.message().equals(e.getMessageText()));
+                        && "Planning complete after continuation.".equals(e.getMessageText()));
+    }
+
+    private static boolean isInterstitialWithStatus(
+            com.kratisai.controlplane.model.ChatMemoryEntity entity, String expectedStatus) {
+        String metadata = entity.getMetadata();
+        if (metadata == null || metadata.isBlank()) {
+            return false;
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode node =
+                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(metadata);
+            return node.path("interstitial").asBoolean(false)
+                    && expectedStatus.equals(node.path("status").asText());
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     @Test

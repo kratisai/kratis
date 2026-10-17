@@ -140,6 +140,27 @@ class ClientChatSubscribeRpcHandlerTest {
     }
 
     @Test
+    void buildHistoryPayload_mapsInterstitialEntityToPlanningStatusResult() {
+        ChatMemoryEntity entity = new ChatMemoryEntity();
+        entity.setId(43L);
+        entity.setChatId(chatId);
+        entity.setMessageType(MessageRole.ASSISTANT);
+        entity.setMessageText("");
+        entity.setMetadata(
+                "{\"interstitial\":true,\"status\":\"paused\",\"reason\":\"max_iterations\",\"directive\":\"resume directive\"}");
+        entity.setCreatedAt(Instant.now());
+
+        ClientPayload payload = ClientChatSubscribeRpcHandler.buildHistoryPayload(entity, chatId);
+
+        assertThat(payload).isInstanceOf(ClientPayload.PlanningStatusResult.class);
+        ClientPayload.PlanningStatusResult statusResult = (ClientPayload.PlanningStatusResult) payload;
+        assertThat(statusResult.chatId()).isEqualTo(chatId);
+        assertThat(statusResult.status()).isEqualTo("paused");
+        assertThat(statusResult.reason()).isEqualTo("max_iterations");
+        assertThat(statusResult.metadata()).containsEntry("directive", "resume directive");
+    }
+
+    @Test
     void handle_noLiveFlux_sendsCompleteResult() {
         ClientRpcPayload.ChatSubscribe params =
                 new ClientRpcPayload.ChatSubscribe(chatId.toString(), teamId.toString());

@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.planningagent;
 
+import com.kratisai.controlplane.agentloop.ChatResponseAssembler;
 import com.kratisai.controlplane.agentloop.LlmErrorCategory;
 import com.kratisai.controlplane.agentloop.ReActLoopExhaustedException;
 import com.kratisai.controlplane.agentloop.ReActLoopFatalException;
@@ -13,17 +14,23 @@ import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ChatUsageSessionService;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ScratchpadService;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
@@ -38,6 +45,9 @@ import reactor.core.publisher.Sinks;
 public class PlanningAgentService {
 
     private static final Logger logger = LoggerFactory.getLogger(PlanningAgentService.class);
+
+    public static final String DEFAULT_CONTINUATION_DIRECTIVE =
+            "Resume planning by utilizing existing findings and completing remaining tasks without repeating completed research.";
 
     private final ModelProviderRepository modelProviderRepository;
     private final ChatModelFactory chatModelFactory;
@@ -99,29 +109,47 @@ public class PlanningAgentService {
      */
     public Flux<ClientPayload.ChatStreamPayload> streamMessage(
             UUID teamId, UUID providerId, String modelName, UUID sessionId, String userQuery) {
-        ModelProvider modelProvider = resolveProvider(teamId, providerId);
+        return startTurn(teamId, providerId, modelName, new PlanningContext(teamId, sessionId), userQuery);
+    }
 
+    /** Continue a paused planning execution; the directive is injected into history, not persisted. */
+    public Flux<ClientPayload.ChatStreamPayload> continuePlanning(
+            UUID teamId, UUID providerId, String modelName, UUID sessionId, String directive) {
+        return startTurn(
+                teamId, providerId, modelName, PlanningContext.continuation(teamId, sessionId, directive), null);
+    }
+
+    private Flux<ClientPayload.ChatStreamPayload> startTurn(
+            UUID teamId,
+            UUID providerId,
+            String modelName,
+            PlanningContext context,
+            @Nullable String userQueryToPersist) {
+        ModelProvider modelProvider = resolveProvider(teamId, providerId);
         if (!modelProvider.isActive()) {
             return Flux.error(() -> new LlmProviderInactiveException(modelProvider.getId()));
         }
+        UUID chatId = context.chatId();
 
-        // Synchronously save and commit user prompt in DB before starting ReAct loop or returning Flux.
-        // This runs eagerly on the calling (servlet/virtual) thread, not a reactive scheduler.
-        //noinspection BlockingMethodInNonBlockingContext
-        chatService.saveUserMessage(sessionId, userQuery);
+        if (userQueryToPersist != null) {
+            // Synchronously save and commit user prompt in DB before starting ReAct loop or returning Flux.
+            // This runs eagerly on the calling (servlet/virtual) thread, not a reactive scheduler.
+            //noinspection BlockingMethodInNonBlockingContext
+            chatService.saveUserMessage(chatId, userQueryToPersist);
+        }
 
         logger.info(
-                "Streaming chat message for session {} from team {} using provider {} model {}",
-                sessionId,
+                "Starting {} turn for session {} from team {} using provider {} model {}",
+                context.continuationDirective() == null ? "user" : "continuation",
+                chatId,
                 teamId,
                 modelProvider.getId(),
                 modelName);
         Sinks.Many<ClientPayload.ChatStreamPayload> sink = Sinks.many().replay().all();
-        PlanningContext context = new PlanningContext(teamId, sessionId);
 
         String litellmModelName = liteLLMProvisioningService.buildLiteLLMModelName(modelProvider, modelName);
         String virtualKey = chatUsageSessionService
-                .getOrCreateActiveSession(sessionId, modelName, litellmModelName)
+                .getOrCreateActiveSession(chatId, modelName, litellmModelName)
                 .getUsage()
                 .getVirtualKey();
         ChatModel chatModel =
@@ -129,9 +157,9 @@ public class PlanningAgentService {
         ChatClient chatClient = ChatClient.builder(chatModel).build();
 
         Future<?> task = agentTaskExecutor.submit(
-                () -> execute(chatClient, context, sink, modelProvider, modelName, virtualKey, sessionId));
-        activeAgentTasks.put(context.chatId(), task);
-        return sink.asFlux().doOnCancel(() -> cancelExecution(sessionId));
+                () -> execute(chatClient, context, sink, modelProvider, modelName, virtualKey));
+        activeAgentTasks.put(chatId, task);
+        return sink.asFlux().doOnCancel(() -> cancelExecution(chatId));
     }
 
     public void cancelExecution(UUID chatId) {
@@ -143,6 +171,41 @@ public class PlanningAgentService {
 
     public String initialPlaceholderTitle(String userQuery) {
         return chatTitleService.initialPlaceholderTitle(userQuery);
+    }
+
+    public String evaluateContinuationDirective(ChatClient chatClient, List<Message> history) {
+        String directivePrompt = """
+                You are summarizing the current progress of an autonomous planning agent that reached its iteration limit.
+                Analyze the completed research, findings, and remaining tasks from the conversation history.
+                Generate a concise, focused continuation directive instruction for the next agent turn.
+                The directive must instruct the agent to build upon existing findings, avoid duplicate tool queries or redundant research, and synthesize the final plan or complete remaining work.
+                Be direct and concise.
+                """;
+        try {
+            List<Message> excerpt = history != null
+                    ? history.stream()
+                            .filter(m -> m instanceof UserMessage || m instanceof AssistantMessage)
+                            .toList()
+                    : List.of();
+            if (excerpt.size() > 10) {
+                excerpt = excerpt.subList(excerpt.size() - 10, excerpt.size());
+            }
+            if (!excerpt.isEmpty()) {
+                ChatResponse response = chatClient
+                        .prompt()
+                        .system(directivePrompt)
+                        .messages(excerpt)
+                        .call()
+                        .chatResponse();
+                String directive = ChatResponseAssembler.answerText(response);
+                if (!directive.isBlank()) {
+                    return directive.trim();
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to evaluate continuation directive using LLM", e);
+        }
+        return DEFAULT_CONTINUATION_DIRECTIVE;
     }
 
     public void evaluateInitialTitleAsync(
@@ -183,8 +246,7 @@ public class PlanningAgentService {
             Sinks.Many<ClientPayload.ChatStreamPayload> sink,
             ModelProvider provider,
             String modelName,
-            String virtualKey,
-            UUID sessionId) {
+            String virtualKey) {
         try {
             orchestrationLoop.run(chatClient, context, sink);
             if (Thread.currentThread().isInterrupted()) {
@@ -193,6 +255,20 @@ public class PlanningAgentService {
                 return;
             }
             sink.tryEmitNext(new ClientPayload.CompleteResult(context.messageId()));
+            sink.tryEmitComplete();
+        } catch (ReActLoopExhaustedException exhausted) {
+            logger.info("Planning agent reached maximum iterations for chat {}", context.chatId());
+            String directive = evaluateContinuationDirective(chatClient, exhausted.history());
+            Map<String, Object> metadata = Map.of(
+                    "interstitial", true, "status", "paused", "reason", "max_iterations", "directive", directive);
+            try {
+                chatService.saveInterstitialMessage(context.chatId(), "paused", "max_iterations", directive);
+            } catch (Exception persistError) {
+                logger.warn("Failed to persist interstitial status for chat {}", context.chatId(), persistError);
+            }
+            ClientPayload.PlanningStatusResult statusResult =
+                    new ClientPayload.PlanningStatusResult(context.chatId(), "paused", "max_iterations", metadata);
+            sink.tryEmitNext(statusResult);
             sink.tryEmitComplete();
         } catch (Exception e) {
             if (isCancellation(e)) {
@@ -211,7 +287,7 @@ public class PlanningAgentService {
             }
         } finally {
             activeAgentTasks.remove(context.chatId());
-            chatUsageSessionService.syncUsage(sessionId, virtualKey);
+            chatUsageSessionService.syncUsage(context.chatId(), virtualKey);
         }
         if (!Thread.currentThread().isInterrupted()) {
             try {
@@ -245,10 +321,6 @@ public class PlanningAgentService {
         if (e instanceof ReActLoopFatalException fatal) {
             return new ClientPayload.ChatErrorResult(
                     context.chatId(), context.messageId(), chatErrorCode(fatal.category()), fatal.getMessage());
-        }
-        if (e instanceof ReActLoopExhaustedException) {
-            return new ClientPayload.ChatErrorResult(
-                    context.chatId(), context.messageId(), JsonRpcErrorCodes.MAX_ITERATIONS_EXCEEDED, e.getMessage());
         }
         return new ClientPayload.ChatErrorResult(
                 context.chatId(),
