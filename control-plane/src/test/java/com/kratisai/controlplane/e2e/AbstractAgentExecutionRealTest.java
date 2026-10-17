@@ -459,9 +459,15 @@ public abstract class AbstractAgentExecutionRealTest {
             // Verify file exists
             verifier.verifyFileExists(expectedFile.path());
 
-            // Verify content if specified
+            // Verify content if specified. An agent can create the file first and apply its edit
+            // a moment later (e.g. Aider SEARCH/REPLACE), so poll instead of a single read.
             if (expectedFile.expectedContent() != null) {
-                verifier.verifyFileContains(expectedFile.path(), expectedFile.expectedContent());
+                Awaitility.await("file '%s' content in container for harness '%s'"
+                                .formatted(expectedFile.path(), getHarness().getName()))
+                        .atMost(30, TimeUnit.SECONDS)
+                        .pollInterval(Duration.ofMillis(500))
+                        .untilAsserted(
+                                () -> verifier.verifyFileContains(expectedFile.path(), expectedFile.expectedContent()));
             }
 
             // Verify permissions if specified

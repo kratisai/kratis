@@ -82,7 +82,7 @@ class EnvironmentCheckoutCompleteRpcHandlerTest {
 
         handler.handle(sessionId, request, params);
         verify(sandboxExecutionService).resumeAfterCheckout(executionId);
-        verify(sandboxExecutionService, never()).failExecution(executionId);
+        verify(sandboxExecutionService, never()).failExecution(any(), any());
     }
 
     @Test
@@ -97,7 +97,7 @@ class EnvironmentCheckoutCompleteRpcHandlerTest {
                 EnvironmentRpcPayload.CheckoutComplete.METHOD, objectMapper.valueToTree(params), null);
 
         handler.handle(sessionId, request, params);
-        verify(sandboxExecutionService).failExecution(executionId);
+        verify(sandboxExecutionService).failExecution(executionId, "clone failed");
         verify(sandboxExecutionService, never()).resumeAfterCheckout(executionId);
     }
 

@@ -416,20 +416,8 @@ public class ExecutionEnvironmentService {
 
         sandboxExecutionRepository
                 .findFirstByEnvironmentIdOrderByStartedAtDesc(envId)
-                .ifPresent(execution -> {
-                    if (execution.getStatus() == SandboxExecutionStatus.COMPLETED) {
-                        // Correct execution wrongly stored as COMPLETED
-                        // TODO - revert.
-                        logger.info(
-                                "Recovering execution {} from COMPLETED to IDLE on resume of environment {}",
-                                execution.getId(),
-                                envId);
-                        execution.setStatus(SandboxExecutionStatus.IDLE);
-                        sandboxExecutionRepository.save(execution);
-                    }
-                    eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
-                            teamId, execution.getChat().getId(), execution.getId()));
-                });
+                .ifPresent(execution -> eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
+                        teamId, execution.getChat().getId(), execution.getId())));
 
         return toDto(env);
     }

@@ -786,10 +786,15 @@ public class SandboxExecutionService {
 
     @Transactional
     public void failExecution(UUID executionId) {
+        failExecution(executionId, null);
+    }
+
+    @Transactional
+    public void failExecution(UUID executionId, String reason) {
         SandboxExecution execution = sandboxExecutionRepository
                 .findById(executionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Execution not found"));
-        markFailedAndPublish(execution);
+        markFailedAndPublish(execution, reason);
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -879,10 +884,6 @@ public class SandboxExecutionService {
 
     private void handleExecutionFailure(SandboxExecution execution, String logMessage, Exception e) {
         handleExecutionFailure(execution.getId(), execution, logMessage, e);
-    }
-
-    private void markFailedAndPublish(SandboxExecution execution) {
-        markFailedAndPublish(execution, null);
     }
 
     private void markFailedAndPublish(SandboxExecution execution, String reason) {
