@@ -93,4 +93,8 @@
     <Match>
         <Bug pattern="US_USELESS_SUPPRESSION_ON_LOCAL_VARIABLE"/>
     </Match>
+    <Match>
+        <Class name="com.kratisai.controlplane.api.wsdto.ActivityHitlTest"/>
+        <Bug pattern="NP_NULL_PARAM_DEREF_NONVIRTUAL"/>
+    </Match>
 </FindBugsFilter>

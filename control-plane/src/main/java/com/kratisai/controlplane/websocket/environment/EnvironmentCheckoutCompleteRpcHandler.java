@@ -56,7 +56,7 @@ public class EnvironmentCheckoutCompleteRpcHandler
             sandboxExecutionService.resumeAfterCheckout(executionId);
         } else {
             logger.error("Checkout failed for execution {}: {}", executionId, params.error());
-            sandboxExecutionService.failExecution(executionId);
+            sandboxExecutionService.failExecution(executionId, params.error());
         }
 
         return Flux.empty();
