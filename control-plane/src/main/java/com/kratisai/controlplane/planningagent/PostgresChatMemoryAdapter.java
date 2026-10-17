@@ -2,6 +2,7 @@ package com.kratisai.controlplane.planningagent;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
 import com.kratisai.controlplane.model.ChatMemoryEntity;
@@ -44,6 +45,7 @@ public class PostgresChatMemoryAdapter implements ChatMemoryRepository {
     public @NonNull List<Message> findByConversationId(@NonNull String conversationId) {
         UUID chatId = UUID.fromString(conversationId);
         return jpaRepository.findByChatIdOrderByCreatedAtAsc(chatId).stream()
+                .filter(entity -> !isInterstitial(entity))
                 .map(this::deserializeMessage)
                 .toList();
     }
@@ -52,14 +54,37 @@ public class PostgresChatMemoryAdapter implements ChatMemoryRepository {
     @Transactional
     public void saveAll(@NonNull String conversationId, List<Message> messages) {
         UUID chatId = UUID.fromString(conversationId);
-        // Delete existing messages for this conversation
-        jpaRepository.deleteByChatId(chatId);
+        List<ChatMemoryEntity> existing = jpaRepository.findByChatIdOrderByCreatedAtAsc(chatId);
+        List<ChatMemoryEntity> nonInterstitials =
+                existing.stream().filter(e -> !isInterstitial(e)).toList();
+        List<ChatMemoryEntity> interstitials =
+                existing.stream().filter(this::isInterstitial).toList();
+
+        // Delete existing non-interstitial messages for this conversation
+        jpaRepository.deleteAll(nonInterstitials);
 
         // Save new messages
         int index = 0;
         for (Message message : messages) {
             ChatMemoryEntity entity = serializeMessage(message, chatId, index++);
             jpaRepository.save(entity);
+        }
+        for (ChatMemoryEntity interstitial : interstitials) {
+            interstitial.setMessageIndex(index++);
+            jpaRepository.save(interstitial);
+        }
+    }
+
+    private boolean isInterstitial(ChatMemoryEntity entity) {
+        String metadata = entity.getMetadata();
+        if (metadata == null || metadata.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(metadata);
+            return node.path("interstitial").asBoolean(false);
+        } catch (JsonProcessingException ignored) {
+            return false;
         }
     }
 

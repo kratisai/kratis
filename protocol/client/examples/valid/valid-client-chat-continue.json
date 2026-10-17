@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "chat.continue",
+  "params": {
+    "chatId": "123e4567-e89b-12d3-a456-426614174000",
+    "teamId": "123e4567-e89b-12d3-a456-426614174001",
+    "providerId": "123e4567-e89b-12d3-a456-426614174002",
+    "modelName": "claude-sonnet-4"
+  }
+}

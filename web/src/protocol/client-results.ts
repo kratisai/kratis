@@ -274,6 +274,15 @@ export const CLIENT_RESULTS = {
     })
     .strict(),
   ping: z.object({ status: z.enum(['pong']), type: z.literal('ping') }).strict(),
+  planning_status: z
+    .object({
+      chatId: uuid,
+      metadata: z.record(z.string(), z.unknown()).optional(),
+      reason: z.string().optional(),
+      status: z.string(),
+      type: z.literal('planning_status'),
+    })
+    .strict(),
   subscription: z
     .object({ channel: z.string(), message: z.string(), type: z.literal('subscription') })
     .strict(),

@@ -2,6 +2,9 @@ package com.kratisai.controlplane.planningagent;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kratisai.controlplane.api.wsdto.MessageRole;
+import com.kratisai.controlplane.model.ChatMemoryEntity;
+import com.kratisai.controlplane.repository.AgentChatMemoryRepository;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import java.util.List;
@@ -22,6 +25,9 @@ class PostgresChatMemoryAdapterTest {
 
     @Autowired
     private PostgresChatMemoryAdapter adapter;
+
+    @Autowired
+    private AgentChatMemoryRepository chatMemoryRepository;
 
     @Autowired
     private DatabaseCleaner databaseCleaner;
@@ -194,5 +200,61 @@ class PostgresChatMemoryAdapterTest {
         assertThat(retrieved.get(2).getText()).isEqualTo("First assistant message");
         assertThat(retrieved.get(3).getText()).isEqualTo("Second user message");
         assertThat(retrieved.get(4).getText()).isEqualTo("Second assistant message");
+    }
+
+    @Test
+    void shouldFilterOutInterstitialRecordsFromConversationContext() {
+        UUID chatId = UUID.randomUUID();
+        String conversationId = chatId.toString();
+
+        adapter.saveAll(conversationId, List.of(new UserMessage("Initial prompt")));
+
+        ChatMemoryEntity interstitial = new ChatMemoryEntity(
+                chatId,
+                1,
+                MessageRole.ASSISTANT,
+                "",
+                null,
+                null,
+                "{\"interstitial\":true,\"status\":\"paused\",\"reason\":\"max_iterations\",\"directive\":\"resume\"}");
+        chatMemoryRepository.save(interstitial);
+
+        List<Message> messages = adapter.findByConversationId(conversationId);
+        assertThat(messages).hasSize(1);
+        assertThat(messages.getFirst().getText()).isEqualTo("Initial prompt");
+    }
+
+    @Test
+    void shouldPreserveInterstitialRecordsAcrossSaveAll() {
+        UUID chatId = UUID.randomUUID();
+        String conversationId = chatId.toString();
+
+        adapter.saveAll(conversationId, List.of(new UserMessage("Turn 1")));
+
+        ChatMemoryEntity interstitial = new ChatMemoryEntity(
+                chatId,
+                1,
+                MessageRole.ASSISTANT,
+                "",
+                null,
+                null,
+                "{\"interstitial\":true,\"status\":\"paused\",\"reason\":\"max_iterations\",\"directive\":\"resume\"}");
+        chatMemoryRepository.save(interstitial);
+
+        // Turn 2 adds a new assistant message and calls saveAll
+        adapter.saveAll(
+                conversationId, List.of(new UserMessage("Turn 1"), new AssistantMessage("Turn 2 assistant response")));
+
+        List<ChatMemoryEntity> allEntities = chatMemoryRepository.findByChatIdOrderByCreatedAtAsc(chatId);
+        assertThat(allEntities).hasSize(3);
+        assertThat(allEntities)
+                .anyMatch(e -> e.getMetadata() != null
+                        && e.getMetadata().contains("interstitial")
+                        && e.getMetadata().contains("paused"));
+
+        List<Message> messages = adapter.findByConversationId(conversationId);
+        assertThat(messages).hasSize(2);
+        assertThat(messages.get(0).getText()).isEqualTo("Turn 1");
+        assertThat(messages.get(1).getText()).isEqualTo("Turn 2 assistant response");
     }
 }

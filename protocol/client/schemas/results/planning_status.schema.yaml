@@ -1,0 +1,23 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: PlanningStatusResult
+type: object
+required:
+- type
+- chatId
+- status
+properties:
+  type:
+    type: string
+    const: "planning_status"
+    enum:
+    - "planning_status"
+  chatId:
+    type: string
+    format: uuid
+  status:
+    type: string
+  reason:
+    type: string
+  metadata:
+    type: object
+additionalProperties: true

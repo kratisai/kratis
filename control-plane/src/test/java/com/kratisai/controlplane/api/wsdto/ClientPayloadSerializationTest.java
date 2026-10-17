@@ -94,4 +94,25 @@ class ClientPayloadSerializationTest {
         assertThat(json.get("chatId").asText()).isEqualTo(chatId.toString());
         assertThat(json.get("teamId").asText()).isEqualTo(teamId.toString());
     }
+
+    @Test
+    void planningStatusResult_serializesAndDeserializesExpectedFields() throws Exception {
+        UUID chatId = UUID.randomUUID();
+        ClientPayload.PlanningStatusResult payload = new ClientPayload.PlanningStatusResult(
+                chatId, "paused", "max_iterations", java.util.Map.of("directive", "Continue planning"));
+
+        JsonNode json = objectMapper.valueToTree(payload);
+        assertThat(json.get("type").asText()).isEqualTo("planning_status");
+        assertThat(json.get("chatId").asText()).isEqualTo(chatId.toString());
+        assertThat(json.get("status").asText()).isEqualTo("paused");
+        assertThat(json.get("reason").asText()).isEqualTo("max_iterations");
+        assertThat(json.get("metadata").get("directive").asText()).isEqualTo("Continue planning");
+
+        ClientPayload.PlanningStatusResult deserialized =
+                objectMapper.treeToValue(json, ClientPayload.PlanningStatusResult.class);
+        assertThat(deserialized.chatId()).isEqualTo(chatId);
+        assertThat(deserialized.status()).isEqualTo("paused");
+        assertThat(deserialized.reason()).isEqualTo("max_iterations");
+        assertThat(deserialized.metadata()).containsEntry("directive", "Continue planning");
+    }
 }

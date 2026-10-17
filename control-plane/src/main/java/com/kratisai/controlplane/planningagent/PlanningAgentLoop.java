@@ -18,6 +18,7 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import reactor.core.publisher.Sinks;
@@ -55,6 +56,10 @@ public class PlanningAgentLoop {
         List<Message> previousMessages = chatMemory.get(context.chatId().toString());
         if (!previousMessages.isEmpty()) {
             history.addAll(previousMessages);
+        }
+        String continuationDirective = context.continuationDirective();
+        if (continuationDirective != null) {
+            history.add(new UserMessage(continuationDirective));
         }
 
         Map<String, Object> contextMap = new HashMap<>(context.toToolContext().getContext());

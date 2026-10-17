@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.planningagent;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -23,6 +24,7 @@ import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ChatUsageSessionService;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ScratchpadService;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
@@ -226,5 +228,108 @@ class PlanningAgentServiceTest {
 
         verify(mockFuture).cancel(true);
         assertThat(activeTasks).doesNotContainKey(chatId);
+    }
+
+    @Test
+    void continuePlanning_doesNotCallSaveUserMessage_andInvokesLoopWithDirective() throws Exception {
+        UUID teamId = UUID.randomUUID();
+        UUID providerId = UUID.randomUUID();
+        UUID chatId = UUID.randomUUID();
+
+        ModelProvider provider = new ModelProvider("TestProvider", ProviderType.OPENAI, "key", "url");
+        when(modelProviderRepository.findByTeamIdAndId(teamId, providerId)).thenReturn(Optional.of(provider));
+        when(liteLLMProvisioningService.buildLiteLLMModelName(any(), any())).thenReturn("litellm-model");
+
+        ChatUsageSession session = mock(ChatUsageSession.class);
+        LlmUsage usage = mock(LlmUsage.class);
+        when(usage.getVirtualKey()).thenReturn("vk-123");
+        when(session.getUsage()).thenReturn(usage);
+        when(chatUsageSessionService.getOrCreateActiveSession(chatId, "gpt-4o", "litellm-model"))
+                .thenReturn(session);
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModelFactory.createChatModelViaLiteLLM(any(), any(), any(), eq(true)))
+                .thenReturn(chatModel);
+
+        PlanningAgentLoop mockLoop = mock(PlanningAgentLoop.class);
+        Field orchestrationLoopField = PlanningAgentService.class.getDeclaredField("orchestrationLoop");
+        orchestrationLoopField.setAccessible(true);
+        orchestrationLoopField.set(planningAgentService, mockLoop);
+
+        CountDownLatch completedLatch = new CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(invocation -> {
+                    completedLatch.countDown();
+                    return null;
+                })
+                .when(mockLoop)
+                .run(any(), any(), any());
+
+        Flux<ClientPayload.ChatStreamPayload> flux =
+                planningAgentService.continuePlanning(teamId, providerId, "gpt-4o", chatId, "directive-123");
+
+        flux.subscribe();
+
+        assertThat(completedLatch.await(3, TimeUnit.SECONDS)).isTrue();
+        verify(chatService, never()).saveUserMessage(any(), anyString());
+        verify(mockLoop).run(any(), any(), any());
+    }
+
+    @Test
+    void continuePlanning_nullDirective_throws() {
+        assertThatThrownBy(() -> nullDirectiveContinue(planningAgentService)).isInstanceOf(NullPointerException.class);
+    }
+
+    @SuppressFBWarnings("NP_NULL_PARAM_DEREF_ALL_TARGETS_DANGEROUS")
+    private static void nullDirectiveContinue(PlanningAgentService service) {
+        service.continuePlanning(null, null, null, null, null);
+    }
+
+    @Test
+    void execute_reactLoopExhausted_emitsPlanningStatusAndSavesInterstitial() throws Exception {
+        UUID teamId = UUID.randomUUID();
+        UUID providerId = UUID.randomUUID();
+        UUID chatId = UUID.randomUUID();
+
+        ModelProvider provider = new ModelProvider("TestProvider", ProviderType.OPENAI, "key", "url");
+        when(modelProviderRepository.findByTeamIdAndId(teamId, providerId)).thenReturn(Optional.of(provider));
+        when(liteLLMProvisioningService.buildLiteLLMModelName(any(), any())).thenReturn("litellm-model");
+
+        ChatUsageSession session = mock(ChatUsageSession.class);
+        LlmUsage usage = mock(LlmUsage.class);
+        when(usage.getVirtualKey()).thenReturn("vk-123");
+        when(session.getUsage()).thenReturn(usage);
+        when(chatUsageSessionService.getOrCreateActiveSession(chatId, "gpt-4o", "litellm-model"))
+                .thenReturn(session);
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModelFactory.createChatModelViaLiteLLM(any(), any(), any(), eq(true)))
+                .thenReturn(chatModel);
+
+        PlanningAgentLoop mockLoop = mock(PlanningAgentLoop.class);
+        org.mockito.Mockito.doThrow(
+                        new com.kratisai.controlplane.agentloop.ReActLoopExhaustedException(10, null, List.of()))
+                .when(mockLoop)
+                .run(any(), any(), any());
+
+        Field orchestrationLoopField = PlanningAgentService.class.getDeclaredField("orchestrationLoop");
+        orchestrationLoopField.setAccessible(true);
+        orchestrationLoopField.set(planningAgentService, mockLoop);
+
+        Flux<ClientPayload.ChatStreamPayload> flux =
+                planningAgentService.streamMessage(teamId, providerId, "gpt-4o", chatId, "Hello");
+
+        List<ClientPayload.ChatStreamPayload> received = new ArrayList<>();
+        CountDownLatch completeLatch = new CountDownLatch(1);
+        flux.subscribe(received::add, error -> completeLatch.countDown(), completeLatch::countDown);
+
+        assertThat(completeLatch.await(3, TimeUnit.SECONDS)).isTrue();
+        assertThat(received).hasSize(1);
+        assertThat(received.get(0)).isInstanceOf(ClientPayload.PlanningStatusResult.class);
+        ClientPayload.PlanningStatusResult status = (ClientPayload.PlanningStatusResult) received.get(0);
+        assertThat(status.status()).isEqualTo("paused");
+        assertThat(status.reason()).isEqualTo("max_iterations");
+
+        verify(chatService).saveInterstitialMessage(eq(chatId), eq("paused"), eq("max_iterations"), any());
+        verify(chatService, never()).saveAssistantErrorMessage(any(), anyString(), anyInt());
     }
 }

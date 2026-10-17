@@ -198,7 +198,7 @@ public final class ReActLoop<T> {
                 "ReAct loop exhausted after {} iterations without a final response (lastValidationError={})",
                 maxIterations,
                 lastValidationError);
-        throw new ReActLoopExhaustedException(maxIterations, lastValidationError);
+        throw new ReActLoopExhaustedException(maxIterations, lastValidationError, history);
     }
 
     private static String turnBudgetNotice(int remainingAfterThisTurn, boolean finalTurn) {

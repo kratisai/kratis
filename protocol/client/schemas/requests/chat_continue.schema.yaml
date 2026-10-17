@@ -1,0 +1,15 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ChatContinueParams
+type: object
+required:
+- chatId
+properties:
+  chatId:
+    type: string
+  teamId:
+    type: string
+  providerId:
+    type: string
+  modelName:
+    type: string
+additionalProperties: false

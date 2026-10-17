@@ -3,11 +3,13 @@ import { create } from 'zustand'
 
 import type { WorkingItem } from '@/types/telemetry-types'
 import type {
+  ChatContinueParams,
   ChatErrorResult,
   CompleteResult,
   JsonRpcError,
   MessageChunkResult,
   MessageResult,
+  PlanningStatusResult,
   TelemetryEvent,
   TelemetryResult,
 } from '@/types/websocket-types'
@@ -35,8 +37,10 @@ export type ChatMessage = TextChatMessage | WorkingChatMessage
 export interface WorkingChatMessage {
   endTime: null | number
   id: string
+  isPaused?: boolean
   isStreaming: boolean
   items: WorkingItem[]
+  pauseReason?: string
   role: 'working'
   startTime: null | number
   timestamp: Date
@@ -46,6 +50,7 @@ interface ChatState {
   addMessage: (chatId: string, message: ChatMessage) => void
   clearChats: () => void
   clearMessages: (chatId: string) => void
+  continuePlanning: (chatId: string) => void
 
   currentChatId: null | string
   finishWorking: (chatId: string) => void
@@ -57,6 +62,7 @@ interface ChatState {
   handleErrorResponse: (error: JsonRpcError) => void
   handleMessageChunkResult: (messageChunkResult: MessageChunkResult) => void
   handleMessageResult: (messageResult: MessageResult) => void
+  handlePlanningStatusResult: (result: PlanningStatusResult) => void
   handleTelemetryEvent: (chatId: string, telemetryResult: TelemetryResult) => void
   markSending: (chatId: string) => void
   messages: Record<string, ChatMessage[]>
@@ -215,6 +221,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return { messages: newMessages }
     })
   },
+
+  continuePlanning: (chatId: string) => {
+    const { selectedModelName, selectedProviderId } = useUIStore.getState()
+    const teamId = useAuthStore.getState().currentTeamId
+
+    set((state) => {
+      const chatMessages = state.messages[chatId] ?? []
+      const updatedMessages = chatMessages.map((m) =>
+        m.role === 'working' && m.isPaused ? { ...m, isPaused: false, isStreaming: true } : m,
+      )
+      return {
+        messages: {
+          ...state.messages,
+          [chatId]: updatedMessages,
+        },
+        sendingChatIds: state.sendingChatIds.has(chatId)
+          ? state.sendingChatIds
+          : new Set(state.sendingChatIds).add(chatId),
+      }
+    })
+
+    const params: ChatContinueParams = {
+      chatId,
+      modelName: selectedModelName || undefined,
+      providerId: selectedProviderId || undefined,
+      teamId: teamId || undefined,
+    }
+    useWebSocketStore.getState().send('chat.continue', params)
+  },
+
   currentChatId: null,
 
   finishWorking: (chatId: string) => {
@@ -435,10 +471,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (chatMsgs.some((m) => m.id === messageId)) {
           return state
         }
+        const unpausedMsgs = chatMsgs.map((m) =>
+          m.role === 'working' && m.isPaused ? { ...m, isPaused: false } : m,
+        )
         return {
           messages: {
             ...state.messages,
-            [activeChatId]: [...chatMsgs, streamingMessage],
+            [activeChatId]: [...unpausedMsgs, streamingMessage],
           },
         }
       })
@@ -479,18 +518,77 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     set((state) => {
       const existingMessages = state.messages[chatId] ?? []
-      const index = existingMessages.findIndex((m) => m.id === messageId)
+      const unpausedMessages = existingMessages.map((m) =>
+        m.role === 'working' && m.isPaused ? { ...m, isPaused: false } : m,
+      )
+      const index = unpausedMessages.findIndex((m) => m.id === messageId)
       let updatedMessages: ChatMessage[]
       if (index >= 0) {
-        updatedMessages = [...existingMessages]
+        updatedMessages = [...unpausedMessages]
         updatedMessages[index] = msg
       } else {
-        updatedMessages = [...existingMessages, msg]
+        updatedMessages = [...unpausedMessages, msg]
       }
       return {
         messages: {
           ...state.messages,
           [chatId]: updatedMessages,
+        },
+      }
+    })
+  },
+
+  handlePlanningStatusResult: (result: PlanningStatusResult) => {
+    const { chatId, reason, status } = result
+    const activeChatId = chatId || get().currentChatId
+    if (!activeChatId) return
+
+    set((state) => {
+      const chatMessages = state.messages[activeChatId] ?? []
+      if (status === 'paused') {
+        const lastIndex = chatMessages.findLastIndex((m) => m.role === 'working')
+        let updatedMessages: ChatMessage[]
+        if (lastIndex !== -1) {
+          const existing = chatMessages[lastIndex] as WorkingChatMessage
+          const updated: WorkingChatMessage = {
+            ...existing,
+            endTime: existing.endTime ?? Date.now(),
+            isPaused: true,
+            isStreaming: false,
+            pauseReason: reason ?? existing.pauseReason,
+          }
+          updatedMessages = [...chatMessages]
+          updatedMessages[lastIndex] = updated
+        } else {
+          const newWorking: WorkingChatMessage = {
+            endTime: Date.now(),
+            id: `working-${Date.now()}`,
+            isPaused: true,
+            isStreaming: false,
+            items: [],
+            pauseReason: reason ?? 'max_iterations',
+            role: 'working',
+            startTime: null,
+            timestamp: new Date(),
+          }
+          updatedMessages = [...chatMessages, newWorking]
+        }
+        return {
+          messages: {
+            ...state.messages,
+            [activeChatId]: updatedMessages,
+          },
+          sendingChatIds: withoutChatId(state.sendingChatIds, activeChatId),
+        }
+      }
+
+      const updatedMessages = chatMessages.map((m) =>
+        m.role === 'working' ? { ...m, isPaused: false } : m,
+      )
+      return {
+        messages: {
+          ...state.messages,
+          [activeChatId]: updatedMessages,
         },
       }
     })

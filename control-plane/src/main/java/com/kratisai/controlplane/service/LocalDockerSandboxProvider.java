@@ -545,6 +545,9 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             }
         }
 
+        String gateway = dockerNetworkGateway(networkName);
+        String hostInternal = gateway != null ? resolveContainerReachableHost(gateway) : "host-gateway";
+
         List<String> command = new ArrayList<>(List.of(
                 "docker",
                 "run",
@@ -554,7 +557,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 "--network",
                 networkName,
                 "--add-host",
-                "host.docker.internal:host-gateway",
+                "host.docker.internal:" + hostInternal,
                 "-e",
                 "DOCKER_HOST=tcp://" + dindName + ":2375",
                 "-e",

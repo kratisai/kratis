@@ -126,6 +126,28 @@ public sealed interface ClientRpcPayload extends RpcPayload {
         }
     }
 
+    record ChatContinue(
+            @JsonProperty("chatId") String chatId,
+            @JsonProperty("teamId") String teamId,
+            @JsonProperty("providerId") String providerId,
+            @JsonProperty("modelName") String modelName)
+            implements ClientRpcPayload {
+        public static final String METHOD = "chat.continue";
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+
+        public ChatContinue {
+            Objects.requireNonNull(chatId, "chatId is required");
+        }
+
+        public ChatContinue(String chatId) {
+            this(chatId, null, null, null);
+        }
+    }
+
     /** Replay persisted activities for an execution (running or completed). */
     record ExecutionReplayActivities(
             @JsonProperty("executionId") String executionId) implements ClientRpcPayload {

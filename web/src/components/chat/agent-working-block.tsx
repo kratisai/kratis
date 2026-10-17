@@ -4,31 +4,80 @@ import { useState } from 'react'
 import type { WorkingItem } from '@/types/telemetry-types'
 
 import { MarkdownMessage } from '@/components/chat/markdown-message'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useChatStore } from '@/store/chat-store'
 
 interface AgentWorkingBlockProps {
+  chatId?: string
   endTime: null | number
+  isPaused?: boolean
   isStreaming: boolean
   items: WorkingItem[]
+  pauseReason?: string
   startTime: null | number
 }
 
 export function AgentWorkingBlock({
+  chatId,
   endTime,
+  isPaused = false,
   isStreaming,
   items,
   startTime,
 }: AgentWorkingBlockProps) {
   const [manuallyExpanded, setManuallyExpanded] = useState(false)
+  const [isContinuing, setIsContinuing] = useState(false)
+  const continuePlanning = useChatStore((state) => state.continuePlanning)
 
-  if (items.length === 0) return null
+  if (items.length === 0 && !isPaused) return null
 
   const isExpanded = isStreaming || manuallyExpanded
   const duration = formatDuration(endTime, startTime)
 
+  const handleContinueClick = () => {
+    setIsContinuing(true)
+    if (chatId) {
+      continuePlanning(chatId)
+    }
+  }
+
   return (
-    <div className="border-border bg-muted/30 overflow-x-auto rounded-lg border">
-      {isStreaming ? (
+    <div
+      className="border-border bg-muted/30 overflow-x-auto rounded-lg border"
+      data-testid="agent-working-block"
+    >
+      {isPaused ? (
+        <div className="p-3">
+          {items.length > 0 && (
+            <div className="pb-2">
+              <button
+                className="text-muted-foreground hover:bg-muted/50 flex w-full items-center gap-2 text-xs font-medium transition-colors"
+                onClick={() => setManuallyExpanded((expanded) => !expanded)}
+                type="button"
+              >
+                {isExpanded ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+                <span>Agent worked for {duration}</span>
+              </button>
+            </div>
+          )}
+          <div className="border-border bg-background rounded-md border p-3 text-sm">
+            <p className="text-muted-foreground">
+              The agent completed maximum exploration steps for this turn. Would you like to
+              continue planning?
+            </p>
+            <div className="mt-3">
+              <Button disabled={isContinuing} onClick={handleContinueClick} size="sm">
+                Continue Planning
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : isStreaming ? (
         <div className="text-muted-foreground flex items-center gap-2 px-3 py-2 text-xs font-medium">
           <span>Agent working...</span>
         </div>
@@ -42,21 +91,23 @@ export function AgentWorkingBlock({
           <span>Agent worked for {duration}</span>
         </button>
       )}
-      <div
-        className="grid transition-[grid-template-rows] duration-300 ease-in-out"
-        data-testid="agent-working-items"
-        style={{ gridTemplateRows: isExpanded ? '1fr' : '0fr' }}
-      >
-        <div className="min-h-0 overflow-hidden">
-          <div
-            className={cn('space-y-1.5 px-3 pb-3', !isStreaming && 'border-border border-t pt-2')}
-          >
-            {items.map((item, index) => (
-              <WorkingItemRow item={item} key={index} />
-            ))}
+      {items.length > 0 && (
+        <div
+          className="grid transition-[grid-template-rows] duration-300 ease-in-out"
+          data-testid="agent-working-items"
+          style={{ gridTemplateRows: isExpanded ? '1fr' : '0fr' }}
+        >
+          <div className="min-h-0 overflow-hidden">
+            <div
+              className={cn('space-y-1.5 px-3 pb-3', !isStreaming && 'border-border border-t pt-2')}
+            >
+              {items.map((item, index) => (
+                <WorkingItemRow item={item} key={index} />
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

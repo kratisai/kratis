@@ -36,6 +36,15 @@ export const chatSendParamsSchema = z
   })
   .strict()
 
+export const chatContinueParamsSchema = z
+  .object({
+    chatId: z.string(),
+    modelName: z.string().optional(),
+    providerId: z.string().optional(),
+    teamId: z.string().optional(),
+  })
+  .strict()
+
 export const chatSubscribeParamsSchema = z
   .object({
     chatId: z.string(),
@@ -75,6 +84,11 @@ export const CLIENT_METHODS = {
     direction: Direction.WebToControlPlane,
     messageKind: MessageKind.Request,
     paramsSchema: authParamsSchema,
+  },
+  'chat.continue': {
+    direction: Direction.WebToControlPlane,
+    messageKind: MessageKind.Request,
+    paramsSchema: chatContinueParamsSchema,
   },
   'chat.send': {
     direction: Direction.WebToControlPlane,
