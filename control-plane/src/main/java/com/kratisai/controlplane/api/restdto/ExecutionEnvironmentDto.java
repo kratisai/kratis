@@ -30,4 +30,16 @@ public record ExecutionEnvironmentDto(
         Instant lastHeartbeat,
 
         @Schema(description = "Last activity timestamp", example = "2026-05-19T10:05:00Z", nullable = true)
-        Instant lastActivity) {}
+        Instant lastActivity,
+
+        @Schema(
+                description = "Active (RUNNING or IDLE) execution for this environment, if any",
+                example = "550e8400-e29b-41d4-a716-446655440002",
+                nullable = true)
+        UUID activeExecutionId,
+
+        @Schema(
+                description = "Chat that owns the active execution, if any",
+                example = "550e8400-e29b-41d4-a716-446655440003",
+                nullable = true)
+        UUID activeChatId) {}

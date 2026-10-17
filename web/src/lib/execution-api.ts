@@ -72,15 +72,15 @@ export async function fetchHarnesses(teamId: string): Promise<AgentHarnessOption
   return response.json()
 }
 
+export async function haltExecution(chatId: string, executionId: string): Promise<void> {
+  await fetchWithAuth(`/api/v1/chats/${chatId}/executions/${executionId}/halt`, {
+    method: 'POST',
+  })
+}
+
 export async function listChatExecutions(chatId: string): Promise<SandboxExecutionDto[]> {
   const response = await fetchWithAuth(`/api/v1/chats/${chatId}/executions`)
   return response.json()
-}
-
-export async function terminateExecution(chatId: string, executionId: string): Promise<void> {
-  await fetchWithAuth(`/api/v1/chats/${chatId}/executions/${executionId}/terminate`, {
-    method: 'POST',
-  })
 }
 
 async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {

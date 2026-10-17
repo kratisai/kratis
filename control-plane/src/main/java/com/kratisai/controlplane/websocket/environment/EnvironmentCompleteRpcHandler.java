@@ -59,6 +59,13 @@ public class EnvironmentCompleteRpcHandler
         UUID execId = UUID.fromString(params.executionId());
         SandboxExecution execution = executionGuard.requireExecutionInEnvironment(sessionId, execId);
 
+        if (execution.getStatus() == SandboxExecutionStatus.COMPLETED
+                || execution.getStatus() == SandboxExecutionStatus.FAILED) {
+            // The execution was already settled (e.g. halted). A late env.complete must not reopen it.
+            logger.warn("Ignoring env.complete for execution {} already settled as {}", execId, execution.getStatus());
+            return Flux.empty();
+        }
+
         int exitCode = params.exitCode();
         boolean deliberateStop = Boolean.TRUE.equals(params.terminated());
         boolean failed = exitCode != 0 && !deliberateStop;

@@ -12,7 +12,6 @@ vi.mock('@/lib/environment-api', () => ({
   deleteEnvironment: vi.fn(),
   getEnvironments: vi.fn(),
   resumeEnvironment: vi.fn(),
-  terminateEnvironment: vi.fn(),
   updateEnvironment: vi.fn(),
 }))
 

@@ -31,8 +31,8 @@ import {
   useDeleteEnvironment,
   useEnvironments,
   useResumeEnvironment,
-  useTerminateEnvironment,
 } from '@/hooks/use-environments'
+import { useHaltExecution } from '@/hooks/use-executions'
 import { copyToClipboard } from '@/lib/clipboard'
 import { isEnvironmentFeaturesEnabled } from '@/lib/feature-flags'
 
@@ -43,7 +43,7 @@ interface EnvironmentListProps {
 export function EnvironmentList({ isOwner }: EnvironmentListProps) {
   const { data: environments, isLoading } = useEnvironments()
   const deleteEnvironment = useDeleteEnvironment()
-  const terminateEnvironment = useTerminateEnvironment()
+  const haltExecution = useHaltExecution()
   const resumeEnvironment = useResumeEnvironment()
   const createConnector = useCreateConnector()
   const environmentFeaturesEnabled = isEnvironmentFeaturesEnabled()
@@ -72,17 +72,20 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
     }
   }
 
-  const handleTerminate = (envId: string, envName: string) => {
-    if (window.confirm(`Are you sure you want to terminate "${envName}"?`)) {
-      terminateEnvironment.mutate(envId)
+  const handleHalt = (env: ExecutionEnvironmentDto) => {
+    if (!env.activeExecutionId || !env.activeChatId) return
+    if (window.confirm(`Are you sure you want to halt "${env.name}"?`)) {
+      haltExecution.mutate({ chatId: env.activeChatId, executionId: env.activeExecutionId })
     }
   }
 
-  const isRunningSandbox = (env: ExecutionEnvironmentDto) =>
-    env.type === 'SANDBOX' && env.status === 'CONNECTED'
-
   const isSleepingSandbox = (env: ExecutionEnvironmentDto) =>
     env.type === 'SANDBOX' && env.status === 'SLEEPING'
+
+  // An environment is haltable whenever it has a live execution; the halt API decides the effect
+  // (purge a sandbox, stop a connector agent) from the environment type.
+  const canHalt = (env: ExecutionEnvironmentDto) =>
+    Boolean(env.activeExecutionId) && Boolean(env.activeChatId)
 
   const resumeAction = (env: ExecutionEnvironmentDto) =>
     isSleepingSandbox(env) ? (
@@ -189,12 +192,13 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
                           <TableCell>
                             <div className="flex items-center gap-2">
                               {resumeAction(env)}
-                              {isRunningSandbox(env) && (
+                              {canHalt(env) && (
                                 <Button
-                                  aria-label={`Terminate ${env.name}`}
-                                  onClick={() => handleTerminate(env.id, env.name)}
+                                  aria-label={`Halt ${env.name}`}
+                                  disabled={haltExecution.isPending}
+                                  onClick={() => handleHalt(env)}
                                   size="icon"
-                                  title="Terminate"
+                                  title="Halt"
                                   variant="ghost"
                                 >
                                   <Square className="h-4 w-4 fill-current" />
@@ -236,12 +240,13 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
                       {isOwner && (
                         <div className="flex shrink-0 gap-1">
                           {resumeAction(env)}
-                          {isRunningSandbox(env) && (
+                          {canHalt(env) && (
                             <Button
-                              aria-label={`Terminate ${env.name}`}
-                              onClick={() => handleTerminate(env.id, env.name)}
+                              aria-label={`Halt ${env.name}`}
+                              disabled={haltExecution.isPending}
+                              onClick={() => handleHalt(env)}
                               size="icon"
-                              title="Terminate"
+                              title="Halt"
                               variant="ghost"
                             >
                               <Square className="h-4 w-4 fill-current" />

@@ -194,7 +194,7 @@ class PlanningAgentLoopTest {
         assertThatThrownBy(() -> nullDirectiveContext(context)).isInstanceOf(NullPointerException.class);
     }
 
-    @SuppressFBWarnings("NP_NULL_PARAM_DEREF_ALL_TARGETS_DANGEROUS")
+    @SuppressFBWarnings({"NP_NULL_PARAM_DEREF_ALL_TARGETS_DANGEROUS", "NP_NULL_PARAM_DEREF_NONVIRTUAL"})
     private static void nullDirectiveContext(PlanningContext context) {
         PlanningContext.continuation(context.teamId(), context.chatId(), null);
     }

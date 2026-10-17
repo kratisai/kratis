@@ -103,10 +103,11 @@ public class ExecutionEnvironmentService {
     }
 
     public ExecutionEnvironmentDto toDto(ExecutionEnvironment env) {
-        return toDto(env, null);
+        return toDto(env, null, null);
     }
 
-    public ExecutionEnvironmentDto toDto(ExecutionEnvironment env, Instant lastActivity) {
+    public ExecutionEnvironmentDto toDto(
+            ExecutionEnvironment env, Instant lastActivity, SandboxExecution activeExecution) {
         return new ExecutionEnvironmentDto(
                 env.getId(),
                 env.getTeam().getId(),
@@ -115,14 +116,27 @@ public class ExecutionEnvironmentService {
                 env.getAuthToken(),
                 env.getStatus(),
                 env.getLastHeartbeat(),
-                lastActivity);
+                lastActivity,
+                activeExecution != null ? activeExecution.getId() : null,
+                activeExecution != null ? activeExecution.getChat().getId() : null);
     }
 
     public List<ExecutionEnvironmentDto> listEnvironments(UUID userId, UUID teamId) {
         requireTeamMembership(userId, teamId);
         return executionEnvironmentRepository.findByTeamIdOrderByLatestActivityDesc(teamId).stream()
-                .map(row -> toDto((ExecutionEnvironment) row[0], (Instant) row[1]))
+                .map(row -> {
+                    ExecutionEnvironment env = (ExecutionEnvironment) row[0];
+                    return toDto(env, (Instant) row[1], findActiveExecution(env.getId()));
+                })
                 .toList();
+    }
+
+    private SandboxExecution findActiveExecution(UUID environmentId) {
+        return sandboxExecutionRepository
+                .findFirstByEnvironmentIdOrderByStartedAtDesc(environmentId)
+                .filter(execution -> execution.getStatus() == SandboxExecutionStatus.RUNNING
+                        || execution.getStatus() == SandboxExecutionStatus.IDLE)
+                .orElse(null);
     }
 
     @Transactional
@@ -171,36 +185,6 @@ public class ExecutionEnvironmentService {
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
         return toDto(env);
-    }
-
-    @Transactional
-    public void terminateEnvironment(UUID userId, UUID teamId, UUID envId) {
-        requireTeamMembership(userId, teamId);
-
-        ExecutionEnvironment env = executionEnvironmentRepository
-                .findByTeamIdAndId(teamId, envId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Environment not found"));
-
-        stopRunningExecutions(envId);
-
-        if (env.getType() == ExecutionEnvironmentType.SANDBOX && env.getProvider() != null) {
-            try {
-                SandboxProvider sandboxProvider =
-                        sandboxOrchestratorService.getProvider(env.getProvider().getType());
-                sandboxProvider.destroy(envId);
-            } catch (Exception e) {
-                logger.error("Failed to destroy sandbox environment {}", envId, e);
-                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to terminate environment");
-            }
-            env.setStatus(EnvironmentStatus.DISCONNECTED);
-            env.setSuspendedAt(null);
-            executionEnvironmentRepository.save(env);
-            eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
-        } else if (env.getType() == ExecutionEnvironmentType.SANDBOX && env.getProvider() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Environment has no configured sandbox provider");
-        } else if (env.getType() != ExecutionEnvironmentType.SANDBOX) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Environment is not a running sandbox");
-        }
     }
 
     /**

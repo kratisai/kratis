@@ -91,6 +91,15 @@ On completion, termination, or reconnect-lease expiry the control plane:
 3. Calls `destroy` on the provider (or `terminateSandbox` to keep a suspend snapshot) —
    idempotent, even if an earlier step fails.
 
+A user **halt** is the single terminate action, exposed as
+`POST /api/v1/chats/{chatId}/executions/{executionId}/halt` and driven from both the execution
+view and the environment list. For a sandbox it marks the execution `COMPLETED` and calls
+`destroy` (runtime and suspend snapshot) without sending `env.terminate` and without needing a
+WebSocket session, so a sleeping or disconnected sandbox can always be purged. For a workspace
+connector it marks the execution `COMPLETED` and best-effort sends `env.terminate` to stop the
+agent in place; the connector stays `CONNECTED` and reusable, and an offline connector is still
+updated in the database.
+
 A transient `/ws/env` disconnect does not terminate the agent or discard its session; the
 connector reconnects and re-registers within the lease. See
 [`acp-lifecycle.md`](acp-lifecycle.md) for reconnect and lease behaviour.

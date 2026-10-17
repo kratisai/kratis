@@ -288,33 +288,6 @@ class ExecutionEnvironmentControllerTest {
                 .andExpect(status().isForbidden());
     }
 
-    @Test
-    void terminateEnvironment_shouldReturn204AndMarkDisconnected() throws Exception {
-        // Create a provider for the sandbox environment
-        EnvironmentProvider provider = new EnvironmentProvider();
-        provider.setTeam(teamRepository.findById(teamId).orElseThrow());
-        provider.setName("Test Docker Provider");
-        provider.setDockerImage("test-image:latest");
-        provider = environmentProviderRepository.save(provider);
-
-        ExecutionEnvironment sandboxEnv = new ExecutionEnvironment();
-        sandboxEnv.setTeam(teamRepository.findById(teamId).orElseThrow());
-        sandboxEnv.setProvider(provider);
-        sandboxEnv.setName("Terminable Sandbox");
-        sandboxEnv.setType(ExecutionEnvironmentType.SANDBOX);
-        sandboxEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED);
-        executionEnvironmentRepository.save(sandboxEnv);
-
-        mockMvc.perform(post("/api/v1/teams/{teamId}/environments/{envId}/terminate", teamId, sandboxEnv.getId())
-                        .header("Authorization", "Bearer " + authToken))
-                .andExpect(status().isNoContent());
-
-        ExecutionEnvironment updatedEnv =
-                executionEnvironmentRepository.findById(sandboxEnv.getId()).orElseThrow();
-        assertThat(updatedEnv.getSuspendedAt()).isNull();
-        assertThat(updatedEnv.getStatus()).isEqualTo(com.kratisai.controlplane.model.EnvironmentStatus.DISCONNECTED);
-    }
-
     private GenericContainer<?> suspendedRunner(EnvironmentProvider provider) {
         ExecutionEnvironment env = new ExecutionEnvironment();
         env.setTeam(teamRepository.findById(teamId).orElseThrow());
@@ -464,20 +437,6 @@ class ExecutionEnvironmentControllerTest {
         mockMvc.perform(post("/api/v1/teams/{teamId}/environments/{envId}/resume", teamId, env.getId())
                         .header("Authorization", "Bearer " + authToken))
                 .andExpect(status().isGone());
-    }
-
-    @Test
-    void terminateEnvironment_notSandbox_shouldReturn400() throws Exception {
-        ExecutionEnvironment connectorEnv = new ExecutionEnvironment();
-        connectorEnv.setTeam(teamRepository.findById(teamId).orElseThrow());
-        connectorEnv.setName("Connector Env");
-        connectorEnv.setType(ExecutionEnvironmentType.CONNECTOR);
-        connectorEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED);
-        executionEnvironmentRepository.save(connectorEnv);
-
-        mockMvc.perform(post("/api/v1/teams/{teamId}/environments/{envId}/terminate", teamId, connectorEnv.getId())
-                        .header("Authorization", "Bearer " + authToken))
-                .andExpect(status().isBadRequest());
     }
 
     @Test

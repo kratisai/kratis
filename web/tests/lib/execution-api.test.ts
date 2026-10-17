@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SandboxExecutionDto } from '@/lib/execution-api'
 
-import { executionDisplayStatus, terminateExecution } from '@/lib/execution-api'
+import { executionDisplayStatus, haltExecution } from '@/lib/execution-api'
 import { useAuthStore } from '@/store/auth-store'
 
 type HasEnvironmentFields = 'environmentId' extends keyof SandboxExecutionDto
@@ -13,7 +13,7 @@ type HasEnvironmentFields = 'environmentId' extends keyof SandboxExecutionDto
 const hasEnvironmentFields: HasEnvironmentFields = true
 void hasEnvironmentFields
 
-describe('terminateExecution', () => {
+describe('haltExecution', () => {
   beforeEach(() => {
     useAuthStore.setState({ accessToken: 'test-token' })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 202 })))
@@ -24,17 +24,17 @@ describe('terminateExecution', () => {
     useAuthStore.setState({ accessToken: null })
   })
 
-  it('POSTs to the chat execution terminate endpoint', async () => {
-    await terminateExecution('chat-1', 'exec-1')
+  it('POSTs to the chat execution halt endpoint', async () => {
+    await haltExecution('chat-1', 'exec-1')
 
     expect(fetch).toHaveBeenCalledWith(
-      '/api/v1/chats/chat-1/executions/exec-1/terminate',
+      '/api/v1/chats/chat-1/executions/exec-1/halt',
       expect.objectContaining({ method: 'POST' }),
     )
   })
 
   it('sends the access token', async () => {
-    await terminateExecution('chat-1', 'exec-1')
+    await haltExecution('chat-1', 'exec-1')
 
     expect(fetch).toHaveBeenCalledWith(
       expect.any(String),
@@ -50,7 +50,7 @@ describe('terminateExecution', () => {
       vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'nope' }), { status: 409 })),
     )
 
-    await expect(terminateExecution('chat-1', 'exec-1')).rejects.toMatchObject({
+    await expect(haltExecution('chat-1', 'exec-1')).rejects.toMatchObject({
       message: 'nope',
     })
   })

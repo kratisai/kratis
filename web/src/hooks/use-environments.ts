@@ -12,7 +12,6 @@ import {
   deleteEnvironment,
   getEnvironments,
   resumeEnvironment,
-  terminateEnvironment,
 } from '@/lib/environment-api'
 import { useAuthStore } from '@/store/auth-store'
 
@@ -89,28 +88,6 @@ export function useResumeEnvironment() {
         queryKey: [ENVIRONMENTS_QUERY_KEY, teamId],
       })
       toast.success('Environment resumed successfully')
-    },
-  })
-}
-
-export function useTerminateEnvironment() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (envId: string) => {
-      const teamId = useAuthStore.getState().currentTeamId
-      if (!teamId) throw new Error('No team selected')
-      return terminateEnvironment(teamId, envId)
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || 'Failed to terminate environment')
-    },
-    onSuccess: () => {
-      const teamId = useAuthStore.getState().currentTeamId
-      void queryClient.invalidateQueries({
-        queryKey: [ENVIRONMENTS_QUERY_KEY, teamId],
-      })
-      toast.success('Environment terminated successfully')
     },
   })
 }

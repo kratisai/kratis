@@ -449,26 +449,51 @@ class ChatExecutionControllerTest {
     }
 
     @Test
-    void terminateExecution_authorized_shouldReturnAccepted() throws Exception {
-        // Create an environment first
+    void haltExecution_sandboxPurgesEnvironmentAndCompletesExecution() throws Exception {
         ExecutionEnvironment environment = new ExecutionEnvironment();
         environment.setTeam(chat.getTeam());
-        environment.setName("Test Environment");
+        environment.setName("Halt Sandbox");
         environment.setType(ExecutionEnvironmentType.SANDBOX);
         environment.setStatus(EnvironmentStatus.CONNECTED);
+        environment.setProvider(provider);
         environment = executionEnvironmentRepository.save(environment);
 
-        // Create a running execution
         SandboxExecution execution = new SandboxExecution();
         execution.setChat(chat);
         execution.setEnvironment(environment);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         execution = sandboxExecutionRepository.save(execution);
 
-        // terminateExecution awaits the env.terminate result, so the mock must answer it.
+        mockMvc.perform(post("/api/v1/chats/{chatId}/executions/{executionId}/halt", chat.getId(), execution.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isAccepted());
+
+        SandboxExecution halted =
+                sandboxExecutionRepository.findById(execution.getId()).orElseThrow();
+        assertThat(halted.getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
+        ExecutionEnvironment purged =
+                executionEnvironmentRepository.findById(environment.getId()).orElseThrow();
+        assertThat(purged.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
+    }
+
+    @Test
+    void haltExecution_connectorStopsAgentAndKeepsConnector() throws Exception {
+        ExecutionEnvironment environment = new ExecutionEnvironment();
+        environment.setTeam(chat.getTeam());
+        environment.setName("Laptop Connector");
+        environment.setType(ExecutionEnvironmentType.CONNECTOR);
+        environment.setStatus(EnvironmentStatus.CONNECTED);
+        environment = executionEnvironmentRepository.save(environment);
+
+        SandboxExecution execution = new SandboxExecution();
+        execution.setChat(chat);
+        execution.setEnvironment(environment);
+        execution.setStatus(SandboxExecutionStatus.RUNNING);
+        execution = sandboxExecutionRepository.save(execution);
+
         org.springframework.web.socket.WebSocketSession mockSession =
                 org.mockito.Mockito.mock(org.springframework.web.socket.WebSocketSession.class);
-        org.mockito.Mockito.when(mockSession.getId()).thenReturn("mock-chat-id");
+        org.mockito.Mockito.when(mockSession.getId()).thenReturn("connector-session");
         org.mockito.Mockito.when(mockSession.isOpen()).thenReturn(true);
         Mockito.doAnswer(inv -> {
                     TextMessage msg = inv.getArgument(0);
@@ -489,28 +514,49 @@ class ChatExecutionControllerTest {
                 .sendMessage(org.mockito.ArgumentMatchers.any(TextMessage.class));
         sessionRegistry.registerEnvironmentSession(mockSession, environment.getId());
 
-        // Terminate it
-        mockMvc.perform(post(
-                                "/api/v1/chats/{chatId}/executions/{executionId}/terminate",
-                                chat.getId(),
-                                execution.getId())
+        mockMvc.perform(post("/api/v1/chats/{chatId}/executions/{executionId}/halt", chat.getId(), execution.getId())
                         .header("Authorization", "Bearer " + authToken))
                 .andExpect(status().isAccepted());
 
-        // Verify execution still exists (terminateExecution sends env.terminate but doesn't change status immediately)
-        SandboxExecution terminated =
+        SandboxExecution halted =
                 sandboxExecutionRepository.findById(execution.getId()).orElseThrow();
-        assertThat(terminated.getStatus()).isEqualTo(SandboxExecutionStatus.RUNNING);
+        assertThat(halted.getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
+        ExecutionEnvironment kept =
+                executionEnvironmentRepository.findById(environment.getId()).orElseThrow();
+        assertThat(kept.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
 
-        // Clean up
         sessionRegistry.removeSession(mockSession.getId());
     }
 
     @Test
-    void terminateExecution_notFound_shouldReturnNotFound() throws Exception {
-        // Try to terminate non-existent execution
+    void haltExecution_alreadyCompletedStillPurgesSandbox() throws Exception {
+        ExecutionEnvironment environment = new ExecutionEnvironment();
+        environment.setTeam(chat.getTeam());
+        environment.setName("Lingering Sandbox");
+        environment.setType(ExecutionEnvironmentType.SANDBOX);
+        environment.setStatus(EnvironmentStatus.SLEEPING);
+        environment.setProvider(provider);
+        environment = executionEnvironmentRepository.save(environment);
+
+        SandboxExecution execution = new SandboxExecution();
+        execution.setChat(chat);
+        execution.setEnvironment(environment);
+        execution.setStatus(SandboxExecutionStatus.COMPLETED);
+        execution = sandboxExecutionRepository.save(execution);
+
+        mockMvc.perform(post("/api/v1/chats/{chatId}/executions/{executionId}/halt", chat.getId(), execution.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isAccepted());
+
+        ExecutionEnvironment purged =
+                executionEnvironmentRepository.findById(environment.getId()).orElseThrow();
+        assertThat(purged.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
+    }
+
+    @Test
+    void haltExecution_notFound_shouldReturnNotFound() throws Exception {
         mockMvc.perform(post(
-                                "/api/v1/chats/{chatId}/executions/{executionId}/terminate",
+                                "/api/v1/chats/{chatId}/executions/{executionId}/halt",
                                 chat.getId(),
                                 java.util.UUID.randomUUID())
                         .header("Authorization", "Bearer " + authToken))
@@ -518,86 +564,49 @@ class ChatExecutionControllerTest {
     }
 
     @Test
-    void terminateExecution_alreadyTerminated_shouldReturnConflict() throws Exception {
-        // Create an environment first
+    void haltExecution_unauthorized_shouldReturnForbidden() throws Exception {
         ExecutionEnvironment environment = new ExecutionEnvironment();
         environment.setTeam(chat.getTeam());
-        environment.setName("Test Environment");
+        environment.setName("Auth Sandbox");
         environment.setType(ExecutionEnvironmentType.SANDBOX);
         environment.setStatus(EnvironmentStatus.CONNECTED);
         environment = executionEnvironmentRepository.save(environment);
 
-        // Create a completed execution
-        SandboxExecution execution = new SandboxExecution();
-        execution.setChat(chat);
-        execution.setEnvironment(environment);
-        execution.setStatus(SandboxExecutionStatus.COMPLETED);
-        execution = sandboxExecutionRepository.save(execution);
-
-        // Try to terminate it again
-        mockMvc.perform(post(
-                                "/api/v1/chats/{chatId}/executions/{executionId}/terminate",
-                                chat.getId(),
-                                execution.getId())
-                        .header("Authorization", "Bearer " + authToken))
-                .andExpect(status().isConflict());
-    }
-
-    @Test
-    void terminateExecution_unauthorized_shouldReturnForbidden() throws Exception {
-        // Create an environment first
-        ExecutionEnvironment environment = new ExecutionEnvironment();
-        environment.setTeam(chat.getTeam());
-        environment.setName("Test Environment");
-        environment.setType(ExecutionEnvironmentType.SANDBOX);
-        environment.setStatus(EnvironmentStatus.CONNECTED);
-        environment = executionEnvironmentRepository.save(environment);
-
-        // Create another user
-        TestDataFactory.TestContext otherCtx = testDataFactory.createUserAndTeam();
-        String otherAuthToken = jwtService.generateAccessToken(
-                otherCtx.user().getId(), otherCtx.user().getEmail());
-
-        // Create execution in original chat
         SandboxExecution execution = new SandboxExecution();
         execution.setChat(chat);
         execution.setEnvironment(environment);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         execution = sandboxExecutionRepository.save(execution);
 
-        // Try to terminate with other user's token
-        mockMvc.perform(post(
-                                "/api/v1/chats/{chatId}/executions/{executionId}/terminate",
-                                chat.getId(),
-                                execution.getId())
+        TestDataFactory.TestContext otherCtx = testDataFactory.createUserAndTeam();
+        String otherAuthToken = jwtService.generateAccessToken(
+                otherCtx.user().getId(), otherCtx.user().getEmail());
+
+        mockMvc.perform(post("/api/v1/chats/{chatId}/executions/{executionId}/halt", chat.getId(), execution.getId())
                         .header("Authorization", "Bearer " + otherAuthToken))
                 .andExpect(status().isForbidden());
     }
 
     @Test
-    void terminateExecution_wrongSession_shouldReturnNotFound() throws Exception {
-        // Create an environment first
+    void haltExecution_wrongChat_shouldReturnNotFound() throws Exception {
         ExecutionEnvironment environment = new ExecutionEnvironment();
         environment.setTeam(chat.getTeam());
-        environment.setName("Test Environment");
+        environment.setName("Wrong Chat Sandbox");
         environment.setType(ExecutionEnvironmentType.SANDBOX);
         environment.setStatus(EnvironmentStatus.CONNECTED);
         environment = executionEnvironmentRepository.save(environment);
 
-        // Create execution in original chat
         SandboxExecution execution = new SandboxExecution();
         execution.setChat(chat);
         execution.setEnvironment(environment);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         execution = sandboxExecutionRepository.save(execution);
 
-        // Create another chat
-        ChatEntity otherSession = chatRepository.save(new ChatEntity(chat.getTeam(), chat.getUser(), "Other Session"));
+        ChatEntity otherChat = chatRepository.save(new ChatEntity(chat.getTeam(), chat.getUser(), "Other Session"));
 
-        // Try to terminate with wrong session ID
         mockMvc.perform(post(
-                                "/api/v1/chats/{sessionId}/executions/{executionId}/terminate",
-                                otherSession.getId(),
+                                "/api/v1/chats/{chatId}/executions/{executionId}/halt",
+                                otherChat.getId(),
                                 execution.getId())
                         .header("Authorization", "Bearer " + authToken))
                 .andExpect(status().isNotFound());
