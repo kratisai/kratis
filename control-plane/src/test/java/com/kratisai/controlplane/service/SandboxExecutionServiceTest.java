@@ -859,6 +859,26 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
+    void handleEnvironmentRegistered_withIdleExecution_redeploysGitCredentialsBeforeRelaunch() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+        when(sandboxExecutionRepository.findByEnvironmentIdAndStatus(ENVIRONMENT_ID, SandboxExecutionStatus.RUNNING))
+                .thenReturn(List.of());
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENVIRONMENT_ID))
+                .thenReturn(Optional.of(execution));
+
+        List<Runnable> submitted = new ArrayList<>();
+        SandboxExecutionService service = newSandboxExecutionService(submitted::add);
+        service.handleEnvironmentRegistered(new EnvironmentRegisteredEvent(ENVIRONMENT_ID));
+        assertThat(submitted).hasSize(1);
+
+        submitted.getFirst().run();
+
+        // The resumed connector holds no credentials, so the relaunched agent needs them redeployed.
+        verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitIdentity.class));
+    }
+
+    @Test
     void completeAcpPrompt_withEndTurn_transitionsToIdle() {
         SandboxExecution execution = createTestExecution();
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
@@ -1343,7 +1363,8 @@ class SandboxExecutionServiceTest {
 
         verify(virtualKeyService).fetchUsage("sk-final-key");
         verify(virtualKeyService).revokeKey("sk-final-key");
-        verify(sandboxExecutionRepository).save(execution);
+        verify(sandboxExecutionRepository, times(2)).save(execution);
+        assertThat(execution.getUsages().getFirst().getRevokedAt()).isNotNull();
         assertThat(execution.getTotalSpend()).isEqualTo(0.99);
         assertThat(execution.getTotalTokens()).isEqualTo(2000L);
         assertThat(execution.getUsageLastUpdatedAt()).isNotNull();
@@ -1354,6 +1375,31 @@ class SandboxExecutionServiceTest {
         assertThat(statusEvent.teamId()).isEqualTo(teamId);
         assertThat(statusEvent.chatId()).isEqualTo(CHAT_ID);
         assertThat(statusEvent.executionId()).isEqualTo(execution.getId());
+    }
+
+    @Test
+    void onSandboxExecutionCompleteEvent_sealsSegmentBeforeUsageIsFetchedAndKeyRevoked() {
+        UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
+        SandboxExecution execution = createTestExecution();
+        SandboxExecutionUsage usage = execution.startUsage("sk-final-key", null);
+        when(sandboxExecutionRepository.findActiveVirtualKeysByExecutionId(execution.getId()))
+                .thenReturn(List.of("sk-final-key"));
+        when(sandboxExecutionRepository.findByIdForUpdate(execution.getId())).thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
+        // A resume during the usage delay reuses any still-active key, which finalize then revokes.
+        when(virtualKeyService.fetchUsage("sk-final-key")).thenAnswer(invocation -> {
+            assertThat(execution.getActiveUsage())
+                    .as("a resume must not find the key that is about to be revoked")
+                    .isNull();
+            assertThat(usage.getRevokedAt()).isNotNull();
+            return new LlmUsageSnapshot(0.5, 10L, 6L, 4L);
+        });
+
+        sandboxExecutionService.onSandboxExecutionCompleteEvent(
+                new SandboxExecutionCompleteEvent(teamId, execution.getId(), 0, SandboxExecutionStatus.COMPLETED));
+
+        verify(virtualKeyService).revokeKey("sk-final-key");
+        assertThat(usage.getTotalTokens()).isEqualTo(10L);
     }
 
     @Test

@@ -158,6 +158,51 @@ public class SidecarWebSocketFixture extends WebSocketFixture<SidecarWebSocketFi
         });
     }
 
+    /**
+     * Simulates a connector restarted from a suspend snapshot: it re-attaches the ACP session it
+     * persisted on disk and reports it with {@code relaunch: true}, so no task prompt follows.
+     */
+    public SidecarWebSocketFixture withPersistedSession(String sessionId) {
+        return whenMethod("env.launch_acp_agent", (session, payload) -> {
+            updateExecutionId(payload);
+            sendResult(
+                    session,
+                    payload,
+                    Map.of(
+                            "status",
+                            "launched",
+                            "sessionId",
+                            sessionId,
+                            "agentName",
+                            "test-agent",
+                            "agentVersion",
+                            "1.0.0"));
+            JsonRpcInboundRequest initialized = new JsonRpcInboundRequest(
+                    EnvironmentRpcPayload.AcpInitialized.METHOD,
+                    objectMapper.valueToTree(Map.of(
+                            "sessionId",
+                            sessionId,
+                            "agentName",
+                            "test-agent",
+                            "agentVersion",
+                            "1.0.0",
+                            "executionId",
+                            getExecutionId(),
+                            "relaunch",
+                            true)),
+                    null);
+            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(initialized)));
+        });
+    }
+
+    /** The relaunch cannot start the agent (for example a missing binary in the snapshot). */
+    public SidecarWebSocketFixture withLaunchFailure(String error) {
+        return whenMethod("env.launch_acp_agent", (session, payload) -> {
+            updateExecutionId(payload);
+            sendResult(session, payload, Map.of("status", "failed", "error", error));
+        });
+    }
+
     /** Configure this sidecar to stream an ACP tool failure to the UI during the prompt phase. */
     public SidecarWebSocketFixture withAcpErrorOutput(String error) {
         return whenMethod("env.acp_prompt", (session, payload) -> {

@@ -4,6 +4,7 @@ import {
   createConnector,
   deleteEnvironment,
   getEnvironments,
+  resumeEnvironment,
   terminateEnvironment,
 } from '@/lib/environment-api'
 import { useAuthStore } from '@/store/auth-store'
@@ -51,7 +52,7 @@ describe('environment-api', () => {
             'Content-Type': 'application/json',
           }),
           method: 'POST',
-        })
+        }),
       )
     })
 
@@ -78,7 +79,7 @@ describe('environment-api', () => {
         '/api/v1/teams/team-1/environments/env-1',
         expect.objectContaining({
           method: 'DELETE',
-        })
+        }),
       )
     })
   })
@@ -99,7 +100,7 @@ describe('environment-api', () => {
           headers: expect.objectContaining({
             Authorization: 'Bearer mock-token',
           }),
-        })
+        }),
       )
     })
   })
@@ -116,7 +117,7 @@ describe('environment-api', () => {
         '/api/v1/teams/team-1/environments/env-1/terminate',
         expect.objectContaining({
           method: 'POST',
-        })
+        }),
       )
     })
 
@@ -128,7 +129,47 @@ describe('environment-api', () => {
       })
 
       await expect(terminateEnvironment('team-1', 'env-1')).rejects.toThrow(
-        'Environment is not a running sandbox'
+        'Environment is not a running sandbox',
+      )
+    })
+  })
+
+  describe('resumeEnvironment', () => {
+    it('should POST to the resume endpoint and return the environment', async () => {
+      const resumed = { id: 'env-1', status: 'PENDING_CONNECT' }
+      mockFetch.mockResolvedValueOnce({ json: async () => resumed, ok: true })
+
+      await expect(resumeEnvironment('team-1', 'env-1')).resolves.toEqual(resumed)
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/v1/teams/team-1/environments/env-1/resume',
+        expect.objectContaining({ method: 'POST' }),
+      )
+    })
+
+    it('should surface the expired-snapshot error (410)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: async () => ({
+          message: 'Environment was terminated after its suspend snapshot expired',
+        }),
+        ok: false,
+        status: 410,
+      })
+
+      await expect(resumeEnvironment('team-1', 'env-1')).rejects.toMatchObject({
+        message: 'Environment was terminated after its suspend snapshot expired',
+        status: 410,
+      })
+    })
+
+    it('should surface a not-sleeping error (400)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        json: async () => ({ message: 'Environment is not sleeping' }),
+        ok: false,
+        status: 400,
+      })
+
+      await expect(resumeEnvironment('team-1', 'env-1')).rejects.toThrow(
+        'Environment is not sleeping',
       )
     })
   })

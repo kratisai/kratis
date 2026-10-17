@@ -8,6 +8,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRegisterStatus;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload;
@@ -28,12 +31,14 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
@@ -58,10 +63,76 @@ class EnvironmentRegisterRpcHandlerTest {
     private final UUID teamId = UUID.randomUUID();
     private final String authToken = "test-token";
 
+    private ListAppender<ILoggingEvent> logAppender;
+    private Logger handlerLogger;
+
     @BeforeEach
     void setUp() {
         handler = new EnvironmentRegisterRpcHandler(
                 executionEnvironmentRepository, sessionRegistry, pendingHitlRegistry, eventPublisher);
+        handlerLogger = (Logger) LoggerFactory.getLogger(EnvironmentRegisterRpcHandler.class);
+        logAppender = new ListAppender<>();
+        logAppender.start();
+        handlerLogger.addAppender(logAppender);
+    }
+
+    @AfterEach
+    void detachLogAppender() {
+        handlerLogger.detachAppender(logAppender);
+    }
+
+    private List<String> loggedMessages() {
+        return logAppender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+    }
+
+    private void register(boolean reconnect, String connectorVersion) {
+        when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(createEnvironment()));
+        EnvironmentRpcPayload.Register params =
+                new EnvironmentRpcPayload.Register(authToken, reconnect, null, false, 0L, null, 1, connectorVersion);
+        handler.handle("ws-session-1", 1, params).blockLast();
+    }
+
+    @Test
+    void initialRegistration_logsConnectorVersion() {
+        register(false, "27e6906492b5+2026-10-17T09:43:54Z");
+
+        assertThat(loggedMessages())
+                .anyMatch(m ->
+                        m.contains("registered") && m.contains("connector version 27e6906492b5+2026-10-17T09:43:54Z"));
+    }
+
+    @Test
+    void reRegistration_logsConnectorVersion() {
+        register(true, "27e6906492b5+2026-10-17T09:43:54Z-dirty");
+
+        assertThat(loggedMessages())
+                .anyMatch(m -> m.contains("reconnecting")
+                        && m.contains("connector version 27e6906492b5+2026-10-17T09:43:54Z-dirty"));
+    }
+
+    @Test
+    void registration_withoutConnectorVersion_logsUnknown() {
+        register(false, null);
+        register(true, "  ");
+
+        assertThat(loggedMessages())
+                .filteredOn(m -> m.contains("connector version"))
+                .hasSize(2)
+                .allMatch(m -> m.endsWith("connector version unknown)"));
+    }
+
+    @Test
+    void registration_neutralisesControlCharactersAndBoundsLength() {
+        register(false, "27e6906492b5\nFORGED " + "x".repeat(200));
+
+        assertThat(loggedMessages())
+                .filteredOn(m -> m.contains("connector version"))
+                .singleElement()
+                .satisfies(m -> {
+                    assertThat(m).doesNotContain("\n");
+                    assertThat(m).contains("27e6906492b5?FORGED");
+                    assertThat(m.length()).isLessThan(200);
+                });
     }
 
     private ExecutionEnvironment createEnvironment() {

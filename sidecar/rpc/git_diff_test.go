@@ -726,25 +726,66 @@ func TestTriggerDiffCheck_PushesDiffManifestWithOriginRemote(t *testing.T) {
 	}
 }
 
-// TestResolveDiffBase_EmptyBranchOnOriginWorkspaceFallsBackToRootCommit covers
-// the notification-path fallback for workspaces with an unknown or missing branch.
-func TestResolveDiffBase_EmptyBranchOnOriginWorkspaceFallsBackToRootCommit(t *testing.T) {
+// TestResolveDiffBase_EmptyBranchOnOriginWorkspaceUsesOriginHead covers the
+// notification path for a workspace with an origin remote and no recorded
+// branch (a connector restarted from a suspend snapshot, which never re-runs
+// checkout). Git owns the base: origin/HEAD, not the root commit.
+func TestResolveDiffBase_EmptyBranchOnOriginWorkspaceUsesOriginHead(t *testing.T) {
 	bareDir, workDir := setupTestGitRepoWithRemote(t)
 	defer func() {
 		_ = os.RemoveAll(bareDir)
 		_ = os.RemoveAll(workDir)
 	}()
 
+	// Advance the remote so origin/HEAD's tip is not the root commit, then
+	// bring the workspace up to it: the fixture's first commit is also its root.
+	commitToBareMain(t, bareDir, "upstream.txt", "upstream change\n")
+	runGitCmd(t, workDir, "fetch", "origin")
+	runGitCmd(t, workDir, "reset", "--hard", "origin/main")
+
+	// A local agent commit makes HEAD diverge from origin/main.
+	if err := os.WriteFile(filepath.Join(workDir, "agent.txt"), []byte("agent work\n"), 0600); err != nil {
+		t.Fatalf("Failed to write agent file: %v", err)
+	}
+	runGitCmd(t, workDir, "add", "agent.txt")
+	runGitCmd(t, workDir, "commit", "-m", "feat: agent change")
+
 	base, err := resolveDiffBase(workDir, "")
 	if err != nil {
-		t.Fatalf("Expected empty branch to fall back instead of erroring: %v", err)
+		t.Fatalf("Expected empty branch to resolve from origin/HEAD: %v", err)
+	}
+	want, err := mergeBaseWithHead(workDir, "origin/HEAD")
+	if err != nil {
+		t.Fatalf("Failed to compute expected merge-base: %v", err)
+	}
+	if base != want {
+		t.Errorf("Expected git-owned base %s (merge-base with origin/HEAD), got %s", want, base)
 	}
 	root, err := rootCommit(workDir)
 	if err != nil {
 		t.Fatalf("Failed to resolve root commit: %v", err)
 	}
-	if base != root {
-		t.Errorf("Expected empty base branch to fall back to root commit %s, got %s", root, base)
+	if base == root {
+		t.Errorf("Expected origin/HEAD base, not the root commit %s", root)
+	}
+}
+
+// TestExecuteCheckout_PersistsDiffBaseBranchForRestart verifies the checked-out
+// branch survives into a fresh connector process (a suspend/resume), where the
+// in-memory value is gone and env.checkout is never re-dispatched.
+func TestExecuteCheckout_PersistsDiffBaseBranchForRestart(t *testing.T) {
+	bareDir, workDir := setupTestGitRepoWithRemote(t)
+	defer func() {
+		_ = os.RemoveAll(bareDir)
+		_ = os.RemoveAll(workDir)
+	}()
+
+	client, _ := connectedGitClient(t, workDir)
+	client.ExecuteCheckout(CheckoutParams{URL: bareDir, Branch: "main", ExecutionID: "exec-persist"}, "req-co")
+
+	restarted := &Client{workspace: workDir, envFile: client.envFilePath()}
+	if got := restarted.diffBaseBranch(); got != "main" {
+		t.Errorf("Expected persisted diff base branch 'main' after restart, got %q", got)
 	}
 }
 

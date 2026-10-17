@@ -12,7 +12,10 @@ WORKDIR /sidecar
 COPY sidecar/go.mod sidecar/go.sum* ./
 RUN go mod download
 COPY sidecar/ .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o kratis-connector main.go
+# The build context has no .git, so the commit is stamped explicitly (CI passes it) alongside the
+# build time. Both are reported as the connectorVersion.
+ARG GIT_COMMIT=
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X kratis-connector/rpc.buildCommit=${GIT_COMMIT} -X kratis-connector/rpc.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o kratis-connector .
 
 # Stage 2: GraalVM native image build
 # GraalVM CE 25.0.2 on Oracle Linux 9.

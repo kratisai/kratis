@@ -191,9 +191,11 @@ func (c *Client) ExecuteCheckout(params CheckoutParams, _ interface{}) {
 		c.currentExecutionID = params.ExecutionID
 	}
 	// Record the checked-out branch as the diff base for later workspace
-	// change notifications, which carry no explicit branch.
+	// change notifications. Persist it so a restarted connector keeps the base.
 	c.baseBranch = strings.TrimSpace(params.Branch)
+	checkedOutBranch := c.baseBranch
 	c.mu.Unlock()
+	c.persistBaseBranch(checkedOutBranch)
 
 	cmdEnv := os.Environ()
 
@@ -492,23 +494,37 @@ func mergeBaseWithHead(workspace string, ref string) (string, error) {
 }
 
 // resolveDiffBase uses the merge-base of origin/<branch> and HEAD, or the root commit
-// when the origin remote or branch is absent so unpublished commits stay in the diff.
-// An empty branch takes the same root-commit fallback instead of erroring, so
-// workspace change notifications on an origin-remote workspace can still emit.
+// when the origin remote is absent so unpublished commits stay in the diff.
 func resolveDiffBase(workspace, baseBranch string) (string, error) {
 	if !hasOriginRemote(workspace) {
 		return rootCommit(workspace)
 	}
 	branch := strings.TrimSpace(baseBranch)
 	if branch == "" {
-		return rootCommit(workspace)
+		branch = originDefaultBranch(workspace)
+		if branch == "" {
+			return rootCommit(workspace)
+		}
 	}
-	checkRemote := exec.Command("git", "rev-parse", "--verify", "origin/"+branch) //nolint:gosec
+	ref := "origin/" + branch
+	checkRemote := exec.Command("git", "rev-parse", "--verify", ref) //nolint:gosec
 	checkRemote.Dir = workspace
 	if checkRemote.Run() == nil {
-		return mergeBaseWithHead(workspace, "origin/"+branch)
+		return mergeBaseWithHead(workspace, ref)
 	}
 	return rootCommit(workspace)
+}
+
+// originDefaultBranch returns the branch that git's remote-tracking origin/HEAD
+// points at (for example "main"), or "" when the symref is not set.
+func originDefaultBranch(workspace string) string {
+	cmd := exec.Command("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD") //nolint:gosec
+	cmd.Dir = workspace
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
 }
 
 func hasOriginRemote(workspace string) bool {
@@ -882,11 +898,11 @@ func (c *Client) flushDiffCheck() {
 func (c *Client) pushDiffManifest() {
 	c.mu.Lock()
 	execID := c.currentExecutionID
-	baseBranch := c.baseBranch
 	c.mu.Unlock()
 	if execID == "" {
 		return
 	}
+	baseBranch := c.diffBaseBranch()
 
 	summary, manifest, sections, err := c.buildDiffSections(baseBranch)
 	if err != nil {
@@ -1193,11 +1209,11 @@ func (c *Client) diffPushLoop() {
 func (c *Client) pushDiffManifestSync() {
 	c.mu.Lock()
 	execID := c.currentExecutionID
-	baseBranch := c.baseBranch
 	c.mu.Unlock()
 	if execID == "" {
 		return
 	}
+	baseBranch := c.diffBaseBranch()
 
 	_, manifest, sections, err := c.buildDiffSections(baseBranch)
 	if err != nil {

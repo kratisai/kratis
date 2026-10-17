@@ -24,9 +24,16 @@ It does not show changes that merged into the target after this branch diverged.
 
 `env.checkout` always clones with an `origin` remote.
 Provisioning runs `git init` with no remote.
-The sidecar treats a missing `origin` as a new repository.
-`resolveDiffBase` then returns `git rev-list --max-parents=0 HEAD`.
-Never treat a repository with a remote as new.
+The connector persists the checked-out branch to `<credentials-dir>/diff_base_branch`
+(beside `acp_session_id`), so it survives a suspend snapshot and is never in the
+working tree; the diff base is the in-memory branch, then that persisted value.
+A resume never re-runs `env.checkout`, so without it the branch would be unknown.
+
+The sidecar treats a missing `origin` as a new repository, diffing against the root
+commit (`git rev-list --max-parents=0 HEAD`). A workspace with an `origin` remote is
+never treated as new: when no branch is recorded the base is git's own `origin/HEAD`
+(its default branch), falling back to the root commit only when the remote has no
+resolvable default branch (a new repository given a remote but never pushed).
 If the target branch is missing, `resolveBaseRef` returns an error.
 `env.git_diff_summary` and the diff push never fall back to `HEAD` or `HEAD~1`.
 

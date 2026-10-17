@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,10 +36,18 @@ public class GitFixtureContainer extends GenericContainer<GitFixtureContainer> {
     private static final String SSH_USER = "gituser";
     private static final String FIXTURE_FILE_CONTENT = "Hello over HTTPS";
 
+    /** Non-default branch that carries one commit beyond {@code main}. */
+    public static final String DEVELOP_BRANCH = "develop";
+
+    /** Files committed upstream; none may appear in a diff of sandbox-local changes. */
+    public static final List<String> UPSTREAM_FILES = List.of("hello.txt", "second.txt", "third.txt", "develop.txt");
+
     private final String token;
     private Path sourceRepoDir;
     private Path fixtureDir;
     private String expectedCommitHash;
+    private String rootCommitHash;
+    private String developCommitHash;
     private String sshPrivateKey;
     private String gitHttpUrl;
     private String gitSshUrl;
@@ -92,6 +101,16 @@ public class GitFixtureContainer extends GenericContainer<GitFixtureContainer> {
         return expectedCommitHash;
     }
 
+    /** First commit of the fixture repository (shared by every branch). */
+    public String getRootCommitHash() {
+        return rootCommitHash;
+    }
+
+    /** Tip of {@link #DEVELOP_BRANCH}. */
+    public String getDevelopCommitHash() {
+        return developCommitHash;
+    }
+
     /** Generated ed25519 private key that authenticates the SSH user. */
     public String getSshPrivateKey() {
         return sshPrivateKey;
@@ -101,18 +120,18 @@ public class GitFixtureContainer extends GenericContainer<GitFixtureContainer> {
         sourceRepoDir = Files.createTempDirectory("kratis-git-source-");
         runCommand(sourceRepoDir, "git", "init", "-b", "main");
         Files.writeString(sourceRepoDir.resolve("hello.txt"), FIXTURE_FILE_CONTENT);
-        runCommand(sourceRepoDir, "git", "add", ".");
-        runCommand(
-                sourceRepoDir,
-                "git",
-                "-c",
-                "user.name=Test",
-                "-c",
-                "user.email=test@example.com",
-                "commit",
-                "-m",
-                "Initial");
-        expectedCommitHash = runCommand(sourceRepoDir, "git", "rev-parse", "HEAD");
+        rootCommitHash = commitAll("Initial");
+        // Several upstream commits so the root commit differs from every branch tip: a diff
+        // base wrongly resolved to the root commit then lists these files as changed.
+        Files.writeString(sourceRepoDir.resolve("second.txt"), "second");
+        commitAll("Second");
+        Files.writeString(sourceRepoDir.resolve("third.txt"), "third");
+        expectedCommitHash = commitAll("Third");
+
+        runCommand(sourceRepoDir, "git", "checkout", "-b", DEVELOP_BRANCH);
+        Files.writeString(sourceRepoDir.resolve("develop.txt"), "develop");
+        developCommitHash = commitAll("Develop");
+        runCommand(sourceRepoDir, "git", "checkout", "main");
 
         fixtureDir = Files.createTempDirectory("kratis-git-fixture-");
         runCommand(fixtureDir, "git", "clone", "--bare", sourceRepoDir.toString(), "repo.git");
@@ -147,6 +166,21 @@ public class GitFixtureContainer extends GenericContainer<GitFixtureContainer> {
             throw new IllegalStateException("Container command failed: " + String.join(" ", command) + "\n"
                     + result.getStdout() + result.getStderr());
         }
+    }
+
+    private String commitAll(String message) throws IOException, InterruptedException {
+        runCommand(sourceRepoDir, "git", "add", ".");
+        runCommand(
+                sourceRepoDir,
+                "git",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                message);
+        return runCommand(sourceRepoDir, "git", "rev-parse", "HEAD");
     }
 
     private static String runCommand(Path dir, String... args) throws IOException, InterruptedException {

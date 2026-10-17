@@ -16,6 +16,7 @@ import com.kratisai.controlplane.service.PendingHitlRegistry;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -29,6 +30,8 @@ public class EnvironmentRegisterRpcHandler
 
     private static final Logger logger = LoggerFactory.getLogger(EnvironmentRegisterRpcHandler.class);
     private static final int SUPPORTED_PROTOCOL_VERSION = 1;
+    private static final int MAX_LOGGED_VERSION_LENGTH = 64;
+    private static final Pattern CONTROL_CHARACTERS = Pattern.compile("\\p{Cntrl}");
 
     private final ExecutionEnvironmentRepository executionEnvironmentRepository;
     private final EnvironmentSessionRegistry sessionRegistry;
@@ -85,14 +88,18 @@ public class EnvironmentRegisterRpcHandler
                     Boolean.TRUE.equals(params.hasActiveAgent()),
                     params.lastEventSequence() != null ? params.lastEventSequence() : 0L,
                     params.pendingHitlIds() != null ? params.pendingHitlIds() : List.of());
-            return Flux.just(handleReconnect(sessionId, env, reconnectState));
+            return Flux.just(handleReconnect(sessionId, env, reconnectState, params.connectorVersion()));
         }
-        return Flux.just(handleInitialRegistration(sessionId, env));
+        return Flux.just(handleInitialRegistration(sessionId, env, params.connectorVersion()));
     }
 
     private EnvironmentResponsePayload handleReconnect(
-            String sessionId, ExecutionEnvironment env, ReconnectState reconnectState) {
-        logger.info("Environment {} reconnecting with session {}", env.getId(), sessionId);
+            String sessionId, ExecutionEnvironment env, ReconnectState reconnectState, String connectorVersion) {
+        logger.info(
+                "Environment {} reconnecting with session {} (connector version {})",
+                env.getId(),
+                sessionId,
+                loggable(connectorVersion));
 
         String oldSessionId = sessionRegistry.replaceSessionForEnvironment(sessionId, env.getId());
         if (oldSessionId != null) {
@@ -116,7 +123,13 @@ public class EnvironmentRegisterRpcHandler
         return EnvironmentRegisterResult.reconnected(env.getId().toString());
     }
 
-    private EnvironmentResponsePayload handleInitialRegistration(String sessionId, ExecutionEnvironment env) {
+    private EnvironmentResponsePayload handleInitialRegistration(
+            String sessionId, ExecutionEnvironment env, String connectorVersion) {
+        logger.info(
+                "Environment {} registered with session {} (connector version {})",
+                env.getId(),
+                sessionId,
+                loggable(connectorVersion));
         env.setStatus(EnvironmentStatus.CONNECTED);
         env.setLastHeartbeat(Instant.now());
         executionEnvironmentRepository.save(env);
@@ -128,5 +141,14 @@ public class EnvironmentRegisterRpcHandler
         eventPublisher.publishEvent(new EnvironmentRegisteredEvent(env.getId()));
 
         return new EnvironmentRegisterResult(env.getId().toString());
+    }
+
+    // The version is connector-supplied: strip control characters and bound the length before logging.
+    private static String loggable(String connectorVersion) {
+        if (connectorVersion == null || connectorVersion.isBlank()) {
+            return "unknown";
+        }
+        String cleaned = CONTROL_CHARACTERS.matcher(connectorVersion.trim()).replaceAll("?");
+        return cleaned.length() > MAX_LOGGED_VERSION_LENGTH ? cleaned.substring(0, MAX_LOGGED_VERSION_LENGTH) : cleaned;
     }
 }

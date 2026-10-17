@@ -92,7 +92,7 @@ jobs:
       - name: Build Go Sidecar Binary
         run: |
           cd ../sidecar
-          CGO_ENABLED=0 go build -v -o kratis-connector main.go
+          CGO_ENABLED=0 ./build.sh
 
       - name: Setup Docker Sandbox Image
         run: |

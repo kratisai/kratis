@@ -275,6 +275,7 @@ public abstract class AbstractAgentExecutionRealTest {
     protected WireMockLlmServer wireMockLlmServer;
     private volatile boolean executionFailedEarly;
     private final AtomicInteger hitlRequestCount = new AtomicInteger(0);
+    private final AtomicInteger acpInitializedCount = new AtomicInteger(0);
     private final AtomicReference<ClientPayload.ExecutionAcpInitializedResult> acpInitialized = new AtomicReference<>();
     private final Set<ActivityType> receivedActivityTypes = ConcurrentHashMap.newKeySet();
     private final AtomicInteger diffChangedEventCount = new AtomicInteger(0);
@@ -300,6 +301,34 @@ public abstract class AbstractAgentExecutionRealTest {
      * Returns the {@link AgentHarness} to test.
      */
     protected abstract AgentHarness getHarness();
+
+    protected String getRepositoryUrl() {
+        return "file://" + DUMMY_REPO_CONTAINER_PATH;
+    }
+
+    protected String getRepositoryBranch() {
+        return "main";
+    }
+
+    protected RepoCredential createRepositoryCredential() {
+        return null;
+    }
+
+    protected UUID spawnedEnvironmentId() {
+        return spawnedEnvId;
+    }
+
+    protected MockMvc mockMvc() {
+        return mockMvc;
+    }
+
+    protected String authToken() {
+        return authToken;
+    }
+
+    protected int acpInitializedCount() {
+        return acpInitializedCount.get();
+    }
 
     /**
      * Expected {@code agentInfo.name} from the ACP initialize response; {@code null} skips the
@@ -503,6 +532,7 @@ public abstract class AbstractAgentExecutionRealTest {
         databaseCleaner.cleanAll();
         executionFailedEarly = false;
         hitlRequestCount.set(0);
+        acpInitializedCount.set(0);
         acpInitialized.set(null);
         receivedActivityTypes.clear();
         diffChangedEventCount.set(0);
@@ -548,8 +578,9 @@ public abstract class AbstractAgentExecutionRealTest {
         repository = new Repository();
         repository.setTeam(testContext.team());
         repository.setName("e2e-repo");
-        repository.setUrl("file://" + DUMMY_REPO_CONTAINER_PATH);
-        repository.setBranch("main");
+        repository.setUrl(getRepositoryUrl());
+        repository.setBranch(getRepositoryBranch());
+        repository.setCredential(createRepositoryCredential());
         repository = repositoryRepository.save(repository);
 
         // Connect a UI client WebSocket subscriber with typed rules
@@ -576,6 +607,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 })
                 .whenType(ClientPayload.ExecutionAcpInitializedResult.class, (wsSession, msg) -> {
                     acpInitialized.set(msg);
+                    acpInitializedCount.incrementAndGet();
                     logger.info(
                             "[execution][acp_initialized] sessionId={} agentName={} agentVersion={}",
                             msg.sessionId(),
@@ -847,7 +879,7 @@ public abstract class AbstractAgentExecutionRealTest {
             extractAndLogContainerLogs("kratis-sandbox-" + spawnedEnvId);
 
             try {
-                localDockerSandboxProvider.terminateSandbox(spawnedEnvId);
+                localDockerSandboxProvider.destroy(spawnedEnvId);
             } catch (Exception e) {
                 // Ignore
             }

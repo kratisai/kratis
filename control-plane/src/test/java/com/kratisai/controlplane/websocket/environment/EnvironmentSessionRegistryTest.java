@@ -144,6 +144,25 @@ class EnvironmentSessionRegistryTest {
     }
 
     @Test
+    void removeSession_supersededSession_keepsLiveMappingAndPublishesNoDisconnect() {
+        WebSocketSession oldSession = mockSession("ws-old");
+        WebSocketSession newSession = mockSession("ws-new");
+        UUID envId = UUID.randomUUID();
+        registry.registerEnvironmentSession(oldSession, envId);
+        registry.registerEnvironmentSession(newSession, envId);
+
+        registry.removeSession("ws-old");
+
+        assertThat(registry.getSessionForEnvironment(envId)).isSameAs(newSession);
+        verify(eventPublisher, never()).publishEvent(any(EnvironmentDisconnectedEvent.class));
+
+        registry.removeSession("ws-new");
+
+        assertThat(registry.getSessionForEnvironment(envId)).isNull();
+        verify(eventPublisher).publishEvent(any(EnvironmentDisconnectedEvent.class));
+    }
+
+    @Test
     void removeSession_pendingSession_shouldNotPublishEvent() {
         WebSocketSession session = mockSession();
 
@@ -306,9 +325,13 @@ class EnvironmentSessionRegistryTest {
     }
 
     private WebSocketSession mockSession() {
+        return mockSession("ws-1");
+    }
+
+    private WebSocketSession mockSession(String id) {
         WebSocketSession session =
                 mock(WebSocketSession.class, Mockito.withSettings().strictness(Strictness.LENIENT));
-        when(session.getId()).thenReturn("ws-1");
+        when(session.getId()).thenReturn(id);
         when(session.isOpen()).thenReturn(true);
         return session;
     }

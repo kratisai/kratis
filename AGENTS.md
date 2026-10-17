@@ -47,7 +47,7 @@ The build is the formatter: Spotless (Palantir Java Format), Checkstyle, PMD, ES
 - Java: import types; do not use fully-qualified names in code (except JVM descriptor strings). Constructor injection. Record compact constructors (`Objects.requireNonNull`) for DTO/RPC validation. Add a `RuntimeHintsRegistrar` only when a third-party library needs reflection. Details: [`docs/skills/control-plane.md`](docs/skills/control-plane.md).
 - Liquibase: never edit historical changelogs.
 - WebSocket: publish domain events inside `@Transactional` methods. `ClientRealtimeEventListeners` delivers AFTER_COMMIT. Never `fallbackExecution = true`. Never inject `WebSocketDispatch` from business services. Only `WebSocketDispatch` may call `session.sendMessage`. Handlers never touch `WebSocketSession` or `WebSocketDispatch`. Details: [`docs/skills/websocket-method.md`](docs/skills/websocket-method.md) and [`docs/knowledge/cache-invalidation-strategy.md`](docs/knowledge/cache-invalidation-strategy.md).
-- Sidecar: sandbox provisioning copies the host binary. After any `sidecar/` change, run `cd sidecar && go build -o kratis-connector main.go` before you launch an execution.
+- Sidecar: sandbox provisioning copies the host binary. After any `sidecar/` change, run `cd sidecar && ./build.sh` before you launch an execution.
 
 
 ## Core Operating Principles
