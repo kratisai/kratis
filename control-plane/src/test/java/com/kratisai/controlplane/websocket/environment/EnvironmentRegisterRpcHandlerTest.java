@@ -28,6 +28,8 @@ import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
 import com.kratisai.controlplane.service.PendingHitlRegistry;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -167,6 +169,7 @@ class EnvironmentRegisterRpcHandlerTest {
         verify(executionEnvironmentRepository).save(env);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
         assertThat(env.getLastHeartbeat()).isNotNull();
+        assertThat(env.getConnectedAt()).isNotNull();
 
         verify(sessionRegistry).registerEnvironmentSession(any(String.class), eq(envId));
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
@@ -224,9 +227,30 @@ class EnvironmentRegisterRpcHandlerTest {
         verify(executionEnvironmentRepository).save(env);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
         assertThat(env.getLastHeartbeat()).isNotNull();
+        assertThat(env.getConnectedAt()).isNotNull();
 
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
         verify(eventPublisher, never()).publishEvent(any(EnvironmentRegisteredEvent.class));
+    }
+
+    @Test
+    void handle_withReconnect_shouldUpdateStaleConnectedAt() {
+        ExecutionEnvironment env = createEnvironment();
+        Instant staleConnectedAt = Instant.now().minus(Duration.ofHours(2));
+        env.setConnectedAt(staleConnectedAt);
+        when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
+        when(sessionRegistry.replaceSessionForEnvironment(any(String.class), eq(envId)))
+                .thenReturn("ws-old");
+        when(pendingHitlRegistry.rebindBySession(any(), any(String.class))).thenReturn(0);
+
+        EnvironmentRpcPayload.Register params =
+                new EnvironmentRpcPayload.Register(authToken, true, null, false, 0L, null, 1, "0.1.0");
+        JsonRpcInboundRequest request =
+                new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
+
+        handler.handle("ws-new", request, params).blockLast();
+
+        assertThat(env.getConnectedAt()).isAfter(staleConnectedAt);
     }
 
     @Test

@@ -112,6 +112,7 @@ public class EnvironmentRegisterRpcHandler
         }
 
         env.setStatus(EnvironmentStatus.CONNECTED);
+        env.setConnectedAt(Instant.now());
         if (reconnectState.activeAcpSessionId() != null) {
             logger.debug("Reconnect with active ACP session: {}", reconnectState.activeAcpSessionId());
         }
@@ -131,6 +132,7 @@ public class EnvironmentRegisterRpcHandler
                 sessionId,
                 loggable(connectorVersion));
         env.setStatus(EnvironmentStatus.CONNECTED);
+        env.setConnectedAt(Instant.now());
         env.setLastHeartbeat(Instant.now());
         executionEnvironmentRepository.save(env);
 

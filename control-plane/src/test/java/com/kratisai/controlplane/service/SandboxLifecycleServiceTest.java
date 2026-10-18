@@ -222,6 +222,56 @@ class SandboxLifecycleServiceTest {
     }
 
     @Test
+    void sweep_skipsResumedSandboxWithRecentConnectionActivity() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
+        // Resumed sandbox with fresh connection activity (1 minute ago) despite older historical executions
+        when(environmentRepository.findConnectedEnvironmentsWithLastActivity())
+                .thenReturn(List.<Object[]>of(new Object[] {env, Instant.now().minus(Duration.ofMinutes(1)), 0L}));
+
+        lifecycleService.sweep();
+
+        verify(executionEnvironmentService, never()).sleepEnvironmentInternal(any());
+    }
+
+    @Test
+    void sweep_suspendsResumedSandboxWhenIdleTimeoutExceededAfterReconnect() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
+        // Resumed sandbox where connection activity was 2 hours ago and no further activity occurred
+        when(environmentRepository.findConnectedEnvironmentsWithLastActivity())
+                .thenReturn(List.<Object[]>of(new Object[] {env, Instant.now().minus(Duration.ofHours(2)), 0L}));
+        when(executionEnvironmentService.isSandboxRunning(env)).thenReturn(true);
+
+        lifecycleService.sweep();
+
+        verify(executionEnvironmentService).sleepEnvironmentInternal(env);
+    }
+
+    @Test
+    void sweep_skipsConnectedSandboxWithNoExecutionsWhenConnectedRecently() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
+        // Connected sandbox with no executions whose lastActivity matches recent connectedAt
+        when(environmentRepository.findConnectedEnvironmentsWithLastActivity())
+                .thenReturn(List.<Object[]>of(new Object[] {env, Instant.now().minus(Duration.ofMinutes(5)), 0L}));
+
+        lifecycleService.sweep();
+
+        verify(executionEnvironmentService, never()).sleepEnvironmentInternal(any());
+    }
+
+    @Test
+    void sweep_suspendsConnectedSandboxWithNoExecutionsAfterIdleTimeout() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
+        // Connected sandbox with no executions whose lastActivity matches old connectedAt
+        when(environmentRepository.findConnectedEnvironmentsWithLastActivity())
+                .thenReturn(List.<Object[]>of(new Object[] {env, Instant.now().minus(Duration.ofHours(2)), 0L}));
+        when(executionEnvironmentService.isSandboxRunning(env)).thenReturn(true);
+
+        lifecycleService.sweep();
+
+        verify(executionEnvironmentService).sleepEnvironmentInternal(env);
+    }
+
+    @Test
     void sweep_skipsNonSandboxEnvironment() {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
         env.setType(ExecutionEnvironmentType.CONNECTOR);

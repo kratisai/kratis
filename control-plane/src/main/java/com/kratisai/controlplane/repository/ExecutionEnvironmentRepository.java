@@ -40,11 +40,11 @@ public interface ExecutionEnvironmentRepository extends JpaRepository<ExecutionE
 
     @Query("""
             SELECT e,
-                   MAX(CASE WHEN a.createdAt IS NOT NULL THEN a.createdAt ELSE x.startedAt END),
+                   GREATEST(MAX(CASE WHEN a.createdAt IS NOT NULL THEN a.createdAt ELSE x.startedAt END), e.connectedAt),
                    MAX(CASE WHEN x.status = com.kratisai.controlplane.model.SandboxExecutionStatus.RUNNING
                             THEN 1 ELSE 0 END)
             FROM ExecutionEnvironment e
-            JOIN SandboxExecution x ON x.environment = e
+            LEFT JOIN SandboxExecution x ON x.environment = e
             LEFT JOIN SandboxExecutionActivity a ON a.executionId = x.id
             WHERE e.status = com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED
             GROUP BY e

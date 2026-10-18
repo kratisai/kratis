@@ -50,6 +50,9 @@ public class ExecutionEnvironment {
     @Column(name = "last_heartbeat")
     private Instant lastHeartbeat;
 
+    @Column(name = "connected_at")
+    private Instant connectedAt;
+
     @PrePersist
     protected void onCreate() {
         if (status == null) {
@@ -140,5 +143,13 @@ public class ExecutionEnvironment {
 
     public void setSuspendedAt(Instant suspendedAt) {
         this.suspendedAt = suspendedAt;
+    }
+
+    public Instant getConnectedAt() {
+        return connectedAt;
+    }
+
+    public void setConnectedAt(Instant connectedAt) {
+        this.connectedAt = connectedAt;
     }
 }
