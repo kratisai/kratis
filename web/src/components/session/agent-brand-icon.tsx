@@ -64,7 +64,7 @@ export function AgentBrandIcon({ className, harness }: AgentBrandIconProps) {
     return <SiQwen aria-label="Qwen" className={cn('text-[#6950EF]', className)} />
   }
   if (normalized.includes('KILO')) {
-    return <KiloLogo aria-label="Kilo" className={cn('text-[#84cc16]', className)} />
+    return <KiloLogo aria-label="Kilo" className={cn('text-[#fd0]', className)} />
   }
 
   return <Bot aria-label="Agent" className={cn('text-muted-foreground', className)} />

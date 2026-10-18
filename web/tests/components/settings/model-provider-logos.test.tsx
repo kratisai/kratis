@@ -23,6 +23,13 @@ describe('PROVIDER_BRAND', () => {
   it('covers every provider type', () => {
     expect(Object.keys(PROVIDER_BRAND).sort()).toEqual([...PROVIDER_TYPES].sort())
   })
+
+  it('uses the correct brand classes for KILO', () => {
+    expect(PROVIDER_BRAND.KILO).toEqual({
+      bgClass: 'bg-[#fd0]/10',
+      iconClass: 'text-[#fd0]',
+    })
+  })
 })
 
 describe('ModelProviderIcon', () => {
