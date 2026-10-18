@@ -12,7 +12,7 @@ export const PROVIDER_BRAND: Record<ProviderType, { bgClass: string; iconClass: 
   DEEPSEEK: { bgClass: 'bg-[#4d6bfe]/10', iconClass: 'text-[#4d6bfe]' },
   GOOGLE: { bgClass: 'bg-[#4285f4]/10', iconClass: 'text-[#4285f4]' },
   GROQ: { bgClass: 'bg-[#f55036]/10', iconClass: 'text-[#f55036]' },
-  KILO: { bgClass: 'bg-[#84cc16]/10', iconClass: 'text-[#84cc16]' },
+  KILO: { bgClass: 'bg-[#fd0]/10', iconClass: 'text-[#fd0]' },
   MISTRAL: { bgClass: 'bg-[#fa5200]/10', iconClass: 'text-[#fa5200]' },
   OLLAMA: { bgClass: 'bg-zinc-500/10', iconClass: 'text-zinc-700 dark:text-zinc-300' },
   OPENAI: { bgClass: 'bg-[#10a37f]/10', iconClass: 'text-[#10a37f]' },

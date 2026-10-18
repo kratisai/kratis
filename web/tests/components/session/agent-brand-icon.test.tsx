@@ -50,9 +50,11 @@ describe('AgentBrandIcon', () => {
     expect(screen.getByLabelText('Qwen')).toBeInTheDocument()
   })
 
-  it('renders the Kilo logo for KILO', () => {
+  it('renders the Kilo logo for KILO with brand color', () => {
     render(<AgentBrandIcon harness="KILO" />)
-    expect(screen.getByLabelText('Kilo')).toBeInTheDocument()
+    const icon = screen.getByLabelText('Kilo')
+    expect(icon).toBeInTheDocument()
+    expect(icon).toHaveClass('text-[#fd0]')
   })
 
   it('renders fallback agent icon when harness is undefined or unknown', () => {
