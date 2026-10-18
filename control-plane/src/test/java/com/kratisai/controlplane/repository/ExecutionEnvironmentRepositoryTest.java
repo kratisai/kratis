@@ -19,6 +19,7 @@ import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -149,5 +150,107 @@ class ExecutionEnvironmentRepositoryTest {
         Instant fifthAct = (Instant) results.get(4)[1];
         assertThat(fifthEnv.getId()).isEqualTo(envNoExec.getId());
         assertThat(fifthAct).isNull();
+    }
+
+    @Test
+    void findConnectedEnvironmentsWithLastActivity_includesConnectedWithoutExecutionsUsingConnectedAt() {
+        ExecutionEnvironment envNoExec = createEnvironment(team, "Connected No Exec");
+        Instant connectedAt = Instant.now().minus(5, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.MILLIS);
+        envNoExec.setConnectedAt(connectedAt);
+        executionEnvironmentRepository.save(envNoExec);
+
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Object[]> results = executionEnvironmentRepository.findConnectedEnvironmentsWithLastActivity();
+
+        Object[] envRow = results.stream()
+                .filter(r -> ((ExecutionEnvironment) r[0]).getId().equals(envNoExec.getId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat((Instant) envRow[1]).isEqualTo(connectedAt);
+        assertThat(((Number) envRow[2]).longValue()).isZero();
+    }
+
+    @Test
+    void findConnectedEnvironmentsWithLastActivity_usesConnectedAtWhenMoreRecentThanStaleExecutions() {
+        ExecutionEnvironment envResumed = createEnvironment(team, "Resumed Env");
+        Instant staleExecTime = Instant.now().minus(2, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MILLIS);
+        Instant recentConnectedAt = Instant.now().minus(2, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.MILLIS);
+
+        SandboxExecution oldExec = createExecution(envResumed);
+        oldExec.setStatus(SandboxExecutionStatus.COMPLETED);
+        oldExec.setStartedAt(staleExecTime);
+        sandboxExecutionRepository.save(oldExec);
+        createActivity(oldExec, staleExecTime);
+
+        envResumed.setConnectedAt(recentConnectedAt);
+        executionEnvironmentRepository.save(envResumed);
+
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Object[]> results = executionEnvironmentRepository.findConnectedEnvironmentsWithLastActivity();
+
+        Object[] envRow = results.stream()
+                .filter(r -> ((ExecutionEnvironment) r[0]).getId().equals(envResumed.getId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat((Instant) envRow[1]).isEqualTo(recentConnectedAt);
+        assertThat(((Number) envRow[2]).longValue()).isZero();
+    }
+
+    @Test
+    void findConnectedEnvironmentsWithLastActivity_usesExecutionActivityWhenMoreRecentThanConnectedAt() {
+        ExecutionEnvironment envActive = createEnvironment(team, "Active Env");
+        Instant olderConnectedAt = Instant.now().minus(10, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.MILLIS);
+        Instant recentActivityTime = Instant.now().minus(1, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.MILLIS);
+
+        SandboxExecution exec = createExecution(envActive);
+        exec.setStatus(SandboxExecutionStatus.RUNNING);
+        exec.setStartedAt(olderConnectedAt);
+        sandboxExecutionRepository.save(exec);
+        createActivity(exec, recentActivityTime);
+
+        envActive.setConnectedAt(olderConnectedAt);
+        executionEnvironmentRepository.save(envActive);
+
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Object[]> results = executionEnvironmentRepository.findConnectedEnvironmentsWithLastActivity();
+
+        Object[] envRow = results.stream()
+                .filter(r -> ((ExecutionEnvironment) r[0]).getId().equals(envActive.getId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat((Instant) envRow[1]).isEqualTo(recentActivityTime);
+        assertThat(((Number) envRow[2]).longValue()).isEqualTo(1L);
+    }
+
+    @Test
+    void findConnectedEnvironmentsWithLastActivity_excludesDisconnectedAndSleepingEnvironments() {
+        ExecutionEnvironment disconnectedEnv = createEnvironment(team, "Disconnected Env");
+        disconnectedEnv.setStatus(EnvironmentStatus.DISCONNECTED);
+        disconnectedEnv.setConnectedAt(Instant.now().minus(5, ChronoUnit.MINUTES));
+        executionEnvironmentRepository.save(disconnectedEnv);
+
+        ExecutionEnvironment sleepingEnv = createEnvironment(team, "Sleeping Env");
+        sleepingEnv.setStatus(EnvironmentStatus.SLEEPING);
+        sleepingEnv.setConnectedAt(Instant.now().minus(5, ChronoUnit.MINUTES));
+        executionEnvironmentRepository.save(sleepingEnv);
+
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Object[]> results = executionEnvironmentRepository.findConnectedEnvironmentsWithLastActivity();
+
+        List<UUID> returnedIds =
+                results.stream().map(r -> ((ExecutionEnvironment) r[0]).getId()).toList();
+
+        assertThat(returnedIds).doesNotContain(disconnectedEnv.getId(), sleepingEnv.getId());
     }
 }
