@@ -1,7 +1,10 @@
 package com.kratisai.controlplane.repository;
 
+import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
+import com.kratisai.controlplane.model.ExecutionEnvironmentType;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -12,6 +15,10 @@ import org.springframework.data.repository.query.Param;
 public interface ExecutionEnvironmentRepository extends JpaRepository<ExecutionEnvironment, UUID> {
 
     List<ExecutionEnvironment> findByTeamId(UUID teamId);
+
+    /** Environments the control plane believes hold recoverable sandbox resources. */
+    List<ExecutionEnvironment> findByTypeAndStatusIn(
+            ExecutionEnvironmentType type, Collection<EnvironmentStatus> statuses);
 
     @Query("""
             SELECT e, MAX(a.createdAt)

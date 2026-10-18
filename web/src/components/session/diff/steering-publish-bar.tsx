@@ -49,9 +49,9 @@ export function SteeringPublishBar({
     return null
   }
 
-  // Steering and publishing both need a live environment, so the bar is hidden
-  // while the sandbox is asleep; resume is offered from the execution stage view.
-  if (environmentStatus === 'SLEEPING') {
+  // Steering and publishing both need a live sandbox, so the bar is hidden unless the environment
+  // is awake; a sleeping, connecting, disconnected or terminated environment cannot be steered.
+  if (environmentStatus && environmentStatus !== 'CONNECTED') {
     return null
   }
 

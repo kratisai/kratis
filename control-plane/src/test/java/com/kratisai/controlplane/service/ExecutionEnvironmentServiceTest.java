@@ -7,10 +7,13 @@ import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.ExecutionEnvironmentDto;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
+import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.model.event.EnvironmentDisconnectedEvent;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
+import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
@@ -285,6 +288,43 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
+    void handleStoppedContainer_settlesExecutionStrandedByTheDeadSandboxAsUnknown() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        SandboxExecution execution = createRunningExecution(env);
+        when(sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(eq(ENV_ID), any()))
+                .thenReturn(List.of(execution));
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
+        when(activityRepository.findByExecutionIdAndActionId(EXECUTION_ID, "execution-error"))
+                .thenReturn(Optional.empty());
+        when(activityRepository.nextSequence(EXECUTION_ID)).thenReturn(1L);
+
+        executionEnvironmentService.reconcileStoppedContainer(env);
+
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.DISCONNECTED);
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.UNKNOWN);
+        assertThat(execution.getCompletedAt()).isNotNull();
+        verify(eventPublisher).publishEvent(any(ExecutionStatusChangedEvent.class));
+    }
+
+    @Test
+    void failStrandedExecution_settlesExecutionLeftByDeadEnvironmentAsUnknown() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.DISCONNECTED);
+        SandboxExecution execution = createRunningExecution(env);
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
+        when(activityRepository.findByExecutionIdAndActionId(EXECUTION_ID, "execution-error"))
+                .thenReturn(Optional.empty());
+        when(activityRepository.nextSequence(EXECUTION_ID)).thenReturn(1L);
+
+        executionEnvironmentService.failStrandedExecution(EXECUTION_ID);
+
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.UNKNOWN);
+        assertThat(execution.getCompletedAt()).isNotNull();
+        verify(eventPublisher).publishEvent(any(SandboxExecutionCompleteEvent.class));
+        verify(eventPublisher).publishEvent(any(ExecutionStatusChangedEvent.class));
+    }
+
+    @Test
     void resumeEnvironment_delegatesReprovisioningAndMarksPendingConnect() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);
@@ -489,5 +529,53 @@ class ExecutionEnvironmentServiceTest {
         assertThat(env.getSuspendedAt()).isNull();
         verify(executionEnvironmentRepository).save(env);
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+    }
+
+    @Test
+    void reconcilePurgedEnvironment_marksTerminatedAndRecordsPurgedActivity() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setSuspendedAt(Instant.now());
+        SandboxExecution execution = createRunningExecution(env);
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
+                .thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
+        when(activityRepository.findByExecutionIdAndActionId(EXECUTION_ID, "sandbox-purged"))
+                .thenReturn(Optional.empty());
+        when(activityRepository.nextSequence(EXECUTION_ID)).thenReturn(1L);
+
+        executionEnvironmentService.reconcilePurgedEnvironment(env);
+
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
+        assertThat(env.getSuspendedAt()).isNull();
+        verify(executionEnvironmentRepository).save(env);
+        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+        verify(eventPublisher).publishEvent(any(ExecutionStatusChangedEvent.class));
+
+        ArgumentCaptor<SandboxExecutionActivity> activityCaptor =
+                ArgumentCaptor.forClass(SandboxExecutionActivity.class);
+        verify(activityRepository).save(activityCaptor.capture());
+        assertThat(activityCaptor.getValue().getDescription())
+                .isEqualTo("Sandbox resources found to have been unexpectedly purged");
+        assertThat(activityCaptor.getValue().getStatus()).isEqualTo(ActivityStatus.FAILED);
+        assertThat(activityCaptor.getValue().getActivityType()).isEqualTo(ActivityType.ERROR);
+    }
+
+    @Test
+    void reconcilePurgedEnvironment_withoutExecution_marksTerminatedOnly() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setSuspendedAt(Instant.now());
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
+                .thenReturn(Optional.empty());
+
+        executionEnvironmentService.reconcilePurgedEnvironment(env);
+
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
+        assertThat(env.getSuspendedAt()).isNull();
+        verify(executionEnvironmentRepository).save(env);
+        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+        verify(activityRepository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any(ExecutionStatusChangedEvent.class));
     }
 }

@@ -52,6 +52,7 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
   const environmentId = execution?.environmentId ?? null
   const environmentStatus = execution?.environmentStatus
   const isEnvironmentSleeping = environmentStatus === 'SLEEPING'
+  const isEnvironmentAwake = environmentStatus === undefined || environmentStatus === 'CONNECTED'
 
   const terminalOpen = useExecutionStore((state) => state.terminalOpen)
   const setTerminalOpen = useExecutionStore((state) => state.setTerminalOpen)
@@ -130,9 +131,8 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
   }
 
   const hasActiveExecution = execution?.status === 'RUNNING' || execution?.status === 'IDLE'
-  const canHalt =
-    hasActiveExecution || (Boolean(environmentId) && environmentStatus !== 'TERMINATED')
-  const canViewTerminal = hasActiveExecution && !isEnvironmentSleeping
+  const canHalt = Boolean(execution) && (isEnvironmentSleeping || isEnvironmentAwake)
+  const canViewTerminal = hasActiveExecution && isEnvironmentAwake
 
   return (
     <div

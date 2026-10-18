@@ -605,6 +605,42 @@ class LocalDockerSandboxProviderTest {
     }
 
     @Test
+    void testListSnapshotEnvIdsScopesToThisInstanceSnapshots() throws Exception {
+        UUID envA = UUID.randomUUID();
+        UUID envB = UUID.randomUUID();
+        when(mockProcessExecutor.execute(any(), any(), any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(0, (envA + "\nnot-a-uuid\n" + envB + "\n").getBytes()));
+
+        Set<UUID> snapshotIds = provider.listSnapshotEnvIds();
+        assertThat(snapshotIds).containsExactlyInAnyOrder(envA, envB);
+
+        // Removals/reads must stay scoped to this instance's snapshot tags, never every image.
+        verify(mockProcessExecutor)
+                .execute(
+                        eq(List.of(
+                                "docker",
+                                "images",
+                                "--filter",
+                                "reference=kratis-snapshot-*",
+                                "--filter",
+                                "label=kratis.instance.id=unit-test-instance",
+                                "--filter",
+                                "label=kratis.role=runner",
+                                "--format",
+                                "{{.Label \"kratis.sandbox.id\"}}")),
+                        any(),
+                        any());
+    }
+
+    @Test
+    void testListSnapshotEnvIdsFailureExitCode() throws Exception {
+        when(mockProcessExecutor.execute(any(), any(), any()))
+                .thenReturn(new ProcessExecutor.ProcessResult(1, "".getBytes()));
+
+        assertThat(provider.listSnapshotEnvIds()).isEmpty();
+    }
+
+    @Test
     void testSpawnSandboxWithCustomRegistryMirror() throws Exception {
         LocalDockerSandboxProvider customMirrorProvider = sandboxProvider(
                 mockProcessExecutor,
@@ -979,6 +1015,78 @@ class LocalDockerSandboxProviderTest {
                                 "{{.Name}}")),
                         any(),
                         any());
+    }
+
+    @Test
+    void testTerminateSandboxDisconnectsAttachedContainersBeforeNetworkRemove() throws Exception {
+        UUID envId = UUID.randomUUID();
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("network") && cmd.contains("inspect")) {
+                return new ProcessExecutor.ProcessResult(
+                        0, ("kratis-sandbox-" + envId + " kratis-dind-" + envId + "\n").getBytes());
+            }
+            if (cmd.contains("ps")) {
+                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        });
+
+        provider.terminateSandbox(envId);
+
+        InOrder inOrder = inOrder(mockProcessExecutor);
+        inOrder.verify(mockProcessExecutor)
+                .execute(
+                        eq(List.of(
+                                "docker",
+                                "network",
+                                "disconnect",
+                                "-f",
+                                "kratis-net-" + envId,
+                                "kratis-sandbox-" + envId)),
+                        any(),
+                        any());
+        inOrder.verify(mockProcessExecutor)
+                .execute(
+                        eq(List.of(
+                                "docker",
+                                "network",
+                                "disconnect",
+                                "-f",
+                                "kratis-net-" + envId,
+                                "kratis-dind-" + envId)),
+                        any(),
+                        any());
+        inOrder.verify(mockProcessExecutor)
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-" + envId)), any(), any());
+    }
+
+    @Test
+    void testPruneOrphanNetworksForceDisconnectsRacyAttachBeforeRemove() throws Exception {
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("network") && cmd.contains("ls")) {
+                return new ProcessExecutor.ProcessResult(0, "kratis-net-orphan\n".getBytes());
+            }
+            if (cmd.contains("network") && cmd.contains("inspect") && cmd.contains("{{len .Containers}}")) {
+                return new ProcessExecutor.ProcessResult(0, "0\n".getBytes());
+            }
+            if (cmd.contains("network") && cmd.contains("inspect")) {
+                return new ProcessExecutor.ProcessResult(0, "stale-container\n".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        });
+
+        provider.pruneOrphanNetworks(Duration.ZERO);
+        provider.pruneOrphanNetworks(Duration.ZERO);
+
+        verify(mockProcessExecutor, atLeastOnce())
+                .execute(
+                        eq(List.of("docker", "network", "disconnect", "-f", "kratis-net-orphan", "stale-container")),
+                        any(),
+                        any());
+        verify(mockProcessExecutor, atLeastOnce())
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-orphan")), any(), any());
     }
 
     @Test
