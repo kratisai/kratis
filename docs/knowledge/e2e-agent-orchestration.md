@@ -253,8 +253,12 @@ docker ps -a --filter "status=exited" -q | xargs -r docker rm -f
 docker ps -a --format '{{.ID}} {{.Image}} {{.Names}}' | grep -E 'kratis-e2e|kratis-runner' \
   | awk '{print $1}' | xargs -r docker rm -f
 
-# Suspend snapshot images left by interrupted suspend/resume runs
-docker images -q 'kratis-snapshot-*' | xargs -r docker rmi -f
+# Suspend snapshot images left by interrupted suspend/resume runs.
+# Keep every removal scoped to a single environment: `kratis-snapshot-<envId>:latest` is the only
+# durable copy of a sleeping sandbox's disk. Don't bulk-prune `kratis-snapshot-*` for environments
+# which may later be resumed. List candidates, drop only the ids with no live environment, by id:
+docker images --format '{{.Repository}}' 'kratis-snapshot-*'
+docker rmi -f kratis-snapshot-<envId>:latest
 
 # Volumes left by removed containers
 docker volume prune -f

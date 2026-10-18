@@ -39,6 +39,7 @@ public class ExecutionActivityPersistenceService {
     private static final Logger logger = LoggerFactory.getLogger(ExecutionActivityPersistenceService.class);
 
     private static final String ERROR_ACTION_ID = "execution-error";
+    private static final String PURGED_ACTION_ID = "sandbox-purged";
     private static final int MAX_ERROR_DESCRIPTION = 2000;
 
     private final SandboxExecutionActivityRepository repository;
@@ -84,8 +85,7 @@ public class ExecutionActivityPersistenceService {
         return repository
                 .findByExecutionIdAndActionId(executionId, actionId)
                 .map(this::detailOf)
-                .map(detail ->
-                        detail != null && detail.hitl() != null && detail.hitl().kind() == HitlKind.APPROVAL)
+                .map(detail -> detail.hitl() != null && detail.hitl().kind() == HitlKind.APPROVAL)
                 .orElse(false);
     }
 
@@ -278,6 +278,24 @@ public class ExecutionActivityPersistenceService {
                 description,
                 null,
                 ActivityStatus.COMPLETED,
+                null));
+    }
+
+    @Transactional
+    public void recordSandboxPurged(UUID executionId) {
+        SandboxExecution execution = executionRepository.findById(executionId).orElse(null);
+        if (execution == null) {
+            return;
+        }
+        String description = "Sandbox resources found to have been unexpectedly purged";
+        recordActivity(executionId, ActivityType.ERROR, description, PURGED_ACTION_ID, ActivityStatus.FAILED, null);
+        eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
+                execution.getChat().getTeam().getId(),
+                executionId,
+                ActivityType.ERROR,
+                description,
+                PURGED_ACTION_ID,
+                ActivityStatus.FAILED,
                 null));
     }
 

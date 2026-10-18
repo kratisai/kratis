@@ -48,6 +48,7 @@ The build is the formatter: Spotless (Palantir Java Format), Checkstyle, PMD, ES
 - Liquibase: never edit historical changelogs.
 - WebSocket: publish domain events inside `@Transactional` methods. `ClientRealtimeEventListeners` delivers AFTER_COMMIT. Never `fallbackExecution = true`. Never inject `WebSocketDispatch` from business services. Only `WebSocketDispatch` may call `session.sendMessage`. Handlers never touch `WebSocketSession` or `WebSocketDispatch`. Details: [`docs/skills/websocket-method.md`](docs/skills/websocket-method.md) and [`docs/knowledge/cache-invalidation-strategy.md`](docs/knowledge/cache-invalidation-strategy.md).
 - Sidecar: sandbox provisioning copies the host binary. After any `sidecar/` change, run `cd sidecar && ./build.sh` before you launch an execution.
+- Sandbox snapshots: `kratis-snapshot-<envId>:latest` is the only durable copy of a sleeping sandbox's disk. Scope every snapshot removal to a single environment id; don't bulk-prune `kratis-snapshot-*` which may need to later be resumed.
 
 
 ## Core Operating Principles

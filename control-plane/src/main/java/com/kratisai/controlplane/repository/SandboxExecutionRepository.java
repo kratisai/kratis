@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.repository;
 
+import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import jakarta.persistence.LockModeType;
@@ -22,6 +23,9 @@ public interface SandboxExecutionRepository extends JpaRepository<SandboxExecuti
             UUID environmentId, Collection<SandboxExecutionStatus> statuses);
 
     Optional<SandboxExecution> findFirstByEnvironmentIdOrderByStartedAtDesc(UUID environmentId);
+
+    List<SandboxExecution> findByStatusInAndEnvironment_StatusIn(
+            Collection<SandboxExecutionStatus> statuses, Collection<EnvironmentStatus> environmentStatuses);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select e from SandboxExecution e where e.id = :id")

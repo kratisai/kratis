@@ -45,6 +45,14 @@ public class ExecutionEnvironmentService {
 
     private static final Logger logger = LoggerFactory.getLogger(ExecutionEnvironmentService.class);
 
+    private static final String UNAVAILABLE_ENVIRONMENT_REASON =
+            "execution abandoned because its environment is no longer available";
+
+    private static final String PURGED_ENVIRONMENT_REASON = "Sandbox resources found to have been unexpectedly purged";
+
+    private static final String SLEEPING_ENVIRONMENT_REASON =
+            "execution force-terminated because its environment went to sleep";
+
     private final ExecutionEnvironmentRepository executionEnvironmentRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final TeamRepository teamRepository;
@@ -193,7 +201,7 @@ public class ExecutionEnvironmentService {
      * teardown failure can therefore never leave the execution stuck in RUNNING with no event for
      * the UI.
      */
-    private void terminateRunningExecution(UUID executionId, UUID envId) {
+    private void terminateRunningExecution(UUID executionId, UUID envId, String forcedReason) {
         terminationTemplate.executeWithoutResult(status -> {
             SandboxExecution execution =
                     sandboxExecutionRepository.findById(executionId).orElse(null);
@@ -212,15 +220,15 @@ public class ExecutionEnvironmentService {
                         logger.info("Execution {} terminated gracefully", executionId);
                     } else {
                         logger.warn("Execution {} did not complete within timeout, forcing termination", executionId);
-                        forceTerminateExecution(executionId);
+                        forceTerminateExecution(executionId, forcedReason);
                     }
                 } catch (Exception e) {
                     logger.error("Failed to gracefully terminate execution {}", executionId, e);
-                    forceTerminateExecution(executionId);
+                    forceTerminateExecution(executionId, forcedReason);
                 }
             } else {
                 logger.info("Environment {} is disconnected, force terminating execution {}", envId, executionId);
-                forceTerminateExecution(executionId);
+                forceTerminateExecution(executionId, forcedReason);
             }
         });
     }
@@ -250,7 +258,7 @@ public class ExecutionEnvironmentService {
         return false;
     }
 
-    private void forceTerminateExecution(UUID executionId) {
+    private void forceTerminateExecution(UUID executionId, String reason) {
         SandboxExecution execution =
                 sandboxExecutionRepository.findById(executionId).orElse(null);
         if (execution == null
@@ -258,11 +266,10 @@ public class ExecutionEnvironmentService {
                         && execution.getStatus() != SandboxExecutionStatus.IDLE)) {
             return;
         }
-        execution.setStatus(SandboxExecutionStatus.FAILED);
+        execution.setStatus(SandboxExecutionStatus.UNKNOWN);
         execution.setCompletedAt(Instant.now());
         sandboxExecutionRepository.save(execution);
-        String reason = "execution force-terminated because its environment was deleted";
-        executionActivityPersistenceService.recordExecutionError(executionId, reason, 1);
+        executionActivityPersistenceService.recordExecutionError(executionId, reason, null);
 
         SandboxExecutionUsage activeUsage = execution.getActiveUsage();
         if (activeUsage != null && activeUsage.getVirtualKey() != null) {
@@ -279,7 +286,7 @@ public class ExecutionEnvironmentService {
 
         UUID teamId = execution.getChat().getTeam().getId();
         eventPublisher.publishEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), 1, execution.getStatus(), reason));
+                new SandboxExecutionCompleteEvent(teamId, execution.getId(), -1, execution.getStatus(), reason));
         eventPublisher.publishEvent(
                 new ExecutionStatusChangedEvent(teamId, execution.getChat().getId(), execution.getId()));
     }
@@ -320,6 +327,13 @@ public class ExecutionEnvironmentService {
         env.setStatus(EnvironmentStatus.DISCONNECTED);
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
+        failActiveExecutions(env.getId(), UNAVAILABLE_ENVIRONMENT_REASON);
+    }
+
+    @Transactional
+    public void failStrandedExecution(UUID executionId) {
+        terminationTemplate.executeWithoutResult(
+                status -> forceTerminateExecution(executionId, UNAVAILABLE_ENVIRONMENT_REASON));
     }
 
     @Transactional
@@ -340,7 +354,7 @@ public class ExecutionEnvironmentService {
         UUID envId = env.getId();
         UUID teamId = env.getTeam().getId();
 
-        stopRunningExecutions(envId);
+        stopRunningExecutions(envId, SLEEPING_ENVIRONMENT_REASON);
 
         try {
             SandboxProvider sandboxProvider =
@@ -417,6 +431,7 @@ public class ExecutionEnvironmentService {
 
         if (env.getStatus() == EnvironmentStatus.TERMINATED) {
             sandboxProvider.destroy(envId);
+            failActiveExecutions(envId, UNAVAILABLE_ENVIRONMENT_REASON);
             return;
         }
 
@@ -435,6 +450,9 @@ public class ExecutionEnvironmentService {
         }
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
+        if (env.getStatus() == EnvironmentStatus.DISCONNECTED) {
+            failActiveExecutions(envId, UNAVAILABLE_ENVIRONMENT_REASON);
+        }
     }
 
     /** Destroys a suspend snapshot that outlived its retention window. */
@@ -449,6 +467,35 @@ public class ExecutionEnvironmentService {
         env.setSuspendedAt(null);
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
+        failActiveExecutions(envId, UNAVAILABLE_ENVIRONMENT_REASON);
+    }
+
+    @Transactional
+    public void reconcilePurgedEnvironment(ExecutionEnvironment env) {
+        UUID envId = env.getId();
+        UUID teamId = env.getTeam().getId();
+        env.setStatus(EnvironmentStatus.TERMINATED);
+        env.setSuspendedAt(null);
+        executionEnvironmentRepository.save(env);
+        eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
+
+        List<SandboxExecution> active = sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(
+                envId, List.of(SandboxExecutionStatus.RUNNING, SandboxExecutionStatus.IDLE));
+        if (!active.isEmpty()) {
+            for (SandboxExecution execution : active) {
+                terminationTemplate.executeWithoutResult(
+                        status -> forceTerminateExecution(execution.getId(), PURGED_ENVIRONMENT_REASON));
+            }
+            return;
+        }
+
+        sandboxExecutionRepository
+                .findFirstByEnvironmentIdOrderByStartedAtDesc(envId)
+                .ifPresent(execution -> {
+                    executionActivityPersistenceService.recordSandboxPurged(execution.getId());
+                    eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
+                            teamId, execution.getChat().getId(), execution.getId()));
+                });
     }
 
     private static void markSuspended(ExecutionEnvironment env) {
@@ -456,11 +503,19 @@ public class ExecutionEnvironmentService {
         env.setSuspendedAt(Instant.now());
     }
 
-    private void stopRunningExecutions(UUID envId) {
+    private void stopRunningExecutions(UUID envId, String forcedReason) {
         List<SandboxExecution> runningExecs = sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(
                 envId, List.of(SandboxExecutionStatus.RUNNING, SandboxExecutionStatus.IDLE));
         if (!runningExecs.isEmpty()) {
-            terminateRunningExecution(runningExecs.getFirst().getId(), envId);
+            terminateRunningExecution(runningExecs.getFirst().getId(), envId, forcedReason);
+        }
+    }
+
+    private void failActiveExecutions(UUID envId, String reason) {
+        List<SandboxExecution> active = sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(
+                envId, List.of(SandboxExecutionStatus.RUNNING, SandboxExecutionStatus.IDLE));
+        for (SandboxExecution execution : active) {
+            terminationTemplate.executeWithoutResult(status -> forceTerminateExecution(execution.getId(), reason));
         }
     }
 

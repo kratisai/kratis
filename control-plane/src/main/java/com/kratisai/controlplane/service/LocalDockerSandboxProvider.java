@@ -238,7 +238,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
 
     @Override
     public Set<UUID> listActiveEnvIds() {
-        List<String> command = List.of(
+        return listEnvIdLabels(List.of(
                 "docker",
                 "ps",
                 "-a",
@@ -247,7 +247,27 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 "--filter",
                 "label=kratis.role=runner",
                 "--format",
-                "{{.Label \"kratis.sandbox.id\"}}");
+                "{{.Label \"kratis.sandbox.id\"}}"));
+    }
+
+    @Override
+    public Set<UUID> listSnapshotEnvIds() {
+        // Scoped to this instance's resume snapshots only: the tag prefix excludes every other image
+        // and the instance label excludes snapshots owned by another control plane.
+        return listEnvIdLabels(List.of(
+                "docker",
+                "images",
+                "--filter",
+                "reference=kratis-snapshot-*",
+                "--filter",
+                "label=kratis.instance.id=" + instanceId,
+                "--filter",
+                "label=kratis.role=runner",
+                "--format",
+                "{{.Label \"kratis.sandbox.id\"}}"));
+    }
+
+    private Set<UUID> listEnvIdLabels(List<String> command) {
         try {
             ProcessExecutor.ProcessResult result = processExecutor.execute(command, null, null);
             if (result.exitCode() != 0) {
@@ -271,7 +291,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             }
             return envIds;
         } catch (IOException | InterruptedException e) {
-            logger.warn("Failed to list active sandbox environments from Docker host: {}", e.getMessage());
+            logger.warn("Failed to list sandbox environments from Docker host: {}", e.getMessage());
             return Set.of();
         }
     }
@@ -317,8 +337,11 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                         long elapsed = Duration.between(firstSeen, now).toSeconds();
                         if (elapsed >= gracePeriod.toSeconds()) {
                             logger.info("Pruning dangling kratis network with 0 attached containers: {}", netName);
-                            processExecutor.execute(List.of("docker", "network", "rm", netName), null, null);
-                            danglingNetworkFirstSeen.remove(netName);
+                            if (removeNetwork(netName)) {
+                                danglingNetworkFirstSeen.remove(netName);
+                            } else {
+                                logger.warn("Failed to prune dangling kratis network {}", netName);
+                            }
                         } else {
                             logger.debug(
                                     "Dangling kratis network {} tracked ({}s elapsed / {}s grace)",
@@ -759,12 +782,78 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             logger.error("Failed to terminate dind container: {}", dindName, e);
         }
 
-        // Remove network
+        // Remove network. Disconnect first: a stopped but still-attached container blocks
+        // `network rm` and would otherwise leak one /24 from the daemon pool per sandbox.
         String networkName = networkName(envId);
+        forceDisconnectAll(networkName);
         try {
-            processExecutor.execute(List.of("docker", "network", "rm", networkName), null, null);
+            ProcessExecutor.ProcessResult rmResult =
+                    processExecutor.execute(List.of("docker", "network", "rm", networkName), null, null);
+            if (rmResult.exitCode() != 0) {
+                logger.error(
+                        "Failed to remove docker network {}: {}", networkName, new String(rmResult.output()).trim());
+            }
         } catch (IOException | InterruptedException e) {
             logger.error("Failed to remove docker network: {}", networkName, e);
+        }
+    }
+
+    private Set<String> listAttachedContainers(String networkName) {
+        try {
+            ProcessExecutor.ProcessResult result = processExecutor.execute(
+                    List.of(
+                            "docker",
+                            "network",
+                            "inspect",
+                            "--format",
+                            "{{range $k, $v := .Containers}}{{$v.Name}} {{end}}",
+                            networkName),
+                    null,
+                    null);
+            if (result.exitCode() != 0) {
+                return Set.of();
+            }
+            String output = new String(result.output()).trim();
+            if (output.isEmpty()) {
+                return Set.of();
+            }
+            Set<String> names = new LinkedHashSet<>();
+            for (String name : output.split("\\s+")) {
+                if (!name.isBlank()) {
+                    names.add(name);
+                }
+            }
+            return names;
+        } catch (IOException | InterruptedException e) {
+            logger.debug("Failed to list attached containers for network {}: {}", networkName, e.getMessage());
+            return Set.of();
+        }
+    }
+
+    private void forceDisconnectAll(String networkName) {
+        for (String container : listAttachedContainers(networkName)) {
+            try {
+                processExecutor.execute(
+                        List.of("docker", "network", "disconnect", "-f", networkName, container), null, null);
+            } catch (IOException | InterruptedException e) {
+                logger.debug(
+                        "Failed to disconnect container {} from network {}: {}",
+                        container,
+                        networkName,
+                        e.getMessage());
+            }
+        }
+    }
+
+    private boolean removeNetwork(String networkName) {
+        forceDisconnectAll(networkName);
+        try {
+            ProcessExecutor.ProcessResult result =
+                    processExecutor.execute(List.of("docker", "network", "rm", networkName), null, null);
+            return result.exitCode() == 0;
+        } catch (IOException | InterruptedException e) {
+            logger.debug("Failed to remove docker network {}: {}", networkName, e.getMessage());
+            return false;
         }
     }
 

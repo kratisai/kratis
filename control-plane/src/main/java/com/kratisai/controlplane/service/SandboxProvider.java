@@ -28,5 +28,7 @@ public interface SandboxProvider {
 
     Set<UUID> listActiveEnvIds();
 
+    Set<UUID> listSnapshotEnvIds();
+
     void pruneOrphanNetworks(Duration gracePeriod);
 }

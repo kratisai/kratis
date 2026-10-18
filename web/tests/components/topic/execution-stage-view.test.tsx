@@ -372,4 +372,47 @@ describe('ExecutionStageView', () => {
     // The environment is still live, so the run can be halted even though it is not live itself.
     expect(screen.getByRole('menuitem', { name: /halt/i })).toBeInTheDocument()
   })
+
+  it('hides terminal, halt and steering when the environment is disconnected', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useChatExecutions).mockReturnValue({
+      data: [
+        {
+          ...completedExecution(),
+          completedAt: null,
+          environmentStatus: 'DISCONNECTED',
+          status: 'RUNNING',
+        },
+      ],
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useChatExecutions>)
+
+    renderView()
+
+    expect(screen.queryByTestId('steering-publish-bar')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /activity log options/i }))
+    expect(screen.queryByRole('menuitem', { name: /show terminal/i })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /halt/i })).toBeNull()
+  })
+
+  it('hides terminal, halt and steering when the environment is terminated', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useChatExecutions).mockReturnValue({
+      data: [
+        {
+          ...completedExecution(),
+          environmentStatus: 'TERMINATED',
+          status: 'RUNNING',
+        },
+      ],
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useChatExecutions>)
+
+    renderView()
+
+    expect(screen.queryByTestId('steering-publish-bar')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /activity log options/i }))
+    expect(screen.queryByRole('menuitem', { name: /show terminal/i })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /halt/i })).toBeNull()
+  })
 })

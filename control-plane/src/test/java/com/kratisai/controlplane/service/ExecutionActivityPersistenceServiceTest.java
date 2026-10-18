@@ -1039,4 +1039,55 @@ class ExecutionActivityPersistenceServiceTest {
         verify(repository, never()).save(any());
         verify(eventPublisher, never()).publishEvent(any());
     }
+
+    @Test
+    void recordSandboxPurged_recordsErrorAndPublishesEvent() {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+
+        Team team = new Team();
+        team.setId(teamId);
+        ChatEntity chat = new ChatEntity();
+        chat.setId(UUID.randomUUID());
+        chat.setTeam(team);
+
+        SandboxExecution execution = new SandboxExecution();
+        execution.setId(executionId);
+        execution.setChat(chat);
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+        when(repository.findByExecutionIdAndActionId(executionId, "sandbox-purged"))
+                .thenReturn(Optional.empty());
+        when(repository.nextSequence(executionId)).thenReturn(1L);
+
+        service.recordSandboxPurged(executionId);
+
+        assertInsertedRow(
+                capturedSave(),
+                executionId,
+                1,
+                "sandbox-purged",
+                ActivityType.ERROR,
+                ActivityStatus.FAILED,
+                "Sandbox resources found to have been unexpectedly purged");
+
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        SandboxExecutionActivityEvent event = (SandboxExecutionActivityEvent) eventCaptor.getValue();
+        assertThat(event.teamId()).isEqualTo(teamId);
+        assertThat(event.executionId()).isEqualTo(executionId);
+        assertThat(event.activityType()).isEqualTo(ActivityType.ERROR);
+        assertThat(event.actionId()).isEqualTo("sandbox-purged");
+        assertThat(event.status()).isEqualTo(ActivityStatus.FAILED);
+    }
+
+    @Test
+    void recordSandboxPurged_withUnknownExecution_isNoOp() {
+        UUID executionId = UUID.randomUUID();
+        when(executionRepository.findById(executionId)).thenReturn(Optional.empty());
+
+        service.recordSandboxPurged(executionId);
+
+        verify(repository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
 }

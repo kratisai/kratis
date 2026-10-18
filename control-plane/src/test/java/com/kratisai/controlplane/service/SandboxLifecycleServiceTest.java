@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.kratisai.controlplane.config.SandboxProperties;
@@ -14,8 +13,11 @@ import com.kratisai.controlplane.model.EnvironmentProvider;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionEnvironmentType;
+import com.kratisai.controlplane.model.ExecutionProviderType;
+import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -41,6 +43,9 @@ class SandboxLifecycleServiceTest {
     private ExecutionEnvironmentRepository environmentRepository;
 
     @Mock
+    private SandboxExecutionRepository sandboxExecutionRepository;
+
+    @Mock
     private ExecutionEnvironmentService executionEnvironmentService;
 
     @Mock
@@ -57,13 +62,25 @@ class SandboxLifecycleServiceTest {
         sandboxProperties.getLifecycle().setIdleTimeout(Duration.ofMinutes(20));
         sandboxProperties.getLifecycle().setRetentionPeriod(Duration.ofDays(30));
         lifecycleService = new SandboxLifecycleService(
-                environmentRepository, executionEnvironmentService, List.of(sandboxProvider), sandboxProperties);
+                environmentRepository,
+                sandboxExecutionRepository,
+                executionEnvironmentService,
+                List.of(sandboxProvider),
+                sandboxProperties);
 
         lenient()
                 .when(environmentRepository.findConnectedEnvironmentsWithLastActivity())
                 .thenReturn(List.of());
         lenient().when(environmentRepository.findExpiredSleeping(any())).thenReturn(List.of());
+        lenient()
+                .when(environmentRepository.findByTypeAndStatusIn(any(), any()))
+                .thenReturn(List.of());
+        lenient()
+                .when(sandboxExecutionRepository.findByStatusInAndEnvironment_StatusIn(any(), any()))
+                .thenReturn(List.of());
         lenient().when(sandboxProvider.listActiveEnvIds()).thenReturn(Set.of());
+        lenient().when(sandboxProvider.listSnapshotEnvIds()).thenReturn(Set.of());
+        lenient().when(sandboxProvider.getProviderType()).thenReturn(ExecutionProviderType.DOCKER);
     }
 
     private ExecutionEnvironment sandbox(EnvironmentStatus status) {
@@ -89,7 +106,11 @@ class SandboxLifecycleServiceTest {
     void sweep_destroysOrphanRuntimeOnlyAfterGrace() {
         sandboxProperties.getLifecycle().setStartupGrace(Duration.ofHours(1));
         lifecycleService = new SandboxLifecycleService(
-                environmentRepository, executionEnvironmentService, List.of(sandboxProvider), sandboxProperties);
+                environmentRepository,
+                sandboxExecutionRepository,
+                executionEnvironmentService,
+                List.of(sandboxProvider),
+                sandboxProperties);
         when(sandboxProvider.listActiveEnvIds()).thenReturn(Set.of(ENV_ID));
         when(environmentRepository.findById(ENV_ID)).thenReturn(Optional.empty());
 
@@ -110,7 +131,7 @@ class SandboxLifecycleServiceTest {
 
         verify(sandboxProvider).captureSidecarLogs(ENV_ID);
         verify(sandboxProvider).destroy(ENV_ID);
-        verifyNoInteractions(executionEnvironmentService);
+        verify(executionEnvironmentService, never()).reapEnvironment(any());
     }
 
     @Test
@@ -244,5 +265,88 @@ class SandboxLifecycleServiceTest {
         when(sandboxProvider.listActiveEnvIds()).thenReturn(Set.of(ENV_ID));
         lifecycleService.sweep();
         verify(sandboxProvider, never()).destroy(any());
+    }
+
+    @Test
+    void sweep_reconcilesPurgedSandboxWithoutRuntimeOrSnapshot() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.SLEEPING);
+        when(environmentRepository.findByTypeAndStatusIn(any(), any())).thenReturn(List.of(env));
+
+        lifecycleService.sweep();
+        verify(executionEnvironmentService, never()).reconcilePurgedEnvironment(any());
+
+        lifecycleService.sweep();
+        verify(executionEnvironmentService).reconcilePurgedEnvironment(env);
+    }
+
+    @Test
+    void sweep_keepsPurgedCandidateWithResumableSnapshot() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.SLEEPING);
+        when(environmentRepository.findByTypeAndStatusIn(any(), any())).thenReturn(List.of(env));
+        when(sandboxProvider.listSnapshotEnvIds()).thenReturn(Set.of(ENV_ID));
+
+        lifecycleService.sweep();
+        lifecycleService.sweep();
+
+        verify(executionEnvironmentService, never()).reconcilePurgedEnvironment(any());
+    }
+
+    @Test
+    void sweep_keepsPurgedCandidateWithRuntime() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
+        when(environmentRepository.findByTypeAndStatusIn(any(), any())).thenReturn(List.of(env));
+        when(environmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
+        when(sandboxProvider.listActiveEnvIds()).thenReturn(Set.of(ENV_ID));
+
+        lifecycleService.sweep();
+        lifecycleService.sweep();
+
+        verify(executionEnvironmentService, never()).reconcilePurgedEnvironment(any());
+    }
+
+    @Test
+    void sweep_doesNotReconcilePurgedSandboxWithinStartupGrace() {
+        sandboxProperties.getLifecycle().setStartupGrace(Duration.ofHours(1));
+        lifecycleService = new SandboxLifecycleService(
+                environmentRepository,
+                sandboxExecutionRepository,
+                executionEnvironmentService,
+                List.of(sandboxProvider),
+                sandboxProperties);
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.SLEEPING);
+        when(environmentRepository.findByTypeAndStatusIn(any(), any())).thenReturn(List.of(env));
+
+        lifecycleService.sweep();
+        lifecycleService.sweep();
+
+        verify(executionEnvironmentService, never()).reconcilePurgedEnvironment(any());
+    }
+
+    @Test
+    void sweep_skipsPurgedCandidateWithoutProvider() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.SLEEPING);
+        env.setProvider(null);
+        when(environmentRepository.findByTypeAndStatusIn(any(), any())).thenReturn(List.of(env));
+
+        lifecycleService.sweep();
+        lifecycleService.sweep();
+
+        verify(executionEnvironmentService, never()).reconcilePurgedEnvironment(any());
+    }
+
+    @Test
+    void sweep_failsExecutionStrandedByDeadEnvironmentAfterGrace() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.DISCONNECTED);
+        SandboxExecution execution = new SandboxExecution();
+        execution.setId(UUID.fromString("77777777-7777-7777-7777-777777777777"));
+        execution.setEnvironment(env);
+        when(sandboxExecutionRepository.findByStatusInAndEnvironment_StatusIn(any(), any()))
+                .thenReturn(List.of(execution));
+
+        lifecycleService.sweep();
+        verify(executionEnvironmentService, never()).failStrandedExecution(any());
+
+        lifecycleService.sweep();
+        verify(executionEnvironmentService).failStrandedExecution(execution.getId());
     }
 }
