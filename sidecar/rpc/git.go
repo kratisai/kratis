@@ -108,12 +108,21 @@ func (c *Client) credentialHelperScript() string {
 }
 
 // writeCredentialHelper writes the nc-based credential helper that forwards git
-// credential prompts to the local Kratis credential server socket.
+// credential prompts to this process's private credential server socket. The
+// socket path is fixed for the process lifetime, so rewriting the helper on
+// re-registration keeps pointing git at the same live listener.
 func (c *Client) writeCredentialHelper() string {
 	helperScript := c.credentialHelperScript()
+	c.mu.Lock()
+	socketPath := c.credentialSocket
+	c.mu.Unlock()
+	if socketPath == "" {
+		log.Printf("credential helper: no process socket bound, skipping helper write")
+		return helperScript
+	}
 	scriptContent := fmt.Sprintf(
 		"#!/bin/sh\nif [ \"$1\" = \"get\" ]; then\n  if ! command -v nc >/dev/null 2>&1; then\n    echo \"kratis credential helper: 'nc' not found in PATH; the sandbox image must install netcat-openbsd to reach the Kratis credential socket\" >&2\n    exit 1\n  fi\n  exec nc -U %s\nfi\n",
-		runner.SocketPath)
+		socketPath)
 	// 0700: git executes the helper directly, so it must be owner-executable;
 	// owner-only keeps the embedded socket path private.
 	_ = os.WriteFile(helperScript, []byte(scriptContent), 0700) //nolint:gosec // G306: executable credential helper

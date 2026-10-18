@@ -791,7 +791,10 @@ func TestNewClient_CredentialCallback(t *testing.T) {
 	go c.readLoop(errChan)
 	defer c.Close()
 
-	conn, err := net.Dial("unix", runner.SocketPath)
+	c.mu.Lock()
+	credentialSocket := c.credentialSocket
+	c.mu.Unlock()
+	conn, err := net.Dial("unix", credentialSocket)
 	if err != nil {
 		t.Fatalf("failed to dial: %v", err)
 	}

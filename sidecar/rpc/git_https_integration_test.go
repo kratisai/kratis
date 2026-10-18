@@ -228,6 +228,157 @@ func TestExecuteCheckout_RealHttpsClone_WithCredentialHelper(t *testing.T) {
 	}
 }
 
+// TestExecuteGitPush_RealHttpsPush_WithCredentialHelper is the push-side twin
+// of the clone test above: it must exercise the production credential helper
+// against an authenticated remote, so a broken push credential flow (the
+// "could not read Username" regression) fails here instead of in production.
+func TestExecuteGitPush_RealHttpsPush_WithCredentialHelper(t *testing.T) {
+	const token = "test-pat-token"
+
+	srcDir, err := os.MkdirTemp("", "kratis-https-push-src-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(srcDir) }()
+
+	if err := exec.Command("git", "init", "-b", "main", srcDir).Run(); err != nil {
+		t.Fatalf("failed to init git: %v", err)
+	}
+	_ = exec.Command("git", "-C", srcDir, "config", "user.name", "Test User").Run()
+	_ = exec.Command("git", "-C", srcDir, "config", "user.email", "test@example.com").Run()
+	if err := os.WriteFile(filepath.Join(srcDir, "hello.txt"), []byte("hello over https"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	_ = exec.Command("git", "-C", srcDir, "add", ".").Run()
+	if err := exec.Command("git", "-C", srcDir, "commit", "-m", "initial commit").Run(); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+
+	parentDir, err := os.MkdirTemp("", "kratis-https-push-server-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(parentDir) }()
+	bareRepo := filepath.Join(parentDir, "repo.git")
+	if err := exec.Command("git", "clone", "--bare", srcDir, bareRepo).Run(); err != nil {
+		t.Fatalf("failed to create bare repo: %v", err)
+	}
+	if err := exec.Command("git", "-C", bareRepo, "config", "http.receivepack", "true").Run(); err != nil {
+		t.Fatalf("failed to enable receive-pack: %v", err)
+	}
+
+	serverURL, _, _ := startGitHttpBackend(t, parentDir, token)
+	repoURL := serverURL + "/repo.git"
+
+	workDir, err := os.MkdirTemp("", "kratis-https-push-work-*")
+	if err != nil {
+		t.Fatalf("failed to create work dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(workDir) }()
+
+	pushComplete := make(chan JsonRpcResponse, 4)
+	const pushReqID = "req-push-https-1"
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var resp JsonRpcResponse
+			if json.Unmarshal(msg, &resp) != nil || resp.ID == nil {
+				continue
+			}
+			if id, ok := resp.ID.(string); !ok || id != pushReqID {
+				var req JsonRpcRequest
+				if json.Unmarshal(msg, &req) == nil && req.Method == "env.git_token" {
+					resultBytes, _ := json.Marshal(GitTokenResult{Token: token})
+					_ = conn.WriteJSON(JsonRpcResponse{JsonRPC: "2.0", Result: resultBytes, ID: req.ID})
+				}
+				continue
+			}
+			select {
+			case pushComplete <- resp:
+			default:
+			}
+		}
+	})
+
+	c := NewClient(wsURL(srv), "tok", workDir)
+	wsConn, _, err := websocket.DefaultDialer.Dial(wsURL(srv), nil)
+	if err != nil {
+		t.Fatalf("direct dial failed: %v", err)
+	}
+	c.mu.Lock()
+	c.wsConn = wsConn
+	c.credentialsDir = t.TempDir()
+	c.mu.Unlock()
+	errChan := make(chan error, 1)
+	go c.readLoop(errChan)
+	defer c.Close()
+
+	c.ExecuteRegisterGitAuth(RegisterGitAuthParams{CredentialType: "GIT_PAT"}, nil)
+	defer func() { _ = os.Unsetenv("GIT_CONFIG_GLOBAL") }()
+
+	c.ExecuteCheckout(CheckoutParams{
+		URL:    repoURL,
+		Branch: "main",
+		Env:    map[string]string{"GIT_TERMINAL_PROMPT": "0", "SSH_ASKPASS": ""},
+	}, nil)
+
+	// Push commits, so the workspace needs an author identity. Configure it
+	// repo-locally: CI runners have no global git identity, and writing to
+	// $HOME would clobber the developer's real gitconfig.
+	for _, setting := range [][2]string{
+		{"user.name", "Test User"},
+		{"user.email", "test@example.com"},
+	} {
+		if out, err := exec.Command("git", "-C", workDir, "config", setting[0], setting[1]).CombinedOutput(); err != nil {
+			t.Fatalf("failed to configure %s: %v, output: %s", setting[0], err, string(out))
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(workDir, "pushed.txt"), []byte("pushed over https"), 0644); err != nil {
+		t.Fatalf("failed to write push file: %v", err)
+	}
+	reqID := pushReqID
+	go c.ExecuteGitPush(GitPushParams{
+		BranchName:    "kratis/push-test",
+		CommitMessage: "Push over HTTPS",
+		TargetBranch:  "main",
+	}, reqID)
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		select {
+		case resp := <-pushComplete:
+			if resp.Error != nil {
+				t.Fatalf("push failed: %s: %v", resp.Error.Message, resp.Error.Data)
+			}
+			var result GitPushResult
+			if err := json.Unmarshal(resp.Result, &result); err != nil {
+				t.Fatalf("failed to decode push result: %v", err)
+			}
+			if result.Status != "success" || result.CommitSha == "" {
+				t.Fatalf("expected successful push with commit SHA, got %+v", result)
+			}
+			out, err := exec.Command("git", "--git-dir", bareRepo, "rev-parse", "--verify", "refs/heads/kratis/push-test").Output()
+			if err != nil {
+				t.Fatalf("pushed branch missing on remote: %v", err)
+			}
+			if strings.TrimSpace(string(out)) != result.CommitSha {
+				t.Fatalf("remote tip %q != pushed commit %q", strings.TrimSpace(string(out)), result.CommitSha)
+			}
+			return
+		default:
+			if time.Now().After(deadline) {
+				t.Fatal("timed out waiting for env.git_push response")
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
 func runGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
