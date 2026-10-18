@@ -15,8 +15,6 @@ import (
 	"time"
 )
 
-const SocketPath = "/tmp/kratis-git-credentials.sock"
-
 // GetPeerPID retrieves the PID of the peer connecting to a UNIX domain socket.
 func GetPeerPID(conn *net.UnixConn) (int, error) {
 	rawConn, err := conn.SyscallConn()
@@ -168,17 +166,27 @@ func VerifyProcessChain(pid int) (bool, error) {
 	return true, nil
 }
 
-// StartCredentialServer starts a UNIX domain socket server that serves the git credentials.
-func StartCredentialServer(gitPATProvider func() string) error {
-	_ = os.Remove(SocketPath)
-
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: SocketPath, Net: "unix"})
+// StartCredentialServer binds a process-private credential socket and serves
+// git credentials on it. Each call allocates a unique path, so one sidecar
+// process owns exactly one socket for its lifetime: reconnects and
+// re-registrations reuse it, and a new sidecar process can never steal or
+// orphan another process's socket. The sidecar must (re)write its credential
+// helper with the returned path when the socket opens.
+func StartCredentialServer(gitPATProvider func() string) (string, error) {
+	dir, err := os.MkdirTemp("", "kratis-git-*")
 	if err != nil {
-		return err
+		return "", err
+	}
+	socketPath := filepath.Join(dir, "credentials.sock")
+
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return "", err
 	}
 
 	// Restrict permissions on the socket file so only the owner can access it
-	_ = os.Chmod(SocketPath, 0600)
+	_ = os.Chmod(socketPath, 0600)
 
 	go func() {
 		defer func() { _ = listener.Close() }()
@@ -191,7 +199,7 @@ func StartCredentialServer(gitPATProvider func() string) error {
 		}
 	}()
 
-	return nil
+	return socketPath, nil
 }
 
 func handleCredentialConnection(conn *net.UnixConn, gitPATProvider func() string) {

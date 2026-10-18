@@ -155,7 +155,7 @@ func TestVerifyProcessChain(t *testing.T) {
 func TestCredentialServer_SocketLifecycle(t *testing.T) {
 	// Start socket server in background
 	pat := "super-secret-pat-123"
-	err := StartCredentialServer(func() string {
+	socketPath, err := StartCredentialServer(func() string {
 		return pat
 	})
 	if err != nil {
@@ -163,7 +163,7 @@ func TestCredentialServer_SocketLifecycle(t *testing.T) {
 	}
 
 	// Client connection test
-	conn, err := net.Dial("unix", SocketPath)
+	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		t.Fatalf("failed to dial credential server socket: %v", err)
 	}
@@ -292,14 +292,14 @@ func TestCredentialServer_SuccessFlow(t *testing.T) {
 	cmdline := "git\x00clone\x00"
 	_ = os.WriteFile(filepath.Join(ppidDir, "cmdline"), []byte(cmdline), 0644)
 
-	err = StartCredentialServer(func() string {
+	socketPath, err := StartCredentialServer(func() string {
 		return "secret-token-123"
 	})
 	if err != nil {
 		t.Fatalf("failed to start credential server: %v", err)
 	}
 
-	conn, err := net.Dial("unix", SocketPath)
+	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		t.Fatalf("failed to dial: %v", err)
 	}
@@ -566,14 +566,14 @@ func TestHandleCredentialConnection_EmptyPAT(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(ppidDir, "cmdline"), []byte(cmdline), 0644)
 
 	// Start credential server with empty PAT provider
-	err = StartCredentialServer(func() string {
+	socketPath, err := StartCredentialServer(func() string {
 		return "" // Empty PAT
 	})
 	if err != nil {
 		t.Fatalf("failed to start credential server: %v", err)
 	}
 
-	conn, err := net.Dial("unix", SocketPath)
+	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		t.Fatalf("failed to dial: %v", err)
 	}
@@ -605,16 +605,13 @@ func TestHandleCredentialConnection_EmptyPAT(t *testing.T) {
 // TestStartCredentialServer_SocketPermissions tests that the credential server
 // creates the socket file with restricted permissions (0600).
 func TestStartCredentialServer_SocketPermissions(t *testing.T) {
-	// Remove any existing socket
-	_ = os.Remove(SocketPath)
-
-	err := StartCredentialServer(func() string { return "test" })
+	socketPath, err := StartCredentialServer(func() string { return "test" })
 	if err != nil {
 		t.Fatalf("failed to start credential server: %v", err)
 	}
 
 	// Check socket file permissions
-	info, err := os.Stat(SocketPath)
+	info, err := os.Stat(socketPath)
 	if err != nil {
 		t.Fatalf("failed to stat socket: %v", err)
 	}
@@ -623,7 +620,28 @@ func TestStartCredentialServer_SocketPermissions(t *testing.T) {
 	if perm != 0600 {
 		t.Errorf("expected socket permissions 0600, got %04o", perm)
 	}
+}
 
-	// Clean up
-	_ = os.Remove(SocketPath)
+// TestStartCredentialServer_AllocatesUniqueSockets proves each server owns a
+// distinct path: a new sidecar process can never steal or orphan another
+// process's socket, and both serve concurrently.
+func TestStartCredentialServer_AllocatesUniqueSockets(t *testing.T) {
+	first, err := StartCredentialServer(func() string { return "first" })
+	if err != nil {
+		t.Fatalf("failed to start first server: %v", err)
+	}
+	second, err := StartCredentialServer(func() string { return "second" })
+	if err != nil {
+		t.Fatalf("failed to start second server: %v", err)
+	}
+	if first == second {
+		t.Fatalf("expected distinct socket paths, both were %q", first)
+	}
+	for _, path := range []string{first, second} {
+		conn, err := net.Dial("unix", path)
+		if err != nil {
+			t.Fatalf("server at %q does not serve: %v", path, err)
+		}
+		_ = conn.Close()
+	}
 }

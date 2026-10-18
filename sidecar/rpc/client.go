@@ -88,18 +88,19 @@ func DefaultClientTimeouts() ClientTimeouts {
 }
 
 type Client struct {
-	serverURL       string
-	token           string
-	workspace       string
-	envFile         string
-	credentialsDir  string
-	terminalLogFile string
-	terminalLogMu   sync.Mutex
-	executor        *runner.Executor
-	sshAgentPID     string
-	sshAuthSock     string
-	gitHelperScript string
-	gitConfigGlobal string
+	serverURL        string
+	token            string
+	workspace        string
+	envFile          string
+	credentialsDir   string
+	terminalLogFile  string
+	terminalLogMu    sync.Mutex
+	executor         *runner.Executor
+	sshAgentPID      string
+	sshAuthSock      string
+	gitHelperScript  string
+	gitConfigGlobal  string
+	credentialSocket string
 
 	mu             sync.Mutex
 	wsConn         *websocket.Conn
@@ -191,10 +192,18 @@ func NewClient(serverURL, token, workspace string) *Client {
 	// Start local process-verifying git credentials server. Tokens are resolved
 	// on-demand from the control plane (never cached statically) so short-lived
 	// credentials (e.g. GitHub App installation tokens) stay fresh for the whole
-	// sandbox lifetime.
-	_ = runner.StartCredentialServer(func() string {
+	// sandbox lifetime. The socket is process-private and bound once: later
+	// reconnects and credential re-registrations keep serving the same path.
+	socketPath, err := runner.StartCredentialServer(func() string {
 		return c.fetchGitToken()
 	})
+	if err != nil {
+		log.Printf("credential server failed to start: %v", err)
+	} else {
+		c.mu.Lock()
+		c.credentialSocket = socketPath
+		c.mu.Unlock()
+	}
 	return c
 }
 
