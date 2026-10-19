@@ -39,8 +39,8 @@ public class MermaidDiagramValidator {
     private static final Pattern SUBGRAPH_LINE = Pattern.compile("^\\s*subgraph\\s+(.+?)\\s*$");
     private static final Pattern SEQUENCE_BLOCK_START =
             Pattern.compile("^\\s*(loop|alt|opt|par|rect|critical|break)\\b");
-    private static final Pattern INVALID_SEQUENCE_ARROW =
-            Pattern.compile("(?<=[\\w\"'\\-\\]])\\s*(<<--|<--|<-|--<|-<)\\s*(?=[\\w\"'\\-\\[])");
+    private static final Pattern INVALID_SEQUENCE_ARROW = Pattern.compile(
+            "(?<=[\\w\"'\\-\\]])\\s*(<<-->>|<-->>|<-->|<->|<<--|<--|<-|--<<|-<<|<<-|--<|-<|-.->|==>|===|-.-|---\\+|---|--|-)(?![-=.~>ox)])\\s*(?=[\\w\"'\\-\\[])");
     private static final Pattern END_LINE = Pattern.compile("^\\s*end\\s*$");
     private static final Pattern BRACE_COUNT = Pattern.compile("[{}]");
     private static final Pattern DOUBLE_QUOTED_SECTION = Pattern.compile("\"[^\"]*\"");
@@ -208,12 +208,15 @@ public class MermaidDiagramValidator {
             }
 
             int colonIndex = line.indexOf(':');
-            String interaction = colonIndex >= 0 ? line.substring(0, colonIndex) : line;
+            if (colonIndex < 0) {
+                continue;
+            }
+            String interaction = line.substring(0, colonIndex);
             Matcher arrowMatcher = INVALID_SEQUENCE_ARROW.matcher(interaction);
             while (arrowMatcher.find()) {
                 String arrow = arrowMatcher.group(1);
                 issues.add(
-                        "Mermaid diagram #%d, line %d: invalid sequence diagram arrow \"%s\". Sequence diagrams do not support left-pointing arrows. Interactions must point from sender to receiver; use \"-->>\" for response messages (e.g. B-->>A: response)."
+                        "Mermaid diagram #%d, line %d: invalid sequence diagram arrow \"%s\". Sequence diagrams do not support forbidden arrow types (e.g. left-pointing arrows like <-, <-- or bidirectional/undirected/fat arrows like <->, <-->, -, --, ---, -.-, -.->, ==>, ===). Interactions must point from sender to receiver; use \"->>\" for requests and \"-->>\" for responses (e.g. A->>B: request, B-->>A: response)."
                                 .formatted(diagramIndex, i + 1, arrow));
             }
         }
