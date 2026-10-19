@@ -905,15 +905,76 @@ class MermaidDiagramValidatorTest {
         assertThat(issues.get(0))
                 .contains("diagram #1, line 9")
                 .contains("invalid sequence diagram arrow \"--<\"")
-                .contains("use \"-->>\"");
+                .contains("use \"->>\" for requests and \"-->>\" for responses");
         assertThat(issues.get(1))
                 .contains("diagram #1, line 12")
                 .contains("invalid sequence diagram arrow \"--<\"")
-                .contains("use \"-->>\"");
+                .contains("use \"->>\" for requests and \"-->>\" for responses");
         assertThat(issues.get(2))
                 .contains("diagram #1, line 13")
                 .contains("invalid sequence diagram arrow \"--<\"")
-                .contains("use \"-->>\"");
+                .contains("use \"->>\" for requests and \"-->>\" for responses");
+    }
+
+    @Test
+    void findIssues_flagsAllInvalidSequenceArrowPatterns() {
+        String content = """
+                ```mermaid
+                sequenceDiagram
+                    participant A
+                    participant B
+                    A<<-->>B: bidirectional 1
+                    A<-->>B: bidirectional 2
+                    A<-->B: bidirectional 3
+                    A<->B: bidirectional 4
+                    A<<--B: left 1
+                    A<--B: left 2
+                    A<-B: left 3
+                    A--<<B: reverse 1
+                    A-<<B: reverse 2
+                    A<<-B: reverse 3
+                    A--<B: reverse 4
+                    A-<B: reverse 5
+                    A-.->B: dotted arrow
+                    A==>B: thick arrow
+                    A===B: thick line
+                    A-.-B: dotted line
+                    A---+B: open line plus
+                    A---B: open line 3
+                    A--B: open line 2
+                    A-B: open line 1
+                ```
+                """;
+
+        List<String> issues = validator.findIssues(content);
+
+        assertThat(issues).hasSize(20);
+        assertThat(issues.get(0)).contains("diagram #1, line 4").contains("invalid sequence diagram arrow \"<<-->>\"");
+        assertThat(issues.get(1)).contains("diagram #1, line 5").contains("invalid sequence diagram arrow \"<-->>\"");
+        assertThat(issues.get(2)).contains("diagram #1, line 6").contains("invalid sequence diagram arrow \"<-->\"");
+        assertThat(issues.get(3)).contains("diagram #1, line 7").contains("invalid sequence diagram arrow \"<->\"");
+        assertThat(issues.get(4)).contains("diagram #1, line 8").contains("invalid sequence diagram arrow \"<<--\"");
+        assertThat(issues.get(5)).contains("diagram #1, line 9").contains("invalid sequence diagram arrow \"<--\"");
+        assertThat(issues.get(6)).contains("diagram #1, line 10").contains("invalid sequence diagram arrow \"<-\"");
+        assertThat(issues.get(7)).contains("diagram #1, line 11").contains("invalid sequence diagram arrow \"--<<\"");
+        assertThat(issues.get(8)).contains("diagram #1, line 12").contains("invalid sequence diagram arrow \"-<<\"");
+        assertThat(issues.get(9)).contains("diagram #1, line 13").contains("invalid sequence diagram arrow \"<<-\"");
+        assertThat(issues.get(10)).contains("diagram #1, line 14").contains("invalid sequence diagram arrow \"--<\"");
+        assertThat(issues.get(11)).contains("diagram #1, line 15").contains("invalid sequence diagram arrow \"-<\"");
+        assertThat(issues.get(12)).contains("diagram #1, line 16").contains("invalid sequence diagram arrow \"-.->\"");
+        assertThat(issues.get(13)).contains("diagram #1, line 17").contains("invalid sequence diagram arrow \"==>\"");
+        assertThat(issues.get(14)).contains("diagram #1, line 18").contains("invalid sequence diagram arrow \"===\"");
+        assertThat(issues.get(15)).contains("diagram #1, line 19").contains("invalid sequence diagram arrow \"-.-\"");
+        assertThat(issues.get(16)).contains("diagram #1, line 20").contains("invalid sequence diagram arrow \"---+\"");
+        assertThat(issues.get(17)).contains("diagram #1, line 21").contains("invalid sequence diagram arrow \"---\"");
+        assertThat(issues.get(18)).contains("diagram #1, line 22").contains("invalid sequence diagram arrow \"--\"");
+        assertThat(issues.get(19)).contains("diagram #1, line 23").contains("invalid sequence diagram arrow \"-\"");
+
+        for (String issue : issues) {
+            assertThat(issue)
+                    .contains("Sequence diagrams do not support forbidden arrow types")
+                    .contains("use \"->>\" for requests and \"-->>\" for responses");
+        }
     }
 
     @Test
