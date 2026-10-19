@@ -87,6 +87,8 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
   const canHalt = (env: ExecutionEnvironmentDto) =>
     Boolean(env.activeExecutionId) && Boolean(env.activeChatId)
 
+  const canDelete = (env: ExecutionEnvironmentDto) => env.status !== 'TERMINATED'
+
   const resumeAction = (env: ExecutionEnvironmentDto) =>
     isSleepingSandbox(env) ? (
       <Button
@@ -128,7 +130,7 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
       case 'SLEEPING':
         return <Badge variant="secondary">Sleeping</Badge>
       case 'TERMINATED':
-        return <Badge variant="destructive">Terminated</Badge>
+        return <Badge variant="outline">Terminated</Badge>
       default:
         return <Badge variant="outline">{status}</Badge>
     }
@@ -204,16 +206,18 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
                                   <Square className="h-4 w-4 fill-current" />
                                 </Button>
                               )}
-                              <Button
-                                aria-label={`Delete ${env.name}`}
-                                className="text-destructive"
-                                onClick={() => handleDelete(env.id, env.name)}
-                                size="icon"
-                                title="Remove"
-                                variant="ghost"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                              {canDelete(env) && (
+                                <Button
+                                  aria-label={`Delete ${env.name}`}
+                                  className="text-destructive"
+                                  onClick={() => handleDelete(env.id, env.name)}
+                                  size="icon"
+                                  title="Remove"
+                                  variant="ghost"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         )}
@@ -252,16 +256,18 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
                               <Square className="h-4 w-4 fill-current" />
                             </Button>
                           )}
-                          <Button
-                            aria-label={`Delete ${env.name}`}
-                            className="text-destructive"
-                            onClick={() => handleDelete(env.id, env.name)}
-                            size="icon"
-                            title="Remove"
-                            variant="ghost"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          {canDelete(env) && (
+                            <Button
+                              aria-label={`Delete ${env.name}`}
+                              className="text-destructive"
+                              onClick={() => handleDelete(env.id, env.name)}
+                              size="icon"
+                              title="Remove"
+                              variant="ghost"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       )}
                     </div>
