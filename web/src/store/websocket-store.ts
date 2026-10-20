@@ -24,12 +24,14 @@ import type {
 } from '@/types/websocket-types'
 
 import { DIFF_QUERY_KEYS } from '@/hooks/use-diff'
+import { isRefreshTokenRejected, refreshAccessToken } from '@/lib/auth-api'
 import { queryClient } from '@/lib/query-client'
 import { useActivityStore } from '@/store/activity-store'
 import { useAuthStore } from '@/store/auth-store'
 import { useCanvasStore } from '@/store/canvas-store'
 import { useChatStore } from '@/store/chat-store'
 import { useExecutionStore } from '@/store/execution-store'
+import { INVALID_TOKEN_CODE, NOT_AUTHENTICATED_CODE } from '@/types/websocket-types'
 
 const WS_URL = import.meta.env.VITE_WS_URL || '/ws/client'
 const HEARTBEAT_INTERVAL_MS = 5 * 60_000
@@ -46,6 +48,7 @@ interface WebSocketState {
   error: null | string
   isConnected: boolean
   isConnecting: boolean
+  resetAuthAndStop: (errorMessage?: string) => void
   send: <M extends keyof ClientRpcMethods>(method: M, params: ClientRpcMethods[M]) => void
   subscribe: (teamId: string) => void
   subscribedTeamId: null | string
@@ -98,6 +101,59 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
   const pendingSubscriptionIds = new Set<number>()
   let subscriptionRetries = 0
   let subscriptionRetryTimer: null | ReturnType<typeof setTimeout> = null
+  let isRefreshing = false
+
+  function resetAuthAndStop(errorMessage?: string) {
+    disconnect()
+    useAuthStore.getState().logout()
+    const message = errorMessage || 'Session expired. Please sign in again.'
+    set({
+      error: message,
+      isConnected: false,
+      isConnecting: false,
+    })
+    toast.error(message)
+  }
+
+  async function handleAuthError(errorMessage?: string) {
+    const { refreshToken } = useAuthStore.getState()
+    if (!refreshToken) {
+      resetAuthAndStop(errorMessage || 'Session expired. Please sign in again.')
+      return
+    }
+
+    if (isRefreshing) {
+      return
+    }
+
+    isRefreshing = true
+    try {
+      const data = await refreshAccessToken({ refreshToken })
+      useAuthStore.getState().updateTokens(data.accessToken, data.refreshToken, data.expiresIn)
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        if (lastAuthToken !== data.accessToken) {
+          lastAuthToken = data.accessToken
+          reauthenticate(data.accessToken)
+        }
+      } else {
+        connect()
+      }
+    } catch (err) {
+      if (isRefreshTokenRejected(err)) {
+        resetAuthAndStop(
+          err instanceof Error ? err.message : 'Session expired. Please sign in again.',
+        )
+      } else {
+        set({ error: 'Connection lost. Reconnecting…', isConnected: false, isConnecting: false })
+        if (ws) {
+          cleanup()
+        }
+        scheduleReconnect()
+      }
+    } finally {
+      isRefreshing = false
+    }
+  }
 
   function flushInbound() {
     flushTimer = null
@@ -120,6 +176,15 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
 
   function dispatchResponse(response: JsonRpcResponse) {
     if (response.error) {
+      const isAuthError =
+        response.error.code === INVALID_TOKEN_CODE ||
+        (response.error.code === NOT_AUTHENTICATED_CODE && !useAuthStore.getState().isAuthenticated)
+
+      if (isAuthError) {
+        void handleAuthError(response.error.message)
+        return
+      }
+
       if (response.id === 0) {
         set({ error: response.error.message })
         ws?.close()
@@ -423,6 +488,7 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
     }
     stopHeartbeat()
     inboundBuffer.length = 0
+    isRefreshing = false
   }
 
   function scheduleReconnect() {
@@ -517,11 +583,19 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
         set({ error: 'Failed to connect to server' })
       }
 
-      ws.onclose = () => {
+      ws.onclose = (event?: CloseEvent) => {
         cleanup()
         set({ isConnected: false, isConnecting: false })
 
         useChatStore.getState().handleDisconnect()
+
+        const isAuthTimeout = event?.code === 1008
+        const isUnauthenticated = !useAuthStore.getState().isAuthenticated
+
+        if (isAuthTimeout || isUnauthenticated) {
+          resetAuthAndStop(event?.reason || (isAuthTimeout ? 'Authentication timeout' : undefined))
+          return
+        }
 
         scheduleReconnect()
       }
@@ -599,6 +673,7 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
     error: null,
     isConnected: false,
     isConnecting: false,
+    resetAuthAndStop,
     send,
     subscribe,
     subscribedTeamId: null,
