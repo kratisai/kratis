@@ -225,7 +225,10 @@ class ClientChatSubscribeRpcHandlerTest {
             ActivityType type,
             ActivityStatus status,
             String description) {
-        return new SandboxExecutionActivity(executionId, sequence, actionId, type, status, description, null);
+        SandboxExecutionActivity activity =
+                new SandboxExecutionActivity(executionId, sequence, actionId, type, status, description, null);
+        activity.setCreatedAt(Instant.parse("2026-10-20T17:32:12.672Z"));
+        return activity;
     }
 
     @Test

@@ -53,6 +53,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class ClientRealtimeEventListenersTest {
 
+    private static final Instant CREATED_AT = Instant.parse("2026-10-20T17:32:12.672Z");
+
     @Mock
     private WebSocketDispatch dispatch;
 
@@ -154,7 +156,14 @@ class ClientRealtimeEventListenersTest {
         UUID teamId = UUID.randomUUID();
         UUID executionId = UUID.randomUUID();
         listeners.onSandboxExecutionActivityEvent(new SandboxExecutionActivityEvent(
-                teamId, executionId, ActivityType.COMMAND, "running", "tool-call-7", ActivityStatus.IN_PROGRESS, null));
+                teamId,
+                executionId,
+                ActivityType.COMMAND,
+                "running",
+                "tool-call-7",
+                ActivityStatus.IN_PROGRESS,
+                null,
+                CREATED_AT));
 
         ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
         verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
@@ -163,6 +172,7 @@ class ClientRealtimeEventListenersTest {
         assertThat(result.activityType()).isEqualTo(ActivityType.COMMAND);
         assertThat(result.actionId()).isEqualTo("tool-call-7");
         assertThat(result.status()).isEqualTo(ActivityStatus.IN_PROGRESS);
+        assertThat(result.createdAt()).isEqualTo(CREATED_AT.toString());
     }
 
     @Test

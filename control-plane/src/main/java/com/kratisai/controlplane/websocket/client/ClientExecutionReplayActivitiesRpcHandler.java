@@ -86,7 +86,8 @@ public class ClientExecutionReplayActivitiesRpcHandler
                         activity.getDescription(),
                         activity.getActionId(),
                         activity.getStatus(),
-                        activityPersistenceService.detailOf(activity)));
+                        activityPersistenceService.detailOf(activity),
+                        activity.getCreatedAt().toString()));
 
         Flux<ClientPayload> completeFlux =
                 Flux.just(new ClientPayload.ExecutionReplayCompleteResult(executionId, activities.size()));

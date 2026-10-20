@@ -5,22 +5,31 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionActivityResult;
+import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class ClientPayloadSerializationTest {
 
+    private static final Instant CREATED_AT = Instant.parse("2026-10-20T17:32:12.672Z");
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
     void executionActivityResult_omitsNullActionId() {
         JsonNode json = objectMapper.valueToTree(new ExecutionActivityResult(
-                UUID.randomUUID(), ActivityType.COMMAND, "Running tests", ActivityStatus.COMPLETED));
+                UUID.randomUUID(),
+                ActivityType.COMMAND,
+                "Running tests",
+                null,
+                ActivityStatus.COMPLETED,
+                null,
+                CREATED_AT.toString()));
 
         assertThat(json.has("actionId")).isFalse();
         assertThat(json.has("detail")).isFalse();
         assertThat(json.get("activityType").asText()).isEqualTo("COMMAND");
         assertThat(json.get("status").asText()).isEqualTo("completed");
+        assertThat(json.get("createdAt").asText()).isEqualTo("2026-10-20T17:32:12.672Z");
     }
 
     @Test
@@ -33,7 +42,8 @@ class ClientPayloadSerializationTest {
                 "Reading",
                 "tool-call-1",
                 ActivityStatus.IN_PROGRESS,
-                detail));
+                detail,
+                CREATED_AT.toString()));
 
         assertThat(json.get("actionId").asText()).isEqualTo("tool-call-1");
         assertThat(json.get("status").asText()).isEqualTo("in_progress");
@@ -61,7 +71,8 @@ class ClientPayloadSerializationTest {
                 "Agent plan updated",
                 "plan",
                 ActivityStatus.IN_PROGRESS,
-                withPlan));
+                withPlan,
+                CREATED_AT.toString()));
 
         assertThat(json.get("activityType").asText()).isEqualTo("PLAN");
         JsonNode plan = json.path("detail").path("plan");
@@ -78,7 +89,8 @@ class ClientPayloadSerializationTest {
                 "Agent plan updated",
                 "plan",
                 ActivityStatus.IN_PROGRESS,
-                emptyPlan));
+                emptyPlan,
+                CREATED_AT.toString()));
         assertThat(empty.path("detail").has("plan")).isFalse();
     }
 

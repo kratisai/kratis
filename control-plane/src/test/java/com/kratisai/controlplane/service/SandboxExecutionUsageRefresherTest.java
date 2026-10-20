@@ -124,7 +124,8 @@ class SandboxExecutionUsageRefresherTest {
     }
 
     private SandboxExecutionActivityEvent activityEvent() {
-        return new SandboxExecutionActivityEvent(teamId, executionId, null, "running", "tool-call-1", null, null);
+        return new SandboxExecutionActivityEvent(
+                teamId, executionId, null, "running", "tool-call-1", null, null, Instant.now());
     }
 
     private void runImmediateTask(int index) {

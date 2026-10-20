@@ -7,6 +7,7 @@ required:
 - activityType
 - description
 - status
+- createdAt
 properties:
   type:
     type: string
@@ -40,6 +41,10 @@ properties:
     - "completed"
     - "failed"
     description: "ACP ToolCallStatus lifecycle: pending \u2192 in_progress \u2192 completed | failed."
+  createdAt:
+    type: string
+    format: date-time
+    description: "Control-plane time the activity was first persisted (ISO-8601, UTC). Stable across live delivery and replay."
   detail:
     type: object
     description: Structured accumulated tool/message state for the expandable activity record.

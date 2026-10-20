@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import type { CommandExecutionActivity, ThinkingActivity, ToolExecutionActivity } from '@/types/execution-activity-types'
+import type {
+  CommandExecutionActivity,
+  ThinkingActivity,
+  ToolExecutionActivity,
+} from '@/types/execution-activity-types'
 
 import { ExecutionActivityLog } from '@/components/session/execution-activity-log'
 import { useActivityStore } from '@/store/activity-store'
@@ -10,7 +14,9 @@ import { renderWithProviders, screen, waitFor } from '../support/test-render'
 
 const EXECUTION_ID = 'exec-expanded-1'
 
-function seedActivities(activities: Array<CommandExecutionActivity | ThinkingActivity | ToolExecutionActivity>) {
+function seedActivities(
+  activities: Array<CommandExecutionActivity | ThinkingActivity | ToolExecutionActivity>,
+) {
   const store = useActivityStore.getState()
   store.clearActivities(EXECUTION_ID)
 
@@ -136,14 +142,18 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       },
     ])
 
-    const summary = await screen.findByText('Thinking ... I need to analyze the project structure first.')
+    const summary = await screen.findByText(
+      'Thinking ... I need to analyze the project structure first.',
+    )
     expect(summary.className).toContain('truncate')
     expect(summary.className).toContain('italic')
 
     await user.click(summary.closest('button')!)
 
     await waitFor(() => {
-      const expanded = screen.getByText('Thinking ... I need to analyze the project structure first.')
+      const expanded = screen.getByText(
+        'Thinking ... I need to analyze the project structure first.',
+      )
       expect(expanded.className).not.toContain('truncate')
       expect(expanded.className).toContain('whitespace-pre-wrap')
     })
@@ -334,6 +344,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'cmd-stream-1',
       activityType: 'COMMAND',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'npm test',
       executionId: EXECUTION_ID,
       status: 'in_progress',
@@ -346,6 +357,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'cmd-stream-1',
       activityType: 'COMMAND',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'npm test',
       detail: { output: 'PASS src/a.test.ts' },
       executionId: EXECUTION_ID,
@@ -362,6 +374,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'cmd-stream-1',
       activityType: 'COMMAND',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'npm test',
       detail: { output: 'PASS src/a.test.ts\nPASS src/b.test.ts' },
       executionId: EXECUTION_ID,
@@ -379,6 +392,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'msg-1',
       activityType: 'MESSAGE',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'Here is the result',
       detail: { messageId: 'msg-1', role: 'agent' },
       executionId: EXECUTION_ID,
@@ -395,6 +409,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'msg-1',
       activityType: 'MESSAGE',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'Here is the result',
       detail: { messageId: 'msg-1', role: 'agent' },
       executionId: EXECUTION_ID,
@@ -405,6 +420,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'tc-1',
       activityType: 'RESEARCH',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'Reading main.go',
       executionId: EXECUTION_ID,
       status: 'in_progress',
@@ -427,6 +443,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'cmd-detail-1',
       activityType: 'COMMAND',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'rm -rf build',
       detail: { output: 'removed build/' },
       executionId: EXECUTION_ID,
