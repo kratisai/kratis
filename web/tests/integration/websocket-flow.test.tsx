@@ -1,6 +1,7 @@
 import { act } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import App from '@/App'
 import { queryClient } from '@/lib/query-client'
 import { useAuthStore } from '@/store/auth-store'
 import { useExecutionStore } from '@/store/execution-store'
@@ -13,13 +14,19 @@ import {
   setupFetchMock,
 } from '../support/test-fetch-mocks'
 import {
+  renderWithProviders,
   renderWithRouter,
   screen,
   setAuthenticated,
   setUnauthenticated,
   waitFor,
 } from '../support/test-render'
-import { allInstances, type MockWebSocket, setupConnected } from '../support/test-websocket'
+import {
+  allInstances,
+  getLatestInstance,
+  type MockWebSocket,
+  setupConnected,
+} from '../support/test-websocket'
 
 function sentMethodNames(ws: MockWebSocket): string[] {
   return ws.send.mock.calls.map(
@@ -615,5 +622,91 @@ describe('WebSocket Integration Flow', () => {
         }),
       })
     })
+  })
+
+  it('clears credentials, displays login prompt, and stops reconnect when WebSocket closes with status 1008', async () => {
+    mockListTeams([
+      {
+        createdAt: '2024-01-01T00:00:00Z',
+        id: 'team-1',
+        isDefault: true,
+        name: 'Test Team',
+        role: 'owner',
+        tavilyApiKeyConfigured: false,
+      },
+    ])
+    setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
+
+    renderWithProviders(<App />)
+
+    // Login prompt should not be visible when authenticated
+    expect(screen.queryByLabelText('Email')).not.toBeInTheDocument()
+
+    const ws = getLatestInstance()
+    if (!ws) throw new Error('WebSocket instance not created')
+    act(() => {
+      ws.onopen?.()
+    })
+
+    const instanceCount = allInstances.length
+
+    // Simulate backend closing socket with status 1008 (policy violation / auth timeout)
+    act(() => {
+      ws.onclose?.({ code: 1008, reason: 'Authentication timeout' } as CloseEvent)
+    })
+
+    // Credentials cleared
+    await waitFor(() => {
+      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+      expect(useAuthStore.getState().accessToken).toBeNull()
+      expect(useAuthStore.getState().refreshToken).toBeNull()
+    })
+
+    // Login prompt is displayed immediately
+    await waitFor(() => {
+      expect(screen.getByLabelText('Email')).toBeInTheDocument()
+      expect(screen.getByLabelText('Password')).toBeInTheDocument()
+    })
+
+    // No reconnect attempt is scheduled
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(allInstances.length).toBe(instanceCount)
+  })
+
+  it('preserves client credentials and schedules reconnect when WebSocket closes abnormally (code: 1006)', async () => {
+    mockListTeams([
+      {
+        createdAt: '2024-01-01T00:00:00Z',
+        id: 'team-1',
+        isDefault: true,
+        name: 'Test Team',
+        role: 'owner',
+        tavilyApiKeyConfigured: false,
+      },
+    ])
+    setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
+
+    renderWithRouter(['/ask'])
+
+    const ws = setupConnected()
+    const instanceCount = allInstances.length
+
+    // Simulate network drop / abnormal closure
+    act(() => {
+      ws.onclose?.({ code: 1006, reason: 'Connection dropped' } as CloseEvent)
+    })
+
+    // Credentials remain intact
+    expect(useAuthStore.getState().isAuthenticated).toBe(true)
+    expect(useAuthStore.getState().accessToken).toBe('test-access-token')
+    expect(useAuthStore.getState().refreshToken).toBe('test-refresh-token')
+
+    // Reconnection is scheduled with exponential backoff
+    await waitFor(
+      () => {
+        expect(allInstances.length).toBeGreaterThan(instanceCount)
+      },
+      { timeout: 3000 },
+    )
   })
 })

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAuthStore } from '@/store/auth-store'
 import { useWebSocketStore } from '@/store/websocket-store'
 
-import { setupFetchMock } from '../support/test-fetch-mocks'
+import { mockRefreshToken, setupFetchMock } from '../support/test-fetch-mocks'
 import {
   allInstances,
   getLatestInstance,
@@ -236,5 +236,94 @@ describe('WebSocket Token Refresh', () => {
     })
 
     expect(allInstances.length).toBeGreaterThan(instanceCount)
+  })
+
+  it('invokes refreshAccessToken, updates tokens, and re-authenticates over same socket on -32001 with valid refresh token', async () => {
+    mockRefreshToken(false)
+    useAuthStore.getState().login(USER, 'expired-token', 'valid-refresh-token', 3600)
+    const ws = setupConnected()
+    const instanceCount = allInstances.length
+    ws.send.mockClear()
+
+    act(() => {
+      ws.onmessage?.({
+        data: JSON.stringify({
+          error: { code: -32001, message: 'Invalid token' },
+          id: 1,
+          jsonrpc: '2.0',
+        }),
+      })
+    })
+
+    await waitFor(() => {
+      expect(useAuthStore.getState().accessToken).toBe('new-access-token')
+      expect(useAuthStore.getState().refreshToken).toBe('new-refresh-token')
+    })
+
+    await waitFor(() => {
+      expect(sentMethods(ws)).toEqual([{ method: 'auth', params: { token: 'new-access-token' } }])
+    })
+
+    expect(allInstances.length).toBe(instanceCount)
+    expect(ws.close).not.toHaveBeenCalled()
+    expect(useWebSocketStore.getState().isConnected).toBe(true)
+  })
+
+  it('clears credentials and disconnects without reconnecting on -32001 when refresh token is rejected (401)', async () => {
+    mockRefreshToken(true)
+    useAuthStore.getState().login(USER, 'expired-token', 'rejected-refresh-token', 3600)
+    const ws = setupConnected()
+    const instanceCount = allInstances.length
+
+    act(() => {
+      ws.onmessage?.({
+        data: JSON.stringify({
+          error: { code: -32001, message: 'Invalid token' },
+          id: 1,
+          jsonrpc: '2.0',
+        }),
+      })
+    })
+
+    await waitFor(() => {
+      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+      expect(useAuthStore.getState().accessToken).toBeNull()
+      expect(useAuthStore.getState().refreshToken).toBeNull()
+    })
+
+    expect(ws.close).toHaveBeenCalled()
+    expect(useWebSocketStore.getState().isConnected).toBe(false)
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(allInstances.length).toBe(instanceCount)
+  })
+
+  it('immediately resets credentials and stops reconnect on -32001 when no refresh token exists', async () => {
+    useAuthStore.getState().login(USER, 'expired-token', '', 3600)
+    useAuthStore.setState({ refreshToken: null })
+    const ws = setupConnected()
+    const instanceCount = allInstances.length
+
+    act(() => {
+      ws.onmessage?.({
+        data: JSON.stringify({
+          error: { code: -32001, message: 'Invalid token' },
+          id: 1,
+          jsonrpc: '2.0',
+        }),
+      })
+    })
+
+    await waitFor(() => {
+      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+      expect(useAuthStore.getState().accessToken).toBeNull()
+      expect(useAuthStore.getState().refreshToken).toBeNull()
+    })
+
+    expect(ws.close).toHaveBeenCalled()
+    expect(useWebSocketStore.getState().isConnected).toBe(false)
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(allInstances.length).toBe(instanceCount)
   })
 })

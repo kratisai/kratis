@@ -7,6 +7,14 @@ import type { HitlRuleType } from './hitl-rule-types'
 
 export type { ActivityKind } from './activity-kind'
 
+export const JsonRpcErrorCodes = {
+  INVALID_TOKEN: -32001,
+  NOT_AUTHENTICATED: -32000,
+} as const
+
+export const INVALID_TOKEN_CODE = JsonRpcErrorCodes.INVALID_TOKEN
+export const NOT_AUTHENTICATED_CODE = JsonRpcErrorCodes.NOT_AUTHENTICATED
+
 export interface ActivityDetail {
   diff?: ActivityDiff
   exitCode?: number
