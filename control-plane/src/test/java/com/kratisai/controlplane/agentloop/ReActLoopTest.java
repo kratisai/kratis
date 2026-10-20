@@ -264,33 +264,33 @@ class ReActLoopTest {
                 .satisfies(e ->
                         assertThat(((ReActLoopFatalException) e).category()).isEqualTo(LlmErrorCategory.SERVER_ERROR));
 
-        assertThat(flakyMatcher.getMatchCount()).isEqualTo(3);
+        assertThat(flakyMatcher.getMatchCount()).isEqualTo(4);
     }
 
     @Test
-    void transientError_afterPartialStream_abortsWithoutRetry() {
+    void transientError_afterPartialStream_retriesWithImmediateDelivery() {
         ChatModel model = mock(ChatModel.class);
         ChatOptions defaults = defaultOptionsMock();
         when(model.getDefaultOptions()).thenReturn(defaults);
         AtomicInteger calls = new AtomicInteger();
         when(model.stream(any(Prompt.class))).thenAnswer(invocation -> {
-            calls.incrementAndGet();
-            return Flux.concat(
-                    Flux.just(chatResponse(new AssistantMessage("partial"))),
-                    Flux.error(new TransientAiException("503 - upstream failed mid-stream")));
+            if (calls.incrementAndGet() == 1) {
+                return Flux.concat(
+                        Flux.just(chatResponse(new AssistantMessage("partial"))),
+                        Flux.error(new TransientAiException("503 - upstream failed mid-stream")));
+            }
+            return Flux.just(chatResponse(new AssistantMessage("recovered")));
         });
         List<String> answers = new ArrayList<>();
 
-        assertThatThrownBy(() -> ReActLoop.text(client(model), noTools())
-                        .executor(Runnable::run)
-                        .onAnswerChunk(answers::add)
-                        .run(List.of(new UserMessage("go")), TOOL_CONTEXT))
-                .isInstanceOf(ReActLoopFatalException.class)
-                .satisfies(e ->
-                        assertThat(((ReActLoopFatalException) e).category()).isEqualTo(LlmErrorCategory.SERVER_ERROR));
+        String result = ReActLoop.text(client(model), noTools())
+                .executor(Runnable::run)
+                .onAnswerChunk(answers::add)
+                .run(List.of(new UserMessage("go")), TOOL_CONTEXT);
 
-        assertThat(calls.get()).isEqualTo(1);
-        assertThat(answers).containsExactly("partial");
+        assertThat(result).isEqualTo("recovered");
+        assertThat(calls.get()).isEqualTo(2);
+        assertThat(answers).containsExactly("partial", "recovered");
     }
 
     @Test
