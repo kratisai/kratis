@@ -9,7 +9,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import org.jspecify.annotations.Nullable;
@@ -32,8 +31,9 @@ public final class ReActLoop<T> {
 
     private static final Logger log = LoggerFactory.getLogger(ReActLoop.class);
 
-    private static final int MAX_TRANSIENT_ATTEMPTS = 3;
-    private static final long TRANSIENT_RETRY_BACKOFF_MILLIS = 250;
+    private static final int MAX_TRANSIENT_ATTEMPTS = 4;
+    private static final long TRANSIENT_RETRY_INITIAL_BACKOFF_MILLIS = 500;
+    private static final long TRANSIENT_RETRY_MAX_BACKOFF_MILLIS = 8000;
 
     public enum ToolPhase {
         START,
@@ -214,7 +214,6 @@ public final class ReActLoop<T> {
     }
 
     private @Nullable LlmTurn invokeLlm(List<Message> history, ToolContext toolContext, ToolCallback[] turnTools) {
-        AtomicBoolean emitted = new AtomicBoolean();
         int attempt = 0;
         while (true) {
             if (Thread.currentThread().isInterrupted()) {
@@ -229,10 +228,7 @@ public final class ReActLoop<T> {
                         .options(DefaultToolCallingChatOptions.builder().internalToolExecutionEnabled(false))
                         .stream()
                         .chatResponse()
-                        .doOnNext(chunk -> {
-                            emitted.set(true);
-                            handleChunk(chunk);
-                        })
+                        .doOnNext(this::handleChunk)
                         .collectList()
                         .block();
                 return mergeChunks(chunks);
@@ -248,7 +244,7 @@ public final class ReActLoop<T> {
                 if (!category.isTransient()) {
                     throw e;
                 }
-                if (emitted.get() || attempt >= MAX_TRANSIENT_ATTEMPTS - 1) {
+                if (attempt >= MAX_TRANSIENT_ATTEMPTS - 1) {
                     throw new ReActLoopFatalException(category, e);
                 }
                 attempt++;
@@ -274,8 +270,10 @@ public final class ReActLoop<T> {
     }
 
     private static void sleepBeforeRetry(int attempt) {
+        long backoff = Math.min(
+                TRANSIENT_RETRY_INITIAL_BACKOFF_MILLIS * (1L << (attempt - 1)), TRANSIENT_RETRY_MAX_BACKOFF_MILLIS);
         try {
-            Thread.sleep(TRANSIENT_RETRY_BACKOFF_MILLIS * attempt);
+            Thread.sleep(backoff);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while backing off a transient LLM error", interrupted);
