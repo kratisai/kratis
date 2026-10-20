@@ -58,7 +58,7 @@ public class ExecutionActivityPersistenceService {
         this.eventPublisher = eventPublisher;
     }
 
-    public void recordActivity(
+    public SandboxExecutionActivity recordActivity(
             UUID executionId,
             ActivityType activityType,
             String description,
@@ -67,14 +67,12 @@ public class ExecutionActivityPersistenceService {
             ActivityDetail detail) {
         ActivityDetail lifecycle = detail != null ? detail.withHitl(null) : null;
         if (actionId == null || actionId.isBlank()) {
-            insert(executionId, activityType, description, null, status, lifecycle);
-            return;
+            return insert(executionId, activityType, description, null, status, lifecycle);
         }
-        repository
+        return repository
                 .findByExecutionIdAndActionId(executionId, actionId)
-                .ifPresentOrElse(
-                        existing -> merge(existing, activityType, description, status, lifecycle),
-                        () -> insert(executionId, activityType, description, actionId, status, lifecycle));
+                .map(existing -> merge(existing, activityType, description, status, lifecycle))
+                .orElseGet(() -> insert(executionId, activityType, description, actionId, status, lifecycle));
     }
 
     public List<SandboxExecutionActivity> getActivities(UUID executionId) {
@@ -254,12 +252,12 @@ public class ExecutionActivityPersistenceService {
     @Transactional
     public void recordTurnComplete(UUID executionId, StopReason stopReason) {
         String description = "Agent turn complete (" + (stopReason != null ? stopReason.getValue() : "unknown") + ")";
-        recordActivity(executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null);
+        SandboxExecutionActivity row =
+                recordActivity(executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null);
         executionRepository
                 .findById(executionId)
                 .map(execution -> execution.getChat().getTeam().getId())
-                .ifPresent(teamId -> eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
-                        teamId, executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null)));
+                .ifPresent(teamId -> publishActivity(teamId, row));
     }
 
     @Transactional
@@ -270,15 +268,9 @@ public class ExecutionActivityPersistenceService {
         }
         AgentHarness harness = execution.getHarness();
         String description = (harness != null ? harness.getName() : "Agent") + " has gone to sleep";
-        recordActivity(executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null);
-        eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
-                execution.getChat().getTeam().getId(),
-                executionId,
-                ActivityType.MESSAGE,
-                description,
-                null,
-                ActivityStatus.COMPLETED,
-                null));
+        SandboxExecutionActivity row =
+                recordActivity(executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null);
+        publishActivity(execution.getChat().getTeam().getId(), row);
     }
 
     @Transactional
@@ -289,15 +281,9 @@ public class ExecutionActivityPersistenceService {
         }
         AgentHarness harness = execution.getHarness();
         String description = (harness != null ? harness.getName() : "Agent") + " has resumed";
-        recordActivity(executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null);
-        eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
-                execution.getChat().getTeam().getId(),
-                executionId,
-                ActivityType.MESSAGE,
-                description,
-                null,
-                ActivityStatus.COMPLETED,
-                null));
+        SandboxExecutionActivity row =
+                recordActivity(executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null);
+        publishActivity(execution.getChat().getTeam().getId(), row);
     }
 
     @Transactional
@@ -307,15 +293,9 @@ public class ExecutionActivityPersistenceService {
             return;
         }
         String description = "Sandbox resources found to have been unexpectedly purged";
-        recordActivity(executionId, ActivityType.ERROR, description, PURGED_ACTION_ID, ActivityStatus.FAILED, null);
-        eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
-                execution.getChat().getTeam().getId(),
-                executionId,
-                ActivityType.ERROR,
-                description,
-                PURGED_ACTION_ID,
-                ActivityStatus.FAILED,
-                null));
+        SandboxExecutionActivity row = recordActivity(
+                executionId, ActivityType.ERROR, description, PURGED_ACTION_ID, ActivityStatus.FAILED, null);
+        publishActivity(execution.getChat().getTeam().getId(), row);
     }
 
     @Transactional
@@ -326,13 +306,13 @@ public class ExecutionActivityPersistenceService {
         ActivityDetail detail =
                 new ActivityDetail(null, null, null, null, null, exitCode, null, null, null, null, null);
 
-        recordActivity(executionId, ActivityType.ERROR, description, ERROR_ACTION_ID, ActivityStatus.FAILED, detail);
+        SandboxExecutionActivity row = recordActivity(
+                executionId, ActivityType.ERROR, description, ERROR_ACTION_ID, ActivityStatus.FAILED, detail);
 
         Optional<UUID> teamId = executionRepository
                 .findById(executionId)
                 .map(execution -> execution.getChat().getTeam().getId());
-        teamId.ifPresent(uuid -> eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
-                uuid, executionId, ActivityType.ERROR, description, ERROR_ACTION_ID, ActivityStatus.FAILED, detail)));
+        teamId.ifPresent(uuid -> publishActivity(uuid, row));
     }
 
     private static String truncate(String value) {
@@ -367,10 +347,11 @@ public class ExecutionActivityPersistenceService {
                 row.getDescription(),
                 row.getActionId(),
                 row.getStatus(),
-                detailOf(row)));
+                detailOf(row),
+                row.getCreatedAt()));
     }
 
-    private void merge(
+    private SandboxExecutionActivity merge(
             SandboxExecutionActivity existing,
             ActivityType activityType,
             String description,
@@ -385,6 +366,7 @@ public class ExecutionActivityPersistenceService {
             existing.setDetail(toJson(keepApproval ? detail.withHitl(current.hitl()) : detail));
         }
         repository.save(existing);
+        return existing;
     }
 
     private String toJson(ActivityDetail detail) {

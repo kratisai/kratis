@@ -24,6 +24,7 @@ import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -32,6 +33,8 @@ import org.junit.jupiter.api.Test;
 import reactor.test.StepVerifier;
 
 class ClientExecutionReplayActivitiesRpcHandlerTest {
+
+    private static final Instant CREATED_AT = Instant.parse("2026-10-20T17:32:12.672Z");
 
     private ClientSessionRegistry sessionRegistry;
     private SandboxExecutionRepository executionRepository;
@@ -64,6 +67,7 @@ class ClientExecutionReplayActivitiesRpcHandlerTest {
         when(teamMemberRepository.existsByTeamIdAndUserId(teamId, userId)).thenReturn(true);
         SandboxExecutionActivity activity = new SandboxExecutionActivity(
                 executionId, 1, "a1", ActivityType.COMMAND, ActivityStatus.COMPLETED, "ran ls", null);
+        activity.setCreatedAt(CREATED_AT);
         when(activityPersistenceService.getActivities(executionId)).thenReturn(List.of(activity));
         when(activityPersistenceService.detailOf(any())).thenReturn(null);
 
@@ -74,6 +78,7 @@ class ClientExecutionReplayActivitiesRpcHandlerTest {
                     ClientPayload.ExecutionActivityResult result = (ClientPayload.ExecutionActivityResult) payload;
                     assertThat(result.executionId()).isEqualTo(executionId);
                     assertThat(result.description()).isEqualTo("ran ls");
+                    assertThat(result.createdAt()).isEqualTo(CREATED_AT.toString());
                 })
                 .assertNext(payload -> {
                     assertThat(payload).isInstanceOf(ClientPayload.ExecutionReplayCompleteResult.class);
@@ -134,6 +139,7 @@ class ClientExecutionReplayActivitiesRpcHandlerTest {
         when(teamMemberRepository.existsByTeamIdAndUserId(teamId, userId)).thenReturn(true);
         SandboxExecutionActivity plan = new SandboxExecutionActivity(
                 executionId, 1, "plan", ActivityType.PLAN, ActivityStatus.IN_PROGRESS, "Agent plan updated", null);
+        plan.setCreatedAt(CREATED_AT);
         when(activityPersistenceService.getActivities(executionId)).thenReturn(List.of(plan));
         when(activityPersistenceService.detailOf(any()))
                 .thenReturn(new ActivityDetail(

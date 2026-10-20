@@ -5,6 +5,7 @@
   "description": "planning",
   "actionId": "msg-1",
   "status": "in_progress",
+  "createdAt": "2026-10-20T17:32:12.672Z",
   "detail": {
     "messageId": "msg-1",
     "role": "agent"

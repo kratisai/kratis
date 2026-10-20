@@ -100,6 +100,7 @@ export function triggerMockExecutionActivity(
   status: 'completed' | 'failed' | 'in_progress' | 'pending' = 'in_progress',
   actionId?: string,
   detail?: Record<string, unknown>,
+  createdAt = '2026-10-20T17:32:12.672Z',
 ) {
   ws.onmessage?.({
     data: JSON.stringify({
@@ -107,6 +108,7 @@ export function triggerMockExecutionActivity(
       result: {
         actionId,
         activityType,
+        createdAt,
         description,
         detail,
         executionId,

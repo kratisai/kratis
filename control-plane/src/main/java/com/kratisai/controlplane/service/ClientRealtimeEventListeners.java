@@ -91,7 +91,8 @@ public class ClientRealtimeEventListeners {
                             event.description(),
                             event.actionId(),
                             event.status(),
-                            event.detail()));
+                            event.detail(),
+                            event.createdAt().toString()));
         } catch (Exception e) {
             logger.error("Failed to publish execution activity event for execution {}", event.executionId(), e);
         }

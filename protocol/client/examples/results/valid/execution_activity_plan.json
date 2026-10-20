@@ -5,6 +5,7 @@
   "description": "Agent plan updated",
   "actionId": "plan",
   "status": "in_progress",
+  "createdAt": "2026-10-20T17:32:12.672Z",
   "detail": {
     "plan": [
       { "content": "Setup repo", "priority": "high", "status": "in_progress" },

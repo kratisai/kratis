@@ -3,6 +3,7 @@ package com.kratisai.controlplane.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -37,6 +38,7 @@ import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.testsupport.HarnessCatalogFixture;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -106,6 +108,36 @@ class ExecutionActivityPersistenceServiceTest {
         assertThat(saved.getActivityType()).isEqualTo(type);
         assertThat(saved.getStatus()).isEqualTo(status);
         assertThat(saved.getDescription()).isEqualTo(description);
+    }
+
+    @Test
+    void recordTurnComplete_publishesActivityCarryingPersistedCreatedAt() {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        Instant createdAt = Instant.parse("2026-10-20T17:32:12.672Z");
+        Team team = new Team();
+        team.setId(teamId);
+        ChatEntity chat = new ChatEntity();
+        chat.setTeam(team);
+        SandboxExecution execution = new SandboxExecution();
+        execution.setChat(chat);
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+        when(repository.nextSequence(executionId)).thenReturn(1L);
+        doAnswer(invocation -> {
+                    SandboxExecutionActivity row = invocation.getArgument(0);
+                    row.setCreatedAt(createdAt);
+                    return row;
+                })
+                .when(repository)
+                .save(any());
+
+        service.recordTurnComplete(executionId, null);
+
+        ArgumentCaptor<SandboxExecutionActivityEvent> captor =
+                ArgumentCaptor.forClass(SandboxExecutionActivityEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().teamId()).isEqualTo(teamId);
+        assertThat(captor.getValue().createdAt()).isEqualTo(createdAt);
     }
 
     @Test

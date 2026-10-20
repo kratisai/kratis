@@ -3,6 +3,7 @@ package com.kratisai.controlplane.model.event;
 import com.kratisai.controlplane.api.wsdto.ActivityDetail;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
+import java.time.Instant;
 import java.util.UUID;
 
 public record SandboxExecutionActivityEvent(
@@ -12,4 +13,5 @@ public record SandboxExecutionActivityEvent(
         String description,
         String actionId,
         ActivityStatus status,
-        ActivityDetail detail) {}
+        ActivityDetail detail,
+        Instant createdAt) {}

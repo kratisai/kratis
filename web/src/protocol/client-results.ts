@@ -183,6 +183,7 @@ export const CLIENT_RESULTS = {
         'PLAN',
         'ERROR',
       ]),
+      createdAt: z.string(),
       description: z.string(),
       detail: activityDetailSchema.optional(),
       executionId: uuid,

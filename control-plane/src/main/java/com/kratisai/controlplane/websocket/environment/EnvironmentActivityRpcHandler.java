@@ -3,6 +3,7 @@ package com.kratisai.controlplane.websocket.environment;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.model.SandboxExecution;
+import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import java.util.UUID;
@@ -49,7 +50,7 @@ public class EnvironmentActivityRpcHandler
         SandboxExecution execution = executionGuard.requireExecutionInEnvironment(sessionId, execId);
 
         UUID teamId = execution.getChat().getTeam().getId();
-        activityPersistenceService.recordActivity(
+        SandboxExecutionActivity row = activityPersistenceService.recordActivity(
                 execution.getId(),
                 params.activityType(),
                 params.description(),
@@ -63,7 +64,8 @@ public class EnvironmentActivityRpcHandler
                 params.description(),
                 params.actionId(),
                 params.status(),
-                params.detail()));
+                params.detail(),
+                row.getCreatedAt()));
 
         return Flux.empty();
     }

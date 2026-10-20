@@ -142,7 +142,8 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
                             activity.getDescription(),
                             activity.getActionId(),
                             activity.getStatus(),
-                            activityPersistenceService.detailOf(activity)));
+                            activityPersistenceService.detailOf(activity),
+                            activity.getCreatedAt().toString()));
 
             return activities;
         });

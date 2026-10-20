@@ -16,6 +16,7 @@ function activityResult(
   },
 ): ExecutionActivityResult {
   return {
+    createdAt: '2026-10-20T17:32:12.672Z',
     executionId: 'exec-1',
     status: 'in_progress',
     type: 'execution_activity',
@@ -670,7 +671,11 @@ describe('activity-store', () => {
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities).toHaveLength(2)
-      expect(activities[0]).toMatchObject({ actionId: 'm-1', text: 'visible reply', type: 'message' })
+      expect(activities[0]).toMatchObject({
+        actionId: 'm-1',
+        text: 'visible reply',
+        type: 'message',
+      })
       expect(activities[1]).toMatchObject({
         actionId: 'm-1',
         thought: 'private reasoning',
@@ -979,7 +984,6 @@ describe('activity-store', () => {
           description: 'git push',
           detail: {
             hitl: {
-
               kind: 'approval',
               message: 'Allow git push?',
               state: 'awaiting_human',
@@ -1006,7 +1010,6 @@ describe('activity-store', () => {
           description: 'git push',
           detail: {
             hitl: {
-
               kind: 'approval',
               message: 'Allow git push?',
               state: 'awaiting_human',
@@ -1022,7 +1025,6 @@ describe('activity-store', () => {
           description: 'git push',
           detail: {
             hitl: {
-
               kind: 'approval',
               message: 'Allow git push?',
               optionId: 'once',
@@ -1849,7 +1851,6 @@ describe('activity-store', () => {
           description: 'chmod +x script.sh',
           detail: {
             hitl: {
-
               kind: 'approval',
               message: 'Allow?',
               state: 'awaiting_human',
@@ -1968,6 +1969,61 @@ describe('activity-store', () => {
       )
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activityTitle(activities[0])).toBe('Thinking')
+    })
+  })
+
+  describe('startedAt from server-assigned createdAt', () => {
+    it('stamps a new activity with the payload createdAt, not the receipt time', () => {
+      useActivityStore.getState().handleActivityEvent(
+        activityResult({
+          actionId: 'tc-created',
+          activityType: 'RESEARCH',
+          createdAt: '2026-10-20T10:00:00.000Z',
+          description: 'read pom.xml',
+        }),
+      )
+
+      const [activity] = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activity.startedAt).toBe('2026-10-20T10:00:00.000Z')
+    })
+
+    it('keeps the original startedAt when a later update for the same action arrives', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'msg-1',
+          activityType: 'THINKING',
+          createdAt: '2026-10-20T10:00:00.000Z',
+          description: 'planning',
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'msg-1',
+          activityType: 'THINKING',
+          createdAt: '2026-10-20T10:05:00.000Z',
+          description: 'planning the refactor',
+          status: 'completed',
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
+      expect(activities[0].startedAt).toBe('2026-10-20T10:00:00.000Z')
+    })
+
+    it('stamps replayed error activities with the payload createdAt', () => {
+      useActivityStore.getState().handleActivityEvent(
+        activityResult({
+          activityType: 'ERROR',
+          createdAt: '2026-10-20T09:00:00.000Z',
+          description: 'boom',
+          status: 'failed',
+        }),
+      )
+
+      const [activity] = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activity.startedAt).toBe('2026-10-20T09:00:00.000Z')
     })
   })
 })

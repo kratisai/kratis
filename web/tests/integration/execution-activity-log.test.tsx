@@ -22,11 +22,12 @@ interface ScrollCall {
 
 function captureScrollCalls() {
   const calls: ScrollCall[] = []
-  const spy = vi
-    .spyOn(Element.prototype, 'scrollIntoView')
-    .mockImplementation(function (this: Element, options?: boolean | ScrollIntoViewOptions) {
-      calls.push({ el: this, options })
-    })
+  const spy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (
+    this: Element,
+    options?: boolean | ScrollIntoViewOptions,
+  ) {
+    calls.push({ el: this, options })
+  })
   return {
     calls,
     restore: () => {
@@ -36,7 +37,11 @@ function captureScrollCalls() {
 }
 
 /** jsdom has no layout, so metrics must be shadowed to simulate a scrolled-up document. */
-function stubDocumentScrollMetrics(metrics: { clientHeight: number; scrollHeight: number; scrollTop: number }) {
+function stubDocumentScrollMetrics(metrics: {
+  clientHeight: number
+  scrollHeight: number
+  scrollTop: number
+}) {
   const el = document.documentElement as unknown as Record<string, number>
   for (const prop of ['clientHeight', 'scrollHeight', 'scrollTop'] as const) {
     Object.defineProperty(el, prop, { configurable: true, value: metrics[prop] })
@@ -68,9 +73,7 @@ describe('Execution Activity Log', () => {
 
     // Assert thinking card appears with the "Thinking" prefix
     await waitFor(() => {
-      expect(
-        screen.getByText('Thinking ... Analyzing the codebase structure'),
-      ).toBeInTheDocument()
+      expect(screen.getByText('Thinking ... Analyzing the codebase structure')).toBeInTheDocument()
     })
   })
 
@@ -186,6 +189,7 @@ describe('Execution Activity Log', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'a1',
       activityType: 'RESEARCH',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'read pom.xml',
       executionId: EXECUTION_ID,
       status: 'completed',
@@ -215,6 +219,7 @@ describe('Execution Activity Log', () => {
       useActivityStore.getState().handleActivityEvent({
         actionId: 'a-scrolled-up',
         activityType: 'RESEARCH',
+        createdAt: '2026-10-20T17:32:12.672Z',
         description: 'read pom.xml',
         executionId: EXECUTION_ID,
         status: 'in_progress',
@@ -238,6 +243,7 @@ describe('Execution Activity Log', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'tc-approve-scroll',
       activityType: 'COMMAND',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'systemctl restart app',
       executionId: EXECUTION_ID,
       status: 'in_progress',
@@ -252,6 +258,7 @@ describe('Execution Activity Log', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'tc-approve-scroll',
       activityType: 'COMMAND',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'systemctl restart app',
       detail: {
         hitl: {
@@ -283,6 +290,7 @@ describe('Execution Activity Log', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'el-scroll',
       activityType: 'ELICITATION',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'Choose a deployment target',
       detail: {
         hitl: {
@@ -316,6 +324,7 @@ describe('Execution Activity Log', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'el-follow',
       activityType: 'ELICITATION',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'Choose a deployment target',
       detail: {
         hitl: {
@@ -338,6 +347,7 @@ describe('Execution Activity Log', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'a-follow',
       activityType: 'RESEARCH',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'read pom.xml',
       executionId: EXECUTION_ID,
       status: 'in_progress',
@@ -427,10 +437,7 @@ describe('Execution Activity Log', () => {
     })
 
     await user.click(screen.getByRole('button', { name: 'Message to agent' }))
-    await user.type(
-      screen.getByLabelText('Message to agent'),
-      'use pnpm instead of npm',
-    )
+    await user.type(screen.getByLabelText('Message to agent'), 'use pnpm instead of npm')
     await user.click(screen.getByRole('button', { name: /Reject/i }))
 
     await waitFor(() => {
@@ -450,6 +457,7 @@ describe('Execution Activity Log', () => {
     useActivityStore.getState().handleActivityEvent({
       actionId: 'el-feedback',
       activityType: 'ELICITATION',
+      createdAt: '2026-10-20T17:32:12.672Z',
       description: 'Choose a deployment target',
       detail: {
         hitl: {
@@ -481,10 +489,7 @@ describe('Execution Activity Log', () => {
     })
 
     await user.click(screen.getByRole('button', { name: 'Message to agent' }))
-    await user.type(
-      screen.getByLabelText('Message to agent'),
-      'staging is offline, use preview',
-    )
+    await user.type(screen.getByLabelText('Message to agent'), 'staging is offline, use preview')
     await user.click(screen.getByRole('button', { name: 'Decline' }))
 
     await waitFor(() => {

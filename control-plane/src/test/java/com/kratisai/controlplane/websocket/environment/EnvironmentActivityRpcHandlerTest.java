@@ -2,6 +2,7 @@ package com.kratisai.controlplane.websocket.environment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -14,12 +15,14 @@ import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.SandboxExecution;
+import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
 import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +35,8 @@ import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class EnvironmentActivityRpcHandlerTest {
+
+    private static final Instant CREATED_AT = Instant.parse("2026-10-20T17:32:12.672Z");
 
     @Mock
     private EnvironmentSessionRegistry sessionRegistry;
@@ -57,6 +62,12 @@ class EnvironmentActivityRpcHandlerTest {
     void setUp() {
         EnvironmentExecutionGuard executionGuard = new EnvironmentExecutionGuard(sessionRegistry, executionRepository);
         handler = new EnvironmentActivityRpcHandler(executionGuard, activityPersistenceService, eventPublisher);
+    }
+
+    private static SandboxExecutionActivity storedRow() {
+        SandboxExecutionActivity row = new SandboxExecutionActivity();
+        row.setCreatedAt(CREATED_AT);
+        return row;
     }
 
     private SandboxExecution createExecution() {
@@ -90,6 +101,8 @@ class EnvironmentActivityRpcHandlerTest {
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
                 EnvironmentRpcPayload.Activity.METHOD, objectMapper.valueToTree(params), null);
 
+        when(activityPersistenceService.recordActivity(any(), any(), any(), any(), any(), any()))
+                .thenReturn(storedRow());
         handler.handle(sessionId, request, params);
         verify(activityPersistenceService)
                 .recordActivity(
@@ -109,6 +122,7 @@ class EnvironmentActivityRpcHandlerTest {
         assertThat(event.description()).isEqualTo("Writing code");
         assertThat(event.actionId()).isEqualTo("tool-call-7");
         assertThat(event.status()).isEqualTo(ActivityStatus.IN_PROGRESS);
+        assertThat(event.createdAt()).isEqualTo(CREATED_AT);
     }
 
     @Test
@@ -122,6 +136,8 @@ class EnvironmentActivityRpcHandlerTest {
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
                 EnvironmentRpcPayload.Activity.METHOD, objectMapper.valueToTree(params), null);
 
+        when(activityPersistenceService.recordActivity(any(), any(), any(), any(), any(), any()))
+                .thenReturn(storedRow());
         handler.handle(sessionId, request, params);
         ArgumentCaptor<SandboxExecutionActivityEvent> captor =
                 ArgumentCaptor.forClass(SandboxExecutionActivityEvent.class);

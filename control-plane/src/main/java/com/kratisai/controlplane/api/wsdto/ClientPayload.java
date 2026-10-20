@@ -243,7 +243,8 @@ public sealed interface ClientPayload {
             String description,
             String actionId,
             ActivityStatus status,
-            ActivityDetail detail)
+            ActivityDetail detail,
+            String createdAt)
             implements ClientPayload {
         public ExecutionActivityResult {
             Objects.requireNonNull(type, "type is required");
@@ -251,20 +252,7 @@ public sealed interface ClientPayload {
             Objects.requireNonNull(activityType, "activityType is required");
             Objects.requireNonNull(description, "description is required");
             Objects.requireNonNull(status, "status is required");
-        }
-
-        public ExecutionActivityResult(
-                UUID executionId, ActivityType activityType, String description, ActivityStatus status) {
-            this(ClientPayloadType.EXECUTION_ACTIVITY, executionId, activityType, description, null, status, null);
-        }
-
-        public ExecutionActivityResult(
-                UUID executionId,
-                ActivityType activityType,
-                String description,
-                String actionId,
-                ActivityStatus status) {
-            this(ClientPayloadType.EXECUTION_ACTIVITY, executionId, activityType, description, actionId, status, null);
+            Objects.requireNonNull(createdAt, "createdAt is required");
         }
 
         public ExecutionActivityResult(
@@ -273,7 +261,8 @@ public sealed interface ClientPayload {
                 String description,
                 String actionId,
                 ActivityStatus status,
-                ActivityDetail detail) {
+                ActivityDetail detail,
+                String createdAt) {
             this(
                     ClientPayloadType.EXECUTION_ACTIVITY,
                     executionId,
@@ -281,7 +270,8 @@ public sealed interface ClientPayload {
                     description,
                     actionId,
                     status,
-                    detail);
+                    detail,
+                    createdAt);
         }
     }
 

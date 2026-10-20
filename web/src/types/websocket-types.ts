@@ -148,6 +148,7 @@ export type EnvironmentStatus =
 export interface ExecutionActivityResult {
   actionId?: string
   activityType: WireActivityType
+  createdAt: string
   description: string
   detail?: ActivityDetail
   executionId: string
