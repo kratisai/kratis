@@ -32,9 +32,9 @@ import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.websocket.environment.EnvironmentCheckoutCompleteRpcHandler;
 import java.io.IOException;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -270,7 +270,8 @@ class RepositoryCheckoutWebSocketIntegrationTest {
         WebSocketSession mockSession1 = mock(WebSocketSession.class);
         when(mockSession1.getId()).thenReturn("mock-gh-session-1");
         when(mockSession1.isOpen()).thenReturn(true);
-        final List<TextMessage> capturedMessages1 = new ArrayList<>();
+        // CopyOnWriteArrayList prevents ConcurrentModificationException during Awaitility assertion polling.
+        final List<TextMessage> capturedMessages1 = new CopyOnWriteArrayList<>();
         doAnswer(invocation -> {
                     TextMessage message = invocation.getArgument(0);
                     capturedMessages1.add(message);
