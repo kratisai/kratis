@@ -65,6 +65,14 @@ public class PendingHitlRegistry {
         return pending.get(new HitlKey(executionId, actionId));
     }
 
+    /** True when any request for the execution still awaits a human answer. */
+    public boolean hasPendingForExecution(UUID executionId) {
+        if (executionId == null) {
+            return false;
+        }
+        return pending.keySet().stream().anyMatch(key -> key.executionId().equals(executionId));
+    }
+
     public PendingHitl remove(UUID executionId, String actionId) {
         PendingHitl removed = pending.remove(new HitlKey(executionId, actionId));
         if (removed != null) {

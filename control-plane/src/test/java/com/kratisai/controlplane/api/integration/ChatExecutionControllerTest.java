@@ -195,6 +195,9 @@ class ChatExecutionControllerTest {
                     if (cmd.contains("run") && cmd.contains("-d")) {
                         return new ProcessExecutor.ProcessResult(0, "mock-container-id-999888".getBytes());
                     }
+                    if (cmd.stream().anyMatch(arg -> arg.contains("index .Config.Labels"))) {
+                        return new ProcessExecutor.ProcessResult(0, "kratis-test\n".getBytes());
+                    }
                     return new ProcessExecutor.ProcessResult(0, new byte[0]);
                 })
                 .when(processExecutor)

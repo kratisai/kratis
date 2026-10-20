@@ -31,6 +31,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -41,6 +42,9 @@ class ExecutionReplayActivitiesRpcIntegrationTest {
 
     @LocalServerPort
     private int port;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     @Autowired
     private WebApplicationContext wac;
@@ -166,11 +170,15 @@ class ExecutionReplayActivitiesRpcIntegrationTest {
         activityPersistenceService.recordActivity(
                 executionId, ActivityType.RESEARCH, "Reading main.go", "act-1", ActivityStatus.COMPLETED, null);
 
-        SandboxExecution execution = executionRepository.findById(executionId).orElseThrow();
-        execution.setStatus(SandboxExecutionStatus.COMPLETED);
-        execution.setExitCode(0);
-        execution.setCompletedAt(java.time.Instant.now());
-        executionRepository.save(execution);
+        // Leaving RUNNING stamps the lazy environment, which needs an open session.
+        transactionTemplate.executeWithoutResult(status -> {
+            SandboxExecution execution =
+                    executionRepository.findById(executionId).orElseThrow();
+            execution.setStatus(SandboxExecutionStatus.COMPLETED);
+            execution.setExitCode(0);
+            execution.setCompletedAt(java.time.Instant.now());
+            executionRepository.save(execution);
+        });
         return executionId;
     }
 

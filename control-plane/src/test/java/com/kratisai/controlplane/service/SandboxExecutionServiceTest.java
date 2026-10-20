@@ -36,6 +36,7 @@ import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
+import com.kratisai.controlplane.model.event.SandboxExecutionSuspendedEvent;
 import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.testsupport.HarnessCatalogFixture;
 import com.kratisai.controlplane.testsupport.ResourcelessTransactionManager;
@@ -1466,6 +1467,42 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
+    void onSandboxExecutionSuspendedEvent_finalizesUsageAndRevokesKeyWithoutCompleting() {
+        UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
+        SandboxExecution execution = createTestExecution();
+        execution.startUsage("sk-sleep-key", null);
+        when(sandboxExecutionRepository.findActiveVirtualKeysByExecutionId(execution.getId()))
+                .thenReturn(List.of("sk-sleep-key"));
+        when(sandboxExecutionRepository.findByIdForUpdate(execution.getId())).thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
+        when(virtualKeyService.fetchUsage("sk-sleep-key")).thenReturn(new LlmUsageSnapshot(0.5, 10L, 6L, 4L));
+
+        sandboxExecutionService.onSandboxExecutionSuspendedEvent(
+                new SandboxExecutionSuspendedEvent(teamId, execution.getId(), ENVIRONMENT_ID));
+
+        verify(virtualKeyService).fetchUsage("sk-sleep-key");
+        verify(virtualKeyService).revokeKey("sk-sleep-key");
+        assertThat(execution.getUsages().getFirst().getRevokedAt()).isNotNull();
+        assertThat(execution.getStatus())
+                .as("suspend finalize must not change the execution status")
+                .isEqualTo(SandboxExecutionStatus.RUNNING);
+    }
+
+    @Test
+    void onSandboxExecutionSuspendedEvent_withoutVirtualKey_doesNothing() {
+        UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
+        SandboxExecution execution = createTestExecution();
+        when(sandboxExecutionRepository.findActiveVirtualKeysByExecutionId(execution.getId()))
+                .thenReturn(List.of());
+
+        sandboxExecutionService.onSandboxExecutionSuspendedEvent(
+                new SandboxExecutionSuspendedEvent(teamId, execution.getId(), ENVIRONMENT_ID));
+
+        verify(virtualKeyService, never()).fetchUsage(any());
+        verify(virtualKeyService, never()).revokeKey(any());
+    }
+
+    @Test
     void dispatchExecution_submitsDispatchToInjectedExecutor() {
         List<Runnable> submitted = new ArrayList<>();
         SandboxExecutionService service = newSandboxExecutionService(submitted::add);
@@ -1663,6 +1700,38 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
+    void haltExecution_marksEnvironmentTerminatedBeforeDestroyingResources() {
+        SandboxExecution execution = createTestExecution();
+        EnvironmentProvider provider = new EnvironmentProvider();
+        provider.setId(UUID.randomUUID());
+        ExecutionEnvironment environment = execution.getEnvironment();
+        environment.setType(ExecutionEnvironmentType.SANDBOX);
+        environment.setProvider(provider);
+        environment.setStatus(EnvironmentStatus.CONNECTED);
+        Team haltTeam = new Team();
+        haltTeam.setId(TEAM_ID);
+        environment.setTeam(haltTeam);
+        execution.setStatus(SandboxExecutionStatus.RUNNING);
+
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(executionEnvironmentRepository.findById(ENVIRONMENT_ID)).thenReturn(Optional.of(environment));
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        EnvironmentStatus[] statusAtDestroy = new EnvironmentStatus[1];
+        doAnswer(invocation -> {
+                    statusAtDestroy[0] = environment.getStatus();
+                    return null;
+                })
+                .when(sandboxProvider)
+                .destroy(ENVIRONMENT_ID);
+
+        sandboxExecutionService.haltExecution(USER_ID, CHAT_ID, EXECUTION_ID);
+
+        assertThat(statusAtDestroy[0]).isEqualTo(EnvironmentStatus.TERMINATED);
+    }
+
+    @Test
     void haltExecution_sandboxPurgesEnvironmentAndCompletesExecution() {
         SandboxExecution execution = createTestExecution();
         EnvironmentProvider provider = new EnvironmentProvider();
@@ -1671,7 +1740,7 @@ class SandboxExecutionServiceTest {
         environment.setType(ExecutionEnvironmentType.SANDBOX);
         environment.setProvider(provider);
         environment.setStatus(EnvironmentStatus.SLEEPING);
-        environment.setSuspendedAt(Instant.now());
+        environment.setStateChangedAt(Instant.now().minusSeconds(60));
         Team haltTeam = new Team();
         haltTeam.setId(TEAM_ID);
         environment.setTeam(haltTeam);
@@ -1689,7 +1758,7 @@ class SandboxExecutionServiceTest {
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
         assertThat(execution.getCompletedAt()).isNotNull();
         assertThat(environment.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
-        assertThat(environment.getSuspendedAt()).isNull();
+        assertThat(environment.getStateChangedAt()).isAfter(Instant.now().minusSeconds(30));
         verify(eventPublisher).publishEvent(any(SandboxExecutionCompleteEvent.class));
         // Halting a sleeping/disconnected sandbox must not require a live connector session.
         verify(sessionRegistry, never()).getSessionForEnvironment(any());

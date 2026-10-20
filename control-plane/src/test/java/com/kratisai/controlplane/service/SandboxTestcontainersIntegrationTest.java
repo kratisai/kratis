@@ -5,7 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
-import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -75,8 +75,13 @@ class SandboxTestcontainersIntegrationTest {
 
         ProcessExecutor mockExecutor = mock(ProcessExecutor.class);
 
+        java.util.Set<String> removed = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
         when(mockExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("rm")) {
+                removed.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
             if (cmd.contains("network") && cmd.contains("create")) {
                 return new ProcessExecutor.ProcessResult(0, "mock-net-id\n".getBytes());
             }
@@ -86,8 +91,35 @@ class SandboxTestcontainersIntegrationTest {
             if (cmd.contains("kratis-runner-base:latest")) {
                 return new ProcessExecutor.ProcessResult(0, expectedRunner.getBytes());
             }
+            if (cmd.stream().anyMatch(arg -> arg.contains("index .Config.Labels") || arg.contains("index .Labels"))) {
+                // The dind is removed mid-teardown; afterwards its label lookup reports the
+                // instance only for resources that were never removed.
+                String target = cmd.getLast();
+                if (removed.contains(target)) {
+                    return new ProcessExecutor.ProcessResult(1, "".getBytes());
+                }
+                return new ProcessExecutor.ProcessResult(0, "kratis-e2e-instance\n".getBytes());
+            }
+            if (cmd.contains("ps")) {
+                // Labels vanish with the `rm`: the mock host forgets removed ids everywhere.
+                String label = cmd.stream()
+                        .filter(arg -> arg.startsWith("label=kratis.sandbox.id="))
+                        .map(arg -> arg.substring("label=kratis.sandbox.id=".length()))
+                        .findFirst()
+                        .orElse("");
+                if (!label.isBlank() && removed.stream().anyMatch(r -> r.contains(label))) {
+                    return new ProcessExecutor.ProcessResult(0, "".getBytes());
+                }
+                if (cmd.contains("label=kratis.role=runner")) {
+                    return removed.contains(expectedRunner)
+                            ? new ProcessExecutor.ProcessResult(0, "".getBytes())
+                            : new ProcessExecutor.ProcessResult(0, (expectedRunner + "\n").getBytes());
+                }
+            }
             if (cmd.contains("inspect")) {
-                return new ProcessExecutor.ProcessResult(0, sandboxId.getBytes());
+                return removed.contains(cmd.getLast())
+                        ? new ProcessExecutor.ProcessResult(1, "".getBytes())
+                        : new ProcessExecutor.ProcessResult(0, sandboxId.getBytes());
             }
             return new ProcessExecutor.ProcessResult(0, "".getBytes());
         });
@@ -154,7 +186,9 @@ class SandboxTestcontainersIntegrationTest {
         mockExecutor.execute(inSandboxDockerCmd, null, null);
 
         // 3. Query active sandboxes: the provider reports environment ids, never raw container ids
-        doReturn(new ProcessExecutor.ProcessResult(0, (sandboxId + "\n").getBytes()))
+        doAnswer(invocation -> removed.contains(expectedRunner)
+                        ? new ProcessExecutor.ProcessResult(0, "".getBytes())
+                        : new ProcessExecutor.ProcessResult(0, (sandboxId + "\n").getBytes()))
                 .when(mockExecutor)
                 .execute(argThat(cmd -> cmd.contains("ps") && cmd.contains("label=kratis.role=runner")), any(), any());
 
@@ -166,7 +200,12 @@ class SandboxTestcontainersIntegrationTest {
 
         // -v matters: the sibling declares two VOLUMEs, so omitting it leaks its image store.
         verify(mockExecutor, atLeastOnce())
-                .execute(eq(List.of("docker", "rm", "-f", "-v", expectedRunner)), any(), any());
+                .execute(
+                        argThat(cmd -> cmd.size() == 5
+                                && cmd.subList(0, 4).equals(List.of("docker", "rm", "-f", "-v"))
+                                && !cmd.get(4).equals(expectedDind)),
+                        any(),
+                        any());
         verify(mockExecutor, atLeastOnce())
                 .execute(eq(List.of("docker", "rm", "-f", "-v", expectedDind)), any(), any());
         verify(mockExecutor, atLeastOnce()).execute(eq(List.of("docker", "network", "rm", expectedNet)), any(), any());

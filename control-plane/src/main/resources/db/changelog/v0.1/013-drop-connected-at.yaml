@@ -1,0 +1,8 @@
+databaseChangeLog:
+- changeSet:
+    id: 013-drop-connected-at-001
+    author: kratis
+    changes:
+    - dropColumn:
+        tableName: execution_environments
+        columnName: connected_at

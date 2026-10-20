@@ -10,11 +10,21 @@ connector, in turn, supervises one ACP agent (see [`acp-lifecycle.md`](acp-lifec
 
 The control plane talks to sandboxes only through the
 [`SandboxProvider`](../../control-plane/src/main/java/com/kratisai/controlplane/service/SandboxProvider.java)
-interface, keyed end-to-end by environment id: `spawnSandbox`, `initializeWorkspace`,
-`isSandboxRunning`, `suspend`, `resume`, `terminateSandbox` (runtime only), `destroy`
-(runtime and snapshot), `captureSidecarLogs`, `listActiveEnvIds`, and
-`pruneOrphanNetworks`, plus a provider `type`. Beans implement the interface and are
-resolved by type in
+interface. Every method takes or returns an environment id. The provider owns all Docker
+detail: container, network and image names, labels, and ownership checks. Callers never see
+them. The interface has these operations:
+
+- `spawnSandbox`, `initializeWorkspace`, `resume`: start a runtime.
+- `isSandboxRunning`, `isRetained`: report state.
+- `suspend`: snapshot the runtime, then remove compute.
+- `terminateSandbox`: remove compute only. Idempotent. Throws if any compute remains.
+- `destroy`: `terminateSandbox`, then remove the snapshot.
+- `removeSnapshot`: remove the snapshot if this instance owns it.
+- `listActiveEnvIds`: environments with compute. `listRetainedEnvIds`: environments with a
+  retained snapshot, whatever their row status.
+- `captureSidecarLogs`, plus a provider `type`.
+
+Beans implement the interface and are resolved by type in
 [`SandboxOrchestratorService`](../../control-plane/src/main/java/com/kratisai/controlplane/service/SandboxOrchestratorService.java).
 `ExecutionProviderType` currently has one value, `DOCKER`. Teams name providers in the
 `environment_providers` table (`EnvironmentProvider`), each with an optional
@@ -78,6 +88,27 @@ execution (scoped to the execution's models and duration). The connector injects
 `${LLM_BASE_URL}`, `${VIRTUAL_KEY}`, and `${LLM_MODEL}` into the harness. LiteLLM records
 usage and spend in PostgreSQL (Redis-free) and the key is revoked on termination.
 
+Each key lives inside a `sandbox_execution_usage` segment. A segment opens when the
+agent launches (`SandboxProvisioningService.launchAgent` reuses an active key when one
+exists, else it mints a key and calls `startUsage`). Sealing a segment sets `revokedAt`
+on the usage row. The execution totals are the sum of all segments. A resume opens a new
+segment with a fresh key, because sleep seals the old one.
+
+Sleep seals through `SandboxExecutionSuspendedEvent`, not through the complete event.
+`sleepEnvironmentInternal` publishes it for the latest execution after the `SLEEPING`
+commit. `suspendAfterLostRuntime` publishes it for each `IDLE` execution that stays
+resumable (`RUNNING` executions seal through the complete event on the same path).
+`SandboxExecutionService` handles the event `AFTER_COMMIT` on a worker thread. It seals
+the segment first, waits `usageFinalizeDelay`, fetches final usage from LiteLLM, applies
+the totals, publishes `ExecutionStatusChangedEvent`, and revokes the key. A fast resume
+inside the delay mints a fresh key because the old segment is already sealed. The usage
+refresher cancels its trailing refresh on suspend, so no refresh races the revoke.
+
+The UI gets no `execution_complete` on sleep. The sleep transaction already sends
+`TeamEntityChangedEvent(ENVIRONMENTS)` and `ExecutionStatusChangedEvent`, which refresh
+the environment list and the chat executions. The async finalize sends a second
+`ExecutionStatusChangedEvent` when the totals land.
+
 ## Cleanup and reconnect
 
 On completion, termination, or reconnect-lease expiry the control plane:
@@ -91,25 +122,31 @@ On completion, termination, or reconnect-lease expiry the control plane:
 3. Calls `destroy` on the provider (or `terminateSandbox` to keep a suspend snapshot) —
    idempotent, even if an earlier step fails.
 
-A user **halt** is the single terminate action, exposed as
-`POST /api/v1/chats/{chatId}/executions/{executionId}/halt` and driven from both the execution
-view and the environment list. For a sandbox it marks the execution `COMPLETED` and calls
-`destroy` (runtime and suspend snapshot) without sending `env.terminate` and without needing a
-WebSocket session, so a sleeping or disconnected sandbox can always be purged. For a workspace
-connector it marks the execution `COMPLETED` and best-effort sends `env.terminate` to stop the
-agent in place; the connector stays `CONNECTED` and reusable, and an offline connector is still
-updated in the database.
+A user **halt** is the single terminate action: `POST /api/v1/chats/{chatId}/executions/{executionId}/halt`.
+- Sandbox: marks the execution `COMPLETED`, sets the environment `TERMINATED`, then calls
+  `destroy`. It needs no WebSocket session, so a sleeping or disconnected sandbox can always
+  be purged. If `destroy` fails, the sweep retries.
+- Workspace connector: marks the execution `COMPLETED` and best-effort sends `env.terminate`.
+  The connector stays `CONNECTED`.
 
 A transient `/ws/env` disconnect does not terminate the agent or discard its session; the
 connector reconnects and re-registers within the lease. See
 [`acp-lifecycle.md`](acp-lifecycle.md) for reconnect and lease behaviour.
 
+## Environment registration
+
+The connector registers over the environment WebSocket with `env.register`. A first-time
+registration flips the environment to connected and publishes `EnvironmentRegisteredEvent`,
+which relaunches the agent on a resumed sandbox. A reconnect (`isReconnect: true`) replaces
+the session mapping and rebinds pending human-in-the-loop requests, but never publishes the
+registered event, so no second relaunch fires.
+
 ## Suspend and resume
 
 Suspend commits the runner container to a snapshot image and tears the runtime down;
-resume restores that snapshot as a fresh container and starts a **new** connector
-process. `SandboxProvisioningService.reprovisionEnvironment` therefore reuses steps 1–2
-(`resume` + `initializeWorkspace`) exactly as `provisionEnvironment` does for a spawn.
+resume restores that snapshot as a fresh container and starts a **new** connector process.
+`SandboxProvisioningService.reprovisionEnvironment` reuses steps 1–2 (`resume` +
+`initializeWorkspace`) of `provisionEnvironment`.
 
 Because git credentials live only in connector memory, a resumed connector starts
 without them. On every fresh `env.register` — spawn or resume — the control plane
@@ -135,7 +172,7 @@ back to `session/new`. On re-attach the connector reports `env.acp_initialized` 
 `relaunch: true`, so the control plane does not re-dispatch the task prompt; the execution stays
 `IDLE` and steerable.
 
-A resume mints a **fresh** LiteLLM virtual key (the previous one was revoked on detach) and opens
+A resume mints a **fresh** LiteLLM virtual key (the previous one was revoked on sleep) and opens
 a new `sandbox_execution_usage` segment for it. The execution's reported totals are the sum of all
 segments, so usage from every run lifetime aggregates rather than resetting. Each segment records
 its own model name, which also leaves room for per-segment model changes later.
@@ -147,6 +184,90 @@ sandbox sleeps) is excluded, so the duration shown for a resumed execution refle
 done rather than wall-clock elapsed time. Clients tick this count locally from the two fields (as
 `previousActiveSeconds` + `activeSince` in the DTO); the server never republishes per second.
 `completedAt` is no longer used as a duration anchor and is left unset on a pause.
+
+## Lifecycle
+
+`EnvironmentLifecycleService` changes environment status. `ExecutionLifecycleService`
+changes execution status. Neither writes the other's rows.
+
+### Environment states
+
+| Status | Compute | Snapshot | Meaning |
+|--------|---------|----------|---------|
+| `PENDING_CONNECT` | Being created | Present only when resuming | Sidecar not yet registered |
+| `CONNECTED` | Present | Present only after a prior suspend | Runtime live |
+| `SLEEPING` | Absent | Present | Resumable |
+| `TERMINATED` | Absent | Absent | Final |
+
+`DISCONNECTED` is display only. The API shows `CONNECTED` as `DISCONNECTED` when the
+heartbeat is over 60 seconds old. The stored status does not change.
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING_CONNECT : create / spawn
+    PENDING_CONNECT --> CONNECTED : sidecar registers
+    SLEEPING --> PENDING_CONNECT : user resume
+    CONNECTED --> SLEEPING : idle 20m, quiet, no pending HITL
+    SLEEPING --> TERMINATED : retention 30d
+    PENDING_CONNECT --> SLEEPING : lost runtime, snapshot exists
+    PENDING_CONNECT --> TERMINATED : lost runtime, no snapshot
+    CONNECTED --> SLEEPING : lost runtime, snapshot exists
+    CONNECTED --> TERMINATED : lost runtime, no snapshot
+    TERMINATED --> [*]
+```
+
+### Clocks
+
+Each transition sets `state_changed_at`. The sweep uses this column as its only clock:
+
+- `CONNECTED`: idle time, against `idle-timeout` (20 minutes). The clock starts when the
+  last `RUNNING` execution stops.
+- `PENDING_CONNECT`: spawn or resume age, against `connect-timeout` (5 minutes).
+- `SLEEPING`: time since suspend, against `retention-period` (30 days). Each resume
+  restarts it.
+
+### Execution states
+
+- `RUNNING` → `IDLE`: the agent finishes a turn, or no activity is recorded for
+  `activity-timeout` (5 minutes). An execution that waits for a human answer in
+  `PendingHitlRegistry` stays `RUNNING` past the timeout.
+- Only a new user prompt returns `IDLE` to `RUNNING`. Sidecar activity does not.
+- Sleep does not change execution status.
+- `UNKNOWN`: the outcome was not observed, because the runtime was lost or the
+  environment was terminated.
+
+### Pending human answers
+
+`PendingHitlRegistry` holds approval and question requests that wait for a user answer.
+It answers one question: does an execution still wait for a human.
+`ExecutionLifecycleService.hasPendingHitl` checks every `RUNNING` and `IDLE` execution
+of an environment. The idle sweep skips an environment with a pending request, so sleep
+never strands a turn that waits for the user.
+
+### Lost runtime
+
+A runtime is lost when a `PENDING_CONNECT` environment does not register within
+`connect-timeout`, or a `CONNECTED` environment has no runner past `startup-grace`
+(30 seconds). The sweep:
+
+1. Calls `terminateSandbox`. It never commits a snapshot.
+2. Sets `SLEEPING` if a snapshot exists, otherwise `TERMINATED`.
+3. Sets `RUNNING` executions to `UNKNOWN`. `IDLE` executions stay `IDLE` for `SLEEPING`.
+
+### Reaping
+
+The sweep keys all cleanup on the environment row:
+
+| Row | Compute | Snapshot |
+|-----|---------|----------|
+| `PENDING_CONNECT`, `CONNECTED` | Kept. Removed only by the lost runtime rule. | Kept |
+| `SLEEPING` | Owned leftovers removed. Status unchanged. | Kept |
+| `TERMINATED` | Owned resources removed | Owned snapshot removed |
+| No row | Owned resources removed after `startup-grace` | Owned snapshot removed after `startup-grace` |
+
+The sweep never deletes an environment row. Only the user delete action does. A snapshot
+without the `kratis.instance.id` label predates ownership tracking, so the sweep keeps it.
+The sweep waits 2 minutes after boot so sidecars can reconnect.
 
 ## Current provider: Local Docker
 
@@ -162,8 +283,8 @@ sandbox it creates three labelled resources:
    `DOCKER_HOST=tcp://<dind>:2375` so the agent can run Docker/Testcontainers against the
    rootless daemon, isolated from the host.
 
-Every resource carries `kratis.instance.id` and `kratis.sandbox.id` labels for
-instance-scoped cleanup (`SandboxLifecycleService`).
+Every resource carries `kratis.instance.id` and `kratis.sandbox.id` labels. Cleanup
+checks the instance label before it removes anything. See [Reaping](#reaping).
 
 **DinD security flags:** the sibling needs `systempaths=unconfined`. Docker's default
 masked paths leave non-empty, writable child mounts under `/proc`; the kernel then refuses
@@ -252,5 +373,5 @@ the sandbox's non-root user at image build time; ownership is never fixed up at 
 `--server-url`, `--token`, `--log-file /kratis/logs/sidecar.log`).
 
 **Teardown:** copy the connector log only when the sidecar never streamed its output
-(never connected, or crashed/disconnected) or sandbox debug mode is on; then `docker rm -f`
-the runner and DinD sibling and remove the network.
+(never connected, or crashed/disconnected) or sandbox debug mode is on. Teardown then
+verifies that no owned element remains. If one remains, the call fails and the sweep retries.

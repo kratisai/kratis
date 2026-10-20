@@ -22,6 +22,7 @@ import com.kratisai.controlplane.model.event.EnvironmentRegisteredEvent;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
+import com.kratisai.controlplane.model.event.SandboxExecutionSuspendedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.repository.*;
@@ -664,15 +665,6 @@ public class SandboxExecutionService {
         if (environment == null) {
             return;
         }
-        if (environment.getProvider() != null) {
-            SandboxProvider provider = sandboxOrchestratorService.getProvider(
-                    environment.getProvider().getType());
-            try {
-                provider.destroy(environmentId);
-            } catch (Exception e) {
-                logger.error("Failed to purge sandbox resources for environment {}", environmentId, e);
-            }
-        }
         transactionTemplate.executeWithoutResult(status -> {
             ExecutionEnvironment managed =
                     executionEnvironmentRepository.findById(environmentId).orElse(null);
@@ -680,11 +672,21 @@ public class SandboxExecutionService {
                 return;
             }
             managed.setStatus(EnvironmentStatus.TERMINATED);
-            managed.setSuspendedAt(null);
+            managed.setStateChangedAt(Instant.now());
             executionEnvironmentRepository.save(managed);
             eventPublisher.publishEvent(
                     new TeamEntityChangedEvent(managed.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
         });
+        if (environment.getProvider() != null) {
+            SandboxProvider provider = sandboxOrchestratorService.getProvider(
+                    environment.getProvider().getType());
+            try {
+                provider.destroy(environmentId);
+            } catch (Exception e) {
+                logger.error(
+                        "Failed to purge sandbox resources for environment {}; sweep will retry", environmentId, e);
+            }
+        }
     }
 
     private void stopConnectorAgent(UUID environmentId) {
@@ -990,6 +992,11 @@ public class SandboxExecutionService {
     public void onSandboxExecutionCompleteEvent(SandboxExecutionCompleteEvent event) {
         // FinalizeUsage blocks for 3+LiteLLM seconds. Don't block the sidecar-rpc
         // thread.
+        dispatchExecutor.execute(() -> finalizeUsageAndRevokeKey(event.executionId()));
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onSandboxExecutionSuspendedEvent(SandboxExecutionSuspendedEvent event) {
         dispatchExecutor.execute(() -> finalizeUsageAndRevokeKey(event.executionId()));
     }
 

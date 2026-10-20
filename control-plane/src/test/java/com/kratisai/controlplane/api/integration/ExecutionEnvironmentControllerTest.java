@@ -370,7 +370,7 @@ class ExecutionEnvironmentControllerTest {
             ExecutionEnvironment updated =
                     executionEnvironmentRepository.findById(runnerEnvId).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
-            assertThat(updated.getSuspendedAt()).isNotNull();
+            assertThat(updated.getStateChangedAt()).isNotNull();
             assertThat(dockerCli("ps", "-a", "--filter", "name=kratis-sandbox-" + runnerEnvId, "-q"))
                     .isEmpty();
         } finally {
@@ -399,7 +399,7 @@ class ExecutionEnvironmentControllerTest {
             ExecutionEnvironment updated =
                     executionEnvironmentRepository.findById(runnerEnvId).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
-            assertThat(updated.getSuspendedAt()).isNotNull();
+            assertThat(updated.getStateChangedAt()).isNotNull();
 
             mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", teamId, runnerEnvId)
                             .header("Authorization", "Bearer " + authToken))

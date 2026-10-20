@@ -16,6 +16,8 @@ public interface ExecutionEnvironmentRepository extends JpaRepository<ExecutionE
 
     List<ExecutionEnvironment> findByTeamId(UUID teamId);
 
+    List<ExecutionEnvironment> findByTypeAndStatus(ExecutionEnvironmentType type, EnvironmentStatus status);
+
     /** Environments the control plane believes hold recoverable sandbox resources. */
     List<ExecutionEnvironment> findByTypeAndStatusIn(
             ExecutionEnvironmentType type, Collection<EnvironmentStatus> statuses);
@@ -39,22 +41,9 @@ public interface ExecutionEnvironmentRepository extends JpaRepository<ExecutionE
     Optional<ExecutionEnvironment> findByAuthToken(String authToken);
 
     @Query("""
-            SELECT e,
-                   GREATEST(MAX(CASE WHEN a.createdAt IS NOT NULL THEN a.createdAt ELSE x.startedAt END), e.connectedAt),
-                   MAX(CASE WHEN x.status = com.kratisai.controlplane.model.SandboxExecutionStatus.RUNNING
-                            THEN 1 ELSE 0 END)
-            FROM ExecutionEnvironment e
-            LEFT JOIN SandboxExecution x ON x.environment = e
-            LEFT JOIN SandboxExecutionActivity a ON a.executionId = x.id
-            WHERE e.status = com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED
-            GROUP BY e
-            """)
-    List<Object[]> findConnectedEnvironmentsWithLastActivity();
-
-    @Query("""
             SELECT e FROM ExecutionEnvironment e
             WHERE e.status = com.kratisai.controlplane.model.EnvironmentStatus.SLEEPING
-              AND (e.suspendedAt IS NULL OR e.suspendedAt < :cutoff)
+              AND e.stateChangedAt < :cutoff
             """)
     List<ExecutionEnvironment> findExpiredSleeping(@Param("cutoff") Instant cutoff);
 }

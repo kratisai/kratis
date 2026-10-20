@@ -236,4 +236,33 @@ class PendingHitlRegistryTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("missing");
     }
+
+    @Test
+    void hasPendingForExecution_trueWhileRequestRegistered() {
+        registerSample("ws-1", "action-1", HitlKind.APPROVAL);
+
+        assertThat(registry.hasPendingForExecution(executionId)).isTrue();
+    }
+
+    @Test
+    void hasPendingForExecution_falseForUnknownExecutionAndNull() {
+        registerSample("ws-1", "action-1", HitlKind.APPROVAL);
+
+        assertThat(registry.hasPendingForExecution(UUID.randomUUID())).isFalse();
+        assertThat(registry.hasPendingForExecution(null)).isFalse();
+    }
+
+    @Test
+    void hasPendingForExecution_tracksRemainingRequestsForExecution() {
+        registerSample("ws-1", "action-1", HitlKind.APPROVAL);
+        PendingHitlRegistry.PendingHitl second = new PendingHitlRegistry.PendingHitl(
+                sampleRequest(executionId, "action-2", HitlKind.APPROVAL), session("ws-1"), 43, Instant.now(), teamId);
+        registry.register(second);
+
+        registry.remove(executionId, "action-1");
+        assertThat(registry.hasPendingForExecution(executionId)).isTrue();
+
+        registry.removeAll(executionId);
+        assertThat(registry.hasPendingForExecution(executionId)).isFalse();
+    }
 }

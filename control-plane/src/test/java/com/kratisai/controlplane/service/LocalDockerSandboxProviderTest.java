@@ -15,7 +15,6 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -65,7 +64,56 @@ class LocalDockerSandboxProviderTest {
 
     private void stubAllCommandsSucceed() throws Exception {
         when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, "".getBytes()));
+                .thenAnswer(invocation -> defaultMockResult(invocation.getArgument(0)));
+    }
+
+    private final java.util.Set<String> removedInTest =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
+    private ProcessExecutor.ProcessResult defaultMockResult(List<String> cmd) {
+        if (cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm")) {
+            removedInTest.add(cmd.getLast());
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        }
+        if (cmd.size() >= 4
+                && cmd.get(0).equals("docker")
+                && cmd.get(1).equals("network")
+                && cmd.get(2).equals("rm")) {
+            removedInTest.add(cmd.get(3));
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        }
+        if (cmd.stream().anyMatch(arg -> arg.contains("index .Config.Labels") || arg.contains("index .Labels"))) {
+            // After an `rm` the label lookup fails, so ownership checks report "not ours".
+            return removedInTest.contains(cmd.getLast())
+                    ? new ProcessExecutor.ProcessResult(1, "".getBytes())
+                    : new ProcessExecutor.ProcessResult(0, "unit-test-instance\n".getBytes());
+        }
+        if (cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")) {
+            // After an `rm`, the resource is gone; before, it exists.
+            return removedInTest.contains(cmd.get(3))
+                    ? new ProcessExecutor.ProcessResult(1, "".getBytes())
+                    : new ProcessExecutor.ProcessResult(0, "mock-id\n".getBytes());
+        }
+        if (cmd.size() >= 6
+                && cmd.get(0).equals("docker")
+                && cmd.get(1).equals("network")
+                && cmd.get(2).equals("inspect")) {
+            return removedInTest.contains(cmd.getLast())
+                    ? new ProcessExecutor.ProcessResult(1, "".getBytes())
+                    : defaultMockResult(List.of(
+                            "docker",
+                            "network",
+                            "inspect",
+                            "--format",
+                            "{{index .Labels \"kratis.instance.id\"}}",
+                            "x"));
+        }
+        return new ProcessExecutor.ProcessResult(0, "".getBytes());
+    }
+
+    @org.junit.jupiter.api.BeforeEach
+    void clearRemovedInTest() {
+        removedInTest.clear();
     }
 
     private void verifyRunnerRemoved(UUID envId) throws Exception {
@@ -298,6 +346,22 @@ class LocalDockerSandboxProviderTest {
 
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
             if (cmd.contains("network") && cmd.contains("inspect")) {
                 // An unreadable gateway must not fail provisioning
                 return new ProcessExecutor.ProcessResult(1, new byte[0]);
@@ -360,10 +424,26 @@ class LocalDockerSandboxProviderTest {
         // runtime, regardless of the package-management capabilities granted).
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
             if (cmd.contains("test -d '/kratis/workspace' && test -w '/kratis/workspace'")) {
                 return new ProcessExecutor.ProcessResult(1, "".getBytes());
             }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            return defaultMockResult(cmd);
         });
 
         assertThatThrownBy(() -> provider.initializeWorkspace(envId, "test-token"))
@@ -431,10 +511,28 @@ class LocalDockerSandboxProviderTest {
         UUID envId = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("ps")) {
-                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
             }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
+            if (cmd.contains("ps")) {
+                return removedInTest.contains("runner-container-id")
+                        ? new ProcessExecutor.ProcessResult(0, "".getBytes())
+                        : new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            }
+            return defaultMockResult(cmd);
         });
 
         provider.terminateSandbox(envId);
@@ -450,6 +548,49 @@ class LocalDockerSandboxProviderTest {
 
         // Teardown is pure resource removal: log capture is a separate, explicit call.
         verify(mockProcessExecutor, never()).execute(argThat(cmd -> cmd.contains("cp")), any(), any());
+    }
+
+    @Test
+    void testTerminateSandboxNeverTouchesForeignInstanceResources() throws Exception {
+        UUID envId = UUID.randomUUID();
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
+            if (cmd.contains("ps")) {
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            if (cmd.stream().anyMatch(arg -> arg.contains("index .Config.Labels") || arg.contains("index .Labels"))) {
+                return new ProcessExecutor.ProcessResult(0, "other-instance\n".getBytes());
+            }
+            if (cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+        });
+
+        provider.terminateSandbox(envId);
+
+        verify(mockProcessExecutor, never())
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-sandbox-" + envId)), any(), any());
+        verify(mockProcessExecutor, never())
+                .execute(eq(List.of("docker", "rm", "-f", "-v", "kratis-dind-" + envId)), any(), any());
+        verify(mockProcessExecutor, never())
+                .execute(eq(List.of("docker", "network", "rm", "kratis-net-" + envId)), any(), any());
     }
 
     @Test
@@ -469,7 +610,29 @@ class LocalDockerSandboxProviderTest {
     @Test
     void testTerminateSandboxRemovesResourcesWhenLabelLookupThrows() throws Exception {
         UUID envId = UUID.randomUUID();
-        when(mockProcessExecutor.execute(any(), any(), any())).thenThrow(new IOException("Simulated IO error"));
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
+            if (cmd.contains("ps")) {
+                throw new IOException("Simulated IO error");
+            }
+            return defaultMockResult(cmd);
+        });
 
         // Should handle the exception gracefully without throwing
         provider.terminateSandbox(envId);
@@ -484,10 +647,42 @@ class LocalDockerSandboxProviderTest {
         UUID envId = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("ps")) {
-                return new ProcessExecutor.ProcessResult(0, "custom-runner-id\n".getBytes());
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
             }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
+            if (cmd.contains("ps")) {
+                // After the rm, the label is gone too.
+                return removedInTest.contains("custom-runner-id")
+                        ? new ProcessExecutor.ProcessResult(0, "".getBytes())
+                        : new ProcessExecutor.ProcessResult(0, "custom-runner-id\n".getBytes());
+            }
+            if (cmd.size() == 4
+                    && cmd.get(0).equals("docker")
+                    && cmd.get(1).equals("inspect")
+                    && (cmd.get(3).startsWith("kratis-sandbox-") || cmd.get(3).startsWith("kratis-dind-"))) {
+                // Only the label-discovered runner exists in this test; deterministic names do not.
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
+            if (cmd.size() >= 6
+                    && cmd.get(0).equals("docker")
+                    && cmd.get(1).equals("network")
+                    && cmd.get(2).equals("inspect")) {
+                return new ProcessExecutor.ProcessResult(0, "unit-test-instance\n".getBytes());
+            }
+            return defaultMockResult(cmd);
         });
 
         provider.terminateSandbox(envId);
@@ -506,14 +701,32 @@ class LocalDockerSandboxProviderTest {
         UUID envId = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
             if (cmd.contains("ps")) {
-                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+                return removedInTest.contains("runner-container-id")
+                        ? new ProcessExecutor.ProcessResult(0, "".getBytes())
+                        : new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
             }
             if (cmd.size() > 1 && cmd.get(1).equals("cp")) {
                 Files.writeString(Path.of(cmd.get(3)), "sidecar log line 1\nsidecar log line 2\n");
-                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+                return defaultMockResult(cmd);
             }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            return defaultMockResult(cmd);
         });
 
         provider.captureSidecarLogs(envId);
@@ -592,52 +805,39 @@ class LocalDockerSandboxProviderTest {
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(127, "command not found".getBytes()));
 
-        Set<UUID> activeIds = provider.listActiveEnvIds();
-        assertThat(activeIds).isEmpty();
+        assertThatThrownBy(() -> provider.listActiveEnvIds()).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
-    void testListActiveEnvIdsException() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any())).thenThrow(new IOException("Simulated IO error"));
-
-        Set<UUID> activeIds = provider.listActiveEnvIds();
-        assertThat(activeIds).isEmpty();
-    }
-
-    @Test
-    void testListSnapshotEnvIdsScopesToThisInstanceSnapshots() throws Exception {
+    void testListSuspendedEnvIdsParsesEnvIdsFromTags() throws Exception {
         UUID envA = UUID.randomUUID();
         UUID envB = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(0, (envA + "\nnot-a-uuid\n" + envB + "\n").getBytes()));
+                .thenReturn(new ProcessExecutor.ProcessResult(
+                        0, ("kratis-snapshot-" + envA + "\nnot-a-repo\nkratis-snapshot-" + envB + "\n").getBytes()));
 
-        Set<UUID> snapshotIds = provider.listSnapshotEnvIds();
+        Set<UUID> snapshotIds = provider.listRetainedEnvIds();
         assertThat(snapshotIds).containsExactlyInAnyOrder(envA, envB);
 
-        // Removals/reads must stay scoped to this instance's snapshot tags, never every image.
         verify(mockProcessExecutor)
                 .execute(
                         eq(List.of(
                                 "docker",
                                 "images",
                                 "--filter",
-                                "reference=kratis-snapshot-*",
-                                "--filter",
-                                "label=kratis.instance.id=unit-test-instance",
-                                "--filter",
-                                "label=kratis.role=runner",
+                                "reference=kratis-snapshot-*:latest",
                                 "--format",
-                                "{{.Label \"kratis.sandbox.id\"}}")),
+                                "{{.Repository}}")),
                         any(),
                         any());
     }
 
     @Test
-    void testListSnapshotEnvIdsFailureExitCode() throws Exception {
+    void testListSuspendedEnvIdsFailureExitCode() throws Exception {
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(1, "".getBytes()));
 
-        assertThat(provider.listSnapshotEnvIds()).isEmpty();
+        assertThatThrownBy(() -> provider.listRetainedEnvIds()).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
@@ -706,22 +906,53 @@ class LocalDockerSandboxProviderTest {
         AtomicInteger imageLookups = new AtomicInteger();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
             if (cmd.contains("inspect") && cmd.stream().anyMatch(arg -> arg.contains("kratis-snapshot-"))) {
                 return imageLookups.getAndIncrement() == 0
                         ? new ProcessExecutor.ProcessResult(0, "old-image-id".getBytes())
                         : new ProcessExecutor.ProcessResult(0, "new-image-id".getBytes());
             }
             if (cmd.contains("ps")) {
-                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+                return removedInTest.contains("runner-container-id")
+                        ? new ProcessExecutor.ProcessResult(0, "".getBytes())
+                        : new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
             }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            return defaultMockResult(cmd);
         });
 
         provider.suspend(envUuid);
 
         String snapshotRef = "kratis-snapshot-" + envUuid + ":latest";
         verify(mockProcessExecutor)
-                .execute(eq(List.of("docker", "commit", "runner-container-id", snapshotRef)), any(), any());
+                .execute(
+                        eq(List.of(
+                                "docker",
+                                "commit",
+                                "--change",
+                                "LABEL kratis.instance.id=unit-test-instance",
+                                "--change",
+                                "LABEL kratis.sandbox.id=" + envUuid,
+                                "--change",
+                                "LABEL kratis.role=runner",
+                                "runner-container-id",
+                                snapshotRef)),
+                        any(),
+                        any());
         verify(mockProcessExecutor).execute(eq(List.of("docker", "rmi", "-f", "old-image-id")), any(), any());
         verify(mockProcessExecutor)
                 .execute(eq(List.of("docker", "rm", "-f", "-v", "runner-container-id")), any(), any());
@@ -747,6 +978,22 @@ class LocalDockerSandboxProviderTest {
         AtomicInteger imageLookups = new AtomicInteger();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
             if (cmd.contains("inspect") && cmd.stream().anyMatch(arg -> arg.contains("kratis-snapshot-"))) {
                 return imageLookups.getAndIncrement() == 0
                         ? new ProcessExecutor.ProcessResult(0, "old-image-id".getBytes())
@@ -754,15 +1001,15 @@ class LocalDockerSandboxProviderTest {
             }
             if (cmd.contains("ps")) {
                 // No container carries the sandbox label; the deterministic name resolves instead.
-                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+                return defaultMockResult(cmd);
             }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            return defaultMockResult(cmd);
         });
 
         provider.suspend(envUuid);
 
         // The container-existence probe uses `docker inspect` on the deterministic name.
-        verify(mockProcessExecutor)
+        verify(mockProcessExecutor, atLeastOnce())
                 .execute(
                         eq(List.of("docker", "inspect", "--format", "{{.Id}}", "kratis-sandbox-" + envUuid)),
                         any(),
@@ -779,13 +1026,31 @@ class LocalDockerSandboxProviderTest {
         UUID envUuid = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
             if (cmd.contains("{{.State.Running}}")) {
                 return new ProcessExecutor.ProcessResult(0, "true\n".getBytes());
             }
             if (cmd.contains("ps")) {
-                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+                return removedInTest.contains("runner-container-id")
+                        ? new ProcessExecutor.ProcessResult(0, "".getBytes())
+                        : new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
             }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            return defaultMockResult(cmd);
         });
 
         assertThat(provider.isSandboxRunning(envUuid)).isTrue();
@@ -796,13 +1061,31 @@ class LocalDockerSandboxProviderTest {
         UUID envUuid = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
             if (cmd.contains("{{.State.Running}}")) {
                 return new ProcessExecutor.ProcessResult(0, "false\n".getBytes());
             }
             if (cmd.contains("ps")) {
-                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+                return removedInTest.contains("runner-container-id")
+                        ? new ProcessExecutor.ProcessResult(0, "".getBytes())
+                        : new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
             }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            return defaultMockResult(cmd);
         });
 
         assertThat(provider.isSandboxRunning(envUuid)).isFalse();
@@ -822,13 +1105,31 @@ class LocalDockerSandboxProviderTest {
         UUID envUuid = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
             if (cmd.contains("{{.State.Running}}")) {
                 throw new IOException("docker down");
             }
             if (cmd.contains("ps")) {
-                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+                return removedInTest.contains("runner-container-id")
+                        ? new ProcessExecutor.ProcessResult(0, "".getBytes())
+                        : new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
             }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            return defaultMockResult(cmd);
         });
 
         assertThat(provider.isSandboxRunning(envUuid)).isTrue();
@@ -848,6 +1149,22 @@ class LocalDockerSandboxProviderTest {
 
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
             if (cmd.contains("inspect") && cmd.stream().anyMatch(arg -> arg.contains("kratis-snapshot-"))) {
                 return new ProcessExecutor.ProcessResult(0, "snapshot-image-id".getBytes());
             }
@@ -900,10 +1217,28 @@ class LocalDockerSandboxProviderTest {
         UUID envUuid = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("ps")) {
-                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
+                    || (cmd.size() >= 4
+                            && cmd.get(0).equals("docker")
+                            && cmd.get(1).equals("network")
+                            && cmd.get(2).equals("rm"))) {
+                removedInTest.add(cmd.getLast());
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
             }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            if ((cmd.size() == 4 && cmd.get(0).equals("docker") && cmd.get(1).equals("inspect")
+                            || cmd.size() >= 6
+                                    && cmd.get(0).equals("docker")
+                                    && cmd.get(1).equals("network")
+                                    && cmd.get(2).equals("inspect"))
+                    && removedInTest.contains(cmd.getLast())) {
+                return new ProcessExecutor.ProcessResult(1, "".getBytes());
+            }
+            if (cmd.contains("ps")) {
+                return removedInTest.contains("runner-container-id")
+                        ? new ProcessExecutor.ProcessResult(0, "".getBytes())
+                        : new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
+            }
+            return defaultMockResult(cmd);
         });
 
         provider.destroy(envUuid);
@@ -934,159 +1269,6 @@ class LocalDockerSandboxProviderTest {
 
         verify(mockProcessExecutor, times(2))
                 .execute(eq(List.of("docker", "rmi", "-f", "kratis-snapshot-" + envUuid + ":latest")), any(), any());
-    }
-
-    @Test
-    void testPruneOrphanNetworksKeepsNetworkWithinGracePeriod() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
-            List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("network") && cmd.contains("ls")) {
-                return new ProcessExecutor.ProcessResult(0, "kratis-net-orphan\n".getBytes());
-            }
-            if (cmd.contains("network") && cmd.contains("inspect")) {
-                return new ProcessExecutor.ProcessResult(0, "0\n".getBytes());
-            }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
-        });
-
-        provider.pruneOrphanNetworks(Duration.ofSeconds(60));
-
-        verify(mockProcessExecutor, never())
-                .execute(eq(List.of("docker", "network", "rm", "kratis-net-orphan")), any(), any());
-    }
-
-    @Test
-    void testPruneOrphanNetworksRemovesNetworkAfterGracePeriod() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
-            List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("network") && cmd.contains("ls")) {
-                return new ProcessExecutor.ProcessResult(0, "kratis-net-orphan\n".getBytes());
-            }
-            if (cmd.contains("network") && cmd.contains("inspect")) {
-                return new ProcessExecutor.ProcessResult(0, "0\n".getBytes());
-            }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
-        });
-
-        // A zero grace period makes the freshly-tracked network immediately eligible.
-        provider.pruneOrphanNetworks(Duration.ZERO);
-        provider.pruneOrphanNetworks(Duration.ZERO);
-
-        verify(mockProcessExecutor, atLeastOnce())
-                .execute(eq(List.of("docker", "network", "rm", "kratis-net-orphan")), any(), any());
-    }
-
-    @Test
-    void testPruneOrphanNetworksNeverRemovesNetworkWithAttachedContainers() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
-            List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("network") && cmd.contains("ls")) {
-                return new ProcessExecutor.ProcessResult(0, "kratis-net-inuse\n".getBytes());
-            }
-            if (cmd.contains("network") && cmd.contains("inspect")) {
-                return new ProcessExecutor.ProcessResult(0, "2\n".getBytes());
-            }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
-        });
-
-        provider.pruneOrphanNetworks(Duration.ZERO);
-
-        verify(mockProcessExecutor, never())
-                .execute(eq(List.of("docker", "network", "rm", "kratis-net-inuse")), any(), any());
-    }
-
-    @Test
-    void testPruneOrphanNetworksListsOnlyThisInstancesNetworkRoleNetworks() throws Exception {
-        stubAllCommandsSucceed();
-
-        provider.pruneOrphanNetworks(Duration.ZERO);
-
-        verify(mockProcessExecutor)
-                .execute(
-                        eq(List.of(
-                                "docker",
-                                "network",
-                                "ls",
-                                "--filter",
-                                "label=kratis.instance.id=unit-test-instance",
-                                "--filter",
-                                "label=kratis.role=network",
-                                "--format",
-                                "{{.Name}}")),
-                        any(),
-                        any());
-    }
-
-    @Test
-    void testTerminateSandboxDisconnectsAttachedContainersBeforeNetworkRemove() throws Exception {
-        UUID envId = UUID.randomUUID();
-        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
-            List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("network") && cmd.contains("inspect")) {
-                return new ProcessExecutor.ProcessResult(
-                        0, ("kratis-sandbox-" + envId + " kratis-dind-" + envId + "\n").getBytes());
-            }
-            if (cmd.contains("ps")) {
-                return new ProcessExecutor.ProcessResult(0, "runner-container-id\n".getBytes());
-            }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
-        });
-
-        provider.terminateSandbox(envId);
-
-        InOrder inOrder = inOrder(mockProcessExecutor);
-        inOrder.verify(mockProcessExecutor)
-                .execute(
-                        eq(List.of(
-                                "docker",
-                                "network",
-                                "disconnect",
-                                "-f",
-                                "kratis-net-" + envId,
-                                "kratis-sandbox-" + envId)),
-                        any(),
-                        any());
-        inOrder.verify(mockProcessExecutor)
-                .execute(
-                        eq(List.of(
-                                "docker",
-                                "network",
-                                "disconnect",
-                                "-f",
-                                "kratis-net-" + envId,
-                                "kratis-dind-" + envId)),
-                        any(),
-                        any());
-        inOrder.verify(mockProcessExecutor)
-                .execute(eq(List.of("docker", "network", "rm", "kratis-net-" + envId)), any(), any());
-    }
-
-    @Test
-    void testPruneOrphanNetworksForceDisconnectsRacyAttachBeforeRemove() throws Exception {
-        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
-            List<String> cmd = invocation.getArgument(0);
-            if (cmd.contains("network") && cmd.contains("ls")) {
-                return new ProcessExecutor.ProcessResult(0, "kratis-net-orphan\n".getBytes());
-            }
-            if (cmd.contains("network") && cmd.contains("inspect") && cmd.contains("{{len .Containers}}")) {
-                return new ProcessExecutor.ProcessResult(0, "0\n".getBytes());
-            }
-            if (cmd.contains("network") && cmd.contains("inspect")) {
-                return new ProcessExecutor.ProcessResult(0, "stale-container\n".getBytes());
-            }
-            return new ProcessExecutor.ProcessResult(0, "".getBytes());
-        });
-
-        provider.pruneOrphanNetworks(Duration.ZERO);
-        provider.pruneOrphanNetworks(Duration.ZERO);
-
-        verify(mockProcessExecutor, atLeastOnce())
-                .execute(
-                        eq(List.of("docker", "network", "disconnect", "-f", "kratis-net-orphan", "stale-container")),
-                        any(),
-                        any());
-        verify(mockProcessExecutor, atLeastOnce())
-                .execute(eq(List.of("docker", "network", "rm", "kratis-net-orphan")), any(), any());
     }
 
     @Test

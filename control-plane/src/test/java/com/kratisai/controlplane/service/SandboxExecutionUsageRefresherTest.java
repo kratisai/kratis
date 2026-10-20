@@ -19,6 +19,7 @@ import com.kratisai.controlplane.model.event.SandboxExecutionAcpInitializedEvent
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionOutputEvent;
+import com.kratisai.controlplane.model.event.SandboxExecutionSuspendedEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.testsupport.ResourcelessTransactionManager;
 import java.time.Duration;
@@ -237,6 +238,24 @@ class SandboxExecutionUsageRefresherTest {
         verify(windowFutures.getFirst()).cancel(false);
         runImmediateTask(0);
         verify(virtualKeyService, never()).fetchUsage(any());
+    }
+
+    @Test
+    void suspendedEvent_cancelsPendingWindow() {
+        stubRunningExecution();
+        refresher.onSandboxExecutionActivityEvent(activityEvent());
+        assertThat(windowTasks).hasSize(1);
+        verify(windowFutures.getFirst(), never()).cancel(anyBoolean());
+
+        UUID environmentId = UUID.randomUUID();
+        refresher.onSandboxExecutionSuspendedEvent(
+                new SandboxExecutionSuspendedEvent(teamId, executionId, environmentId));
+
+        verify(windowFutures.getFirst()).cancel(false);
+        assertThat(windowTasks).hasSize(1);
+        assertThat(immediateTasks).hasSize(1);
+        runWindowTask(0);
+        assertThat(immediateTasks).hasSize(1);
     }
 
     @Test

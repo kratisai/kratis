@@ -19,6 +19,18 @@ public interface SandboxExecutionRepository extends JpaRepository<SandboxExecuti
 
     List<SandboxExecution> findByEnvironmentIdAndStatus(UUID environmentId, SandboxExecutionStatus status);
 
+    boolean existsByEnvironmentIdAndStatus(UUID environmentId, SandboxExecutionStatus status);
+
+    @Query("""
+            SELECT x,
+                   MAX(CASE WHEN a.createdAt IS NOT NULL THEN a.createdAt ELSE x.startedAt END)
+            FROM SandboxExecution x
+            LEFT JOIN SandboxExecutionActivity a ON a.executionId = x.id
+            WHERE x.status = com.kratisai.controlplane.model.SandboxExecutionStatus.RUNNING
+            GROUP BY x
+            """)
+    List<Object[]> findRunningExecutionsWithLastActivity();
+
     List<SandboxExecution> findByEnvironmentIdAndStatusIn(
             UUID environmentId, Collection<SandboxExecutionStatus> statuses);
 
