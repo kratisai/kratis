@@ -165,6 +165,9 @@ public class SandboxExecution {
             activeSince = now;
         } else if (!willRun && wasRunning) {
             endActive(now);
+            if (environment != null) {
+                environment.setStateChangedAt(now);
+            }
         }
         this.status = status;
     }

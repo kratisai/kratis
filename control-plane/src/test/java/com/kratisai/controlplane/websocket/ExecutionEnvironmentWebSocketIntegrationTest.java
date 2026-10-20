@@ -186,12 +186,11 @@ class ExecutionEnvironmentWebSocketIntegrationTest {
         // Close the sidecar session
         sidecarSession.close();
 
-        // Wait for server to process close event and transition status back to
-        // DISCONNECTED
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+        // A socket close is display-only: lifecycle status must stay CONNECTED.
+        await().during(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             ExecutionEnvironment envAfterClose =
                     executionEnvironmentRepository.findById(envId).orElseThrow();
-            assertThat(envAfterClose.getStatus()).isEqualTo(EnvironmentStatus.DISCONNECTED);
+            assertThat(envAfterClose.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
         });
 
         // Verify received messages contain expected responses

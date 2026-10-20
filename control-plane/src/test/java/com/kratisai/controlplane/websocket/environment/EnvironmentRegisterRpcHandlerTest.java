@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -42,6 +43,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.web.socket.WebSocketSession;
 
 @ExtendWith(MockitoExtension.class)
 class EnvironmentRegisterRpcHandlerTest {
@@ -169,10 +171,57 @@ class EnvironmentRegisterRpcHandlerTest {
         verify(executionEnvironmentRepository).save(env);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
         assertThat(env.getLastHeartbeat()).isNotNull();
-        assertThat(env.getConnectedAt()).isNotNull();
+        assertThat(env.getStateChangedAt()).isNotNull();
 
         verify(sessionRegistry).registerEnvironmentSession(any(String.class), eq(envId));
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+        verify(eventPublisher).publishEvent(any(EnvironmentRegisteredEvent.class));
+    }
+
+    @Test
+    void handle_withDuplicateInitialWhileSessionLive_replacesMappingWithoutRegisteredEvent() {
+        ExecutionEnvironment env = createEnvironment();
+        env.setStatus(EnvironmentStatus.CONNECTED);
+        when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
+        when(sessionRegistry.getSessionForEnvironment(envId)).thenReturn(mock(WebSocketSession.class));
+
+        EnvironmentRpcPayload.Register params =
+                new EnvironmentRpcPayload.Register(authToken, false, null, false, 0L, null, 1, "0.1.0");
+        JsonRpcInboundRequest request =
+                new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
+
+        EnvironmentResponsePayload response =
+                handler.handle("ws-session-2", request, params).blockLast();
+
+        assertThat(response).isNotNull();
+        EnvironmentRegisterResult result = (EnvironmentRegisterResult) response;
+        assertThat(result.status()).isEqualTo(EnvironmentRegisterStatus.RECONNECTED);
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+
+        verify(sessionRegistry).registerEnvironmentSession("ws-session-2", envId);
+        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+        verify(eventPublisher, never()).publishEvent(any(EnvironmentRegisteredEvent.class));
+    }
+
+    @Test
+    void handle_withInitialAfterSessionDied_publishesRegisteredEvent() {
+        ExecutionEnvironment env = createEnvironment();
+        env.setStatus(EnvironmentStatus.CONNECTED);
+        when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
+        when(sessionRegistry.getSessionForEnvironment(envId)).thenReturn(null);
+
+        EnvironmentRpcPayload.Register params =
+                new EnvironmentRpcPayload.Register(authToken, false, null, false, 0L, null, 1, "0.1.0");
+        JsonRpcInboundRequest request =
+                new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
+
+        EnvironmentResponsePayload response =
+                handler.handle("ws-session-2", request, params).blockLast();
+
+        assertThat(response).isNotNull();
+        EnvironmentRegisterResult result = (EnvironmentRegisterResult) response;
+        assertThat(result.status()).isEqualTo(EnvironmentRegisterStatus.REGISTERED);
+
         verify(eventPublisher).publishEvent(any(EnvironmentRegisteredEvent.class));
     }
 
@@ -227,17 +276,37 @@ class EnvironmentRegisterRpcHandlerTest {
         verify(executionEnvironmentRepository).save(env);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
         assertThat(env.getLastHeartbeat()).isNotNull();
-        assertThat(env.getConnectedAt()).isNotNull();
+        assertThat(env.getStateChangedAt()).isNotNull();
 
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
         verify(eventPublisher, never()).publishEvent(any(EnvironmentRegisteredEvent.class));
     }
 
     @Test
-    void handle_withReconnect_shouldUpdateStaleConnectedAt() {
+    void handle_withReconnectFromDisconnected_shouldRestartStateClock() {
         ExecutionEnvironment env = createEnvironment();
-        Instant staleConnectedAt = Instant.now().minus(Duration.ofHours(2));
-        env.setConnectedAt(staleConnectedAt);
+        env.setStatus(EnvironmentStatus.DISCONNECTED);
+        Instant staleChange = Instant.now().minus(Duration.ofHours(2));
+        env.setStateChangedAt(staleChange);
+
+        reconnect(env);
+
+        assertThat(env.getStateChangedAt()).isAfter(staleChange);
+    }
+
+    @Test
+    void handle_withReconnectWhileConnected_shouldNotRestartStateClock() {
+        ExecutionEnvironment env = createEnvironment();
+        env.setStatus(EnvironmentStatus.CONNECTED);
+        Instant staleChange = Instant.now().minus(Duration.ofHours(2));
+        env.setStateChangedAt(staleChange);
+
+        reconnect(env);
+
+        assertThat(env.getStateChangedAt()).isEqualTo(staleChange);
+    }
+
+    private void reconnect(ExecutionEnvironment env) {
         when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
         when(sessionRegistry.replaceSessionForEnvironment(any(String.class), eq(envId)))
                 .thenReturn("ws-old");
@@ -249,8 +318,6 @@ class EnvironmentRegisterRpcHandlerTest {
                 new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
 
         handler.handle("ws-new", request, params).blockLast();
-
-        assertThat(env.getConnectedAt()).isAfter(staleConnectedAt);
     }
 
     @Test

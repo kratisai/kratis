@@ -282,6 +282,25 @@ public class ExecutionActivityPersistenceService {
     }
 
     @Transactional
+    public void recordHarnessResume(UUID executionId) {
+        SandboxExecution execution = executionRepository.findById(executionId).orElse(null);
+        if (execution == null) {
+            return;
+        }
+        AgentHarness harness = execution.getHarness();
+        String description = (harness != null ? harness.getName() : "Agent") + " has resumed";
+        recordActivity(executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null);
+        eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
+                execution.getChat().getTeam().getId(),
+                executionId,
+                ActivityType.MESSAGE,
+                description,
+                null,
+                ActivityStatus.COMPLETED,
+                null));
+    }
+
+    @Transactional
     public void recordSandboxPurged(UUID executionId) {
         SandboxExecution execution = executionRepository.findById(executionId).orElse(null);
         if (execution == null) {

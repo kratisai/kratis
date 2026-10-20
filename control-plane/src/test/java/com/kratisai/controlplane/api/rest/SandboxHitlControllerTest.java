@@ -33,6 +33,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -46,6 +47,9 @@ class SandboxHitlControllerTest {
 
     @Autowired
     private WebApplicationContext wac;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     @Autowired
     private UserRepository userRepository;
@@ -190,6 +194,16 @@ class SandboxHitlControllerTest {
                 "req-1",
                 Instant.now(),
                 teamId));
+    }
+
+    // Leaving RUNNING stamps the lazy environment, which needs an open session.
+    private void markExecutionIdle() {
+        transactionTemplate.executeWithoutResult(status -> {
+            SandboxExecution execution =
+                    sandboxExecutionRepository.findById(executionId).orElseThrow();
+            execution.setStatus(SandboxExecutionStatus.IDLE);
+            sandboxExecutionRepository.save(execution);
+        });
     }
 
     @Test
@@ -593,10 +607,7 @@ class SandboxHitlControllerTest {
 
     @Test
     void resolveApproval_withFeedback_revivesIdleExecutionForSteering() throws Exception {
-        SandboxExecution execution =
-                sandboxExecutionRepository.findById(executionId).orElseThrow();
-        execution.setStatus(SandboxExecutionStatus.IDLE);
-        sandboxExecutionRepository.save(execution);
+        markExecutionIdle();
         registerPendingApproval();
 
         ResolveHitlRequest request = new ResolveHitlRequest(
@@ -622,10 +633,7 @@ class SandboxHitlControllerTest {
 
     @Test
     void resolveApproval_withoutFeedback_leavesIdleExecutionUntouched() throws Exception {
-        SandboxExecution execution =
-                sandboxExecutionRepository.findById(executionId).orElseThrow();
-        execution.setStatus(SandboxExecutionStatus.IDLE);
-        sandboxExecutionRepository.save(execution);
+        markExecutionIdle();
         registerPendingApproval();
 
         ResolveHitlRequest request =
@@ -645,10 +653,7 @@ class SandboxHitlControllerTest {
 
     @Test
     void resolveApproval_blankFeedback_ignoresSteering() throws Exception {
-        SandboxExecution execution =
-                sandboxExecutionRepository.findById(executionId).orElseThrow();
-        execution.setStatus(SandboxExecutionStatus.IDLE);
-        sandboxExecutionRepository.save(execution);
+        markExecutionIdle();
         registerPendingApproval();
 
         ResolveHitlRequest request = new ResolveHitlRequest(

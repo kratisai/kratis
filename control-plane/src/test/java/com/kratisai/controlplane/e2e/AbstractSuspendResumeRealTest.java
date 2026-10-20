@@ -75,6 +75,11 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
     private ExecutionDiffSnapshotRepository diffSnapshotRepository;
 
     @Autowired
+    private ResumeRegistrationProbe registrationCounter;
+
+    private final Map<UUID, ResumeBaseline> resumeBaselines = new HashMap<>();
+
+    @Autowired
     private TransactionTemplate transactionTemplate;
 
     @BeforeAll
@@ -229,6 +234,10 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
     }
 
     protected void resumeViaRest(UUID envId) throws Exception {
+        // The sleeping environment has no container, so the pre-resume boot baseline comes from
+        // the snapshot image (whose log the resumed container inherits); the resumed-container
+        // read in awaitResumed then diffs exactly this resume's boots.
+        resumeBaselines.put(envId, new ResumeBaseline(registrationCount(envId), snapshotBootCount(envId)));
         mockMvc()
                 .perform(post(
                                 "/api/v1/teams/{teamId}/environments/{envId}/resume",
@@ -239,7 +248,8 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
                 .andExpect(status().isOk());
     }
 
-    protected void awaitResumed(UUID envId, int acpInitializedBefore) {
+    protected void awaitResumed(UUID envId, int acpInitializedBefore) throws Exception {
+        ResumeBaseline baseline = resumeBaselines.getOrDefault(envId, new ResumeBaseline(registrationCount(envId), 0));
         Awaitility.await("resumed environment connected")
                 .atMost(Duration.ofSeconds(120))
                 .pollInterval(Duration.ofSeconds(1))
@@ -252,6 +262,72 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
                 .atMost(Duration.ofSeconds(180))
                 .pollInterval(Duration.ofSeconds(1))
                 .until(() -> acpInitializedCount() > acpInitializedBefore);
+        assertSingleResumeRegistration(envId, baseline);
+    }
+
+    /**
+     * A resume must produce exactly one connector process, one initial registration and one
+     * agent relaunch. A duplicate initial registration means a second connector started on the
+     * resumed container; the register handler now suppresses its relaunch, but the extra process
+     * still steals the session mapping and races heartbeats, so fail loudly here. The sidecar
+     * log survives inside the snapshot, so boot lines are diffed across the resume.
+     */
+    private void assertSingleResumeRegistration(UUID envId, ResumeBaseline baseline) throws Exception {
+        assertThat(registrationCount(envId) - baseline.registrations())
+                .as("exactly one registered event per resume")
+                .isEqualTo(1);
+        assertThat(connectorBootCount(envId) - baseline.boots())
+                .as("exactly one connector boot per resume")
+                .isEqualTo(1);
+        assertThat(connectorProcessCount(envId))
+                .as("exactly one live connector process on the resumed container")
+                .isEqualTo(1);
+    }
+
+    private record ResumeBaseline(int registrations, long boots) {}
+
+    private int registrationCount(UUID envId) {
+        return registrationCounter.countFor(envId);
+    }
+
+    private long connectorBootCount(UUID envId) throws Exception {
+        String out = execInSandbox(
+                envId, "sh", "-c", "grep -c 'Starting Kratis Connector' /kratis/logs/sidecar.log || true");
+        return out.isEmpty() ? 0 : Long.parseLong(out);
+    }
+
+    private long snapshotBootCount(UUID envId) throws Exception {
+        String out = dockerOutput(
+                "docker",
+                "run",
+                "--rm",
+                "--entrypoint",
+                "sh",
+                "kratis-snapshot-" + envId + ":latest",
+                "-c",
+                "grep -c 'Starting Kratis Connector' /kratis/logs/sidecar.log || true");
+        return out.isEmpty() ? 0 : Long.parseLong(out.split("\n")[0].trim());
+    }
+
+    private int connectorProcessCount(UUID envId) throws Exception {
+        // No ps in the slim runner image; scan /proc cmdlines for the connector binary instead,
+        // skipping this scan's own shell (its command line contains the pattern text itself).
+        String out = execInSandbox(
+                envId,
+                "sh",
+                "-c",
+                "self=$$; count=0; for c in /proc/[0-9]*/cmdline; do pid=${c#/proc/}; pid=${pid%/cmdline};"
+                        + " [ \"$pid\" = \"$self\" ] && continue; tr '\\0' ' ' < \"$c\" 2>/dev/null"
+                        + " | grep -q kratis-connector && count=$((count + 1)); done; echo $count");
+        return Integer.parseInt(
+                out.lines().reduce("", (first, second) -> second).trim());
+    }
+
+    private String execInSandbox(UUID envId, String... command) throws Exception {
+        java.util.List<String> full = new java.util.ArrayList<>(List.of("docker", "exec", "kratis-sandbox-" + envId));
+        full.addAll(List.of(command));
+        ProcessExecutor.ProcessResult result = suspendProcessExecutor.execute(full, null, null);
+        return new String(result.output()).trim();
     }
 
     protected SandboxExecution latestExecution(UUID envId) {

@@ -13,16 +13,11 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -53,8 +48,6 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
     private final String runnerImage;
     private final boolean debug;
     private String connectUrl;
-
-    private final Map<String, Instant> danglingNetworkFirstSeen = new ConcurrentHashMap<>();
 
     public LocalDockerSandboxProvider(
             ProcessExecutor processExecutor,
@@ -133,9 +126,13 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             createSandboxNetwork(envId, networkName(envId));
             spawnDindSibling(envId, networkName(envId), dindName(envId));
             spawnRunnerContainer(environment, envId, networkName(envId), dindName(envId), runnerName(envId), null);
-        } catch (RuntimeException e) {
-            terminateSandboxResources(envId);
-            throw e;
+        } catch (RuntimeException spawnFailure) {
+            try {
+                terminateSandboxResources(envId);
+            } catch (RuntimeException teardownFailure) {
+                spawnFailure.addSuppressed(teardownFailure);
+            }
+            throw spawnFailure;
         }
     }
 
@@ -171,7 +168,13 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         logger.info("Suspending sandbox environment {}", envId);
         String envKey = envId.toString();
         String runnerRef = resolveRunnerRef(envKey);
+        // If the runner is gone but suspended state exists, the commit already happened on an
+        // earlier attempt whose teardown was interrupted; skip straight to the teardown.
         if (runnerRef == null) {
+            if (isRetained(envId)) {
+                terminateSandboxResources(envKey);
+                return;
+            }
             throw new IllegalStateException("No runner container found for environment " + envId);
         }
         commitSnapshot(envKey, runnerRef);
@@ -238,7 +241,9 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
 
     @Override
     public Set<UUID> listActiveEnvIds() {
-        return listEnvIdLabels(List.of(
+        // Any live element counts; the runner listing would miss a leftover dind or network,
+        // so each kind contributes its own ids.
+        Set<UUID> envIds = new LinkedHashSet<>(listEnvIdLabels(List.of(
                 "docker",
                 "ps",
                 "-a",
@@ -247,32 +252,111 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 "--filter",
                 "label=kratis.role=runner",
                 "--format",
-                "{{.Label \"kratis.sandbox.id\"}}"));
-    }
-
-    @Override
-    public Set<UUID> listSnapshotEnvIds() {
-        // Scoped to this instance's resume snapshots only: the tag prefix excludes every other image
-        // and the instance label excludes snapshots owned by another control plane.
-        return listEnvIdLabels(List.of(
+                "{{.Label \"kratis.sandbox.id\"}}")));
+        envIds.addAll(listEnvIdLabels(List.of(
                 "docker",
-                "images",
-                "--filter",
-                "reference=kratis-snapshot-*",
+                "ps",
+                "-a",
                 "--filter",
                 "label=kratis.instance.id=" + instanceId,
                 "--filter",
-                "label=kratis.role=runner",
+                "label=kratis.role=dind",
                 "--format",
-                "{{.Label \"kratis.sandbox.id\"}}"));
+                "{{.Label \"kratis.sandbox.id\"}}")));
+        envIds.addAll(listNetworkEnvIds());
+        return envIds;
+    }
+
+    /** Instance-scoped networks with an env label; a leftover network alone is runtime remains. */
+    private Set<UUID> listNetworkEnvIds() {
+        try {
+            ProcessExecutor.ProcessResult result = processExecutor.execute(
+                    List.of(
+                            "docker",
+                            "network",
+                            "ls",
+                            "--filter",
+                            "label=kratis.instance.id=" + instanceId,
+                            "--filter",
+                            "label=kratis.role=network",
+                            "--format",
+                            "{{.Label \"kratis.sandbox.id\"}}"),
+                    null,
+                    null);
+            if (result.exitCode() != 0) {
+                throw new IllegalStateException("Docker network listing failed (exit " + result.exitCode() + ")");
+            }
+            String output = new String(result.output()).trim();
+            if (output.isEmpty()) {
+                return Set.of();
+            }
+            Set<UUID> envIds = new LinkedHashSet<>();
+            for (String line : output.split("\\s+")) {
+                if (line.isBlank()) {
+                    continue;
+                }
+                try {
+                    envIds.add(UUID.fromString(line));
+                } catch (IllegalArgumentException e) {
+                    logger.warn("Skipping network with unparseable kratis.sandbox.id label: {}", line);
+                }
+            }
+            return envIds;
+        } catch (IOException e) {
+            throw new IllegalStateException("Docker network listing failed", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Docker network listing interrupted", e);
+        }
+    }
+
+    @Override
+    public Set<UUID> listRetainedEnvIds() {
+        // The images formatter exposes no label fields, so derive ownership from the
+        // deterministic tag (kratis-snapshot-<envId>:latest) instead of label filters.
+        try {
+            ProcessExecutor.ProcessResult result = processExecutor.execute(
+                    List.of(
+                            "docker",
+                            "images",
+                            "--filter",
+                            "reference=kratis-snapshot-*:latest",
+                            "--format",
+                            "{{.Repository}}"),
+                    null,
+                    null);
+            if (result.exitCode() != 0) {
+                throw new IllegalStateException(
+                        "Docker suspended-state listing failed (exit " + result.exitCode() + ")");
+            }
+            String output = new String(result.output()).trim();
+            if (output.isEmpty()) {
+                return Set.of();
+            }
+            Set<UUID> envIds = new LinkedHashSet<>();
+            for (String repo : output.split("\\s+")) {
+                String id = repo.startsWith("kratis-snapshot-") ? repo.substring("kratis-snapshot-".length()) : repo;
+                try {
+                    envIds.add(UUID.fromString(id));
+                } catch (IllegalArgumentException e) {
+                    logger.warn("Skipping suspended image with unparseable env id: {}", repo);
+                }
+            }
+            return envIds;
+        } catch (IOException e) {
+            throw new IllegalStateException("Docker suspended-state listing failed", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Docker suspended-state listing interrupted", e);
+        }
     }
 
     private Set<UUID> listEnvIdLabels(List<String> command) {
         try {
             ProcessExecutor.ProcessResult result = processExecutor.execute(command, null, null);
             if (result.exitCode() != 0) {
-                logger.warn("Docker command failed with exit code: {}", result.exitCode());
-                return Set.of();
+                throw new IllegalStateException(
+                        "Docker listing failed (exit " + result.exitCode() + "): " + String.join(" ", command));
             }
             String output = new String(result.output()).trim();
             if (output.isEmpty()) {
@@ -290,76 +374,24 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 }
             }
             return envIds;
-        } catch (IOException | InterruptedException e) {
-            logger.warn("Failed to list sandbox environments from Docker host: {}", e.getMessage());
-            return Set.of();
+        } catch (IOException e) {
+            throw new IllegalStateException("Docker listing failed: " + String.join(" ", command), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Docker listing interrupted: " + String.join(" ", command), e);
         }
     }
 
     @Override
-    public void pruneOrphanNetworks(Duration gracePeriod) {
-        try {
-            Instant now = Instant.now();
-            // List networks created by this instance with role=network
-            List<String> listCmd = List.of(
-                    "docker",
-                    "network",
-                    "ls",
-                    "--filter",
-                    "label=kratis.instance.id=" + instanceId,
-                    "--filter",
-                    "label=kratis.role=network",
-                    "--format",
-                    "{{.Name}}");
-            ProcessExecutor.ProcessResult listResult = processExecutor.execute(listCmd, null, null);
-            if (listResult.exitCode() != 0) {
-                return;
-            }
-            String output = new String(listResult.output()).trim();
-            Set<String> listedNetworks = new HashSet<>();
-            if (!output.isEmpty()) {
-                String[] networkNames = output.split("\\s+");
-                for (String netName : networkNames) {
-                    if (netName.isBlank()) {
-                        continue;
-                    }
-                    listedNetworks.add(netName);
-                    // Check if any containers are attached to this network
-                    List<String> inspectCmd =
-                            List.of("docker", "network", "inspect", "--format", "{{len .Containers}}", netName);
-                    ProcessExecutor.ProcessResult inspectResult = processExecutor.execute(inspectCmd, null, null);
-                    if (inspectResult.exitCode() != 0) {
-                        continue;
-                    }
-                    String countStr = new String(inspectResult.output()).trim();
-                    if ("0".equals(countStr)) {
-                        Instant firstSeen = danglingNetworkFirstSeen.computeIfAbsent(netName, k -> now);
-                        long elapsed = Duration.between(firstSeen, now).toSeconds();
-                        if (elapsed >= gracePeriod.toSeconds()) {
-                            logger.info("Pruning dangling kratis network with 0 attached containers: {}", netName);
-                            if (removeNetwork(netName)) {
-                                danglingNetworkFirstSeen.remove(netName);
-                            } else {
-                                logger.warn("Failed to prune dangling kratis network {}", netName);
-                            }
-                        } else {
-                            logger.debug(
-                                    "Dangling kratis network {} tracked ({}s elapsed / {}s grace)",
-                                    netName,
-                                    elapsed,
-                                    gracePeriod.toSeconds());
-                        }
-                    } else {
-                        // Network has attached containers; clear any dangling tracking
-                        danglingNetworkFirstSeen.remove(netName);
-                    }
-                }
-            }
-            // Drop tracking for networks that no longer exist
-            danglingNetworkFirstSeen.keySet().removeIf(name -> !listedNetworks.contains(name));
-        } catch (Exception e) {
-            logger.debug("Failed during orphan network pruning: {}", e.getMessage());
+    public void removeSnapshot(UUID envId) {
+        if (envId == null) {
+            return;
         }
+        if (!ownsSnapshot(envId.toString())) {
+            logger.debug("Snapshot for environment {} not owned by this instance; keeping", envId);
+            return;
+        }
+        removeSnapshot(envId.toString());
     }
 
     private void removeSnapshot(String envId) {
@@ -379,7 +411,19 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
     private void commitSnapshot(String envId, String runnerRef) {
         String snapshot = snapshotRef(envId);
         String previousImageId = imageIdOf(snapshot);
-        executeCommand("Committing sandbox snapshot", List.of("docker", "commit", runnerRef, snapshot));
+        executeCommand(
+                "Committing sandbox snapshot",
+                List.of(
+                        "docker",
+                        "commit",
+                        "--change",
+                        "LABEL kratis.instance.id=" + instanceId,
+                        "--change",
+                        "LABEL kratis.sandbox.id=" + envId,
+                        "--change",
+                        "LABEL kratis.role=runner",
+                        runnerRef,
+                        snapshot));
         String committedImageId = imageIdOf(snapshot);
         if (previousImageId != null && !previousImageId.equals(committedImageId)) {
             try {
@@ -402,6 +446,32 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         } catch (IOException | InterruptedException e) {
             logger.warn("Failed to inspect image {}: {}", imageRef, e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * True when the snapshot image exists and carries this instance's label. Images without the
+     * label predate ownership tracking and are never removed automatically.
+     */
+    private boolean ownsSnapshot(String envId) {
+        try {
+            ProcessExecutor.ProcessResult result = processExecutor.execute(
+                    List.of(
+                            "docker",
+                            "image",
+                            "inspect",
+                            "--format",
+                            "{{index .Config.Labels \"kratis.instance.id\"}}",
+                            snapshotRef(envId)),
+                    null,
+                    null);
+            if (result.exitCode() != 0) {
+                return false;
+            }
+            return instanceId.equals(new String(result.output()).trim());
+        } catch (IOException | InterruptedException e) {
+            logger.debug("Failed to inspect ownership of snapshot {}: {}", envId, e.getMessage());
+            return false;
         }
     }
 
@@ -711,7 +781,17 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             return byLabel;
         }
         String name = runnerName(envId);
-        return containerExists(name) ? name : null;
+        if (!containerExists(name)) {
+            return null;
+        }
+        if (!ownsContainer(name)) {
+            logger.warn(
+                    "Runner container {} exists but is not owned by instance {}; refusing to touch it",
+                    name,
+                    instanceId);
+            return null;
+        }
+        return name;
     }
 
     private boolean containerExists(String containerRef) {
@@ -723,6 +803,40 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             logger.debug("Failed to inspect container {}: {}", containerRef, e.getMessage());
             return false;
         }
+    }
+
+    private boolean ownsContainer(String containerRef) {
+        try {
+            ProcessExecutor.ProcessResult result = processExecutor.execute(
+                    List.of(
+                            "docker",
+                            "inspect",
+                            "--format",
+                            "{{index .Config.Labels \"kratis.instance.id\"}}",
+                            containerRef),
+                    null,
+                    null);
+            if (result.exitCode() != 0) {
+                return false;
+            }
+            return instanceId.equals(new String(result.output()).trim());
+        } catch (IOException | InterruptedException e) {
+            logger.debug("Failed to inspect ownership of container {}: {}", containerRef, e.getMessage());
+            return false;
+        }
+    }
+
+    /** Keeps the tag direct-check for a half-written commit the listing may miss. */
+    public boolean isRetained(UUID envId) {
+        if (envId == null) {
+            return false;
+        }
+        if (listRetainedEnvIds().contains(envId)) {
+            return true;
+        }
+        boolean exists = imageIdOf(snapshotRef(envId.toString())) != null;
+        logger.debug("Suspended-state tag fallback for environment {}: exists={}", envId, exists);
+        return exists;
     }
 
     private String findRunnerContainerByLabel(String envId) {
@@ -756,7 +870,9 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
 
     private void terminateSandboxResources(String envId) {
         // -v matters: docker:dind-rootless declares two VOLUMEs holding its image store, so each
-        // sibling leaks gigabytes without it.
+        // sibling leaks gigabytes without it. Every removal below is ownership-checked: names are
+        // deterministic (kratis-<role>-<envId>) so a foreign instance's same-named resource must
+        // never be touched.
         String runnerRef = findRunnerContainerByLabel(envId);
         String runnerName = runnerName(envId);
         if (runnerRef != null) {
@@ -766,7 +882,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 logger.error("Failed to terminate runner container: {}", runnerRef, e);
             }
         }
-        if (!runnerName.equals(runnerRef)) {
+        if (!runnerName.equals(runnerRef) && ownsContainer(runnerName)) {
             try {
                 processExecutor.execute(List.of("docker", "rm", "-f", "-v", runnerName), null, null);
             } catch (Exception e) {
@@ -776,25 +892,85 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
 
         // Remove DinD sibling container
         String dindName = dindName(envId);
-        try {
-            processExecutor.execute(List.of("docker", "rm", "-f", "-v", dindName), null, null);
-        } catch (IOException | InterruptedException e) {
-            logger.error("Failed to terminate dind container: {}", dindName, e);
+        if (ownsContainer(dindName)) {
+            try {
+                processExecutor.execute(List.of("docker", "rm", "-f", "-v", dindName), null, null);
+            } catch (IOException | InterruptedException e) {
+                logger.error("Failed to terminate dind container: {}", dindName, e);
+            }
         }
 
         // Remove network. Disconnect first: a stopped but still-attached container blocks
         // `network rm` and would otherwise leak one /24 from the daemon pool per sandbox.
         String networkName = networkName(envId);
-        forceDisconnectAll(networkName);
-        try {
-            ProcessExecutor.ProcessResult rmResult =
-                    processExecutor.execute(List.of("docker", "network", "rm", networkName), null, null);
-            if (rmResult.exitCode() != 0) {
-                logger.error(
-                        "Failed to remove docker network {}: {}", networkName, new String(rmResult.output()).trim());
+        if (ownsNetwork(networkName)) {
+            forceDisconnectAll(networkName);
+            try {
+                ProcessExecutor.ProcessResult rmResult =
+                        processExecutor.execute(List.of("docker", "network", "rm", networkName), null, null);
+                if (rmResult.exitCode() != 0) {
+                    throw new IllegalStateException(
+                            "docker network rm " + networkName + ": " + new String(rmResult.output()).trim());
+                }
+            } catch (IOException | InterruptedException e) {
+                throw new IllegalStateException("Failed to remove docker network: " + networkName, e);
             }
+        }
+        verifyGone(envId);
+    }
+
+    /**
+     * Throws when any provider-owned element for this environment remains, so a failed
+     * teardown surfaces instead of being logged away and rediscovered by the sweep. A
+     * leftover is confirmed against the listing as well as the deterministic names, so a
+     * resource with an unexpected name is still caught.
+     */
+    private void verifyGone(String envId) {
+        Set<String> leftovers = new LinkedHashSet<>();
+        if (resolveRunnerRef(envId) != null) {
+            leftovers.add(runnerName(envId));
+        }
+        if (ownsContainer(dindName(envId))) {
+            leftovers.add(dindName(envId));
+        }
+        if (ownsNetwork(networkName(envId))) {
+            leftovers.add(networkName(envId));
+        }
+        try {
+            UUID id = UUID.fromString(envId);
+            if (listActiveEnvIds().contains(id)) {
+                leftovers.add("listed-active:" + envId);
+            }
+        } catch (IllegalArgumentException e) {
+            logger.debug("Skipping listing check for non-UUID env key {}", envId);
+        } catch (RuntimeException e) {
+            logger.warn("Teardown verification listing failed for environment {}: {}", envId, e.getMessage());
+        }
+        if (!leftovers.isEmpty()) {
+            throw new IllegalStateException(
+                    "Teardown incomplete for environment " + envId + "; remaining: " + String.join(", ", leftovers));
+        }
+    }
+
+    private boolean ownsNetwork(String networkName) {
+        try {
+            ProcessExecutor.ProcessResult result = processExecutor.execute(
+                    List.of(
+                            "docker",
+                            "network",
+                            "inspect",
+                            "--format",
+                            "{{index .Labels \"kratis.instance.id\"}}",
+                            networkName),
+                    null,
+                    null);
+            if (result.exitCode() != 0) {
+                return false;
+            }
+            return instanceId.equals(new String(result.output()).trim());
         } catch (IOException | InterruptedException e) {
-            logger.error("Failed to remove docker network: {}", networkName, e);
+            logger.debug("Failed to inspect ownership of network {}: {}", networkName, e.getMessage());
+            return false;
         }
     }
 
@@ -842,18 +1018,6 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                         networkName,
                         e.getMessage());
             }
-        }
-    }
-
-    private boolean removeNetwork(String networkName) {
-        forceDisconnectAll(networkName);
-        try {
-            ProcessExecutor.ProcessResult result =
-                    processExecutor.execute(List.of("docker", "network", "rm", networkName), null, null);
-            return result.exitCode() == 0;
-        } catch (IOException | InterruptedException e) {
-            logger.debug("Failed to remove docker network {}: {}", networkName, e.getMessage());
-            return false;
         }
     }
 

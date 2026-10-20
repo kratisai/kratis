@@ -2,7 +2,6 @@ package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionProviderType;
-import java.time.Duration;
 import java.util.Set;
 import java.util.UUID;
 
@@ -26,9 +25,15 @@ public interface SandboxProvider {
 
     void captureSidecarLogs(UUID envId);
 
+    /** Every environment with any live runtime element left, full or partial. */
     Set<UUID> listActiveEnvIds();
 
-    Set<UUID> listSnapshotEnvIds();
+    /** Every environment with a retained snapshot on this host. */
+    Set<UUID> listRetainedEnvIds();
 
-    void pruneOrphanNetworks(Duration gracePeriod);
+    default boolean isRetained(UUID envId) {
+        return envId != null && listRetainedEnvIds().contains(envId);
+    }
+
+    void removeSnapshot(UUID envId);
 }

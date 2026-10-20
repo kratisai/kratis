@@ -80,6 +80,12 @@ public class SandboxProperties {
 
         private Duration idleTimeout = Duration.ofMinutes(20);
 
+        private Duration activityTimeout = Duration.ofMinutes(5);
+
+        private Duration connectTimeout = Duration.ofMinutes(5);
+
+        private Duration settleWindow = Duration.ofMinutes(2);
+
         private Duration startupGrace = Duration.ofSeconds(30);
 
         private Duration retentionPeriod = Duration.ofDays(30);
@@ -106,6 +112,30 @@ public class SandboxProperties {
 
         public void setIdleTimeout(Duration idleTimeout) {
             this.idleTimeout = idleTimeout;
+        }
+
+        public Duration getActivityTimeout() {
+            return activityTimeout;
+        }
+
+        public void setActivityTimeout(Duration activityTimeout) {
+            this.activityTimeout = activityTimeout;
+        }
+
+        public Duration getConnectTimeout() {
+            return connectTimeout;
+        }
+
+        public void setConnectTimeout(Duration connectTimeout) {
+            this.connectTimeout = connectTimeout;
+        }
+
+        public Duration getSettleWindow() {
+            return settleWindow;
+        }
+
+        public void setSettleWindow(Duration settleWindow) {
+            this.settleWindow = settleWindow;
         }
 
         public Duration getStartupGrace() {

@@ -1,0 +1,25 @@
+databaseChangeLog:
+- changeSet:
+    id: 011-sandbox-lifecycle-redesign-001
+    author: kratis
+    changes:
+    - addColumn:
+        tableName: execution_environments
+        columns:
+        - column:
+            name: state_changed_at
+            type: TIMESTAMP WITH TIME ZONE
+        - column:
+            name: idle_since
+            type: TIMESTAMP WITH TIME ZONE
+    - sql:
+        dbms: postgresql
+        splitStatements: true
+        stripComments: true
+        sql: >-
+          UPDATE execution_environments
+          SET state_changed_at = COALESCE(suspended_at, last_heartbeat, NOW()),
+              idle_since = CASE
+                WHEN status = 'SLEEPING' THEN suspended_at
+                ELSE COALESCE(last_heartbeat, NOW())
+              END;

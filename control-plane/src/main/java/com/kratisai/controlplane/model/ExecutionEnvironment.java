@@ -37,8 +37,12 @@ public class ExecutionEnvironment {
     @Column(nullable = false, length = 50)
     private EnvironmentStatus status;
 
-    @Column(name = "suspended_at")
-    private Instant suspendedAt;
+    /**
+     * When the clock for the current status started: the status last changed, or the execution
+     * last stopped running. Idle-timeout, connect-timeout and retention all measure from here.
+     */
+    @Column(name = "state_changed_at")
+    private Instant stateChangedAt;
 
     @Column(name = "auth_token", length = 255)
     private String authToken;
@@ -50,9 +54,6 @@ public class ExecutionEnvironment {
     @Column(name = "last_heartbeat")
     private Instant lastHeartbeat;
 
-    @Column(name = "connected_at")
-    private Instant connectedAt;
-
     @PrePersist
     protected void onCreate() {
         if (status == null) {
@@ -60,6 +61,9 @@ public class ExecutionEnvironment {
         }
         if (type == null) {
             type = ExecutionEnvironmentType.SANDBOX;
+        }
+        if (stateChangedAt == null) {
+            stateChangedAt = Instant.now();
         }
     }
 
@@ -137,19 +141,11 @@ public class ExecutionEnvironment {
         this.lastHeartbeat = lastHeartbeat;
     }
 
-    public Instant getSuspendedAt() {
-        return suspendedAt;
+    public Instant getStateChangedAt() {
+        return stateChangedAt;
     }
 
-    public void setSuspendedAt(Instant suspendedAt) {
-        this.suspendedAt = suspendedAt;
-    }
-
-    public Instant getConnectedAt() {
-        return connectedAt;
-    }
-
-    public void setConnectedAt(Instant connectedAt) {
-        this.connectedAt = connectedAt;
+    public void setStateChangedAt(Instant stateChangedAt) {
+        this.stateChangedAt = stateChangedAt;
     }
 }

@@ -16,6 +16,7 @@ import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.model.event.EnvironmentDisconnectedEvent;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
+import com.kratisai.controlplane.model.event.SandboxExecutionSuspendedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
@@ -35,23 +36,22 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
-import org.springframework.web.socket.WebSocketSession;
 
 @Service
 public class ExecutionEnvironmentService {
 
     private static final Logger logger = LoggerFactory.getLogger(ExecutionEnvironmentService.class);
 
+    private static final Duration HEARTBEAT_STALE_AFTER = Duration.ofSeconds(60);
+
     private static final String UNAVAILABLE_ENVIRONMENT_REASON =
             "execution abandoned because its environment is no longer available";
 
     private static final String PURGED_ENVIRONMENT_REASON = "Sandbox resources found to have been unexpectedly purged";
-
-    private static final String SLEEPING_ENVIRONMENT_REASON =
-            "execution force-terminated because its environment went to sleep";
 
     private final ExecutionEnvironmentRepository executionEnvironmentRepository;
     private final TeamMemberRepository teamMemberRepository;
@@ -60,14 +60,12 @@ public class ExecutionEnvironmentService {
     private final ApplicationEventPublisher eventPublisher;
     private final SandboxOrchestratorService sandboxOrchestratorService;
     private final SandboxExecutionRepository sandboxExecutionRepository;
-    private final EnvironmentSessionRegistry sessionRegistry;
     private final VirtualKeyService virtualKeyService;
     private final SandboxExecutionService sandboxExecutionService;
     private final SandboxProvisioningService sandboxProvisioningService;
     private final ExecutionActivityPersistenceService executionActivityPersistenceService;
     private final String connectUrl;
     private final TransactionTemplate terminationTemplate;
-    private final TransactionTemplate pollTemplate;
 
     public ExecutionEnvironmentService(
             ExecutionEnvironmentRepository executionEnvironmentRepository,
@@ -77,7 +75,6 @@ public class ExecutionEnvironmentService {
             ApplicationEventPublisher eventPublisher,
             SandboxOrchestratorService sandboxOrchestratorService,
             SandboxExecutionRepository sandboxExecutionRepository,
-            EnvironmentSessionRegistry sessionRegistry,
             VirtualKeyService virtualKeyService,
             SandboxExecutionService sandboxExecutionService,
             SandboxProvisioningService sandboxProvisioningService,
@@ -91,7 +88,6 @@ public class ExecutionEnvironmentService {
         this.eventPublisher = eventPublisher;
         this.sandboxOrchestratorService = sandboxOrchestratorService;
         this.sandboxExecutionRepository = sandboxExecutionRepository;
-        this.sessionRegistry = sessionRegistry;
         this.virtualKeyService = virtualKeyService;
         this.sandboxExecutionService = sandboxExecutionService;
         this.sandboxProvisioningService = sandboxProvisioningService;
@@ -99,8 +95,6 @@ public class ExecutionEnvironmentService {
         this.connectUrl = sandboxProperties.getConnectUrl();
         this.terminationTemplate = new TransactionTemplate(transactionManager);
         this.terminationTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        this.pollTemplate = new TransactionTemplate(transactionManager);
-        this.pollTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     private void requireTeamMembership(UUID userId, UUID teamId) {
@@ -122,11 +116,21 @@ public class ExecutionEnvironmentService {
                 env.getName(),
                 env.getType(),
                 env.getAuthToken(),
-                env.getStatus(),
+                displayStatus(env),
                 env.getLastHeartbeat(),
                 lastActivity,
                 activeExecution != null ? activeExecution.getId() : null,
                 activeExecution != null ? activeExecution.getChat().getId() : null);
+    }
+
+    private static EnvironmentStatus displayStatus(ExecutionEnvironment env) {
+        Instant heartbeat = env.getLastHeartbeat();
+        if (env.getStatus() == EnvironmentStatus.CONNECTED
+                && heartbeat != null
+                && Duration.between(heartbeat, Instant.now()).compareTo(HEARTBEAT_STALE_AFTER) > 0) {
+            return EnvironmentStatus.DISCONNECTED;
+        }
+        return env.getStatus();
     }
 
     public List<ExecutionEnvironmentDto> listEnvironments(UUID userId, UUID teamId) {
@@ -169,7 +173,7 @@ public class ExecutionEnvironmentService {
         env.setUser(user);
         env.setName(request.name());
         env.setType(ExecutionEnvironmentType.CONNECTOR);
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
+        transition(env, EnvironmentStatus.DISCONNECTED);
         env.setAuthToken(authToken);
 
         ExecutionEnvironment savedEnv = executionEnvironmentRepository.save(env);
@@ -193,69 +197,6 @@ public class ExecutionEnvironmentService {
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
         return toDto(env);
-    }
-
-    /**
-     * Terminates the running execution in its own {@code REQUIRES_NEW} transaction so the terminal
-     * status write and its events commit independently of the container teardown that follows. A
-     * teardown failure can therefore never leave the execution stuck in RUNNING with no event for
-     * the UI.
-     */
-    private void terminateRunningExecution(UUID executionId, UUID envId, String forcedReason) {
-        terminationTemplate.executeWithoutResult(status -> {
-            SandboxExecution execution =
-                    sandboxExecutionRepository.findById(executionId).orElse(null);
-            if (execution == null
-                    || (execution.getStatus() != SandboxExecutionStatus.RUNNING
-                            && execution.getStatus() != SandboxExecutionStatus.IDLE)) {
-                return;
-            }
-            WebSocketSession envSession = sessionRegistry.getSessionForEnvironment(envId);
-
-            if (envSession != null && envSession.isOpen()) {
-                try {
-                    sandboxExecutionService.terminateExecution(executionId);
-                    boolean completed = waitForExecutionCompletion(executionId, Duration.ofSeconds(10));
-                    if (completed) {
-                        logger.info("Execution {} terminated gracefully", executionId);
-                    } else {
-                        logger.warn("Execution {} did not complete within timeout, forcing termination", executionId);
-                        forceTerminateExecution(executionId, forcedReason);
-                    }
-                } catch (Exception e) {
-                    logger.error("Failed to gracefully terminate execution {}", executionId, e);
-                    forceTerminateExecution(executionId, forcedReason);
-                }
-            } else {
-                logger.info("Environment {} is disconnected, force terminating execution {}", envId, executionId);
-                forceTerminateExecution(executionId, forcedReason);
-            }
-        });
-    }
-
-    /**
-     * Polls for the execution leaving RUNNING. An agent settles the execution to IDLE, which counts
-     * as finished. Each read runs in its own {@code REQUIRES_NEW} transaction so the poll observes
-     * the {@code env.complete} handler's committed update instead of the caller's first-level cache.
-     */
-    private boolean waitForExecutionCompletion(UUID executionId, Duration timeout) {
-        Instant deadline = Instant.now().plus(timeout);
-        while (Instant.now().isBefore(deadline)) {
-            Boolean completed = pollTemplate.execute(status -> sandboxExecutionRepository
-                    .findById(executionId)
-                    .map(execution -> execution.getStatus() != SandboxExecutionStatus.RUNNING)
-                    .orElse(true));
-            if (Boolean.TRUE.equals(completed)) {
-                return true;
-            }
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
-            }
-        }
-        return false;
     }
 
     private void forceTerminateExecution(UUID executionId, String reason) {
@@ -323,21 +264,13 @@ public class ExecutionEnvironmentService {
     }
 
     @Transactional
-    public void reconcileStoppedContainer(ExecutionEnvironment env) {
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
-        executionEnvironmentRepository.save(env);
-        eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
-        failActiveExecutions(env.getId(), UNAVAILABLE_ENVIRONMENT_REASON);
-    }
-
-    @Transactional
     public void failStrandedExecution(UUID executionId) {
         terminationTemplate.executeWithoutResult(
                 status -> forceTerminateExecution(executionId, UNAVAILABLE_ENVIRONMENT_REASON));
     }
 
     @Transactional
-    public ExecutionEnvironmentDto sleepEnvironmentInternal(ExecutionEnvironment env) {
+    public void sleepEnvironmentInternal(ExecutionEnvironment env) {
         if (env.getType() != ExecutionEnvironmentType.SANDBOX) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Environment is not a sandbox");
         }
@@ -354,12 +287,11 @@ public class ExecutionEnvironmentService {
         UUID envId = env.getId();
         UUID teamId = env.getTeam().getId();
 
-        stopRunningExecutions(envId, SLEEPING_ENVIRONMENT_REASON);
-
         try {
             SandboxProvider sandboxProvider =
                     sandboxOrchestratorService.getProvider(env.getProvider().getType());
             sandboxProvider.suspend(envId);
+            logger.debug("Suspend committed snapshot for env {}; marking SLEEPING", envId);
         } catch (Exception e) {
             logger.error("Failed to suspend sandbox for environment {}", envId, e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to suspend environment");
@@ -374,10 +306,11 @@ public class ExecutionEnvironmentService {
                     executionActivityPersistenceService.recordHarnessSleep(execution.getId());
                     eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
                             teamId, execution.getChat().getId(), execution.getId()));
+                    eventPublisher.publishEvent(new SandboxExecutionSuspendedEvent(teamId, execution.getId(), envId));
                 });
 
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
-        return toDto(env);
+        toDto(env);
     }
 
     @Transactional
@@ -399,60 +332,74 @@ public class ExecutionEnvironmentService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Environment has no configured sandbox provider");
         }
 
+        // Two-phase resume: the intent commits before any Docker call.
+        commitResumeIntent(teamId, envId);
+
         try {
             sandboxProvisioningService.reprovisionEnvironment(env);
         } catch (ResponseStatusException e) {
+            rollbackResume(envId, teamId);
             throw e;
         } catch (Exception e) {
             logger.error("Failed to resume sandbox for environment {}", envId, e);
+            rollbackResume(envId, teamId);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to resume environment");
         }
-
-        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
-        executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
 
         sandboxExecutionRepository
                 .findFirstByEnvironmentIdOrderByStartedAtDesc(envId)
-                .ifPresent(execution -> eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
-                        teamId, execution.getChat().getId(), execution.getId())));
+                .ifPresent(execution -> {
+                    executionActivityPersistenceService.recordHarnessResume(execution.getId());
+                    eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
+                            teamId, execution.getChat().getId(), execution.getId()));
+                });
 
         return toDto(env);
     }
 
-    @Transactional
-    public void reapEnvironment(ExecutionEnvironment env) {
-        UUID envId = env.getId();
-        UUID teamId = env.getTeam().getId();
-        SandboxProvider sandboxProvider =
-                sandboxOrchestratorService.getProvider(env.getProvider().getType());
-
-        sandboxProvider.captureSidecarLogs(envId);
-
-        if (env.getStatus() == EnvironmentStatus.TERMINATED) {
-            sandboxProvider.destroy(envId);
-            failActiveExecutions(envId, UNAVAILABLE_ENVIRONMENT_REASON);
-            return;
-        }
-
-        try {
-            sandboxProvider.suspend(envId);
-            markSuspended(env);
-        } catch (Exception e) {
-            logger.warn("Could not snapshot sandbox {} while reaping: {}", envId, e.getMessage());
-            if (env.getSuspendedAt() != null) {
-                sandboxProvider.terminateSandbox(envId);
-                env.setStatus(EnvironmentStatus.SLEEPING);
-            } else {
-                sandboxProvider.destroy(envId);
-                env.setStatus(EnvironmentStatus.DISCONNECTED);
-            }
-        }
+    /** Commits PENDING_CONNECT ahead of the Docker spawn, in its own transaction. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void commitResumeIntent(UUID teamId, UUID envId) {
+        ExecutionEnvironment env = executionEnvironmentRepository
+                .findByTeamIdAndId(teamId, envId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Environment not found"));
+        transition(env, EnvironmentStatus.PENDING_CONNECT);
+        logger.debug("Resumed env {}; idle and retention timers reset", envId);
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
-        if (env.getStatus() == EnvironmentStatus.DISCONNECTED) {
-            failActiveExecutions(envId, UNAVAILABLE_ENVIRONMENT_REASON);
+    }
+
+    /**
+     * Undoes a resume whose spawn failed: any half-spawned resources go, and the SLEEPING row
+     * keeps its suspended state for another attempt.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void rollbackResume(UUID envId, UUID teamId) {
+        try {
+            sandboxOrchestratorService
+                    .getProvider(executionEnvironmentRepository
+                            .findById(envId)
+                            .orElseThrow(
+                                    () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Environment not found"))
+                            .getProvider()
+                            .getType())
+                    .terminateSandbox(envId);
+        } catch (Exception e) {
+            logger.warn("Resume rollback could not tear down environment {}: {}", envId, e.getMessage());
         }
+        executionEnvironmentRepository.findByTeamIdAndId(teamId, envId).ifPresent(env -> {
+            rollbackFailedResume(env);
+            logger.debug("Rolled back failed resume of env {}; back to SLEEPING", envId);
+        });
+    }
+
+    /** A resume that never connected goes back to SLEEPING, keeping its snapshot for another attempt. */
+    @Transactional
+    public void rollbackFailedResume(ExecutionEnvironment env) {
+        markSuspended(env);
+        executionEnvironmentRepository.save(env);
+        eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
     }
 
     /** Destroys a suspend snapshot that outlived its retention window. */
@@ -460,11 +407,11 @@ public class ExecutionEnvironmentService {
     public void expireEnvironment(ExecutionEnvironment env) {
         UUID envId = env.getId();
         UUID teamId = env.getTeam().getId();
+        logger.debug("Expiring env {} stateChangedAt={}", envId, env.getStateChangedAt());
         SandboxProvider sandboxProvider =
                 sandboxOrchestratorService.getProvider(env.getProvider().getType());
         sandboxProvider.destroy(envId);
-        env.setStatus(EnvironmentStatus.TERMINATED);
-        env.setSuspendedAt(null);
+        transition(env, EnvironmentStatus.TERMINATED);
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
         failActiveExecutions(envId, UNAVAILABLE_ENVIRONMENT_REASON);
@@ -474,8 +421,8 @@ public class ExecutionEnvironmentService {
     public void reconcilePurgedEnvironment(ExecutionEnvironment env) {
         UUID envId = env.getId();
         UUID teamId = env.getTeam().getId();
-        env.setStatus(EnvironmentStatus.TERMINATED);
-        env.setSuspendedAt(null);
+        logger.debug("Reconciling env {} status={} as purged (no runtime, no snapshot)", envId, env.getStatus());
+        transition(env, EnvironmentStatus.TERMINATED);
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
 
@@ -498,16 +445,32 @@ public class ExecutionEnvironmentService {
                 });
     }
 
-    private static void markSuspended(ExecutionEnvironment env) {
-        env.setStatus(EnvironmentStatus.SLEEPING);
-        env.setSuspendedAt(Instant.now());
+    private static void transition(ExecutionEnvironment env, EnvironmentStatus status) {
+        env.setStatus(status);
+        env.setStateChangedAt(Instant.now());
     }
 
-    private void stopRunningExecutions(UUID envId, String forcedReason) {
-        List<SandboxExecution> runningExecs = sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(
-                envId, List.of(SandboxExecutionStatus.RUNNING, SandboxExecutionStatus.IDLE));
-        if (!runningExecs.isEmpty()) {
-            terminateRunningExecution(runningExecs.getFirst().getId(), envId, forcedReason);
+    private static void markSuspended(ExecutionEnvironment env) {
+        transition(env, EnvironmentStatus.SLEEPING);
+    }
+
+    /**
+     * Lost runtime that keeps its snapshot: the environment returns to SLEEPING for another
+     * resume attempt. RUNNING executions move to UNKNOWN; IDLE executions are unchanged.
+     */
+    @Transactional
+    public void suspendAfterLostRuntime(ExecutionEnvironment env) {
+        rollbackFailedResume(env);
+        failRunningExecutions(env.getId(), UNAVAILABLE_ENVIRONMENT_REASON);
+        sealIdleExecutions(env.getId());
+    }
+
+    private void sealIdleExecutions(UUID envId) {
+        List<SandboxExecution> idle =
+                sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(envId, List.of(SandboxExecutionStatus.IDLE));
+        for (SandboxExecution execution : idle) {
+            eventPublisher.publishEvent(new SandboxExecutionSuspendedEvent(
+                    execution.getChat().getTeam().getId(), execution.getId(), envId));
         }
     }
 
@@ -519,19 +482,22 @@ public class ExecutionEnvironmentService {
         }
     }
 
+    private void failRunningExecutions(UUID envId, String reason) {
+        List<SandboxExecution> running = sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(
+                envId, List.of(SandboxExecutionStatus.RUNNING));
+        for (SandboxExecution execution : running) {
+            terminationTemplate.executeWithoutResult(status -> forceTerminateExecution(execution.getId(), reason));
+        }
+    }
+
+    // Disconnect is display-only: it never changes lifecycle state. The UI derives DISCONNECTED
+    // from a stale heartbeat, and a reconnect simply refreshes it.
     @EventListener
     @Transactional
     public void handleEnvironmentDisconnected(EnvironmentDisconnectedEvent event) {
-        executionEnvironmentRepository.findById(event.environmentId()).ifPresent(env -> {
-            // The suspend teardown drops the connector session by design; the SLEEPING write
-            // below must survive that disconnect, and TERMINATED is terminal.
-            if (env.getStatus() != EnvironmentStatus.CONNECTED
-                    && env.getStatus() != EnvironmentStatus.PENDING_CONNECT) {
-                return;
-            }
-            env.setStatus(EnvironmentStatus.DISCONNECTED);
-            executionEnvironmentRepository.save(env);
-            eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
-        });
+        executionEnvironmentRepository
+                .findById(event.environmentId())
+                .ifPresent(env -> eventPublisher.publishEvent(
+                        new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS)));
     }
 }

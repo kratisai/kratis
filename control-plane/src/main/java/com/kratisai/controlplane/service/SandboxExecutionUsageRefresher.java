@@ -10,6 +10,7 @@ import com.kratisai.controlplane.model.event.SandboxExecutionAcpInitializedEvent
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionOutputEvent;
+import com.kratisai.controlplane.model.event.SandboxExecutionSuspendedEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import java.time.Duration;
 import java.time.Instant;
@@ -87,13 +88,20 @@ public class SandboxExecutionUsageRefresher {
 
     @EventListener
     public void onSandboxExecutionCompleteEvent(SandboxExecutionCompleteEvent event) {
-        // The final fetch and broadcast run in SandboxExecutionService before key revocation; a
-        // pending refresh would race the revoke, so cancel it.
-        ScheduledFuture<?> pending = pendingRefreshWindows.remove(event.executionId());
+        cancelPendingRefresh(event.executionId());
+    }
+
+    @EventListener
+    public void onSandboxExecutionSuspendedEvent(SandboxExecutionSuspendedEvent event) {
+        cancelPendingRefresh(event.executionId());
+    }
+
+    private void cancelPendingRefresh(UUID executionId) {
+        ScheduledFuture<?> pending = pendingRefreshWindows.remove(executionId);
         if (pending != null) {
             pending.cancel(false);
         }
-        refreshRequestedDuringWindow.remove(event.executionId());
+        refreshRequestedDuringWindow.remove(executionId);
     }
 
     private void scheduleRefresh(UUID executionId) {

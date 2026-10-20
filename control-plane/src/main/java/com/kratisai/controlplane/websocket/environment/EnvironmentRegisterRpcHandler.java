@@ -111,8 +111,10 @@ public class EnvironmentRegisterRpcHandler
             }
         }
 
+        if (env.getStatus() != EnvironmentStatus.CONNECTED) {
+            env.setStateChangedAt(Instant.now());
+        }
         env.setStatus(EnvironmentStatus.CONNECTED);
-        env.setConnectedAt(Instant.now());
         if (reconnectState.activeAcpSessionId() != null) {
             logger.debug("Reconnect with active ACP session: {}", reconnectState.activeAcpSessionId());
         }
@@ -131,15 +133,25 @@ public class EnvironmentRegisterRpcHandler
                 env.getId(),
                 sessionId,
                 loggable(connectorVersion));
+        if (env.getStatus() != EnvironmentStatus.CONNECTED) {
+            env.setStateChangedAt(Instant.now());
+        }
         env.setStatus(EnvironmentStatus.CONNECTED);
-        env.setConnectedAt(Instant.now());
         env.setLastHeartbeat(Instant.now());
         executionEnvironmentRepository.save(env);
 
+        boolean alreadyLive = sessionRegistry.getSessionForEnvironment(env.getId()) != null;
         sessionRegistry.registerEnvironmentSession(sessionId, env.getId());
 
         eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
 
+        if (alreadyLive) {
+            logger.warn(
+                    "Environment {} registered a duplicate initial session {}; keeping newest without relaunch",
+                    env.getId(),
+                    sessionId);
+            return EnvironmentRegisterResult.reconnected(env.getId().toString());
+        }
         eventPublisher.publishEvent(new EnvironmentRegisteredEvent(env.getId()));
 
         return new EnvironmentRegisterResult(env.getId().toString());

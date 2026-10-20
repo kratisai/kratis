@@ -1,0 +1,25 @@
+databaseChangeLog:
+- changeSet:
+    id: 012-sandbox-lifecycle-single-clock-001
+    author: kratis
+    preConditions:
+    - onFail: MARK_RAN
+    - columnExists:
+        tableName: execution_environments
+        columnName: suspended_at
+    changes:
+    - dropColumn:
+        tableName: execution_environments
+        columnName: suspended_at
+- changeSet:
+    id: 012-sandbox-lifecycle-single-clock-002
+    author: kratis
+    preConditions:
+    - onFail: MARK_RAN
+    - columnExists:
+        tableName: execution_environments
+        columnName: idle_since
+    changes:
+    - dropColumn:
+        tableName: execution_environments
+        columnName: idle_since
