@@ -27,7 +27,7 @@ public enum ClientPayloadType {
     EXECUTION_COMPLETE("execution_complete"),
     EXECUTION_STATUS_CHANGED("execution_status_changed"),
     EXECUTION_ACTIVITY("execution_activity"),
-    EXECUTION_REPLAY_COMPLETE("execution_replay_complete"),
+    EXECUTION_SUBSCRIPTION("execution_subscription"),
     EXECUTION_ACP_INITIALIZED("execution_acp_initialized"),
     EXECUTION_DIFF_CHANGED("execution_diff_changed"),
     EXECUTION_LOGS("execution_logs"),

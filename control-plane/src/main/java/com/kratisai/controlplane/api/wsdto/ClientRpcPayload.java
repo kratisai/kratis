@@ -148,17 +148,30 @@ public sealed interface ClientRpcPayload extends RpcPayload {
         }
     }
 
-    /** Replay persisted activities for an execution (running or completed). */
-    record ExecutionReplayActivities(
-            @JsonProperty("executionId") String executionId) implements ClientRpcPayload {
-        public static final String METHOD = "execution.replay_activities";
+    /** Subscribe to an execution: replay persisted activities and stream execution events. */
+    record ExecutionSubscribe(@JsonProperty("executionId") String executionId) implements ClientRpcPayload {
+        public static final String METHOD = "execution.subscribe";
 
         @Override
         public String method() {
             return METHOD;
         }
 
-        public ExecutionReplayActivities {
+        public ExecutionSubscribe {
+            Objects.requireNonNull(executionId, "executionId is required");
+        }
+    }
+
+    /** Unsubscribe from an execution. */
+    record ExecutionUnsubscribe(@JsonProperty("executionId") String executionId) implements ClientRpcPayload {
+        public static final String METHOD = "execution.unsubscribe";
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+
+        public ExecutionUnsubscribe {
             Objects.requireNonNull(executionId, "executionId is required");
         }
     }

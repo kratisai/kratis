@@ -1,8 +1,8 @@
 {
   "jsonrpc": "2.0",
-  "method": "execution.replay_activities",
+  "method": "execution.unsubscribe",
   "params": {
     "executionId": "123e4567-e89b-12d3-a456-426614174000"
   },
-  "id": 5
+  "id": 7
 }

@@ -118,7 +118,8 @@ export interface ClientRpcMethods {
   'chat.subscribe': ChatSubscribeParams
   'chat.unsubscribe': ChatUnsubscribeParams
   'execution.get_logs': ExecutionGetLogsParams
-  'execution.replay_activities': ExecutionReplayActivitiesParams
+  'execution.subscribe': ExecutionSubscribeParams
+  'execution.unsubscribe': ExecutionUnsubscribeParams
   ping: Record<string, never> | void
   subscribe: SubscribeParams
   unsubscribe: SubscribeParams
@@ -191,21 +192,25 @@ export interface ExecutionOutputResult {
   type: 'execution_output'
 }
 
-export interface ExecutionReplayActivitiesParams {
-  executionId: string
-}
-
-export interface ExecutionReplayCompleteResult {
-  activityCount: number
-  executionId: string
-  type: 'execution_replay_complete'
-}
-
 export interface ExecutionStatusChangedResult {
   chatId: string
   executionId: string
   teamId: string
   type: 'execution_status_changed'
+}
+
+export interface ExecutionSubscribeParams {
+  executionId: string
+}
+
+export interface ExecutionSubscriptionResult {
+  executionId: string
+  status: string
+  type: 'execution_subscription'
+}
+
+export interface ExecutionUnsubscribeParams {
+  executionId: string
 }
 
 export type HitlKind = 'approval' | 'question'
@@ -266,8 +271,8 @@ export type JsonRpcResult =
   | ExecutionDiffChangedResult
   | ExecutionLogsResult
   | ExecutionOutputResult
-  | ExecutionReplayCompleteResult
   | ExecutionStatusChangedResult
+  | ExecutionSubscriptionResult
   | IngestionResult
   | MessageChunkResult
   | MessageResult

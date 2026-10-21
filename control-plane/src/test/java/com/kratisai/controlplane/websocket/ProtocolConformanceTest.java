@@ -881,7 +881,7 @@ class ProtocolConformanceTest {
             case EXECUTION_COMPLETE -> ClientPayload.ExecutionCompleteResult.class;
             case EXECUTION_STATUS_CHANGED -> ClientPayload.ExecutionStatusChangedResult.class;
             case EXECUTION_ACTIVITY -> ClientPayload.ExecutionActivityResult.class;
-            case EXECUTION_REPLAY_COMPLETE -> ClientPayload.ExecutionReplayCompleteResult.class;
+            case EXECUTION_SUBSCRIPTION -> ClientPayload.ExecutionSubscriptionResult.class;
             case EXECUTION_ACP_INITIALIZED -> ClientPayload.ExecutionAcpInitializedResult.class;
             case EXECUTION_DIFF_CHANGED -> ClientPayload.ExecutionDiffChangedResult.class;
             case EXECUTION_LOGS -> ClientPayload.ExecutionLogsResult.class;

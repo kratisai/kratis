@@ -225,13 +225,6 @@ export const CLIENT_RESULTS = {
       type: z.literal('execution_output'),
     })
     .strict(),
-  execution_replay_complete: z
-    .object({
-      activityCount: z.number().int(),
-      executionId: uuid,
-      type: z.literal('execution_replay_complete'),
-    })
-    .strict(),
   execution_status_changed: z
     .object({
       chatId: uuid,
@@ -239,6 +232,9 @@ export const CLIENT_RESULTS = {
       teamId: uuid,
       type: z.literal('execution_status_changed'),
     })
+    .strict(),
+  execution_subscription: z
+    .object({ executionId: uuid, status: z.string(), type: z.literal('execution_subscription') })
     .strict(),
   ingestion: z
     .object({

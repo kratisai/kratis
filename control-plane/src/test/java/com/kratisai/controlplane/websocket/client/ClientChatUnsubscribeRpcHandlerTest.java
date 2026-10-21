@@ -9,6 +9,7 @@ import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.api.wsdto.ClientRpcPayload;
 import com.kratisai.controlplane.api.wsdto.JsonRpcErrorCodes;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
+import com.kratisai.controlplane.service.ChatSubscriptionRegistry;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,19 +20,22 @@ import reactor.test.StepVerifier;
 class ClientChatUnsubscribeRpcHandlerTest {
 
     private ClientSessionRegistry sessionRegistry;
+    private ChatSubscriptionRegistry chatSubscriptionRegistry;
     private ClientChatUnsubscribeRpcHandler handler;
 
     @BeforeEach
     void setUp() {
         sessionRegistry = mock(ClientSessionRegistry.class);
-        handler = new ClientChatUnsubscribeRpcHandler(sessionRegistry);
+        chatSubscriptionRegistry = new ChatSubscriptionRegistry();
+        handler = new ClientChatUnsubscribeRpcHandler(sessionRegistry, chatSubscriptionRegistry);
         when(sessionRegistry.getUserId("ws-1"))
                 .thenReturn(Optional.of(UUID.randomUUID().toString()));
     }
 
     @Test
-    void handle_validChatId_returnsUnsubscribedResult() {
+    void handle_validChatId_returnsUnsubscribedResultAndClearsRegistry() {
         UUID chatId = UUID.randomUUID();
+        chatSubscriptionRegistry.subscribeChat("ws-1", chatId);
 
         StepVerifier.create(handler.handle("ws-1", 1, new ClientRpcPayload.ChatUnsubscribe(chatId.toString())))
                 .assertNext(result -> {
@@ -40,6 +44,8 @@ class ClientChatUnsubscribeRpcHandlerTest {
                     assertThat(result.chatId()).isEqualTo(chatId);
                 })
                 .verifyComplete();
+
+        assertThat(chatSubscriptionRegistry.isChatSubscribed("ws-1", chatId)).isFalse();
     }
 
     @Test
@@ -58,6 +64,14 @@ class ClientChatUnsubscribeRpcHandlerTest {
     @Test
     void handle_blankChatId_throwsInvalidParamsError() {
         assertThatThrownBy(() -> handler.handle("ws-1", 1, new ClientRpcPayload.ChatUnsubscribe("  ")))
+                .isInstanceOf(RpcErrorException.class)
+                .satisfies(ex -> assertThat(((RpcErrorException) ex).error().code())
+                        .isEqualTo(JsonRpcErrorCodes.INVALID_PARAMS));
+    }
+
+    @Test
+    void handle_invalidChatId_throwsInvalidParamsError() {
+        assertThatThrownBy(() -> handler.handle("ws-1", 1, new ClientRpcPayload.ChatUnsubscribe("not-a-uuid")))
                 .isInstanceOf(RpcErrorException.class)
                 .satisfies(ex -> assertThat(((RpcErrorException) ex).error().code())
                         .isEqualTo(JsonRpcErrorCodes.INVALID_PARAMS));

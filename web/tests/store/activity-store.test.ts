@@ -1228,6 +1228,99 @@ describe('activity-store', () => {
       })
     })
 
+    it('does not duplicate a replayed MESSAGE lifecycle event without an actionId', () => {
+      const store = useActivityStore.getState()
+      const result = activityResult({
+        activityType: 'MESSAGE',
+        createdAt: '2026-10-20T17:32:12.672Z',
+        description: 'Agent finished the task.',
+        detail: { role: 'agent' },
+        status: 'completed',
+      })
+
+      store.handleActivityEvent(result)
+      store.handleActivityEvent(result)
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
+      expect(activities[0]).toMatchObject({
+        state: 'completed',
+        text: 'Agent finished the task.',
+        type: 'message',
+      })
+    })
+
+    it('does not duplicate a replayed THINKING lifecycle event without an actionId', () => {
+      const store = useActivityStore.getState()
+      const result = activityResult({
+        activityType: 'THINKING',
+        createdAt: '2026-10-20T17:32:12.672Z',
+        description: 'Considering the next step.',
+        status: 'completed',
+      })
+
+      store.handleActivityEvent(result)
+      store.handleActivityEvent(result)
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
+      expect(activities[0]).toMatchObject({
+        state: 'completed',
+        thought: 'Considering the next step.',
+        type: 'thinking',
+      })
+    })
+
+    it('keeps distinct MESSAGE lifecycle events with the same text but a different timestamp', () => {
+      const store = useActivityStore.getState()
+
+      store.handleActivityEvent(
+        activityResult({
+          activityType: 'MESSAGE',
+          createdAt: '2026-10-20T17:32:12.672Z',
+          description: 'Running tests...',
+          detail: { role: 'agent' },
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          activityType: 'MESSAGE',
+          createdAt: '2026-10-20T17:33:12.672Z',
+          description: 'Running tests...',
+          detail: { role: 'agent' },
+        }),
+      )
+
+      expect(useActivityStore.getState().activitiesByExecution['exec-1']).toHaveLength(2)
+    })
+
+    it('does not duplicate a replayed status elicitation event without an actionId', () => {
+      const store = useActivityStore.getState()
+      const result = activityResult({
+        activityType: 'ELICITATION',
+        createdAt: '2026-10-20T17:32:12.672Z',
+        description: 'Choose a deployment target',
+        detail: {
+          hitl: {
+            kind: 'question',
+            message: 'Choose a deployment target',
+            state: 'awaiting_human',
+          },
+        },
+        status: 'pending',
+      })
+
+      store.handleActivityEvent(result)
+      store.handleActivityEvent(result)
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
+      expect(activities[0]).toMatchObject({
+        message: 'Choose a deployment target',
+        type: 'elicitation',
+      })
+    })
+
     it('replaces THINKING text when a replayed merged chunk supersedes the partial text', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(

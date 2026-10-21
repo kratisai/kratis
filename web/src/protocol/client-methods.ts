@@ -65,7 +65,13 @@ export const executionGetLogsParamsSchema = z
   })
   .strict()
 
-export const executionReplayActivitiesParamsSchema = z
+export const executionSubscribeParamsSchema = z
+  .object({
+    executionId: z.string().uuid(),
+  })
+  .strict()
+
+export const executionUnsubscribeParamsSchema = z
   .object({
     executionId: z.string().uuid(),
   })
@@ -110,10 +116,15 @@ export const CLIENT_METHODS = {
     messageKind: MessageKind.Request,
     paramsSchema: executionGetLogsParamsSchema,
   },
-  'execution.replay_activities': {
+  'execution.subscribe': {
     direction: Direction.WebToControlPlane,
     messageKind: MessageKind.Request,
-    paramsSchema: executionReplayActivitiesParamsSchema,
+    paramsSchema: executionSubscribeParamsSchema,
+  },
+  'execution.unsubscribe': {
+    direction: Direction.WebToControlPlane,
+    messageKind: MessageKind.Request,
+    paramsSchema: executionUnsubscribeParamsSchema,
   },
   ping: {
     direction: Direction.WebToControlPlane,

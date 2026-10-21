@@ -187,6 +187,22 @@ async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Re
   return window.fetch(`${API_BASE_URL}${url}`, { ...options, headers })
 }
 
+// Lifecycle events without an actionId or messageId have no stable identifier, so a replayed
+// frame is matched on its natural key (type + createdAt + text) instead of appended again.
+function findTextActivityIndex(
+  activities: Activity[],
+  type: 'message' | 'thinking',
+  createdAt: string,
+  description: string,
+): number {
+  return activities.findIndex((activity) => {
+    if (activity.type !== type || activity.startedAt !== createdAt) return false
+    return type === 'message'
+      ? (activity as MessageActivity).text === description
+      : (activity as ThinkingActivity).thought === description
+  })
+}
+
 // One actionId is one record; a late tool kind moves the record between the
 // command and tool buckets without duplicating it or changing its position.
 function findToolRecordIndex(activities: Activity[], actionId: string | undefined): number {
@@ -334,7 +350,7 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
         const messageId = actionId ?? detail?.messageId
         const idx = messageId
           ? existing.findIndex((a) => a.type === 'message' && a.actionId === messageId)
-          : -1
+          : findTextActivityIndex(existing, 'message', result.createdAt, description)
         if (idx >= 0) {
           const updated = [...existing]
           const current = updated[idx] as MessageActivity
@@ -378,7 +394,7 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
         const messageId = actionId ?? detail?.messageId
         const idx = messageId
           ? existing.findIndex((a) => a.type === 'thinking' && a.actionId === messageId)
-          : -1
+          : findTextActivityIndex(existing, 'thinking', result.createdAt, description)
         if (idx >= 0) {
           const updated = [...existing]
           const current = updated[idx] as ThinkingActivity
@@ -546,9 +562,15 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
       set((state) => {
         const existing = state.activitiesByExecution[executionId] ?? []
         const hitl = detail?.hitl
+        const messageText = hitl?.message ?? description
         const idx = actionId
           ? existing.findIndex((a) => a.type === 'elicitation' && a.actionId === actionId)
-          : -1
+          : existing.findIndex(
+              (a) =>
+                a.type === 'elicitation' &&
+                a.startedAt === result.createdAt &&
+                a.message === messageText,
+            )
         if (idx >= 0) {
           const updated = [...existing]
           const current = updated[idx] as ElicitationActivity

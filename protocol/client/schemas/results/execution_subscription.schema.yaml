@@ -1,19 +1,19 @@
 $schema: https://json-schema.org/draft/2020-12/schema
-title: ExecutionReplayCompleteResult
+title: ExecutionSubscriptionResult
 type: object
 required:
 - type
+- status
 - executionId
-- activityCount
 properties:
   type:
     type: string
-    const: "execution_replay_complete"
+    const: "execution_subscription"
     enum:
-    - "execution_replay_complete"
+    - "execution_subscription"
+  status:
+    type: string
   executionId:
     type: string
     format: uuid
-  activityCount:
-    type: integer
-additionalProperties: false
+additionalProperties: true

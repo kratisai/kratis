@@ -126,8 +126,8 @@ methods:
       - $ref: ./schemas/results/chat_error.schema.yaml
       - $ref: ./schemas/results/canvas.schema.yaml
       - $ref: ./schemas/results/planning_status.schema.yaml
-- name: execution.replay_activities
-  summary: Replay persisted activities for an execution; result is a stream of execution_activity payloads plus a final execution_replay_complete marker
+- name: execution.subscribe
+  summary: Subscribe to an execution; replays persisted activities then streams execution events, correlated with the request id
   x-kratis-direction: web-to-control-plane
   x-kratis-message-kind: request
   x-kratis-streaming: true
@@ -135,13 +135,26 @@ methods:
   - name: params
     required: true
     schema:
-      $ref: ./schemas/requests/execution_replay_activities.schema.yaml
+      $ref: ./schemas/requests/execution_subscribe.schema.yaml
   result:
     name: result
     schema:
       oneOf:
       - $ref: ./schemas/results/execution_activity.schema.yaml
-      - $ref: ./schemas/results/execution_replay_complete.schema.yaml
+      - $ref: ./schemas/results/execution_subscription.schema.yaml
+- name: execution.unsubscribe
+  summary: Unsubscribe from execution updates
+  x-kratis-direction: web-to-control-plane
+  x-kratis-message-kind: request
+  params:
+  - name: params
+    required: true
+    schema:
+      $ref: ./schemas/requests/execution_unsubscribe.schema.yaml
+  result:
+    name: result
+    schema:
+      $ref: ./schemas/results/execution_subscription.schema.yaml
 - name: execution.get_logs
   summary: Fetch the trailing terminal log lines for an execution's environment; the reply goes only to the requesting session
   x-kratis-direction: web-to-control-plane
