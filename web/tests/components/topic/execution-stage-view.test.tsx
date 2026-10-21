@@ -391,14 +391,14 @@ describe('ExecutionStageView', () => {
     expect(screen.getByRole('menuitem', { name: /halt/i })).toBeInTheDocument()
   })
 
-  it('hides terminal, halt and steering when the environment is disconnected', async () => {
+  it('hides terminal, halt and steering when the environment is connecting', async () => {
     const user = userEvent.setup()
     vi.mocked(useChatExecutions).mockReturnValue({
       data: [
         {
           ...completedExecution(),
           completedAt: null,
-          environmentStatus: 'DISCONNECTED',
+          environmentStatus: 'PENDING_CONNECT',
           status: 'RUNNING',
         },
       ],

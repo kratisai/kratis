@@ -113,7 +113,7 @@ class ChatExecutionControllerCanvasTest {
         env.setTeam(authTeam);
         env.setName("Test Sandbox");
         env.setType(ExecutionEnvironmentType.SANDBOX);
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
         env = executionEnvironmentRepository.save(env);
         environmentId = env.getId();
 

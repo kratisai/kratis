@@ -151,8 +151,8 @@ class ClientExecutionGetLogsRpcHandlerTest {
     }
 
     @Test
-    void disconnectedStatesAreReportedWithoutContactingSidecar() {
-        for (EnvironmentStatus status : List.of(EnvironmentStatus.DISCONNECTED, EnvironmentStatus.PENDING_CONNECT)) {
+    void nonConnectedStatesAreReportedWithoutContactingSidecar() {
+        for (EnvironmentStatus status : List.of(EnvironmentStatus.SLEEPING, EnvironmentStatus.PENDING_CONNECT)) {
             when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution(status)));
             StepVerifier.create(handler.handle("ws-1", 1, request(10)))
                     .assertNext(result -> {

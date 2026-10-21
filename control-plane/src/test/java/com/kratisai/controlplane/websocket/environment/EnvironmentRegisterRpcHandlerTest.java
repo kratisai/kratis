@@ -146,7 +146,7 @@ class EnvironmentRegisterRpcHandlerTest {
         env.setId(envId);
         env.setTeam(team);
         env.setAuthToken(authToken);
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
         return env;
     }
 
@@ -283,9 +283,9 @@ class EnvironmentRegisterRpcHandlerTest {
     }
 
     @Test
-    void handle_withReconnectFromDisconnected_shouldRestartStateClock() {
+    void handle_withReconnectFromSleeping_shouldRestartStateClock() {
         ExecutionEnvironment env = createEnvironment();
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
+        env.setStatus(EnvironmentStatus.SLEEPING);
         Instant staleChange = Instant.now().minus(Duration.ofHours(2));
         env.setStateChangedAt(staleChange);
 

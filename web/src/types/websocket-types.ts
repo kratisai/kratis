@@ -139,12 +139,7 @@ export interface CompleteResult {
   type: 'complete'
 }
 
-export type EnvironmentStatus =
-  | 'CONNECTED'
-  | 'DISCONNECTED'
-  | 'PENDING_CONNECT'
-  | 'SLEEPING'
-  | 'TERMINATED'
+export type EnvironmentStatus = 'CONNECTED' | 'PENDING_CONNECT' | 'SLEEPING' | 'TERMINATED'
 
 export interface ExecutionActivityResult {
   actionId?: string

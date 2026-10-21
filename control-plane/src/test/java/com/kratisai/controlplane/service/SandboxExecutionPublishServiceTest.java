@@ -137,6 +137,8 @@ class SandboxExecutionPublishServiceTest {
 
         modelProvider = new ModelProvider("OpenAI", ProviderType.OPENAI, "enc-key", "https://api.openai.com/v1");
         modelProvider.setTeam(team);
+        team.setIngestionProvider(modelProvider);
+        team.setIngestionModel("gpt-4o");
 
         repository = new Repository("my-repo", "https://github.com/test/repo.git", "main", RepositoryType.GITHUB);
         repository.setTeam(team);
@@ -409,7 +411,7 @@ class SandboxExecutionPublishServiceTest {
     }
 
     @Test
-    void getPublishCapabilities_throwsWhenAiFails() throws Exception {
+    void getPublishCapabilities_returnsEmptySuggestionWhenAiFails() throws Exception {
         stubExecutionLookup();
         RepoProvider repoProvider = mock(RepoProvider.class);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
@@ -427,14 +429,16 @@ class SandboxExecutionPublishServiceTest {
 
         when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenThrow(new RuntimeException("LLM down"));
 
-        assertThatThrownBy(() -> service.getPublishCapabilities(userId, chatId, executionId))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("Failed to generate PR publish summary via LLM");
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        assertThat(result.stats().hasChanges()).isTrue();
+        assertThat(result.suggestedTitle()).isEmpty();
+        assertThat(result.suggestedBody()).isEmpty();
     }
 
     @Test
     void getPublishCapabilities_throwsWhenNoModelProvider() throws Exception {
-        execution.setModelProvider(null);
+        team.setIngestionProvider(null);
         stubExecutionLookup();
         RepoProvider repoProvider = mock(RepoProvider.class);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
@@ -458,7 +462,7 @@ class SandboxExecutionPublishServiceTest {
 
         assertThatThrownBy(() -> service.getPublishCapabilities(userId, chatId, executionId))
                 .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("No model provider configured for execution");
+                .hasMessageContaining("No ingestion model provider configured for team");
     }
 
     @Test

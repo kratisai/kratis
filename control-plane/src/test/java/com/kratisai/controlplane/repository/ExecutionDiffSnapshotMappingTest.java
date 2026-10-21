@@ -49,7 +49,7 @@ class ExecutionDiffSnapshotMappingTest {
         env.setTeam(context.team());
         env.setName("Test Sandbox");
         env.setType(ExecutionEnvironmentType.SANDBOX);
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
         executionEnvironmentRepository.save(env);
 
         ChatEntity chat = new ChatEntity(context.team(), context.user(), "Test Chat");

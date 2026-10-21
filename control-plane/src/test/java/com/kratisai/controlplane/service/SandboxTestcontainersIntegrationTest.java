@@ -64,7 +64,7 @@ class SandboxTestcontainersIntegrationTest {
         ExecutionEnvironment env = new ExecutionEnvironment();
         env.setTeam(team);
         env.setName("Testcontainers Sandbox");
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
         env = environmentRepository.save(env);
 
         UUID envId = env.getId();

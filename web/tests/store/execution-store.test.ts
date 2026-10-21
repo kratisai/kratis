@@ -184,7 +184,7 @@ describe('useExecutionStore', () => {
       expect(useExecutionStore.getState().logs['exec-1']).toEqual(['[System] done'])
     })
 
-    it.each(['DISCONNECTED', 'PENDING_CONNECT', 'SLEEPING', 'TERMINATED'] as const)(
+    it.each(['PENDING_CONNECT', 'SLEEPING', 'TERMINATED'] as const)(
       'leaves logs untouched for %s status',
       (status) => {
         useExecutionStore.setState({ logs: { 'exec-1': ['[System] done'] } })

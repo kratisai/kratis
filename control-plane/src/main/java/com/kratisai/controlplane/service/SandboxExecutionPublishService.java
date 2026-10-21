@@ -27,6 +27,7 @@ import com.kratisai.controlplane.model.RepositoryType;
 import com.kratisai.controlplane.model.RepositoryVisibility;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
+import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.RepoCredentialRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
@@ -133,6 +134,13 @@ public class SandboxExecutionPublishService {
                 }
             }
         }
+        logger.debug(
+                "Publish capabilities: canCreateRepository={}, supportsPr={}, repoType={}, defaultBranch={}, visibilityOptions={}",
+                canCreateRepository,
+                supportsPr,
+                repoType,
+                defaultBranch,
+                visibilityOptions);
 
         ExecutionEnvironment env = execution.getEnvironment();
         if (env == null) {
@@ -156,6 +164,14 @@ public class SandboxExecutionPublishService {
 
         String diffBase = execution.getPublishedBranch() != null ? execution.getPublishedBranch() : defaultBranch;
         EnvironmentConnectorResult.GitDiffSummary summary = fetchGitDiffSummary(env.getId(), executionId, diffBase);
+        logger.debug(
+                "Git diff summary: commitsAhead={}, stagedFiles={}, unstagedFiles={}, additions={}, deletions={}, hasChanges={}",
+                summary.commitsAhead(),
+                summary.stagedFiles(),
+                summary.unstagedFiles(),
+                summary.totalAdditions(),
+                summary.totalDeletions(),
+                summary.hasChanges());
 
         int commitsAhead = summary.commitsAhead() != null ? summary.commitsAhead() : 0;
         int stagedFiles = summary.stagedFiles() != null ? summary.stagedFiles() : 0;
@@ -191,6 +207,7 @@ public class SandboxExecutionPublishService {
             suggestedTitle = msg.title();
             suggestedBody = msg.body();
         }
+        logger.debug("Suggested publish summary: title={}, body={}", suggestedTitle, suggestedBody);
 
         return new PublishCapabilitiesDto(
                 supportsPr,
@@ -334,14 +351,16 @@ public class SandboxExecutionPublishService {
             EnvironmentConnectorResult.GitDiffSummary summary,
             List<EnvironmentConnectorResult.GitCommitMessage> commits,
             List<String> agentMessages) {
-        ModelProvider provider = execution.getModelProvider();
+        Team team = execution.getChat().getTeam();
+        ModelProvider provider = team.getIngestionProvider();
         if (provider == null) {
             throw new ResponseStatusException(
-                    HttpStatus.INTERNAL_SERVER_ERROR, "No model provider configured for execution");
+                    HttpStatus.INTERNAL_SERVER_ERROR, "No ingestion model provider configured for team");
         }
 
+        String modelName = team.getIngestionModel();
         try {
-            ChatModel model = chatModelFactory.createChatModel(provider, execution.getModelName());
+            ChatModel model = chatModelFactory.createChatModel(provider, modelName);
             StringBuilder promptBuilder = new StringBuilder();
             promptBuilder.append(
                     "You are generating a concise Pull Request title and structured description summarizing the changes made by an AI development agent.\n\n");
@@ -392,11 +411,17 @@ public class SandboxExecutionPublishService {
             promptBuilder.append(
                     "{\n  \"title\": \"conventional commit title under 72 chars\",\n  \"body\": \"concise bulleted markdown summary of changes including agent feedback and verification\"\n}\n");
 
-            ChatResponse chatResponse = ChatClient.builder(model)
-                    .build()
-                    .prompt(promptBuilder.toString())
-                    .call()
-                    .chatResponse();
+            String prompt = promptBuilder.toString();
+            logger.debug(
+                    "Generating publish summary: provider={} model={} promptChars={} agentMessages={} commits={} files={}",
+                    provider.getProviderType(),
+                    modelName,
+                    prompt.length(),
+                    agentMessages == null ? 0 : agentMessages.size(),
+                    commits == null ? 0 : commits.size(),
+                    summary.files() == null ? 0 : summary.files().size());
+            ChatResponse chatResponse =
+                    ChatClient.builder(model).build().prompt(prompt).call().chatResponse();
             String response = ChatResponseAssembler.answerText(chatResponse);
 
             if (!response.isBlank()) {
@@ -413,19 +438,18 @@ public class SandboxExecutionPublishService {
                 JsonNode json = objectMapper.readTree(cleanJson.trim());
                 String title = json.path("title").asText("");
                 String body = json.path("body").asText("");
-                if (!title.isBlank()) {
-                    return new SuggestedMessage(title, body);
-                }
+                return new SuggestedMessage(title, body);
             }
-            throw new IllegalStateException("LLM response did not contain a valid title in JSON payload: " + response);
-        } catch (ResponseStatusException rse) {
-            throw rse;
+            logger.warn("LLM publish summary had no usable response; returning empty suggestion");
+            return new SuggestedMessage("", "");
         } catch (Exception e) {
-            logger.error("ChatModel generation failed for PR publish summary: {}", e.getMessage(), e);
-            throw new ResponseStatusException(
-                    HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Failed to generate PR publish summary via LLM: " + e.getMessage(),
+            logger.warn(
+                    "ChatModel generation failed for PR publish summary: provider={} model={} error={}",
+                    provider.getProviderType(),
+                    modelName,
+                    e.getMessage(),
                     e);
+            return new SuggestedMessage("", "");
         }
     }
 

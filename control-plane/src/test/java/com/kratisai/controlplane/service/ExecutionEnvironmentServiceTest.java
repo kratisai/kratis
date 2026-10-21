@@ -299,7 +299,7 @@ class ExecutionEnvironmentServiceTest {
     @Test
     void failStrandedExecution_settlesExecutionLeftByDeadEnvironmentAsUnknown() {
         ExecutionEnvironment env = createSandboxEnvironment();
-        env.setStatus(EnvironmentStatus.DISCONNECTED);
+        env.setStatus(EnvironmentStatus.TERMINATED);
         SandboxExecution execution = createRunningExecution(env);
         when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
         when(activityRepository.findByExecutionIdAndActionId(EXECUTION_ID, "execution-error"))
@@ -403,20 +403,35 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
-    void toDto_showsConnectedEnvironmentWithStaleHeartbeatAsDisconnectedWithoutChangingIt() {
+    void toDto_reportsConnectedEnvironmentWithStaleHeartbeatAsNotConnectedWithoutChangingStatus() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setLastHeartbeat(Instant.now().minusSeconds(600));
 
-        assertThat(executionEnvironmentService.toDto(env).status()).isEqualTo(EnvironmentStatus.DISCONNECTED);
+        ExecutionEnvironmentDto dto = executionEnvironmentService.toDto(env);
+
+        assertThat(dto.status()).isEqualTo(EnvironmentStatus.CONNECTED);
+        assertThat(dto.connected()).isFalse();
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
     }
 
     @Test
-    void toDto_showsConnectedEnvironmentWithFreshHeartbeatAsConnected() {
+    void toDto_reportsConnectedEnvironmentWithFreshHeartbeatAsConnected() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setLastHeartbeat(Instant.now());
 
-        assertThat(executionEnvironmentService.toDto(env).status()).isEqualTo(EnvironmentStatus.CONNECTED);
+        ExecutionEnvironmentDto dto = executionEnvironmentService.toDto(env);
+
+        assertThat(dto.status()).isEqualTo(EnvironmentStatus.CONNECTED);
+        assertThat(dto.connected()).isTrue();
+    }
+
+    @Test
+    void toDto_reportsNonConnectedStatusAsNotConnectedEvenWithFreshHeartbeat() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setLastHeartbeat(Instant.now());
+
+        assertThat(executionEnvironmentService.toDto(env).connected()).isFalse();
     }
 
     @Test

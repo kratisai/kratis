@@ -123,7 +123,7 @@ class ExecutionEnvironmentRepositoryTest {
 
         List<Object[]> results = executionEnvironmentRepository.findByTeamIdOrderByLatestActivityDesc(team.getId());
 
-        assertThat(results).hasSize(5);
+        assertThat(results).hasSize(4);
 
         ExecutionEnvironment firstEnv = (ExecutionEnvironment) results.getFirst()[0];
         Instant firstAct = (Instant) results.getFirst()[1];
@@ -142,12 +142,7 @@ class ExecutionEnvironmentRepositoryTest {
 
         ExecutionEnvironment fourthEnv = (ExecutionEnvironment) results.get(3)[0];
         Instant fourthAct = (Instant) results.get(3)[1];
-        assertThat(fourthEnv.getName()).isEqualTo("Default Sandbox");
+        assertThat(fourthEnv.getId()).isEqualTo(envNoExec.getId());
         assertThat(fourthAct).isNull();
-
-        ExecutionEnvironment fifthEnv = (ExecutionEnvironment) results.get(4)[0];
-        Instant fifthAct = (Instant) results.get(4)[1];
-        assertThat(fifthEnv.getId()).isEqualTo(envNoExec.getId());
-        assertThat(fifthAct).isNull();
     }
 }

@@ -57,7 +57,7 @@ public class ExecutionEnvironment {
     @PrePersist
     protected void onCreate() {
         if (status == null) {
-            status = EnvironmentStatus.DISCONNECTED;
+            status = EnvironmentStatus.PENDING_CONNECT;
         }
         if (type == null) {
             type = ExecutionEnvironmentType.SANDBOX;

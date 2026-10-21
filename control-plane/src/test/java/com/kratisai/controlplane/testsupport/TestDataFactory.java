@@ -235,14 +235,6 @@ public class TestDataFactory {
         defaultProvider.setDockerImage("kratis-runner-base:latest");
         environmentProviderRepository.save(defaultProvider);
 
-        // Create default execution environment for the new team
-        ExecutionEnvironment defaultEnv = new ExecutionEnvironment();
-        defaultEnv.setTeam(team);
-        defaultEnv.setName("Default Sandbox");
-        defaultEnv.setType(ExecutionEnvironmentType.SANDBOX);
-        defaultEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.DISCONNECTED);
-        executionEnvironmentRepository.save(defaultEnv);
-
         ModelProvider provider = null;
         if (createProvider) {
             // Create default ModelProvider for the new team
@@ -271,12 +263,12 @@ public class TestDataFactory {
         provider = modelProviderRepository.save(provider);
         String accessToken =
                 jwtService.generateAccessToken(ctx.user().getId(), ctx.user().getEmail());
-        ExecutionEnvironment defaultSandbox = executionEnvironmentRepository
-                .findByTeamId(ctx.team().getId())
-                .stream()
-                .filter(env -> env.getType() == ExecutionEnvironmentType.SANDBOX)
-                .findFirst()
-                .orElseThrow();
+        ExecutionEnvironment defaultSandbox = new ExecutionEnvironment();
+        defaultSandbox.setTeam(ctx.team());
+        defaultSandbox.setName("Default Sandbox");
+        defaultSandbox.setType(ExecutionEnvironmentType.SANDBOX);
+        defaultSandbox.setStatus(EnvironmentStatus.PENDING_CONNECT);
+        defaultSandbox = executionEnvironmentRepository.save(defaultSandbox);
         return new AuthContext(ctx.team(), ctx.user(), accessToken, provider, defaultSandbox);
     }
 
