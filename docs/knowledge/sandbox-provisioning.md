@@ -229,9 +229,8 @@ Each transition sets `state_changed_at`. The sweep uses this column as its only 
 
 ### Execution states
 
-- `RUNNING` → `IDLE`: the agent finishes a turn, or no activity is recorded for
-  `activity-timeout` (5 minutes). An execution that waits for a human answer in
-  `PendingHitlRegistry` stays `RUNNING` past the timeout.
+- `RUNNING` → `IDLE`: the agent finishes a turn. A hung execution is stopped by the user
+  (Terminate) or by the connector going away.
 - Only a new user prompt returns `IDLE` to `RUNNING`. Sidecar activity does not.
 - Sleep does not change execution status.
 - `UNKNOWN`: the outcome was not observed, because the runtime was lost or the

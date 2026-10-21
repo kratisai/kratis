@@ -3,10 +3,13 @@ package com.kratisai.controlplane.websocket;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.kratisai.controlplane.service.ChatSubscriptionRegistry;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
@@ -86,16 +89,17 @@ class ChatSubscriptionRegistryTest {
     }
 
     @Test
-    void subscribeChat_isAtomicUnderConcurrency() throws InterruptedException {
+    void subscribeChat_isAtomicUnderConcurrency() throws Exception {
         UUID chatId = UUID.randomUUID();
         int threads = 8;
         ExecutorService executor = Executors.newFixedThreadPool(threads);
         CountDownLatch start = new CountDownLatch(1);
         AtomicInteger added = new AtomicInteger();
+        List<Future<?>> futures = new ArrayList<>();
 
         try {
             for (int i = 0; i < threads; i++) {
-                executor.submit(() -> {
+                futures.add(executor.submit(() -> {
                     try {
                         start.await();
                         if (registry.subscribeChat("ws-1", chatId)) {
@@ -104,9 +108,12 @@ class ChatSubscriptionRegistryTest {
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
-                });
+                }));
             }
             start.countDown();
+            for (Future<?> future : futures) {
+                future.get(5, TimeUnit.SECONDS);
+            }
             executor.shutdown();
             assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
         } finally {

@@ -80,8 +80,6 @@ public class SandboxProperties {
 
         private Duration idleTimeout = Duration.ofMinutes(20);
 
-        private Duration activityTimeout = Duration.ofMinutes(5);
-
         private Duration connectTimeout = Duration.ofMinutes(5);
 
         private Duration settleWindow = Duration.ofMinutes(2);
@@ -112,14 +110,6 @@ public class SandboxProperties {
 
         public void setIdleTimeout(Duration idleTimeout) {
             this.idleTimeout = idleTimeout;
-        }
-
-        public Duration getActivityTimeout() {
-            return activityTimeout;
-        }
-
-        public void setActivityTimeout(Duration activityTimeout) {
-            this.activityTimeout = activityTimeout;
         }
 
         public Duration getConnectTimeout() {

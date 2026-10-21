@@ -119,9 +119,12 @@ describe('Environment Connector Flow (Flow C)', () => {
     setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
     const { queryClient, user } = renderIntegration(['/settings'])
 
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /runtime/i })).toBeInTheDocument()
-    })
+    await waitFor(
+      () => {
+        expect(screen.getByRole('tab', { name: /runtime/i })).toBeInTheDocument()
+      },
+      { timeout: 5000 },
+    )
     await user.click(screen.getByRole('tab', { name: /runtime/i }))
 
     await waitFor(() => {
