@@ -1,30 +1,25 @@
 package com.kratisai.controlplane.websocket.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.kratisai.controlplane.api.wsdto.ActivityStatus;
-import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionActivityResult;
 import com.kratisai.controlplane.api.wsdto.ClientRpcPayload;
+import com.kratisai.controlplane.api.wsdto.JsonRpcErrorCodes;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
+import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.model.ChatMemoryEntity;
-import com.kratisai.controlplane.model.SandboxExecution;
-import com.kratisai.controlplane.model.SandboxExecutionActivity;
-import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.repository.AgentChatMemoryRepository;
-import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.service.CanvasService;
 import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatService;
+import com.kratisai.controlplane.service.ChatSubscriptionRegistry;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
-import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,9 +34,9 @@ import reactor.core.publisher.Sinks;
 class ClientChatSubscribeRpcHandlerTest {
 
     private ChatFluxRegistry chatFluxRegistry;
+    private AgentChatMemoryRepository chatMemoryRepository;
+    private ChatSubscriptionRegistry chatSubscriptionRegistry;
     private ClientChatSubscribeRpcHandler handler;
-    private SandboxExecutionRepository executionRepository;
-    private ExecutionActivityPersistenceService activityPersistenceService;
 
     private ClientSessionRegistry sessionRegistry;
     private UUID teamId;
@@ -51,13 +46,12 @@ class ClientChatSubscribeRpcHandlerTest {
     @BeforeEach
     void setUp() {
         ChatService chatService = mock(ChatService.class);
-        AgentChatMemoryRepository chatMemoryRepository = mock(AgentChatMemoryRepository.class);
+        chatMemoryRepository = mock(AgentChatMemoryRepository.class);
         sessionRegistry = mock(ClientSessionRegistry.class);
         TeamMemberRepository teamMemberRepository = mock(TeamMemberRepository.class);
         CanvasService canvasService = mock(CanvasService.class);
         chatFluxRegistry = new ChatFluxRegistry();
-        executionRepository = mock(SandboxExecutionRepository.class);
-        activityPersistenceService = mock(ExecutionActivityPersistenceService.class);
+        chatSubscriptionRegistry = new ChatSubscriptionRegistry();
 
         handler = new ClientChatSubscribeRpcHandler(
                 chatService,
@@ -66,8 +60,7 @@ class ClientChatSubscribeRpcHandlerTest {
                 teamMemberRepository,
                 canvasService,
                 chatFluxRegistry,
-                executionRepository,
-                activityPersistenceService);
+                chatSubscriptionRegistry);
 
         userId = UUID.randomUUID();
         teamId = UUID.randomUUID();
@@ -77,23 +70,6 @@ class ClientChatSubscribeRpcHandlerTest {
         when(teamMemberRepository.existsByTeamIdAndUserId(teamId, userId)).thenReturn(true);
         when(chatMemoryRepository.findByChatIdOrderByCreatedAtAsc(chatId)).thenReturn(List.of());
         when(canvasService.getCanvasesForChat(chatId)).thenReturn(List.of());
-        when(executionRepository.findByChatIdOrderByStartedAtAsc(chatId)).thenReturn(List.of());
-    }
-
-    private static SandboxExecution runningExecution(UUID id) {
-        SandboxExecution execution = new SandboxExecution();
-        execution.setId(id);
-        execution.setStatus(SandboxExecutionStatus.RUNNING);
-        execution.setStartedAt(Instant.now());
-        return execution;
-    }
-
-    private static SandboxExecution completedExecution(UUID id) {
-        SandboxExecution execution = new SandboxExecution();
-        execution.setId(id);
-        execution.setStatus(SandboxExecutionStatus.COMPLETED);
-        execution.setStartedAt(Instant.now());
-        return execution;
     }
 
     private static List<ClientPayload> collectComplete(Flux<ClientPayload> flux) {
@@ -218,63 +194,66 @@ class ClientChatSubscribeRpcHandlerTest {
         assertThat(((ClientPayload.MessageChunkResult) sent2.get(1)).content()).isEqualTo("Token 0");
     }
 
-    private static SandboxExecutionActivity activity(
-            UUID executionId,
-            long sequence,
-            String actionId,
-            ActivityType type,
-            ActivityStatus status,
-            String description) {
-        SandboxExecutionActivity activity =
-                new SandboxExecutionActivity(executionId, sequence, actionId, type, status, description, null);
-        activity.setCreatedAt(Instant.parse("2026-10-20T17:32:12.672Z"));
-        return activity;
-    }
-
     @Test
-    void handle_replaysPersistedActivitiesOfRunningExecutionInOrder() {
-        UUID executionId = UUID.randomUUID();
-        when(executionRepository.findByChatIdOrderByStartedAtAsc(chatId))
-                .thenReturn(List.of(runningExecution(executionId)));
-        when(activityPersistenceService.getActivities(executionId))
-                .thenReturn(List.of(
-                        activity(
-                                executionId,
-                                1,
-                                "thought-1",
-                                ActivityType.THINKING,
-                                ActivityStatus.IN_PROGRESS,
-                                "first"),
-                        activity(executionId, 2, "tc-2", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "second")));
-        when(activityPersistenceService.detailOf(any(SandboxExecutionActivity.class)))
-                .thenReturn(null);
+    void handle_duplicateSubscriptionFromSameSession_acknowledgesWithoutReplayingHistory() {
+        ChatMemoryEntity entity = new ChatMemoryEntity();
+        entity.setId(7L);
+        entity.setChatId(chatId);
+        entity.setMessageType(MessageRole.USER);
+        entity.setMessageText("hello");
+        entity.setCreatedAt(Instant.now());
+        when(chatMemoryRepository.findByChatIdOrderByCreatedAtAsc(chatId)).thenReturn(List.of(entity));
 
         ClientRpcPayload.ChatSubscribe params =
                 new ClientRpcPayload.ChatSubscribe(chatId.toString(), teamId.toString());
-        List<ClientPayload> sent = collectComplete(handler.handle("ws-1", 301, params));
+        collectComplete(handler.handle("ws-1", 301, params));
 
-        assertThat(sent.getFirst()).isInstanceOf(ClientPayload.ExecutionActivityResult.class);
-        ExecutionActivityResult first = (ExecutionActivityResult) sent.getFirst();
-        assertThat(first.executionId()).isEqualTo(executionId);
-        assertThat(first.activityType()).isEqualTo(ActivityType.THINKING);
-        assertThat(first.description()).isEqualTo("first");
-        assertThat(first.actionId()).isEqualTo("thought-1");
-        ExecutionActivityResult second = (ExecutionActivityResult) sent.get(1);
-        assertThat(second.description()).isEqualTo("second");
-        assertThat(sent.get(2)).isInstanceOf(ClientPayload.CompleteResult.class);
+        List<ClientPayload> duplicate = collectComplete(handler.handle("ws-1", 302, params));
+
+        assertThat(duplicate).singleElement().isInstanceOf(ClientPayload.ChatSubscriptionResult.class);
+        ClientPayload.ChatSubscriptionResult ack = (ClientPayload.ChatSubscriptionResult) duplicate.getFirst();
+        assertThat(ack.status()).isEqualTo("subscribed");
+        assertThat(ack.chatId()).isEqualTo(chatId);
+        verify(chatMemoryRepository, times(1)).findByChatIdOrderByCreatedAtAsc(chatId);
     }
 
     @Test
-    void handle_doesNotReplayStateForCompletedExecution() {
-        UUID executionId = UUID.randomUUID();
-        when(executionRepository.findByChatIdOrderByStartedAtAsc(chatId))
-                .thenReturn(List.of(completedExecution(executionId)));
+    void handle_notAuthenticated_throwsNotAuthenticatedError() {
+        when(sessionRegistry.getUserId("ws-1")).thenReturn(Optional.empty());
 
-        ClientRpcPayload.ChatSubscribe params =
-                new ClientRpcPayload.ChatSubscribe(chatId.toString(), teamId.toString());
-        List<ClientPayload> sent = collectComplete(handler.handle("ws-1", 303, params));
+        assertThatThrownBy(() -> handler.handle(
+                        "ws-1", 1, new ClientRpcPayload.ChatSubscribe(chatId.toString(), teamId.toString())))
+                .isInstanceOf(RpcErrorException.class)
+                .satisfies(ex -> assertThat(((RpcErrorException) ex).error().code())
+                        .isEqualTo(JsonRpcErrorCodes.NOT_AUTHENTICATED));
+    }
 
-        assertThat(sent).singleElement().isInstanceOf(ClientPayload.CompleteResult.class);
-        verify(activityPersistenceService, never()).getActivities(executionId);
+    @Test
+    void handle_invalidChatId_throwsInvalidParamsError() {
+        assertThatThrownBy(() ->
+                        handler.handle("ws-1", 1, new ClientRpcPayload.ChatSubscribe("not-a-uuid", teamId.toString())))
+                .isInstanceOf(RpcErrorException.class)
+                .satisfies(ex -> assertThat(((RpcErrorException) ex).error().code())
+                        .isEqualTo(JsonRpcErrorCodes.INVALID_PARAMS));
+    }
+
+    @Test
+    void handle_nonMemberTeam_throwsNotAuthorised() {
+        TeamMemberRepository teamMemberRepository = mock(TeamMemberRepository.class);
+        when(teamMemberRepository.existsByTeamIdAndUserId(teamId, userId)).thenReturn(false);
+        ClientChatSubscribeRpcHandler restricted = new ClientChatSubscribeRpcHandler(
+                mock(ChatService.class),
+                chatMemoryRepository,
+                sessionRegistry,
+                teamMemberRepository,
+                mock(CanvasService.class),
+                chatFluxRegistry,
+                new ChatSubscriptionRegistry());
+
+        assertThatThrownBy(() -> restricted.handle(
+                        "ws-1", 1, new ClientRpcPayload.ChatSubscribe(chatId.toString(), teamId.toString())))
+                .isInstanceOf(RpcErrorException.class)
+                .satisfies(ex -> assertThat(((RpcErrorException) ex).error().code())
+                        .isEqualTo(JsonRpcErrorCodes.NOT_AUTHORIZED));
     }
 }

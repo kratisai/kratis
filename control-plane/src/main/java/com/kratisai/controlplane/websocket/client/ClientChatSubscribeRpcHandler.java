@@ -12,17 +12,15 @@ import com.kratisai.controlplane.api.wsdto.JsonRpcErrorCodes;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.model.CanvasEntity;
 import com.kratisai.controlplane.model.ChatMemoryEntity;
-import com.kratisai.controlplane.model.SandboxExecution;
-import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.repository.AgentChatMemoryRepository;
-import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.service.CanvasService;
 import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatService;
+import com.kratisai.controlplane.service.ChatSubscriptionRegistry;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
-import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -39,8 +37,7 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
     private final TeamMemberRepository teamMemberRepository;
     private final CanvasService canvasService;
     private final ChatFluxRegistry chatFluxRegistry;
-    private final SandboxExecutionRepository executionRepository;
-    private final ExecutionActivityPersistenceService activityPersistenceService;
+    private final ChatSubscriptionRegistry chatSubscriptionRegistry;
 
     public ClientChatSubscribeRpcHandler(
             ChatService chatService,
@@ -49,16 +46,14 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
             TeamMemberRepository teamMemberRepository,
             CanvasService canvasService,
             ChatFluxRegistry chatFluxRegistry,
-            SandboxExecutionRepository executionRepository,
-            ExecutionActivityPersistenceService activityPersistenceService) {
+            ChatSubscriptionRegistry chatSubscriptionRegistry) {
         this.chatService = chatService;
         this.chatMemoryRepository = chatMemoryRepository;
         this.sessionRegistry = sessionRegistry;
         this.teamMemberRepository = teamMemberRepository;
         this.canvasService = canvasService;
         this.chatFluxRegistry = chatFluxRegistry;
-        this.executionRepository = executionRepository;
-        this.activityPersistenceService = activityPersistenceService;
+        this.chatSubscriptionRegistry = chatSubscriptionRegistry;
     }
 
     @Override
@@ -78,10 +73,13 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
                 .orElseThrow(() -> new RpcErrorException(JsonRpcError.NotAuthenticated()));
 
         try {
-            String chatIdStr = params.chatId();
+            UUID chatId = UUID.fromString(params.chatId());
             String teamIdStr = params.teamId();
-            UUID chatId = UUID.fromString(chatIdStr);
             UUID userIdUuid = UUID.fromString(userId);
+
+            if (chatSubscriptionRegistry.isChatSubscribed(sessionId, chatId)) {
+                return Flux.just(new ClientPayload.ChatSubscriptionResult("subscribed", chatId));
+            }
 
             if (teamIdStr != null && !teamIdStr.isBlank()) {
                 UUID teamId = UUID.fromString(teamIdStr);
@@ -89,6 +87,10 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
                     throw new RpcErrorException(JsonRpcError.NotAuthorised("Not a member of this team"));
                 }
                 chatService.verifyChat(chatId, teamId);
+            }
+
+            if (!chatSubscriptionRegistry.subscribeChat(sessionId, chatId)) {
+                return Flux.just(new ClientPayload.ChatSubscriptionResult("subscribed", chatId));
             }
 
             List<ChatMemoryEntity> entities = chatMemoryRepository.findByChatIdOrderByCreatedAtAsc(chatId);
@@ -100,8 +102,6 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
             Flux<ClientPayload> canvasFlux = Flux.fromIterable(canvases)
                     .map(canvas -> new ClientPayload.CanvasResult(CanvasEvent.Create.of(canvas)));
 
-            Flux<ClientPayload> replay = replayRunningExecutionState(chatId);
-
             Flux<ClientPayload> complete = Flux.just(new ClientPayload.CompleteResult(chatId, entities.size()));
 
             Flux<ClientPayload> liveFlux = Flux.defer(() -> {
@@ -109,7 +109,7 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
                 return live != null ? live.cast(ClientPayload.class) : Flux.empty();
             });
 
-            return Flux.concat(history, canvasFlux, replay, complete, liveFlux);
+            return Flux.concat(history, canvasFlux, complete, liveFlux);
         } catch (IllegalArgumentException e) {
             throw new RpcErrorException(JsonRpcError.InvalidParams(e.getMessage()));
         } catch (ResponseStatusException e) {
@@ -118,35 +118,6 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
                     : JsonRpcErrorCodes.INTERNAL_ERROR;
             throw new RpcErrorException(new JsonRpcError(code, e.getReason(), e.getMessage()));
         }
-    }
-
-    /**
-     * Replays the live state of every running execution of the chat: persisted activities followed
-     * by the pending permission (if any). Reconnect relies on this to rebuild the activity log and
-     * re-surface outstanding HITL requests after the team broadcast of the original events was
-     * missed. Activities are read from the database, so replay is identical for late joiners and
-     * after a control-plane restart.
-     */
-    private Flux<ClientPayload> replayRunningExecutionState(UUID chatId) {
-        List<SandboxExecution> runningExecutions = executionRepository.findByChatIdOrderByStartedAtAsc(chatId).stream()
-                .filter(execution -> execution.getStatus() == SandboxExecutionStatus.RUNNING
-                        || execution.getStatus() == SandboxExecutionStatus.IDLE)
-                .toList();
-
-        return Flux.fromIterable(runningExecutions).flatMap(execution -> {
-            UUID executionId = execution.getId();
-            Flux<ClientPayload> activities = Flux.fromIterable(activityPersistenceService.getActivities(executionId))
-                    .map(activity -> new ClientPayload.ExecutionActivityResult(
-                            executionId,
-                            activity.getActivityType(),
-                            activity.getDescription(),
-                            activity.getActionId(),
-                            activity.getStatus(),
-                            activityPersistenceService.detailOf(activity),
-                            activity.getCreatedAt().toString()));
-
-            return activities;
-        });
     }
 
     public static ClientPayload buildMessagePayload(ChatMemoryEntity entity, UUID chatId) {
@@ -166,8 +137,8 @@ public class ClientChatSubscribeRpcHandler implements ClientRpcHandler<ClientRpc
                 if (node.path("interstitial").asBoolean(false)) {
                     String status = node.path("status").asText("paused");
                     String reason = node.has("reason") ? node.path("reason").asText() : null;
-                    java.util.Map<String, Object> metaMap =
-                            MAPPER.convertValue(node, new TypeReference<java.util.Map<String, Object>>() {});
+                    Map<String, Object> metaMap =
+                            MAPPER.convertValue(node, new TypeReference<Map<String, Object>>() {});
                     return new ClientPayload.PlanningStatusResult(chatId, status, reason, metaMap);
                 }
                 if (node.path("isError").asBoolean(false)) {

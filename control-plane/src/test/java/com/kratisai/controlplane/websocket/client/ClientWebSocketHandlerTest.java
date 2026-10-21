@@ -13,6 +13,7 @@ import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.api.wsdto.ClientRpcPayload;
 import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
 import com.kratisai.controlplane.api.wsdto.JsonRpcResponse;
+import com.kratisai.controlplane.service.ChatSubscriptionRegistry;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import com.kratisai.controlplane.service.SubscriptionRegistry;
 import com.kratisai.controlplane.service.WebSocketDispatch;
@@ -20,6 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ScheduledFuture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,18 +53,25 @@ class ClientWebSocketHandlerTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private ClientSessionRegistry sessionRegistry;
+    private ChatSubscriptionRegistry chatSubscriptionRegistry;
     private WebSocketDispatch dispatch;
     private ClientWebSocketHandler handler;
 
     @BeforeEach
     void setUp() {
         sessionRegistry = new ClientSessionRegistry(subscriptionRegistry);
+        chatSubscriptionRegistry = new ChatSubscriptionRegistry();
         dispatch = new WebSocketDispatch(objectMapper, sessionRegistry, subscriptionRegistry, Runnable::run);
         doReturn(cleanupFuture)
                 .when(cleanupScheduler)
                 .scheduleAtFixedRate(any(Runnable.class), any(Instant.class), any(Duration.class));
         handler = new ClientWebSocketHandler(
-                Collections.emptyList(), sessionRegistry, dispatch, objectMapper, cleanupScheduler);
+                Collections.emptyList(),
+                sessionRegistry,
+                chatSubscriptionRegistry,
+                dispatch,
+                objectMapper,
+                cleanupScheduler);
     }
 
     @Test
@@ -117,7 +126,12 @@ class ClientWebSocketHandlerTest {
         when(mockRpcHandler.getPayloadType()).thenReturn(ClientRpcPayload.Ping.class);
         when(mockRpcHandler.handle(any(), any(), any())).thenReturn(Flux.empty());
         ClientWebSocketHandler handlerWithMock = new ClientWebSocketHandler(
-                List.of(mockRpcHandler), sessionRegistry, dispatch, objectMapper, cleanupScheduler);
+                List.of(mockRpcHandler),
+                sessionRegistry,
+                chatSubscriptionRegistry,
+                dispatch,
+                objectMapper,
+                cleanupScheduler);
 
         WebSocketSession session = mockSession();
         JsonRpcInboundRequest request = new JsonRpcInboundRequest("2.0", "test.method", null, 1);
@@ -137,6 +151,22 @@ class ClientWebSocketHandlerTest {
         handler.afterConnectionClosed(session, CloseStatus.NORMAL);
 
         assertThat(sessionRegistry.getAuthenticatedSessionCount()).isEqualTo(0);
+    }
+
+    @Test
+    void afterConnectionClosed_shouldClearChatAndExecutionSubscriptions() {
+        WebSocketSession session = mockSession();
+        UUID chatId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
+        chatSubscriptionRegistry.subscribeChat(session.getId(), chatId);
+        chatSubscriptionRegistry.subscribeExecution(session.getId(), executionId);
+
+        handler.afterConnectionClosed(session, CloseStatus.NORMAL);
+
+        assertThat(chatSubscriptionRegistry.isChatSubscribed(session.getId(), chatId))
+                .isFalse();
+        assertThat(chatSubscriptionRegistry.isExecutionSubscribed(session.getId(), executionId))
+                .isFalse();
     }
 
     @Test

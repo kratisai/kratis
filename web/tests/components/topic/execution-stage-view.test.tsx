@@ -88,7 +88,7 @@ describe('ExecutionStageView', () => {
     useActivityStore.setState({ activitiesByExecution: {} })
     useExecutionStore.setState({
       logs: {},
-      replayingExecutionId: null,
+      subscriberCounts: {},
       terminalFullscreen: false,
       terminalHeight: 256,
       terminalOpen: false,
@@ -185,34 +185,52 @@ describe('ExecutionStageView', () => {
     expect(screen.getByText('Tokens:')).toBeInTheDocument()
   })
 
-  it('replays a completed execution whose log is not yet populated', async () => {
-    vi.mocked(useChatExecutions).mockReturnValue({
-      data: [completedExecution()],
-      refetch: vi.fn(),
-    } as unknown as ReturnType<typeof useChatExecutions>)
-    const replaySpy = vi.spyOn(useExecutionStore.getState(), 'replayActivities')
+  it('clears stale activities and subscribes on mount', async () => {
+    const clearSpy = vi.spyOn(useActivityStore.getState(), 'clearActivities')
+    const subscribeSpy = vi.spyOn(useExecutionStore.getState(), 'subscribeExecution')
 
     renderView()
 
     await waitFor(() => {
-      expect(replaySpy).toHaveBeenCalledWith('exec-1')
+      expect(subscribeSpy).toHaveBeenCalledWith('exec-1')
     })
-    expect(useExecutionStore.getState().replayingExecutionId).toBe('exec-1')
-    replaySpy.mockRestore()
+    expect(clearSpy).toHaveBeenCalledWith('exec-1')
+    expect(useExecutionStore.getState().subscriberCounts['exec-1']).toBe(1)
+    clearSpy.mockRestore()
+    subscribeSpy.mockRestore()
   })
 
-  it('does not replay a running execution', async () => {
-    vi.mocked(useChatExecutions).mockReturnValue({
-      data: [{ ...completedExecution(), completedAt: null, status: 'RUNNING' }],
-      refetch: vi.fn(),
-    } as unknown as ReturnType<typeof useChatExecutions>)
-    const replaySpy = vi.spyOn(useExecutionStore.getState(), 'replayActivities')
+  it('subscribes once even when the execution refetches', async () => {
+    const subscribeSpy = vi.spyOn(useExecutionStore.getState(), 'subscribeExecution')
 
-    renderView()
+    const { rerender } = renderView()
+    await waitFor(() => {
+      expect(subscribeSpy).toHaveBeenCalledTimes(1)
+    })
 
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(replaySpy).not.toHaveBeenCalled()
-    replaySpy.mockRestore()
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionStageView chatId="session-1" executionId="exec-1" />
+      </QueryClientProvider>,
+    )
+
+    expect(subscribeSpy).toHaveBeenCalledTimes(1)
+    subscribeSpy.mockRestore()
+  })
+
+  it('unsubscribes when the view unmounts', async () => {
+    const unsubscribeSpy = vi.spyOn(useExecutionStore.getState(), 'unsubscribeExecution')
+
+    const { unmount } = renderView()
+    await waitFor(() => {
+      expect(useExecutionStore.getState().subscriberCounts['exec-1']).toBe(1)
+    })
+
+    unmount()
+
+    expect(unsubscribeSpy).toHaveBeenCalledWith('exec-1')
+    expect(useExecutionStore.getState().subscriberCounts['exec-1']).toBeUndefined()
+    unsubscribeSpy.mockRestore()
   })
 
   it('toggles the terminal from the options menu when an execution is running', async () => {

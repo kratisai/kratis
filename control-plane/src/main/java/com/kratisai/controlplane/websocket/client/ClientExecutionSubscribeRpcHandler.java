@@ -9,6 +9,7 @@ import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
+import com.kratisai.controlplane.service.ChatSubscriptionRegistry;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import java.util.List;
@@ -19,42 +20,48 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
 
+/**
+ * Subscribes a client to an execution: replays persisted activities, after which live execution
+ * events continue to flow to the session.
+ */
 @Component
-public class ClientExecutionReplayActivitiesRpcHandler
-        implements ClientRpcHandler<ClientRpcPayload.ExecutionReplayActivities, ClientPayload> {
+public class ClientExecutionSubscribeRpcHandler
+        implements ClientRpcHandler<ClientRpcPayload.ExecutionSubscribe, ClientPayload> {
 
-    private static final Logger logger = LoggerFactory.getLogger(ClientExecutionReplayActivitiesRpcHandler.class);
+    private static final Logger logger = LoggerFactory.getLogger(ClientExecutionSubscribeRpcHandler.class);
 
     private final ClientSessionRegistry sessionRegistry;
     private final SandboxExecutionRepository executionRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final ExecutionActivityPersistenceService activityPersistenceService;
+    private final ChatSubscriptionRegistry chatSubscriptionRegistry;
 
-    public ClientExecutionReplayActivitiesRpcHandler(
+    public ClientExecutionSubscribeRpcHandler(
             ClientSessionRegistry sessionRegistry,
             SandboxExecutionRepository executionRepository,
             TeamMemberRepository teamMemberRepository,
-            ExecutionActivityPersistenceService activityPersistenceService) {
+            ExecutionActivityPersistenceService activityPersistenceService,
+            ChatSubscriptionRegistry chatSubscriptionRegistry) {
         this.sessionRegistry = sessionRegistry;
         this.executionRepository = executionRepository;
         this.teamMemberRepository = teamMemberRepository;
         this.activityPersistenceService = activityPersistenceService;
+        this.chatSubscriptionRegistry = chatSubscriptionRegistry;
     }
 
     @Override
     public String getMethodName() {
-        return ClientRpcPayload.ExecutionReplayActivities.METHOD;
+        return ClientRpcPayload.ExecutionSubscribe.METHOD;
     }
 
     @Override
-    public Class<ClientRpcPayload.ExecutionReplayActivities> getPayloadType() {
-        return ClientRpcPayload.ExecutionReplayActivities.class;
+    public Class<ClientRpcPayload.ExecutionSubscribe> getPayloadType() {
+        return ClientRpcPayload.ExecutionSubscribe.class;
     }
 
     @Override
     @Transactional(readOnly = true)
-    public Flux<ClientPayload> handle(
-            String sessionId, Object requestId, ClientRpcPayload.ExecutionReplayActivities params) {
+    public Flux<ClientPayload> handle(String sessionId, Object requestId, ClientRpcPayload.ExecutionSubscribe params) {
         String userId = sessionRegistry
                 .getUserId(sessionId)
                 .orElseThrow(() -> new RpcErrorException(JsonRpcError.NotAuthenticated()));
@@ -64,6 +71,10 @@ public class ClientExecutionReplayActivitiesRpcHandler
             executionId = UUID.fromString(params.executionId());
         } catch (IllegalArgumentException e) {
             throw new RpcErrorException(JsonRpcError.InvalidParams("executionId must be a valid UUID"));
+        }
+
+        if (chatSubscriptionRegistry.isExecutionSubscribed(sessionId, executionId)) {
+            return Flux.just(new ClientPayload.ExecutionSubscriptionResult("subscribed", executionId));
         }
 
         SandboxExecution execution = executionRepository
@@ -77,9 +88,19 @@ public class ClientExecutionReplayActivitiesRpcHandler
             throw new RpcErrorException(JsonRpcError.NotAuthorised("Not a member of this team"));
         }
 
+        if (!chatSubscriptionRegistry.subscribeExecution(sessionId, executionId)) {
+            return Flux.just(new ClientPayload.ExecutionSubscriptionResult("subscribed", executionId));
+        }
+
         List<SandboxExecutionActivity> activities = activityPersistenceService.getActivities(executionId);
 
-        Flux<ClientPayload> activityFlux = Flux.fromIterable(activities)
+        logger.debug(
+                "Streaming {} replayed activities for execution {} to client session {}",
+                activities.size(),
+                executionId,
+                sessionId);
+
+        return Flux.fromIterable(activities)
                 .map(activity -> new ClientPayload.ExecutionActivityResult(
                         executionId,
                         activity.getActivityType(),
@@ -88,16 +109,5 @@ public class ClientExecutionReplayActivitiesRpcHandler
                         activity.getStatus(),
                         activityPersistenceService.detailOf(activity),
                         activity.getCreatedAt().toString()));
-
-        Flux<ClientPayload> completeFlux =
-                Flux.just(new ClientPayload.ExecutionReplayCompleteResult(executionId, activities.size()));
-
-        logger.debug(
-                "Replaying {} activities for execution {} to client session {}",
-                activities.size(),
-                executionId,
-                sessionId);
-
-        return Flux.concat(activityFlux, completeFlux);
     }
 }

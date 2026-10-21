@@ -11,7 +11,6 @@ import type {
   ExecutionDiffChangedResult,
   ExecutionLogsResult,
   ExecutionOutputResult,
-  ExecutionReplayCompleteResult,
   ExecutionStatusChangedResult,
   IngestionResult,
   JsonRpcResponse,
@@ -38,6 +37,17 @@ const HEARTBEAT_INTERVAL_MS = 5 * 60_000
 const PONG_TIMEOUT_MS = 30_000
 const MAX_RECONNECT_DELAY_MS = 30_000
 const MAX_SUBSCRIPTION_RETRIES = 3
+
+// Subscriptions are declarative: their wire frames are (re)issued from store state by
+// resubscribe() once the server confirms the session. They must never be queued in send().
+const SUBSCRIPTION_METHODS = new Set<string>([
+  'chat.subscribe',
+  'chat.unsubscribe',
+  'execution.subscribe',
+  'execution.unsubscribe',
+  'subscribe',
+  'unsubscribe',
+])
 
 const REPOSITORIES_QUERY_KEY = 'repositories'
 const CHAT_EXECUTIONS_QUERY_KEY = 'chat-executions'
@@ -95,6 +105,7 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
   let lastInboundAt = 0
   let lastAuthToken: null | string = null
   let hasConnectedOnce = false
+  let authenticated = false
   const messageQueue: { method: string; params: Record<string, unknown> }[] = []
   const inboundBuffer: JsonRpcResponse[] = []
   let flushTimer: null | number = null
@@ -174,6 +185,24 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
     }
   }
 
+  // Only after the server confirms the session: frames sent before auth are rejected and lost.
+  function flushMessageQueue() {
+    while (messageQueue.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+      const queued = messageQueue.shift()
+      if (queued) {
+        const requestId = ++messageIdCounter
+        ws.send(
+          JSON.stringify({
+            id: requestId,
+            jsonrpc: '2.0',
+            method: queued.method,
+            params: queued.params,
+          }),
+        )
+      }
+    }
+  }
+
   function dispatchResponse(response: JsonRpcResponse) {
     if (response.error) {
       const isAuthError =
@@ -209,9 +238,11 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
       const { type } = response.result
       switch (type) {
         case 'auth':
+          authenticated = true
           set({ isConnected: true })
-          // The socket is only usable once the server confirms the session, so
-          // (re)establish subscriptions here rather than speculatively on open.
+          // The socket is only usable once the server confirms the session: flush messages
+          // queued while connecting and (re)establish subscriptions from store state.
+          flushMessageQueue()
           resubscribe()
           break
         case 'canvas':
@@ -240,9 +271,6 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
           break
         case 'execution_output':
           handleExecutionOutputResult(response.result)
-          break
-        case 'execution_replay_complete':
-          handleExecutionReplayCompleteResult(response.result)
           break
         case 'execution_status_changed':
           handleExecutionStatusChangedResult(response.result)
@@ -315,10 +343,6 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
     useExecutionStore.getState().handleLogsResult(result)
   }
 
-  function handleExecutionReplayCompleteResult(result: ExecutionReplayCompleteResult) {
-    useExecutionStore.getState().handleReplayComplete(result)
-  }
-
   function handleCanvasResult(canvasResult: CanvasResult) {
     useCanvasStore.getState().handleCanvasEvent(canvasResult)
   }
@@ -330,7 +354,7 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
   }
 
   function sendSubscription(teamId: string, method: 'subscribe' | 'unsubscribe') {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    if (!ws || ws.readyState !== WebSocket.OPEN || !authenticated) return
     const requestId = ++messageIdCounter
     if (method === 'subscribe') {
       pendingSubscriptionIds.add(requestId)
@@ -363,6 +387,20 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
           jsonrpc: '2.0',
           method: 'chat.subscribe',
           params: { chatId, teamId: currentTeamId || undefined },
+        }),
+      )
+    }
+
+    for (const executionId of Object.keys(useExecutionStore.getState().subscriberCounts)) {
+      useActivityStore.getState().clearActivities(executionId)
+      const requestId = ++messageIdCounter
+      pendingSubscriptionIds.add(requestId)
+      ws.send(
+        JSON.stringify({
+          id: requestId,
+          jsonrpc: '2.0',
+          method: 'execution.subscribe',
+          params: { executionId },
         }),
       )
     }
@@ -489,6 +527,7 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
     stopHeartbeat()
     inboundBuffer.length = 0
     isRefreshing = false
+    authenticated = false
   }
 
   function scheduleReconnect() {
@@ -523,6 +562,7 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
       ws = new WebSocket(url)
 
       ws.onopen = () => {
+        authenticated = false
         set({ error: null, isConnected: true, isConnecting: false })
         reconnectAttempts = 0
         lastInboundAt = Date.now()
@@ -549,31 +589,23 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
         }
         startHeartbeat()
 
-        // Subscriptions are (re)established from the auth confirmation, not here: an
-        // unauthenticated subscribe is rejected by the server and would be lost.
+        // Subscriptions and queued messages are flushed from the auth confirmation, not
+        // here: frames sent before the session is authenticated are rejected and lost.
         resyncActiveExecution()
-
-        while (messageQueue.length > 0 && ws) {
-          const queued = messageQueue.shift()
-          if (queued) {
-            const requestId = ++messageIdCounter
-            ws.send(
-              JSON.stringify({
-                id: requestId,
-                jsonrpc: '2.0',
-                method: queued.method,
-                params: queued.params,
-              }),
-            )
-          }
-        }
       }
 
       ws.onmessage = (event) => {
         lastInboundAt = Date.now()
         clearPongTimeout()
         try {
-          bufferInbound(JSON.parse(event.data) as JsonRpcResponse)
+          const response = JSON.parse(event.data) as JsonRpcResponse
+          // The auth handshake gates every other send, so it must not wait behind the
+          // inbound batching window; handle it immediately.
+          if (response.result?.type === 'auth') {
+            dispatchResponse(response)
+          } else {
+            bufferInbound(response)
+          }
         } catch (error) {
           console.error('Failed to parse WebSocket message:', error)
         }
@@ -616,7 +648,12 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
   }
 
   function send<M extends keyof ClientRpcMethods>(method: M, params: ClientRpcMethods[M]): void {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !authenticated) {
+      // Subscriptions are managed declaratively: recording the intent in store state is
+      // enough, because resubscribe() re-issues them once the session is confirmed.
+      if (SUBSCRIPTION_METHODS.has(method)) {
+        return
+      }
       messageQueue.push({ method, params: params as Record<string, unknown> })
       return
     }

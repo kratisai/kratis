@@ -9,13 +9,12 @@ import com.kratisai.controlplane.api.wsdto.ClientRpcPayload;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
 import com.kratisai.controlplane.model.ChatMemoryEntity;
 import com.kratisai.controlplane.repository.AgentChatMemoryRepository;
-import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.service.CanvasService;
 import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatService;
+import com.kratisai.controlplane.service.ChatSubscriptionRegistry;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
-import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.websocket.client.ClientChatSubscribeRpcHandler;
 import java.util.ArrayList;
@@ -48,9 +47,6 @@ class ChatSubscribeLateJoinerIntegrationTest {
         teamMemberRepository = mock(TeamMemberRepository.class);
         CanvasService canvasService = mock(CanvasService.class);
         chatFluxRegistry = new ChatFluxRegistry();
-        SandboxExecutionRepository executionRepository = mock(SandboxExecutionRepository.class);
-        ExecutionActivityPersistenceService activityPersistenceService =
-                mock(ExecutionActivityPersistenceService.class);
 
         handler = new ClientChatSubscribeRpcHandler(
                 chatService,
@@ -59,15 +55,13 @@ class ChatSubscribeLateJoinerIntegrationTest {
                 teamMemberRepository,
                 canvasService,
                 chatFluxRegistry,
-                executionRepository,
-                activityPersistenceService);
+                new ChatSubscriptionRegistry());
 
         teamId = UUID.randomUUID();
         userId = UUID.randomUUID();
         chatId = UUID.randomUUID();
 
         when(canvasService.getCanvasesForChat(chatId)).thenReturn(List.of());
-        when(executionRepository.findByChatIdOrderByStartedAtAsc(chatId)).thenReturn(List.of());
     }
 
     @Test

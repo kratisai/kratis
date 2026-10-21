@@ -56,8 +56,8 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
 
   const terminalOpen = useExecutionStore((state) => state.terminalOpen)
   const setTerminalOpen = useExecutionStore((state) => state.setTerminalOpen)
-  const replayingExecutionId = useExecutionStore((state) => state.replayingExecutionId)
-  const replayActivities = useExecutionStore((state) => state.replayActivities)
+  const subscribeExecution = useExecutionStore((state) => state.subscribeExecution)
+  const unsubscribeExecution = useExecutionStore((state) => state.unsubscribeExecution)
 
   const handleResume = () => {
     if (!environmentId) return
@@ -69,17 +69,11 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
     executionId ? (state.activitiesByExecution[executionId] ?? EMPTY_ACTIVITIES) : EMPTY_ACTIVITIES,
   )
 
-  const replayedRef = useRef<null | string>(null)
-
   useEffect(() => {
     if (!executionId) return
-    if (replayedRef.current === executionId) return
-    if (!execution || execution.status === 'RUNNING') return
-    if (replayingExecutionId === executionId) return
-    if (activities.length > 0) return
-    replayedRef.current = executionId
-    replayActivities(executionId)
-  }, [activities.length, execution, executionId, replayActivities, replayingExecutionId])
+    subscribeExecution(executionId)
+    return () => unsubscribeExecution(executionId)
+  }, [executionId, subscribeExecution, unsubscribeExecution])
 
   useEffect(() => {
     if (!isMobile) return

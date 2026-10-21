@@ -43,12 +43,12 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 
 /**
- * Integration test verifying that clients subscribing to a chat after activities have been
+ * Integration test verifying that clients subscribing to an execution after activities have been
  * broadcast (simulating a reconnect or control-plane restart) receive the persisted activity log
- * and pending permission replayed by the chat.subscribe handler.
+ * and pending permission replayed by the execution.subscribe handler.
  */
 @SpringIntegrationTest
-class ExecutionReplayOnChatSubscribeIntegrationTest {
+class ExecutionSubscribeReplayIntegrationTest {
 
     @LocalServerPort
     private int port;
@@ -249,9 +249,9 @@ class ExecutionReplayOnChatSubscribeIntegrationTest {
         assertThat(activities.get(1).getStatus()).isEqualTo(ActivityStatus.PENDING);
         assertThat(activities.get(1).getActionId()).isEqualTo("tool-call-100");
 
-        // 4. Connect a NEW client (simulating a reconnect) that sends chat.subscribe after auth
-        ClientWebSocketFixtureWithChatSubscribe lateJoinerFixture =
-                new ClientWebSocketFixtureWithChatSubscribe(userAuthToken, team.getId(), chat.getId());
+        // 4. Connect a NEW client (simulating a reconnect) that sends execution.subscribe after auth
+        ClientWebSocketFixtureWithExecutionSubscribe lateJoinerFixture =
+                new ClientWebSocketFixtureWithExecutionSubscribe(userAuthToken, team.getId(), executionId);
 
         WebSocketSession lateJoinerSession = client.execute(lateJoinerFixture, "ws://localhost:" + port + "/ws/client")
                 .get(5, TimeUnit.SECONDS);
@@ -270,8 +270,8 @@ class ExecutionReplayOnChatSubscribeIntegrationTest {
 
         // 6. A second fresh client (restart-equivalent: no in-memory state) must receive the same
         //    replay from the database
-        ClientWebSocketFixtureWithChatSubscribe restartClientFixture =
-                new ClientWebSocketFixtureWithChatSubscribe(userAuthToken, team.getId(), chat.getId());
+        ClientWebSocketFixtureWithExecutionSubscribe restartClientFixture =
+                new ClientWebSocketFixtureWithExecutionSubscribe(userAuthToken, team.getId(), executionId);
 
         WebSocketSession restartClientSession = client.execute(
                         restartClientFixture, "ws://localhost:" + port + "/ws/client")
@@ -293,19 +293,19 @@ class ExecutionReplayOnChatSubscribeIntegrationTest {
     }
 
     /**
-     * Custom fixture that sends chat.subscribe after authentication (in addition to the team
-     * subscription). This simulates a client reconnecting and subscribing to a specific chat.
+     * Custom fixture that sends execution.subscribe after authentication (in addition to the team
+     * subscription). This simulates a client reconnecting and subscribing to a specific execution.
      */
-    private static class ClientWebSocketFixtureWithChatSubscribe extends ClientWebSocketFixture {
+    private static class ClientWebSocketFixtureWithExecutionSubscribe extends ClientWebSocketFixture {
 
-        public ClientWebSocketFixtureWithChatSubscribe(String token, UUID teamId, UUID chatId) {
+        public ClientWebSocketFixtureWithExecutionSubscribe(String token, UUID teamId, UUID executionId) {
             super(token, teamId);
             whenContains("authenticated", (sess, payload) -> {
-                JsonRpcInboundRequest chatSubRequest = new JsonRpcInboundRequest(
-                        ClientRpcPayload.ChatSubscribe.METHOD,
-                        objectMapper.valueToTree(Map.of("chatId", chatId.toString(), "teamId", teamId.toString())),
+                JsonRpcInboundRequest executionSubRequest = new JsonRpcInboundRequest(
+                        ClientRpcPayload.ExecutionSubscribe.METHOD,
+                        objectMapper.valueToTree(Map.of("executionId", executionId.toString())),
                         3);
-                sess.sendMessage(new TextMessage(objectMapper.writeValueAsString(chatSubRequest)));
+                sess.sendMessage(new TextMessage(objectMapper.writeValueAsString(executionSubRequest)));
             });
         }
     }

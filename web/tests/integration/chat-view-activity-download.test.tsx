@@ -1,3 +1,4 @@
+import { act } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CommandExecutionActivity } from '@/types/execution-activity-types'
@@ -74,7 +75,6 @@ function setupSessionView() {
     },
   ])
   setAuthenticated({ teamId: TEAM_ID })
-  seedActivityLog()
   return renderIntegration([`/chats/${CHAT_ID}/executions/${EXECUTION_ID}`])
 }
 
@@ -100,6 +100,11 @@ describe('Chat View - Activity Log Download', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /activity log options/i })).toBeInTheDocument()
+    })
+
+    // The view clears stale activities and subscribes on mount; seed the replayed log now.
+    act(() => {
+      seedActivityLog()
     })
 
     const { clickedAnchors, createObjectURL } = mockDownloads()

@@ -275,16 +275,16 @@ public sealed interface ClientPayload {
         }
     }
 
-    record ExecutionReplayCompleteResult(ClientPayloadType type, UUID executionId, Integer activityCount)
+    record ExecutionSubscriptionResult(ClientPayloadType type, String status, UUID executionId)
             implements ClientPayload {
-        public ExecutionReplayCompleteResult {
+        public ExecutionSubscriptionResult {
             Objects.requireNonNull(type, "type is required");
+            Objects.requireNonNull(status, "status is required");
             Objects.requireNonNull(executionId, "executionId is required");
-            Objects.requireNonNull(activityCount, "activityCount is required");
         }
 
-        public ExecutionReplayCompleteResult(UUID executionId, int activityCount) {
-            this(ClientPayloadType.EXECUTION_REPLAY_COMPLETE, executionId, activityCount);
+        public ExecutionSubscriptionResult(String status, UUID executionId) {
+            this(ClientPayloadType.EXECUTION_SUBSCRIPTION, status, executionId);
         }
     }
 

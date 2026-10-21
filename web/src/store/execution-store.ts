@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-import type { ExecutionLogsResult, ExecutionReplayCompleteResult } from '@/types/websocket-types'
+import type { ExecutionLogsResult } from '@/types/websocket-types'
 
 import { useActivityStore } from '@/store/activity-store'
 import { useWebSocketStore } from '@/store/websocket-store'
@@ -9,17 +9,17 @@ interface ExecutionState {
   addLog: (executionId: string, log: string) => void
   clearLogs: (executionId: string) => void
   handleLogsResult: (result: ExecutionLogsResult) => void
-  handleReplayComplete: (result: ExecutionReplayCompleteResult) => void
   logs: Record<string, string[]>
-  replayActivities: (executionId: string) => void
-  replayingExecutionId: null | string
   requestLogs: (executionId: string) => void
   setTerminalFullscreen: (fullscreen: boolean) => void
   setTerminalHeight: (height: number) => void
   setTerminalOpen: (open: boolean) => void
+  subscribeExecution: (executionId: string) => void
+  subscriberCounts: Record<string, number>
   terminalFullscreen: boolean
   terminalHeight: number
   terminalOpen: boolean
+  unsubscribeExecution: (executionId: string) => void
 }
 
 // Live line count at request time, so lines streamed while catch-up is in flight
@@ -51,18 +51,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         logs: { ...state.logs, [result.executionId]: [...result.lines, ...liveSinceRequest] },
       }
     }),
-  handleReplayComplete: (result) => {
-    if (get().replayingExecutionId === result.executionId) {
-      set({ replayingExecutionId: null })
-    }
-  },
   logs: {},
-  replayActivities: (executionId) => {
-    useActivityStore.getState().clearActivities(executionId)
-    set({ replayingExecutionId: executionId })
-    useWebSocketStore.getState().send('execution.replay_activities', { executionId })
-  },
-  replayingExecutionId: null,
   requestLogs: (executionId) => {
     logBaselines.set(executionId, (get().logs[executionId] ?? []).length)
     useWebSocketStore.getState().send('execution.get_logs', { executionId })
@@ -70,7 +59,35 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   setTerminalFullscreen: (terminalFullscreen) => set({ terminalFullscreen }),
   setTerminalHeight: (terminalHeight) => set({ terminalHeight }),
   setTerminalOpen: (open) => set({ terminalOpen: open }),
+  subscribeExecution: (executionId) => {
+    const count = get().subscriberCounts[executionId] ?? 0
+    set((state) => ({
+      subscriberCounts: { ...state.subscriberCounts, [executionId]: count + 1 },
+    }))
+    if (count > 0) return
+    // The server replays persisted activities on every new subscription, so the local log is
+    // rebuilt from scratch rather than merged with what is already on screen.
+    useActivityStore.getState().clearActivities(executionId)
+    useWebSocketStore.getState().send('execution.subscribe', { executionId })
+  },
+  subscriberCounts: {},
   terminalFullscreen: false,
   terminalHeight: 256,
   terminalOpen: false,
+  unsubscribeExecution: (executionId) => {
+    const count = get().subscriberCounts[executionId] ?? 0
+    if (count === 0) return
+    if (count > 1) {
+      set((state) => ({
+        subscriberCounts: { ...state.subscriberCounts, [executionId]: count - 1 },
+      }))
+      return
+    }
+    set((state) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [executionId]: _removed, ...rest } = state.subscriberCounts
+      return { subscriberCounts: rest }
+    })
+    useWebSocketStore.getState().send('execution.unsubscribe', { executionId })
+  },
 }))

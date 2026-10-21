@@ -128,7 +128,7 @@ describe('ChatView', () => {
     })
     useExecutionStore.setState({
       logs: {},
-      replayingExecutionId: null,
+      subscriberCounts: {},
       terminalFullscreen: false,
       terminalHeight: 256,
       terminalOpen: false,

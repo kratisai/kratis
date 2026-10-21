@@ -13,7 +13,7 @@ describe('useExecutionStore', () => {
   beforeEach(() => {
     useExecutionStore.setState({
       logs: {},
-      replayingExecutionId: null,
+      subscriberCounts: {},
       terminalFullscreen: false,
       terminalHeight: 256,
       terminalOpen: false,
@@ -25,7 +25,7 @@ describe('useExecutionStore', () => {
     vi.unstubAllGlobals()
     useExecutionStore.setState({
       logs: {},
-      replayingExecutionId: null,
+      subscriberCounts: {},
       terminalFullscreen: false,
       terminalHeight: 256,
       terminalOpen: false,
@@ -38,7 +38,7 @@ describe('useExecutionStore', () => {
     expect(state.terminalFullscreen).toBe(false)
     expect(state.terminalHeight).toBe(256)
     expect(state.terminalOpen).toBe(false)
-    expect(state.replayingExecutionId).toBeNull()
+    expect(state.subscriberCounts).toEqual({})
   })
 
   it('should add a log keyed by execution ID', () => {
@@ -96,40 +96,53 @@ describe('useExecutionStore', () => {
     expect(useExecutionStore.getState().terminalFullscreen).toBe(false)
   })
 
-  it('clears stale activities, flags the replay and sends the replay RPC', () => {
-    const clearSpy = vi.spyOn(useActivityStore.getState(), 'clearActivities')
-    useExecutionStore.getState().replayActivities('exec-1')
+  it('sends execution.subscribe on the first subscriber only', () => {
+    useExecutionStore.getState().subscribeExecution('exec-1')
+    useExecutionStore.getState().subscribeExecution('exec-1')
 
+    expect(sendMock).toHaveBeenCalledTimes(1)
+    expect(sendMock).toHaveBeenCalledWith('execution.subscribe', { executionId: 'exec-1' })
+    expect(useExecutionStore.getState().subscriberCounts['exec-1']).toBe(2)
+  })
+
+  it('clears the local activity log before the first subscription', () => {
+    const clearSpy = vi.spyOn(useActivityStore.getState(), 'clearActivities')
+
+    useExecutionStore.getState().subscribeExecution('exec-1')
+    useExecutionStore.getState().subscribeExecution('exec-1')
+
+    expect(clearSpy).toHaveBeenCalledTimes(1)
     expect(clearSpy).toHaveBeenCalledWith('exec-1')
-    expect(useExecutionStore.getState().replayingExecutionId).toBe('exec-1')
-    expect(sendMock).toHaveBeenCalledWith('execution.replay_activities', {
-      executionId: 'exec-1',
-    })
     clearSpy.mockRestore()
   })
 
-  it('clears the replaying flag for the matching execution', () => {
-    useExecutionStore.setState({ replayingExecutionId: 'exec-1' })
+  it('keeps multiple execution subscriptions independent', () => {
+    useExecutionStore.getState().subscribeExecution('exec-1')
+    useExecutionStore.getState().subscribeExecution('exec-2')
 
-    useExecutionStore.getState().handleReplayComplete({
-      activityCount: 3,
-      executionId: 'exec-1',
-      type: 'execution_replay_complete',
-    })
-
-    expect(useExecutionStore.getState().replayingExecutionId).toBeNull()
+    expect(sendMock).toHaveBeenCalledWith('execution.subscribe', { executionId: 'exec-1' })
+    expect(sendMock).toHaveBeenCalledWith('execution.subscribe', { executionId: 'exec-2' })
+    expect(useExecutionStore.getState().subscriberCounts).toEqual({ 'exec-1': 1, 'exec-2': 1 })
   })
 
-  it('ignores completion markers for a different execution', () => {
-    useExecutionStore.setState({ replayingExecutionId: 'exec-1' })
+  it('sends execution.unsubscribe only when the last subscriber leaves', () => {
+    useExecutionStore.getState().subscribeExecution('exec-1')
+    useExecutionStore.getState().subscribeExecution('exec-1')
+    sendMock.mockClear()
 
-    useExecutionStore.getState().handleReplayComplete({
-      activityCount: 1,
-      executionId: 'exec-2',
-      type: 'execution_replay_complete',
-    })
+    useExecutionStore.getState().unsubscribeExecution('exec-1')
+    expect(sendMock).not.toHaveBeenCalled()
+    expect(useExecutionStore.getState().subscriberCounts['exec-1']).toBe(1)
 
-    expect(useExecutionStore.getState().replayingExecutionId).toBe('exec-1')
+    useExecutionStore.getState().unsubscribeExecution('exec-1')
+    expect(sendMock).toHaveBeenCalledWith('execution.unsubscribe', { executionId: 'exec-1' })
+    expect(useExecutionStore.getState().subscriberCounts['exec-1']).toBeUndefined()
+  })
+
+  it('ignores unsubscribe for an execution with no subscribers', () => {
+    useExecutionStore.getState().unsubscribeExecution('exec-1')
+
+    expect(sendMock).not.toHaveBeenCalled()
   })
 
   describe('terminal log catch-up', () => {

@@ -8,6 +8,7 @@ import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.config.WebSocketConfig;
+import com.kratisai.controlplane.service.ChatSubscriptionRegistry;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import com.kratisai.controlplane.service.WebSocketDispatch;
 import com.kratisai.controlplane.websocket.JsonRpcInbound;
@@ -49,6 +50,7 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     private final Map<String, ClientRpcHandler> handlers = new ConcurrentHashMap<>();
 
     private final ClientSessionRegistry sessionRegistry;
+    private final ChatSubscriptionRegistry chatSubscriptionRegistry;
     private final WebSocketDispatch dispatch;
     private final ScheduledFuture<?> cleanupTask;
 
@@ -56,11 +58,13 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     public ClientWebSocketHandler(
             List<ClientRpcHandler> rpcHandlers,
             ClientSessionRegistry sessionRegistry,
+            ChatSubscriptionRegistry chatSubscriptionRegistry,
             WebSocketDispatch dispatch,
             ObjectMapper objectMapper,
             @Qualifier("wsCleanupScheduler") TaskScheduler cleanupScheduler) {
         this.objectMapper = objectMapper.copy().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true);
         this.sessionRegistry = sessionRegistry;
+        this.chatSubscriptionRegistry = chatSubscriptionRegistry;
         this.dispatch = dispatch;
         for (ClientRpcHandler handler : rpcHandlers) {
             this.handlers.put(handler.getMethodName(), handler);
@@ -88,6 +92,7 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionClosed(@NonNull WebSocketSession session, @NonNull CloseStatus status) {
         dispatch.removeSession(session.getId());
+        chatSubscriptionRegistry.removeSession(session.getId());
         sessionRegistry.removeSession(session.getId());
         logger.info("Client WebSocket connection closed: {} with status {}", session.getId(), status);
     }
