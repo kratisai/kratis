@@ -92,7 +92,7 @@ export function mockCreateEnvironment(response?: Record<string, unknown>) {
             id: 'env-new',
             lastHeartbeat: null,
             name: 'New Connector',
-            status: 'DISCONNECTED',
+            status: 'PENDING_CONNECT',
             teamId: 'team-1',
             type: 'CONNECTOR',
             updatedAt: '2024-01-01T00:00:00Z',

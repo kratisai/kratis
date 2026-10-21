@@ -23,11 +23,14 @@ public record ExecutionEnvironmentDto(
         @Schema(description = "Authentication token", example = "conn_tok_xxx", nullable = true)
         String authToken,
 
-        @Schema(description = "Environment status", example = "DISCONNECTED")
+        @Schema(description = "Environment status", example = "CONNECTED")
         EnvironmentStatus status,
 
         @Schema(description = "Last heartbeat timestamp", example = "2026-05-19T10:05:00Z", nullable = true)
         Instant lastHeartbeat,
+
+        @Schema(description = "True when the environment is CONNECTED and its heartbeat is fresh", example = "true")
+        boolean connected,
 
         @Schema(description = "Last activity timestamp", example = "2026-05-19T10:05:00Z", nullable = true)
         Instant lastActivity,

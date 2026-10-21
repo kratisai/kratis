@@ -76,7 +76,7 @@ describe('Environments Flow', () => {
         id: 'env-1',
         lastHeartbeat: null,
         name: 'My Connector',
-        status: 'DISCONNECTED',
+        status: 'PENDING_CONNECT',
         teamId: 'team-1',
         type: 'CONNECTOR',
         updatedAt: '2024-01-01T00:00:00Z',
@@ -194,7 +194,7 @@ describe('Environments Flow', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Connected Env').length).toBeGreaterThan(0)
     })
-    expect(screen.getAllByText('Connected').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Active').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Pending Env').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Connecting').length).toBeGreaterThan(0)
   })
@@ -212,6 +212,7 @@ describe('Environments Flow', () => {
     ])
     mockListEnvironments([
       {
+        connected: true,
         createdAt: '2024-01-01T00:00:00Z',
         id: 'env-connected',
         lastHeartbeat: '2024-01-01T00:00:00Z',
@@ -239,7 +240,7 @@ describe('Environments Flow', () => {
     const cards = screen.getByTestId('environment-cards')
     expect(within(cards).getByText('Connected Env')).toBeInTheDocument()
     expect(within(cards).getByText('CONNECTOR')).toBeInTheDocument()
-    expect(within(cards).getByRole('button', { name: /delete connected env/i })).toBeInTheDocument()
+    expect(within(cards).queryByRole('button', { name: /delete connected env/i })).not.toBeInTheDocument()
   })
 
   it('deletes an environment with confirmation', async () => {
@@ -258,10 +259,10 @@ describe('Environments Flow', () => {
         createdAt: '2024-01-01T00:00:00Z',
         id: 'env-1',
         lastHeartbeat: null,
-        name: 'My Connector',
-        status: 'DISCONNECTED',
+        name: 'Old Sandbox',
+        status: 'TERMINATED',
         teamId: 'team-1',
-        type: 'CONNECTOR',
+        type: 'SANDBOX',
         updatedAt: '2024-01-01T00:00:00Z',
       },
     ])
@@ -281,16 +282,16 @@ describe('Environments Flow', () => {
     await user.click(screen.getByRole('tab', { name: /runtime/i }))
 
     await waitFor(() => {
-      expect(screen.getAllByText('My Connector').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('Old Sandbox').length).toBeGreaterThan(0)
     })
 
     // Click delete button
     const deleteButton = within(screen.getByRole('table')).getByRole('button', {
-      name: /delete my connector/i,
+      name: /delete old sandbox/i,
     })
     await user.click(deleteButton)
 
-    expect(confirmSpy).toHaveBeenCalledWith('Are you sure you want to delete "My Connector"?')
+    expect(confirmSpy).toHaveBeenCalledWith('Are you sure you want to delete "Old Sandbox"?')
     confirmSpy.mockRestore()
 
     // Success toast
@@ -372,7 +373,7 @@ describe('Environments Flow', () => {
         id: 'env-1',
         lastHeartbeat: null,
         name: 'My Connector',
-        status: 'DISCONNECTED',
+        status: 'PENDING_CONNECT',
         teamId: 'team-1',
         type: 'CONNECTOR',
         updatedAt: '2024-01-01T00:00:00Z',
@@ -382,7 +383,7 @@ describe('Environments Flow', () => {
         id: 'env-stopped',
         lastHeartbeat: null,
         name: 'Stopped Sandbox',
-        status: 'DISCONNECTED',
+        status: 'PENDING_CONNECT',
         teamId: 'team-1',
         type: 'SANDBOX',
         updatedAt: '2024-01-01T00:00:00Z',

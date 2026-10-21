@@ -87,7 +87,10 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
   const canHalt = (env: ExecutionEnvironmentDto) =>
     Boolean(env.activeExecutionId) && Boolean(env.activeChatId)
 
-  const canDelete = (env: ExecutionEnvironmentDto) => env.status !== 'TERMINATED'
+  const canDelete = (env: ExecutionEnvironmentDto) =>
+    env.type === 'CONNECTOR'
+      ? !env.connected && !env.activeExecutionId
+      : env.status === 'TERMINATED'
 
   const resumeAction = (env: ExecutionEnvironmentDto) =>
     isSleepingSandbox(env) ? (
@@ -119,22 +122,52 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
     )
   }
 
-  const getStatusBadge = (status: string) => {
+  const isConnectionVisible = (env: ExecutionEnvironmentDto) =>
+    env.status === 'CONNECTED' && Boolean(env.activeExecutionId)
+
+  const statusBadge = (status: string) => {
     switch (status) {
       case 'CONNECTED':
-        return <Badge variant="default">Connected</Badge>
-      case 'DISCONNECTED':
-        return <Badge variant="secondary">Disconnected</Badge>
+        return (
+          <Badge
+            className="border-green-600 text-green-600 dark:border-green-500 dark:text-green-500"
+            variant="outline"
+          >
+            Active
+          </Badge>
+        )
       case 'PENDING_CONNECT':
         return <Badge variant="outline">Connecting</Badge>
       case 'SLEEPING':
-        return <Badge variant="secondary">Sleeping</Badge>
+        return (
+          <Badge
+            className="border-amber-500 text-amber-600 dark:border-amber-400 dark:text-amber-400"
+            variant="outline"
+          >
+            Sleeping
+          </Badge>
+        )
       case 'TERMINATED':
-        return <Badge variant="outline">Terminated</Badge>
+        return (
+          <Badge className="border-destructive text-destructive" variant="outline">
+            Terminated
+          </Badge>
+        )
       default:
         return <Badge variant="outline">{status}</Badge>
     }
   }
+
+  const renderStatus = (env: ExecutionEnvironmentDto) => (
+    <div className="flex flex-wrap items-center gap-2">
+      {statusBadge(env.status)}
+      {isConnectionVisible(env) && (
+        <span className="text-muted-foreground text-xs">
+          {env.connected ? 'Connected' : 'Disconnected'}
+        </span>
+      )}
+    </div>
+  )
 
   return (
     <>
@@ -184,7 +217,7 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
                             env.type
                           )}
                         </TableCell>
-                        <TableCell>{getStatusBadge(env.status)}</TableCell>
+                        <TableCell>{renderStatus(env)}</TableCell>
                         <TableCell className="text-muted-foreground text-sm">
                           {env.lastActivity
                             ? formatDistanceToNow(new Date(env.lastActivity), { addSuffix: true })
@@ -238,7 +271,7 @@ export function EnvironmentList({ isOwner }: EnvironmentListProps) {
                           ) : (
                             <span className="text-muted-foreground text-xs">{env.type}</span>
                           )}
-                          {getStatusBadge(env.status)}
+                          {renderStatus(env)}
                         </div>
                       </div>
                       {isOwner && (

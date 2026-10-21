@@ -116,21 +116,26 @@ public class ExecutionEnvironmentService {
                 env.getName(),
                 env.getType(),
                 env.getAuthToken(),
-                displayStatus(env),
+                env.getStatus(),
                 env.getLastHeartbeat(),
+                isConnected(env),
                 lastActivity,
                 activeExecution != null ? activeExecution.getId() : null,
                 activeExecution != null ? activeExecution.getChat().getId() : null);
     }
 
-    private static EnvironmentStatus displayStatus(ExecutionEnvironment env) {
+    private boolean isDeletable(ExecutionEnvironment env) {
+        return switch (env.getType()) {
+            case SANDBOX -> env.getStatus() == EnvironmentStatus.TERMINATED;
+            case CONNECTOR -> !isConnected(env) && findActiveExecution(env.getId()) == null;
+        };
+    }
+
+    private static boolean isConnected(ExecutionEnvironment env) {
         Instant heartbeat = env.getLastHeartbeat();
-        if (env.getStatus() == EnvironmentStatus.CONNECTED
+        return env.getStatus() == EnvironmentStatus.CONNECTED
                 && heartbeat != null
-                && Duration.between(heartbeat, Instant.now()).compareTo(HEARTBEAT_STALE_AFTER) > 0) {
-            return EnvironmentStatus.DISCONNECTED;
-        }
-        return env.getStatus();
+                && Duration.between(heartbeat, Instant.now()).compareTo(HEARTBEAT_STALE_AFTER) <= 0;
     }
 
     public List<ExecutionEnvironmentDto> listEnvironments(UUID userId, UUID teamId) {
@@ -173,7 +178,7 @@ public class ExecutionEnvironmentService {
         env.setUser(user);
         env.setName(request.name());
         env.setType(ExecutionEnvironmentType.CONNECTOR);
-        transition(env, EnvironmentStatus.DISCONNECTED);
+        transition(env, EnvironmentStatus.PENDING_CONNECT);
         env.setAuthToken(authToken);
 
         ExecutionEnvironment savedEnv = executionEnvironmentRepository.save(env);
@@ -239,6 +244,11 @@ public class ExecutionEnvironmentService {
         ExecutionEnvironment env = executionEnvironmentRepository
                 .findByTeamIdAndId(teamId, envId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Environment not found"));
+
+        if (!isDeletable(env)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT, "Environment cannot be deleted in its current state");
+        }
 
         if (env.getType() == ExecutionEnvironmentType.SANDBOX && env.getProvider() != null) {
             try {
@@ -490,7 +500,7 @@ public class ExecutionEnvironmentService {
         }
     }
 
-    // Disconnect is display-only: it never changes lifecycle state. The UI derives DISCONNECTED
+    // Disconnect is display-only: it never changes lifecycle state. The DTO derives `connected`
     // from a stale heartbeat, and a reconnect simply refreshes it.
     @EventListener
     @Transactional

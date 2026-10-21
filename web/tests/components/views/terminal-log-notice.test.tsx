@@ -54,10 +54,4 @@ describe('TerminalLogNotice', () => {
     rerender(<TerminalLogNotice isWaking={false} onWake={null} status="CONNECTED" />)
     expect(container).toBeEmptyDOMElement()
   })
-
-  it('shows a disconnected notice for DISCONNECTED', () => {
-    render(<TerminalLogNotice isWaking={false} onWake={null} status="DISCONNECTED" />)
-
-    expect(screen.getByTestId('terminal-disconnected-notice')).toBeInTheDocument()
-  })
 })

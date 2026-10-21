@@ -1,0 +1,42 @@
+databaseChangeLog:
+- changeSet:
+    id: 014-close-environment-status-set-001
+    author: kratis
+    comment: >-
+      Removes DISCONNECTED from the stored environment status set. Connection is derived from the
+      heartbeat. Each legacy row moves to a closed-set state that the lifecycle sweep already resolves.
+    changes:
+    - sql:
+        dbms: postgresql
+        splitStatements: true
+        stripComments: true
+        sql: >-
+          DELETE FROM execution_environments e
+          WHERE e.status = 'DISCONNECTED'
+            AND e.type = 'SANDBOX'
+            AND e.provider_id IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM sandbox_executions se WHERE se.environment_id = e.id
+            );
+          UPDATE execution_environments
+          SET status = 'TERMINATED', state_changed_at = NOW()
+          WHERE status = 'DISCONNECTED'
+            AND type = 'SANDBOX'
+            AND provider_id IS NULL;
+          UPDATE execution_environments
+          SET status = 'PENDING_CONNECT', state_changed_at = NOW()
+          WHERE status = 'DISCONNECTED'
+            AND type = 'SANDBOX';
+          UPDATE execution_environments
+          SET status = 'PENDING_CONNECT', state_changed_at = NOW()
+          WHERE status = 'DISCONNECTED'
+            AND type = 'CONNECTOR'
+            AND last_heartbeat IS NULL;
+          UPDATE execution_environments
+          SET status = 'CONNECTED', state_changed_at = NOW()
+          WHERE status = 'DISCONNECTED'
+            AND type = 'CONNECTOR';
+    - dropDefaultValue:
+        tableName: execution_environments
+        columnName: status
+        columnDataType: VARCHAR(50)

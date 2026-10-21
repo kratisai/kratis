@@ -94,7 +94,6 @@ class ExecutionEnvironmentControllerTest {
     private final List<GenericContainer<?>> runnerContainers = new ArrayList<>();
 
     private UUID teamId;
-    private UUID defaultEnvId;
 
     @BeforeEach
     void setUp() {
@@ -110,25 +109,15 @@ class ExecutionEnvironmentControllerTest {
         teamId = team.getId();
         authToken =
                 jwtService.generateAccessToken(ctx.user().getId(), ctx.user().getEmail());
-
-        // The default sandbox provider is now automatically created by TeamService
-        ExecutionEnvironment defaultEnv = executionEnvironmentRepository.findByTeamId(teamId).stream()
-                .filter(env -> "Default Sandbox".equals(env.getName()))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Default environment not created"));
-        defaultEnvId = defaultEnv.getId();
     }
 
     @Test
-    void listEnvironments_shouldReturnPrePopulatedDefault() throws Exception {
+    void listEnvironments_newTeamHasNoEnvironments() throws Exception {
         mockMvc.perform(get("/api/v1/teams/{teamId}/environments", teamId)
                         .header("Authorization", "Bearer " + authToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].name").value("Default Sandbox"))
-                .andExpect(jsonPath("$[0].status").value("DISCONNECTED"))
-                .andExpect(jsonPath("$[0].lastActivity").value(nullValue()));
+                .andExpect(jsonPath("$.length()").value(0));
     }
 
     @Test
@@ -141,6 +130,14 @@ class ExecutionEnvironmentControllerTest {
         activeEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED);
         activeEnv.setAuthToken("active-token");
         executionEnvironmentRepository.save(activeEnv);
+
+        ExecutionEnvironment idleEnv = new ExecutionEnvironment();
+        idleEnv.setTeam(team);
+        idleEnv.setName("Idle Connector");
+        idleEnv.setType(ExecutionEnvironmentType.CONNECTOR);
+        idleEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED);
+        idleEnv.setAuthToken("idle-token");
+        executionEnvironmentRepository.save(idleEnv);
 
         ChatEntity chat = testDataFactory.createChat(team, user, "Controller Test Chat");
 
@@ -163,8 +160,8 @@ class ExecutionEnvironmentControllerTest {
                 .andExpect(jsonPath("$[0].id").value(activeEnv.getId().toString()))
                 .andExpect(jsonPath("$[0].name").value("Active Connector"))
                 .andExpect(jsonPath("$[0].lastActivity").isNotEmpty())
-                .andExpect(jsonPath("$[1].id").value(defaultEnvId.toString()))
-                .andExpect(jsonPath("$[1].name").value("Default Sandbox"))
+                .andExpect(jsonPath("$[1].id").value(idleEnv.getId().toString()))
+                .andExpect(jsonPath("$[1].name").value("Idle Connector"))
                 .andExpect(jsonPath("$[1].lastActivity").value(nullValue()));
     }
 
@@ -174,7 +171,7 @@ class ExecutionEnvironmentControllerTest {
         customEnv.setTeam(teamRepository.findById(teamId).orElseThrow());
         customEnv.setName("To Be Deleted");
         customEnv.setType(ExecutionEnvironmentType.SANDBOX);
-        customEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.DISCONNECTED);
+        customEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.TERMINATED);
         executionEnvironmentRepository.save(customEnv);
 
         mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", teamId, customEnv.getId())
@@ -185,8 +182,82 @@ class ExecutionEnvironmentControllerTest {
                         .header("Authorization", "Bearer " + authToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].name").value("Default Sandbox"));
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void deleteEnvironment_nonTerminatedEnvironment_shouldReturn409AndKeepRow() throws Exception {
+        for (com.kratisai.controlplane.model.EnvironmentStatus status : List.of(
+                com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED,
+                com.kratisai.controlplane.model.EnvironmentStatus.SLEEPING,
+                com.kratisai.controlplane.model.EnvironmentStatus.PENDING_CONNECT)) {
+            ExecutionEnvironment env = new ExecutionEnvironment();
+            env.setTeam(teamRepository.findById(teamId).orElseThrow());
+            env.setName("Protected " + status);
+            env.setType(ExecutionEnvironmentType.SANDBOX);
+            env.setStatus(status);
+            executionEnvironmentRepository.save(env);
+
+            mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", teamId, env.getId())
+                            .header("Authorization", "Bearer " + authToken))
+                    .andExpect(status().isConflict());
+
+            assertThat(executionEnvironmentRepository.findById(env.getId())).isPresent();
+        }
+    }
+
+    @Test
+    void deleteConnector_offlineWithoutExecution_shouldReturn204() throws Exception {
+        ExecutionEnvironment connector = new ExecutionEnvironment();
+        connector.setTeam(teamRepository.findById(teamId).orElseThrow());
+        connector.setName("Offline Connector");
+        connector.setType(ExecutionEnvironmentType.CONNECTOR);
+        connector.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED);
+        connector.setLastHeartbeat(Instant.now().minusSeconds(600));
+        executionEnvironmentRepository.save(connector);
+
+        mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", teamId, connector.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isNoContent());
+
+        assertThat(executionEnvironmentRepository.findById(connector.getId())).isEmpty();
+    }
+
+    @Test
+    void deleteConnector_connectedOrRunning_shouldReturn409AndKeepRow() throws Exception {
+        ExecutionEnvironment connected = new ExecutionEnvironment();
+        connected.setTeam(teamRepository.findById(teamId).orElseThrow());
+        connected.setName("Live Connector");
+        connected.setType(ExecutionEnvironmentType.CONNECTOR);
+        connected.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED);
+        connected.setLastHeartbeat(Instant.now());
+        executionEnvironmentRepository.save(connected);
+
+        mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", teamId, connected.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isConflict());
+        assertThat(executionEnvironmentRepository.findById(connected.getId())).isPresent();
+
+        ExecutionEnvironment running = new ExecutionEnvironment();
+        running.setTeam(teamRepository.findById(teamId).orElseThrow());
+        running.setName("Running Connector");
+        running.setType(ExecutionEnvironmentType.CONNECTOR);
+        running.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED);
+        running.setLastHeartbeat(Instant.now().minusSeconds(600));
+        executionEnvironmentRepository.save(running);
+
+        SandboxExecution execution = new SandboxExecution();
+        execution.setEnvironment(running);
+        execution.setChat(
+                testDataFactory.createChat(teamRepository.findById(teamId).orElseThrow(), user, "Running Chat"));
+        execution.setStatus(SandboxExecutionStatus.RUNNING);
+        execution.setStartedAt(Instant.now());
+        sandboxExecutionRepository.save(execution);
+
+        mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", teamId, running.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isConflict());
+        assertThat(executionEnvironmentRepository.findById(running.getId())).isPresent();
     }
 
     @Test
@@ -204,13 +275,13 @@ class ExecutionEnvironmentControllerTest {
         Team otherTeam = new Team("Other Team", "Not accessible");
         teamRepository.save(otherTeam);
 
-        mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", otherTeam.getId(), defaultEnvId)
+        mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", otherTeam.getId(), UUID.randomUUID())
                         .header("Authorization", "Bearer " + authToken))
                 .andExpect(status().isForbidden());
     }
 
     @Test
-    void createTeam_shouldAutomaticallyProvisionDefaultEnvironment() throws Exception {
+    void createTeam_shouldNotProvisionSandboxEnvironment() throws Exception {
         // Create a new team via the API
         CreateTeamRequest request = new CreateTeamRequest("New Team", "A new test team");
         MvcResult result = mockMvc.perform(post("/api/v1/teams")
@@ -223,14 +294,11 @@ class ExecutionEnvironmentControllerTest {
         JsonNode responseNode = objectMapper.readTree(result.getResponse().getContentAsString());
         UUID newTeamId = UUID.fromString(responseNode.get("id").asText());
 
-        // Verify the new team has exactly one default environment
         mockMvc.perform(get("/api/v1/teams/{teamId}/environments", newTeamId)
                         .header("Authorization", "Bearer " + authToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].name").value("Default Sandbox"))
-                .andExpect(jsonPath("$[0].status").value("DISCONNECTED"));
+                .andExpect(jsonPath("$.length()").value(0));
     }
 
     @Test
@@ -256,11 +324,11 @@ class ExecutionEnvironmentControllerTest {
                         .header("Authorization", "Bearer " + authToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[?(@.name == 'My Workspace Connector')].type")
                         .value("CONNECTOR"))
                 .andExpect(jsonPath("$[?(@.name == 'My Workspace Connector')].status")
-                        .value("DISCONNECTED"));
+                        .value("PENDING_CONNECT"));
     }
 
     @Test
@@ -401,6 +469,11 @@ class ExecutionEnvironmentControllerTest {
             assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
             assertThat(updated.getStateChangedAt()).isNotNull();
 
+            ExecutionEnvironment terminated =
+                    executionEnvironmentRepository.findById(runnerEnvId).orElseThrow();
+            terminated.setStatus(EnvironmentStatus.TERMINATED);
+            executionEnvironmentRepository.save(terminated);
+
             mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", teamId, runnerEnvId)
                             .header("Authorization", "Bearer " + authToken))
                     .andExpect(status().isNoContent());
@@ -453,7 +526,7 @@ class ExecutionEnvironmentControllerTest {
         sandboxEnv.setProvider(provider);
         sandboxEnv.setName("To Be Deleted With Termination");
         sandboxEnv.setType(ExecutionEnvironmentType.SANDBOX);
-        sandboxEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED);
+        sandboxEnv.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.TERMINATED);
         executionEnvironmentRepository.save(sandboxEnv);
 
         mockMvc.perform(delete("/api/v1/teams/{teamId}/environments/{envId}", teamId, sandboxEnv.getId())

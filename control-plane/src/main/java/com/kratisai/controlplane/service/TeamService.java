@@ -24,7 +24,6 @@ public class TeamService {
     private final ModelProviderRepository modelProviderRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final EnvironmentProviderRepository environmentProviderRepository;
-    private final ExecutionEnvironmentRepository executionEnvironmentRepository;
     private final LiteLLMProvisioningService liteLLMProvisioningService;
     private final String runnerImage;
 
@@ -35,7 +34,6 @@ public class TeamService {
             ModelProviderRepository modelProviderRepository,
             ApplicationEventPublisher eventPublisher,
             EnvironmentProviderRepository environmentProviderRepository,
-            ExecutionEnvironmentRepository executionEnvironmentRepository,
             LiteLLMProvisioningService liteLLMProvisioningService,
             SandboxProperties sandboxProperties) {
         this.teamRepository = teamRepository;
@@ -44,7 +42,6 @@ public class TeamService {
         this.modelProviderRepository = modelProviderRepository;
         this.eventPublisher = eventPublisher;
         this.environmentProviderRepository = environmentProviderRepository;
-        this.executionEnvironmentRepository = executionEnvironmentRepository;
         this.liteLLMProvisioningService = liteLLMProvisioningService;
         this.runnerImage = sandboxProperties.getDocker().getRunnerImage();
     }
@@ -68,14 +65,6 @@ public class TeamService {
         defaultProvider.setName("Default Docker Provider");
         defaultProvider.setDockerImage(runnerImage);
         environmentProviderRepository.save(defaultProvider);
-
-        // Create default execution environment for the new team
-        ExecutionEnvironment defaultEnv = new ExecutionEnvironment();
-        defaultEnv.setTeam(team);
-        defaultEnv.setName("Default Sandbox");
-        defaultEnv.setType(ExecutionEnvironmentType.SANDBOX);
-        defaultEnv.setStatus(EnvironmentStatus.DISCONNECTED);
-        executionEnvironmentRepository.save(defaultEnv);
 
         eventPublisher.publishEvent(new UserEntityChangedEvent(userId, UserEntityType.TEAMS));
 

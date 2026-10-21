@@ -82,7 +82,7 @@ describe('Environment Connector Flow (Flow C)', () => {
             id: 'env-new',
             lastHeartbeat: isConnected ? new Date().toISOString() : null,
             name: (postPayload as { name: string }).name,
-            status: isConnected ? 'CONNECTED' : 'DISCONNECTED',
+            status: isConnected ? 'CONNECTED' : 'PENDING_CONNECT',
             teamId: 'team-1',
             type: 'CONNECTOR',
             updatedAt: '2024-01-01T00:00:00Z',
@@ -103,7 +103,7 @@ describe('Environment Connector Flow (Flow C)', () => {
               id: 'env-new',
               lastHeartbeat: null,
               name: (postPayload as { name: string }).name,
-              status: 'DISCONNECTED',
+              status: 'PENDING_CONNECT',
               teamId: 'team-1',
               type: 'CONNECTOR',
               updatedAt: '2024-01-01T00:00:00Z',
@@ -155,14 +155,13 @@ describe('Environment Connector Flow (Flow C)', () => {
     const closeButtons = screen.getAllByRole('button', { name: 'Close' })
     await user.click(closeButtons[0])
 
-    // 8. Verify the new environment appears in the list with "DISCONNECTED" status.
+    // 8. Verify the new environment appears in the list.
     await waitFor(() => {
       expect(screen.getAllByText('My New Connector').length).toBeGreaterThan(0)
       expect(screen.getAllByText('CONNECTOR').length).toBeGreaterThan(0)
-      expect(screen.getAllByText('Disconnected').length).toBeGreaterThan(0)
     })
 
-    // 9. Simulate a WebSocket heartbeat message for this environment and verify the UI updates the status to "CONNECTED".
+    // 9. Simulate a WebSocket heartbeat message for this environment and verify the UI updates the status to "Active".
     // Update the mock state to return the connected environment on next fetch
     isConnected = true
 
@@ -170,7 +169,7 @@ describe('Environment Connector Flow (Flow C)', () => {
     void queryClient.invalidateQueries({ queryKey: ['environments', 'team-1'] })
 
     await waitFor(() => {
-      expect(screen.getAllByText('Connected').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('Active').length).toBeGreaterThan(0)
     })
   })
 })

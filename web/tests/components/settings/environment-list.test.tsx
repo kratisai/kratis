@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExecutionEnvironmentDto } from '@/lib/environment-api'
 
 import { EnvironmentList } from '@/components/settings/environment-list'
-import { useEnvironments, useResumeEnvironment } from '@/hooks/use-environments'
+import { useDeleteEnvironment, useEnvironments, useResumeEnvironment } from '@/hooks/use-environments'
 import { useHaltExecution } from '@/hooks/use-executions'
 
 vi.mock('@/hooks/use-environments', () => ({
@@ -58,7 +58,7 @@ describe('EnvironmentList Component', () => {
           lastActivity: null,
           lastHeartbeat: null,
           name: 'Sandbox 1',
-          status: 'DISCONNECTED',
+          status: 'PENDING_CONNECT',
           teamId: 'team-1',
           type: 'SANDBOX',
           updatedAt: '2026-01-01T00:00:00Z',
@@ -79,8 +79,8 @@ describe('EnvironmentList Component', () => {
         id: 'env-inactive',
         lastActivity: null,
         lastHeartbeat: null,
-        name: 'Inactive Sandbox',
-        status: 'DISCONNECTED',
+        name: 'Never Connected Sandbox',
+        status: 'PENDING_CONNECT',
         teamId: 'team-1',
         type: 'SANDBOX',
         updatedAt: '2026-01-01T00:00:00Z',
@@ -123,7 +123,7 @@ describe('EnvironmentList Component', () => {
     expect(rows).toHaveLength(3)
     expect(within(rows[0]).getByText('Recent Connector')).toBeInTheDocument()
     expect(within(rows[1]).getByText('Older Connector')).toBeInTheDocument()
-    expect(within(rows[2]).getByText('Inactive Sandbox')).toBeInTheDocument()
+    expect(within(rows[2]).getByText('Never Connected Sandbox')).toBeInTheDocument()
 
     // Assert that inactive environment displays '-' for Last Activity
     const dashes = within(rows[2]).getAllByText('-')
@@ -137,7 +137,7 @@ describe('EnvironmentList Component', () => {
 
     expect(cardHeadings[0]).toBe('Recent Connector')
     expect(cardHeadings[1]).toBe('Older Connector')
-    expect(cardHeadings[2]).toBe('Inactive Sandbox')
+    expect(cardHeadings[2]).toBe('Never Connected Sandbox')
   })
 
   it('renders Sleeping and Terminated badges', () => {
@@ -153,8 +153,88 @@ describe('EnvironmentList Component', () => {
     const terminatedBadges = screen.getAllByText('Terminated')
     expect(terminatedBadges.length).toBeGreaterThanOrEqual(1)
     terminatedBadges.forEach((badge) => {
-      expect(badge).not.toHaveClass('bg-destructive')
+      expect(badge).toHaveClass('text-destructive')
     })
+  })
+
+  it('renders every status as an outline badge coloured by state', () => {
+    mockEnvironmentsData([
+      makeEnv('active-env', 'Active Sandbox', 'SANDBOX', 'CONNECTED'),
+      makeEnv('connecting-env', 'Connecting Sandbox', 'SANDBOX', 'PENDING_CONNECT'),
+      makeEnv('sleeping-env', 'Sleeping Sandbox', 'SANDBOX', 'SLEEPING'),
+    ])
+
+    render(<EnvironmentList isOwner={true} />)
+
+    const table = screen.getByRole('table')
+    const badgeFor = (label: string) => within(table).getByText(label)
+
+    expect(badgeFor('Active')).toHaveClass('border-green-600', 'text-green-600')
+    expect(badgeFor('Connecting')).not.toHaveClass('text-destructive', 'text-green-600')
+    expect(badgeFor('Sleeping')).toHaveClass('border-amber-500', 'text-amber-600')
+    expect(within(table).queryByText('Disconnected')).not.toBeInTheDocument()
+  })
+
+  it('shows connection state only for CONNECTED environments with an active execution', () => {
+    mockEnvironmentsData([
+      {
+        ...makeEnv('live-env', 'Live Sandbox', 'SANDBOX', 'CONNECTED'),
+        activeChatId: 'chat-1',
+        activeExecutionId: 'exec-1',
+        connected: true,
+      },
+      {
+        ...makeEnv('stale-env', 'Stale Sandbox', 'SANDBOX', 'CONNECTED'),
+        activeChatId: 'chat-2',
+        activeExecutionId: 'exec-2',
+        connected: false,
+      },
+      {
+        ...makeEnv('idle-env', 'Idle Sandbox', 'SANDBOX', 'CONNECTED'),
+        connected: true,
+      },
+      {
+        ...makeEnv('sleeping-env', 'Sleeping Sandbox', 'SANDBOX', 'SLEEPING'),
+        activeChatId: 'chat-3',
+        activeExecutionId: 'exec-3',
+        connected: false,
+      },
+      {
+        ...makeEnv('terminated-env', 'Terminated Sandbox', 'SANDBOX', 'TERMINATED'),
+        activeChatId: 'chat-4',
+        activeExecutionId: 'exec-4',
+        connected: false,
+      },
+    ])
+
+    render(<EnvironmentList isOwner={true} />)
+
+    const table = screen.getByRole('table')
+    const rows = within(table).getAllByRole('row').slice(1)
+    const rowFor = (name: string) => rows.find((row) => within(row).queryByText(name)) as HTMLElement
+
+    expect(within(rowFor('Live Sandbox')).getByText('Connected')).toBeInTheDocument()
+    expect(within(rowFor('Stale Sandbox')).getByText('Disconnected')).toBeInTheDocument()
+    expect(within(rowFor('Idle Sandbox')).queryByText(/Connected|Disconnected/)).not.toBeInTheDocument()
+    expect(within(rowFor('Sleeping Sandbox')).queryByText(/Connected|Disconnected/)).not.toBeInTheDocument()
+    expect(within(rowFor('Terminated Sandbox')).queryByText(/Connected|Disconnected/)).not.toBeInTheDocument()
+  })
+
+  it('shows connection state in mobile cards', () => {
+    mockEnvironmentsData([
+      {
+        ...makeEnv('stale-env', 'Stale Sandbox', 'SANDBOX', 'CONNECTED'),
+        activeChatId: 'chat-2',
+        activeExecutionId: 'exec-2',
+        connected: false,
+      },
+    ])
+
+    render(<EnvironmentList isOwner={true} />)
+
+    const mobileCards = screen.getByTestId('environment-cards')
+    expect(within(mobileCards).getByText('Active')).toBeInTheDocument()
+    expect(within(mobileCards).getByText('Disconnected')).toBeInTheDocument()
   })
 
   it('offers Resume for a sleeping sandbox only', () => {
@@ -177,48 +257,56 @@ describe('EnvironmentList Component', () => {
     expect(resumeMutate).toHaveBeenCalledWith('sleeping-env')
   })
 
-  it('offers no Resume or Delete action for a terminated sandbox', () => {
+  it('offers Delete and no Resume for a terminated sandbox', () => {
+    const deleteMutate = vi.fn()
+    vi.mocked(useDeleteEnvironment).mockReturnValue({ mutate: deleteMutate } as never)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     mockEnvironmentsData([makeEnv('terminated-env', 'Terminated Sandbox', 'SANDBOX', 'TERMINATED')])
 
     render(<EnvironmentList isOwner={true} />)
 
-    expect(screen.queryByRole('button', { name: 'Delete Terminated Sandbox' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Resume/ })).not.toBeInTheDocument()
+
+    const table = screen.getByRole('table')
+    fireEvent.click(within(table).getByRole('button', { name: 'Delete Terminated Sandbox' }))
+    expect(deleteMutate).toHaveBeenCalledWith('terminated-env')
 
     const mobileCards = screen.getByTestId('environment-cards')
     expect(
-      within(mobileCards).queryByRole('button', { name: 'Delete Terminated Sandbox' }),
-    ).not.toBeInTheDocument()
-
-    const table = screen.getByRole('table')
-    expect(
-      within(table).queryByRole('button', { name: 'Delete Terminated Sandbox' }),
-    ).not.toBeInTheDocument()
+      within(mobileCards).getByRole('button', { name: 'Delete Terminated Sandbox' }),
+    ).toBeInTheDocument()
   })
 
-  it('shows Delete action for non-terminated environments when isOwner is true', () => {
-    const mockEnvironments: ExecutionEnvironmentDto[] = [
+  it('hides Delete for active, connecting and sleeping sandboxes', () => {
+    mockEnvironmentsData([
       makeEnv('running-env', 'Running Sandbox', 'SANDBOX', 'CONNECTED'),
       makeEnv('sleeping-env', 'Sleeping Sandbox', 'SANDBOX', 'SLEEPING'),
-      makeEnv('disconnected-env', 'Disconnected Connector', 'CONNECTOR', 'DISCONNECTED'),
-    ]
-    mockEnvironmentsData(mockEnvironments)
+      makeEnv('connecting-env', 'Connecting Sandbox', 'SANDBOX', 'PENDING_CONNECT'),
+    ])
 
     render(<EnvironmentList isOwner={true} />)
 
-    expect(screen.getAllByRole('button', { name: 'Delete Running Sandbox' }).length).toBe(2)
-    expect(screen.getAllByRole('button', { name: 'Delete Sleeping Sandbox' }).length).toBe(2)
-    expect(
-      screen.getAllByRole('button', { name: 'Delete Disconnected Connector' }).length,
-    ).toBe(2)
+    expect(screen.queryByRole('button', { name: /^Delete / })).not.toBeInTheDocument()
+  })
+
+  it('offers Delete for an offline connector with no active execution only', () => {
+    mockEnvironmentsData([
+      { ...makeEnv('offline-env', 'Offline Connector', 'CONNECTOR', 'CONNECTED'), connected: false },
+      { ...makeEnv('live-env', 'Live Connector', 'CONNECTOR', 'CONNECTED'), connected: true },
+      {
+        ...makeEnv('busy-env', 'Busy Connector', 'CONNECTOR', 'CONNECTED'),
+        activeChatId: 'chat-1',
+        activeExecutionId: 'exec-1',
+        connected: false,
+      },
+    ])
+
+    render(<EnvironmentList isOwner={true} />)
 
     const table = screen.getByRole('table')
-    expect(within(table).getByRole('button', { name: 'Delete Running Sandbox' })).toBeInTheDocument()
-
-    const mobileCards = screen.getByTestId('environment-cards')
-    expect(
-      within(mobileCards).getByRole('button', { name: 'Delete Running Sandbox' }),
-    ).toBeInTheDocument()
+    expect(within(table).getByRole('button', { name: 'Delete Offline Connector' })).toBeInTheDocument()
+    expect(within(table).queryByRole('button', { name: 'Delete Live Connector' })).not.toBeInTheDocument()
+    expect(within(table).queryByRole('button', { name: 'Delete Busy Connector' })).not.toBeInTheDocument()
   })
 
   it('halts an environment through the execution halt API', () => {
@@ -240,7 +328,7 @@ describe('EnvironmentList Component', () => {
   })
 
   it('offers no halt action when an environment has no active execution', () => {
-    mockEnvironmentsData([makeEnv('env-idle', 'Idle Sandbox', 'SANDBOX', 'DISCONNECTED')])
+    mockEnvironmentsData([makeEnv('env-idle', 'Idle Sandbox', 'SANDBOX', 'PENDING_CONNECT')])
 
     render(<EnvironmentList isOwner={true} />)
 

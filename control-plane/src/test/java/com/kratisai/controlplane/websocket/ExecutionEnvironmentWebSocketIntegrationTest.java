@@ -122,7 +122,7 @@ class ExecutionEnvironmentWebSocketIntegrationTest {
 
         assertThat(connectorToken).isNotNull();
         assertThat(envDto.type()).isEqualTo(ExecutionEnvironmentType.CONNECTOR);
-        assertThat(envDto.status()).isEqualTo(EnvironmentStatus.DISCONNECTED);
+        assertThat(envDto.status()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
 
         CountDownLatch registerLatch = new CountDownLatch(1);
         CountDownLatch heartbeatLatch = new CountDownLatch(1);

@@ -16,6 +16,7 @@ export interface CreateEnvironmentResponse {
 export interface ExecutionEnvironmentDto {
   activeChatId?: null | string
   activeExecutionId?: null | string
+  connected?: boolean
   createdAt: string
   id: string
   lastActivity?: null | string

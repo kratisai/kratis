@@ -55,15 +55,5 @@ export function TerminalLogNotice({ isWaking, onWake, status }: TerminalLogNotic
       </div>
     )
   }
-  if (status === 'DISCONNECTED') {
-    return (
-      <div
-        className="mb-3 rounded border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-400"
-        data-testid="terminal-disconnected-notice"
-      >
-        Sandbox is disconnected. Console history is unavailable until it reconnects.
-      </div>
-    )
-  }
   return null
 }

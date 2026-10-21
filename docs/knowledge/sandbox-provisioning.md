@@ -199,8 +199,9 @@ changes execution status. Neither writes the other's rows.
 | `SLEEPING` | Absent | Present | Resumable |
 | `TERMINATED` | Absent | Absent | Final |
 
-`DISCONNECTED` is display only. The API shows `CONNECTED` as `DISCONNECTED` when the
-heartbeat is over 60 seconds old. The stored status does not change.
+The API returns the stored status unchanged. Connection is a separate `connected` flag: true when
+the status is `CONNECTED` and the heartbeat is at most 60 seconds old. The UI shows it only while an
+execution is `RUNNING` or `IDLE`.
 
 ```mermaid
 stateDiagram-v2
@@ -265,7 +266,9 @@ The sweep keys all cleanup on the environment row:
 | `TERMINATED` | Owned resources removed | Owned snapshot removed |
 | No row | Owned resources removed after `startup-grace` | Owned snapshot removed after `startup-grace` |
 
-The sweep never deletes an environment row. Only the user delete action does. A snapshot
+The sweep never deletes an environment row. Only the user delete action does, and it is allowed
+only for a `TERMINATED` sandbox or for a connector that is not connected and has no active
+execution. Any other row returns `409 Conflict`. A snapshot
 without the `kratis.instance.id` label predates ownership tracking, so the sweep keeps it.
 The sweep waits 2 minutes after boot so sidecars can reconnect.
 

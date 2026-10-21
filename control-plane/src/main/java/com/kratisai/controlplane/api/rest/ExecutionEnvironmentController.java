@@ -115,7 +115,11 @@ public class ExecutionEnvironmentController {
             value = {
                 @ApiResponse(responseCode = "204", description = "Environment deleted"),
                 @ApiResponse(responseCode = "403", description = "Not a member of this team", content = @Content),
-                @ApiResponse(responseCode = "404", description = "Environment not found", content = @Content)
+                @ApiResponse(responseCode = "404", description = "Environment not found", content = @Content),
+                @ApiResponse(
+                        responseCode = "409",
+                        description = "Sandbox is not TERMINATED, or connector is connected or running",
+                        content = @Content)
             })
     public ResponseEntity<Void> deleteEnvironment(@PathVariable UUID teamId, @PathVariable UUID envId) {
         UUID userId = SecurityUtil.getCurrentUserId();
