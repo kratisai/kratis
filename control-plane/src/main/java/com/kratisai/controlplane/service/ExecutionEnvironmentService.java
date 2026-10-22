@@ -437,7 +437,7 @@ public class ExecutionEnvironmentService {
         transition(env, EnvironmentStatus.TERMINATED);
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
-        failActiveExecutions(envId, UNAVAILABLE_ENVIRONMENT_REASON);
+        terminateActiveExecution(envId, UNAVAILABLE_ENVIRONMENT_REASON);
     }
 
     @Transactional
@@ -449,13 +449,10 @@ public class ExecutionEnvironmentService {
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
 
-        List<SandboxExecution> active = sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(
-                envId, List.of(SandboxExecutionStatus.RUNNING, SandboxExecutionStatus.IDLE));
-        if (!active.isEmpty()) {
-            for (SandboxExecution execution : active) {
-                terminationTemplate.executeWithoutResult(
-                        status -> forceTerminateExecution(execution.getId(), PURGED_ENVIRONMENT_REASON));
-            }
+        SandboxExecution active = findActiveExecution(envId);
+        if (active != null) {
+            terminationTemplate.executeWithoutResult(
+                    status -> forceTerminateExecution(active.getId(), PURGED_ENVIRONMENT_REASON));
             return;
         }
 
@@ -484,32 +481,22 @@ public class ExecutionEnvironmentService {
     @Transactional
     public void suspendAfterLostRuntime(ExecutionEnvironment env) {
         rollbackFailedResume(env);
-        failRunningExecutions(env.getId(), UNAVAILABLE_ENVIRONMENT_REASON);
-        sealIdleExecutions(env.getId());
-    }
-
-    private void sealIdleExecutions(UUID envId) {
-        List<SandboxExecution> idle =
-                sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(envId, List.of(SandboxExecutionStatus.IDLE));
-        for (SandboxExecution execution : idle) {
-            eventPublisher.publishEvent(new SandboxExecutionSuspendedEvent(
-                    execution.getChat().getTeam().getId(), execution.getId(), envId));
+        SandboxExecution active = findActiveExecution(env.getId());
+        if (active != null) {
+            if (active.getStatus() == SandboxExecutionStatus.RUNNING) {
+                terminationTemplate.executeWithoutResult(
+                        status -> forceTerminateExecution(active.getId(), UNAVAILABLE_ENVIRONMENT_REASON));
+            } else if (active.getStatus() == SandboxExecutionStatus.IDLE) {
+                eventPublisher.publishEvent(new SandboxExecutionSuspendedEvent(
+                        active.getChat().getTeam().getId(), active.getId(), env.getId()));
+            }
         }
     }
 
-    private void failActiveExecutions(UUID envId, String reason) {
-        List<SandboxExecution> active = sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(
-                envId, List.of(SandboxExecutionStatus.RUNNING, SandboxExecutionStatus.IDLE));
-        for (SandboxExecution execution : active) {
-            terminationTemplate.executeWithoutResult(status -> forceTerminateExecution(execution.getId(), reason));
-        }
-    }
-
-    private void failRunningExecutions(UUID envId, String reason) {
-        List<SandboxExecution> running = sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(
-                envId, List.of(SandboxExecutionStatus.RUNNING));
-        for (SandboxExecution execution : running) {
-            terminationTemplate.executeWithoutResult(status -> forceTerminateExecution(execution.getId(), reason));
+    private void terminateActiveExecution(UUID envId, String reason) {
+        SandboxExecution active = findActiveExecution(envId);
+        if (active != null) {
+            terminationTemplate.executeWithoutResult(status -> forceTerminateExecution(active.getId(), reason));
         }
     }
 
