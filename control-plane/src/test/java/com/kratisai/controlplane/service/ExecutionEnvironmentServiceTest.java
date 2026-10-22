@@ -228,8 +228,8 @@ class ExecutionEnvironmentServiceTest {
         ExecutionEnvironment env = createSandboxEnvironment();
         SandboxExecution idle = createRunningExecution(env);
         idle.setStatus(SandboxExecutionStatus.IDLE);
-        when(sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(eq(ENV_ID), any()))
-                .thenReturn(List.of(idle));
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
+                .thenReturn(Optional.of(idle));
 
         executionEnvironmentService.suspendAfterLostRuntime(env);
 
@@ -507,11 +507,8 @@ class ExecutionEnvironmentServiceTest {
         env.setStatus(EnvironmentStatus.CONNECTED);
         SandboxExecution running = createRunningExecution(env);
         running.setStatus(SandboxExecutionStatus.RUNNING);
-        SandboxExecution idle = createRunningExecution(env);
-        idle.setId(UUID.fromString("88888888-8888-8888-8888-888888888888"));
-        idle.setStatus(SandboxExecutionStatus.IDLE);
-        when(sandboxExecutionRepository.findByEnvironmentIdAndStatusIn(eq(ENV_ID), any()))
-                .thenReturn(List.of(running));
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
+                .thenReturn(Optional.of(running));
         when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(running));
         when(activityRepository.findByExecutionIdAndActionId(EXECUTION_ID, "execution-error"))
                 .thenReturn(Optional.empty());
@@ -521,7 +518,6 @@ class ExecutionEnvironmentServiceTest {
 
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
         assertThat(running.getStatus()).isEqualTo(SandboxExecutionStatus.UNKNOWN);
-        assertThat(idle.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
     }
 
     @Test
@@ -582,11 +578,59 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
+    void expireEnvironment_terminatesActiveExecution() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setStateChangedAt(Instant.now().minus(Duration.ofDays(60)));
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        SandboxExecution active = createRunningExecution(env);
+        active.setStatus(SandboxExecutionStatus.RUNNING);
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
+                .thenReturn(Optional.of(active));
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(active));
+        when(activityRepository.findByExecutionIdAndActionId(EXECUTION_ID, "execution-error"))
+                .thenReturn(Optional.empty());
+        when(activityRepository.nextSequence(EXECUTION_ID)).thenReturn(1L);
+
+        executionEnvironmentService.expireEnvironment(env);
+
+        verify(sandboxProvider).destroy(ENV_ID);
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
+        assertThat(active.getStatus()).isEqualTo(SandboxExecutionStatus.UNKNOWN);
+        verify(executionEnvironmentRepository).save(env);
+    }
+
+    @Test
+    void reconcilePurgedEnvironment_withActiveExecution_terminatesWithoutRecordingSandboxPurged() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setStateChangedAt(Instant.now());
+        SandboxExecution active = createRunningExecution(env);
+        active.setStatus(SandboxExecutionStatus.RUNNING);
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
+                .thenReturn(Optional.of(active));
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(active));
+        when(activityRepository.findByExecutionIdAndActionId(EXECUTION_ID, "execution-error"))
+                .thenReturn(Optional.empty());
+        when(activityRepository.nextSequence(EXECUTION_ID)).thenReturn(1L);
+
+        executionEnvironmentService.reconcilePurgedEnvironment(env);
+
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
+        assertThat(active.getStatus()).isEqualTo(SandboxExecutionStatus.UNKNOWN);
+        verify(executionEnvironmentRepository).save(env);
+        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+        verify(activityRepository, never()).findByExecutionIdAndActionId(EXECUTION_ID, "sandbox-purged");
+    }
+
+    @Test
     void reconcilePurgedEnvironment_marksTerminatedAndRecordsPurgedActivity() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);
         env.setStateChangedAt(Instant.now());
         SandboxExecution execution = createRunningExecution(env);
+        execution.setStatus(SandboxExecutionStatus.COMPLETED);
         when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
                 .thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
