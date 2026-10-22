@@ -1,5 +1,5 @@
 $schema: https://json-schema.org/draft/2020-12/schema
-title: TerminateResult
+title: CancelAgentResult
 type: object
 required:
 - status
@@ -9,7 +9,7 @@ properties:
     type: string
     enum:
     - "completed"
-    - "terminated"
+    - "cancelled"
   exitCode:
     type: integer
   error:

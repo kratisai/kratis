@@ -100,8 +100,8 @@ public class SidecarWebSocketFixture extends WebSocketFixture<SidecarWebSocketFi
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(completeLine)));
         }));
 
-        rules.add(new Rule(payload -> payload.contains("\"method\":\"env.terminate\""), (session, payload) -> {
-            sendResult(session, payload, Map.of("status", "terminated", "exitCode", 0));
+        rules.add(new Rule(payload -> payload.contains("\"method\":\"env.cancel_agent\""), (session, payload) -> {
+            sendResult(session, payload, Map.of("status", "cancelled", "exitCode", 0));
             JsonRpcInboundRequest completeLine = new JsonRpcInboundRequest(
                     EnvironmentRpcPayload.Complete.METHOD,
                     objectMapper.valueToTree(Map.of("exitCode", 0, "executionId", getExecutionId())),

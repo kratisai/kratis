@@ -327,3 +327,58 @@ func TestHandleSessionUpdate_TerminalRelay_PostExitFlushDoesNotReopen(t *testing
 		t.Errorf("expected the post-exit flush to keep accumulating, got %q", got)
 	}
 }
+
+// TestHandleSessionUpdate_PiAcpTerminalRelay_CompletedBeforeOutput verifies that when an agent
+// like pi-acp emits tool_call with status completed and terminal_info, followed by tool_call_update
+// with status completed and terminal_output, the activity is re-emitted with the final output.
+func TestHandleSessionUpdate_PiAcpTerminalRelay_CompletedBeforeOutput(t *testing.T) {
+	sink := &mockEventSink{}
+	h := NewHandler(sink, nil, "")
+
+	// 1. First update: tool_call already has status: "completed"
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "tc-pi",
+			"kind":          "execute",
+			"title":         "bash script.sh",
+			"status":        "completed",
+			"content": []interface{}{
+				map[string]interface{}{"type": "terminal", "terminalId": "term-pi"},
+			},
+			"_meta": map[string]interface{}{
+				"terminal_info": map[string]interface{}{"terminal_id": "term-pi", "cwd": "/kratis/workspace"},
+			},
+		},
+	})
+
+	// 2. Second update: tool_call_update delivers terminal_output with same status: "completed"
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call_update",
+			"toolCallId":    "tc-pi",
+			"status":        "completed",
+			"_meta": map[string]interface{}{
+				"terminal_output": map[string]interface{}{"terminal_id": "term-pi", "data": "Hello Kratis - what a lovely day\n"},
+				"terminal_exit":   map[string]interface{}{"terminal_id": "term-pi", "exit_code": 0},
+			},
+		},
+	})
+
+	var completedActivities []capturedActivity
+	for _, a := range sink.activities {
+		if a.actionID == "tc-pi" && a.status == "completed" {
+			completedActivities = append(completedActivities, a)
+		}
+	}
+
+	if len(completedActivities) == 0 {
+		t.Fatal("expected at least one completed activity")
+	}
+
+	last := completedActivities[len(completedActivities)-1]
+	expected := "Hello Kratis - what a lovely day\n"
+	if last.detail.Output != expected {
+		t.Errorf("expected detail.Output to be %q, got %q", expected, last.detail.Output)
+	}
+}

@@ -153,7 +153,7 @@ class EnvironmentRpcClientTest {
     void request_unknownEnvironment_throws() {
         when(sessionRegistry.getSessionForEnvironment(ENVIRONMENT_ID)).thenReturn(null);
 
-        assertThatThrownBy(() -> client.request(ENVIRONMENT_ID, new EnvironmentRpcPayload.Terminate()))
+        assertThatThrownBy(() -> client.request(ENVIRONMENT_ID, new EnvironmentRpcPayload.CancelAgent()))
                 .isInstanceOf(EnvironmentRpcClient.EnvironmentRpcException.class)
                 .hasMessageContaining("not connected");
     }
@@ -187,18 +187,18 @@ class EnvironmentRpcClientTest {
                 .when(otherSession)
                 .sendMessage(any(TextMessage.class));
 
-        CompletableFuture<EnvironmentConnectorResult.Terminate> first = CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<EnvironmentConnectorResult.CancelAgent> first = CompletableFuture.supplyAsync(() -> {
             try {
-                return client.request(ENVIRONMENT_ID, new EnvironmentRpcPayload.Terminate(), 5, TimeUnit.SECONDS);
+                return client.request(ENVIRONMENT_ID, new EnvironmentRpcPayload.CancelAgent(), 5, TimeUnit.SECONDS);
             } catch (InterruptedException | TimeoutException e) {
                 throw new RuntimeException(e);
             }
         });
         assertThat(sentFirst.await(2, TimeUnit.SECONDS)).isTrue();
 
-        CompletableFuture<EnvironmentConnectorResult.Terminate> second = CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<EnvironmentConnectorResult.CancelAgent> second = CompletableFuture.supplyAsync(() -> {
             try {
-                return client.request(otherEnv, new EnvironmentRpcPayload.Terminate(), 5, TimeUnit.SECONDS);
+                return client.request(otherEnv, new EnvironmentRpcPayload.CancelAgent(), 5, TimeUnit.SECONDS);
             } catch (InterruptedException | TimeoutException e) {
                 throw new RuntimeException(e);
             }
@@ -214,7 +214,7 @@ class EnvironmentRpcClientTest {
         response.put("jsonrpc", "2.0");
         response.put("id", secondId.get());
         ObjectNode result = response.putObject("result");
-        result.put("status", "terminated");
+        result.put("status", "cancelled");
         result.put("exitCode", 0);
         client.completeResponse(response);
 
@@ -242,9 +242,9 @@ class EnvironmentRpcClientTest {
 
     @Test
     void request_noParamsPayload_omitsParamsFromWire() {
-        JsonRpcRequest<EnvironmentRpcPayload.Terminate> request =
-                new JsonRpcRequest<>(new EnvironmentRpcPayload.Terminate(), 7);
-        assertThat(request.method()).isEqualTo("env.terminate");
+        JsonRpcRequest<EnvironmentRpcPayload.CancelAgent> request =
+                new JsonRpcRequest<>(new EnvironmentRpcPayload.CancelAgent(), 7);
+        assertThat(request.method()).isEqualTo("env.cancel_agent");
         assertThat(request.params()).isNull();
         assertThat(objectMapper.valueToTree(request).path("params").isMissingNode())
                 .isTrue();
@@ -258,8 +258,8 @@ class EnvironmentRpcClientTest {
                 .isEqualTo(EnvironmentConnectorResult.LaunchAcpAgent.class);
         assertThat(new EnvironmentRpcPayload.AcpPrompt("do it", "exec-1").resultType())
                 .isEqualTo(EnvironmentConnectorResult.AcpPrompt.class);
-        assertThat(new EnvironmentRpcPayload.Terminate().resultType())
-                .isEqualTo(EnvironmentConnectorResult.Terminate.class);
+        assertThat(new EnvironmentRpcPayload.CancelAgent().resultType())
+                .isEqualTo(EnvironmentConnectorResult.CancelAgent.class);
         assertThat(new EnvironmentRpcPayload.RegisterGitAuth("PAT", "").resultType())
                 .isEqualTo(EnvironmentConnectorResult.RegisterGitAuth.class);
         assertThat(new EnvironmentRpcPayload.RegisterGitIdentity("Kratis", "kratis@example.com").resultType())

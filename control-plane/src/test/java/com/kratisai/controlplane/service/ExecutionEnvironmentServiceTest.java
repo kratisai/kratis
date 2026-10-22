@@ -31,11 +31,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
@@ -331,6 +333,47 @@ class ExecutionEnvironmentServiceTest {
         // path only publishes once more on success.
         verify(executionEnvironmentRepository, times(1)).save(env);
         verify(eventPublisher, times(2)).publishEvent(any(TeamEntityChangedEvent.class));
+    }
+
+    @Test
+    void resumeEnvironment_commitsPendingIntentBeforeReprovisioning() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setAuthToken("test-token");
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
+
+        executionEnvironmentService.resumeEnvironment(USER_ID, TEAM_ID, ENV_ID);
+
+        InOrder inOrder = inOrder(transactionManager, sandboxProvisioningService);
+        ArgumentCaptor<TransactionDefinition> definition = ArgumentCaptor.forClass(TransactionDefinition.class);
+        inOrder.verify(transactionManager).getTransaction(definition.capture());
+        inOrder.verify(transactionManager).commit(any());
+        inOrder.verify(sandboxProvisioningService).reprovisionEnvironment(env);
+        assertThat(definition.getValue().getPropagationBehavior())
+                .as("the PENDING_CONNECT intent must commit before the Docker spawn")
+                .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
+    @Test
+    void resumeEnvironment_rollsBackToSleepingWhenSpawnFails() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setAuthToken("test-token");
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
+        when(executionEnvironmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        doThrow(new IllegalStateException("spawn failed"))
+                .when(sandboxProvisioningService)
+                .reprovisionEnvironment(env);
+
+        assertThatThrownBy(() -> executionEnvironmentService.resumeEnvironment(USER_ID, TEAM_ID, ENV_ID))
+                .isInstanceOf(ResponseStatusException.class);
+
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
+        verify(sandboxProvider).terminateSandbox(ENV_ID);
     }
 
     @Test

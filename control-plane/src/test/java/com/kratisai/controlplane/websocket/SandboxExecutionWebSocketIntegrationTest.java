@@ -268,7 +268,7 @@ class SandboxExecutionWebSocketIntegrationTest {
     }
 
     @Test
-    void testSandboxExecutionHitlPermissionCancelOnTerminateFlow() throws Exception {
+    void testSandboxExecutionHitlPermissionCancelOnCancelAgentFlow() throws Exception {
         var scenario = scenarioFactory.startOnConnector(
                 auth, chat, "HITL Cancel Test Connector", "test-plan-hitl-cancel", "hitl-cancel-repo");
         UUID executionId = scenario.executionId();
@@ -283,7 +283,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                 sidecar -> sidecar.withAcpCommand("rm -rf /")
                         .expectTrigger("env.acp_prompt", 1)
                         .expectTrigger("HITL request cancelled: execution terminated", 1)
-                        .expectTrigger("env.terminate", 1))) {
+                        .expectTrigger("env.cancel_agent", 1))) {
             assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 5, TimeUnit.SECONDS))
                     .isTrue();
             assertThat(pair.client().awaitTrigger("awaiting_human", 5, TimeUnit.SECONDS))
@@ -294,8 +294,8 @@ class SandboxExecutionWebSocketIntegrationTest {
             assertThat(pair.sidecar().awaitTrigger("HITL request cancelled: execution terminated", 5, TimeUnit.SECONDS))
                     .as("Sidecar should receive HITL cancellation error on termination")
                     .isTrue();
-            assertThat(pair.sidecar().awaitTrigger("env.terminate", 5, TimeUnit.SECONDS))
-                    .as("Sidecar should receive env.terminate after pending permission cancellation")
+            assertThat(pair.sidecar().awaitTrigger("env.cancel_agent", 5, TimeUnit.SECONDS))
+                    .as("Sidecar should receive env.cancel_agent after pending permission cancellation")
                     .isTrue();
             assertThat(pair.client().awaitTrigger("\"state\":\"resolved\"", 5, TimeUnit.SECONDS))
                     .as("UI client should receive resolved state so the pending approval clears")

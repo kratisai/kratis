@@ -113,7 +113,7 @@ the environment list and the chat executions. The async finalize sends a second
 
 On completion, termination, or reconnect-lease expiry the control plane:
 
-1. Sends `env.terminate` (connector cancels and stops the agent, deliberately leaving the ACP
+1. Sends `env.cancel_agent` (connector cancels and stops the agent, deliberately leaving the ACP
    session on disk so a later resume can re-attach).
    The resulting `env.complete` is marked `terminated: true`, so a deliberate stop (including
    the idle-sleeper's gentle pause) is not recorded as an agent failure; the execution settles to
@@ -126,7 +126,7 @@ A user **halt** is the single terminate action: `POST /api/v1/chats/{chatId}/exe
 - Sandbox: marks the execution `COMPLETED`, sets the environment `TERMINATED`, then calls
   `destroy`. It needs no WebSocket session, so a sleeping or disconnected sandbox can always
   be purged. If `destroy` fails, the sweep retries.
-- Workspace connector: marks the execution `COMPLETED` and best-effort sends `env.terminate`.
+- Workspace connector: marks the execution `COMPLETED` and best-effort sends `env.cancel_agent`.
   The connector stays `CONNECTED`.
 
 A transient `/ws/env` disconnect does not terminate the agent or discard its session; the
@@ -147,6 +147,12 @@ Suspend commits the runner container to a snapshot image and tears the runtime d
 resume restores that snapshot as a fresh container and starts a **new** connector process.
 `SandboxProvisioningService.reprovisionEnvironment` reuses steps 1–2 (`resume` +
 `initializeWorkspace`) of `provisionEnvironment`.
+
+`ExecutionEnvironmentService.resumeEnvironment` commits `PENDING_CONNECT` in a separate
+`REQUIRES_NEW` transaction **before** the Docker spawn. The connector can register while the
+resume transaction is still open; if that intent were part of the outer transaction, its late
+commit would overwrite the connector's `CONNECTED` status. The response is read in another new
+transaction so it reflects the committed status rather than the outer transaction's cached entity.
 
 Because git credentials live only in connector memory, a resumed connector starts
 without them. On every fresh `env.register` — spawn or resume — the control plane

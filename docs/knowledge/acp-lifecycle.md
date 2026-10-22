@@ -53,9 +53,9 @@ stateDiagram-v2
     Prompting --> Cancelling : send session/cancel
     Cancelling --> SessionActive : prompt response with stopReason=cancelled
 
-    Ready --> Terminating : control-plane sends terminate
-    SessionActive --> Terminating : control-plane sends terminate
-    Prompting --> Terminating : control-plane sends terminate
+    Ready --> Terminating : control-plane sends env.cancel_agent
+    SessionActive --> Terminating : control-plane sends env.cancel_agent
+    Prompting --> Terminating : control-plane sends env.cancel_agent
     Terminating --> Terminated : process exited + stdin closed
     Terminating --> Terminated : SIGKILL after timeout
 
@@ -204,7 +204,7 @@ it from a fresh process after the agent is stopped (SIGTERM or SIGKILL).
 
 ### 3.9 `Terminating`
 
-**Entry:** Control-plane sent terminate command, or fatal error detected.
+**Entry:** Control-plane sent `env.cancel_agent` request, or internal teardown / fatal error detected. Note that `env.cancel_agent` operates strictly on the container process table to cancel the agent process group while keeping the sandbox environment container active, whereas container-level sleeping (`suspend`) and purging (`destroy`) remain host-provider responsibilities handled by `ExecutionEnvironmentService` and `LocalDockerSandboxProvider`.
 
 Termination sequence:
 1. If session is active and prompting: send `session/cancel` (advisory)
@@ -458,7 +458,7 @@ The sidecar translates ACP events into Kratis-native WebSocket messages:
 | `env.acp_prompt` accepted | `env.acp_prompt` result with `status: "accepted"` (dispatch acknowledgement) |
 | `session/prompt` response with stopReason, after quiet window | `env.acp_prompt_complete` with `stopReason` and `promptId` |
 | Agent process exit | `env.complete` with `exitCode` |
-| Deliberate stop (`env.terminate` or internal teardown) | `env.complete` with `exitCode` and `terminated: true`; an expected pause, not an error, even when signal-terminated |
+| Deliberate stop (`env.cancel_agent` or internal teardown) | `env.complete` with `exitCode` and `terminated: true`; an expected pause, not an error, even when signal-terminated |
 | Launch failure | `env.complete` with `exitCode: -1` |
 
 On `env.complete` the control plane sets the execution status to `FAILED` only for an
@@ -537,8 +537,10 @@ output text, diff, exit code, approval state, messageId, harness `_meta`
 preserved verbatim). Activities sharing an `actionId` (ACP `toolCallId` for
 tools, the chunk-run key for message/thought runs; see §9.1) are exactly one
 activity record in the UI and one row per execution in the control plane
-(enforced by the `(execution_id, action_id)` unique index). The sidecar
-correlates one capability request without `toolCallId` to one active tool call,
+(enforced by the `(execution_id, action_id)` unique index). The sidecar applies
+`session/update` notifications in stream order, then correlates a generic
+permission source id only to the one active tool call that still awaits a 
+decision. It never folds a new permission onto an approved or completed call, 
 and it does not approve a tool call again after its first approval. A second
 approval for the same `actionId` is a `RESOURCE_CONFLICT` error. Chunk emissions
 carry cumulative text, so both layers replace the description on merge and

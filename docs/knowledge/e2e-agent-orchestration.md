@@ -58,7 +58,7 @@ Test             Control Plane       Sandbox/Connector       ACP Agent        Li
  │                    │                      │ quiet 10s (activity resets)          │
  │                    │<─ env.acp_prompt_complete (promptId)      │                │
  │ verify output      │                      │                    │                │
- │                    │ env.terminate        │                    │                │
+ │                    │ env.cancel_agent     │                    │                │
  │                    │─────────────────────>│ cancel/close/exit  │                │
  │                    │<──── env.complete ───│                    │                │
 ```
@@ -168,7 +168,7 @@ The control plane owns permission policy:
 ### Phase 6: Verification and Cleanup
 
 18. Verify expected files under `/kratis/workspace`, streamed output, activity, and WireMock matches.
-19. Send `env.terminate`.
+19. Send `env.cancel_agent`.
 20. Connector cancels an active prompt, answers pending permissions as cancelled, closes the ACP session when supported, closes stdin, and escalates process termination if necessary.
 21. Connector drains output and sends `env.complete`.
 22. Control Plane revokes the transient LiteLLM key and removes the sandbox.
@@ -216,6 +216,15 @@ rerun) were logical races in the control-plane fan-out path, fixed as follows:
    and its terminal outcome arrives as `env.acp_prompt_complete` (or `env.complete`).
 4. **Diagnostic:** waits also accept a persisted `stopReason` and log execution state on timeout.
    `stopReason` set with `acpInitialized` null ⇒ broadcast lost; all null ⇒ triage `sidecar.log`.
+
+## HITL prompt loss from concurrent ACP notifications
+
+OpenHands sends every `session/request_permission` with the same generic
+`confirmation-<uuid>` `toolCallId` and kind `other`. We apply `session/update` in stream 
+order and don't run each ACP message on its own goroutine to avoid the second permission 
+executing before the preceding `session/update` recorded the new tool call. Guard tests:
+`TestReadStdout_AppliesSessionUpdateBeforeFollowingRequest` and
+`TestCorrelateGenericPermissionIDDoesNotReuseCompletedApprovedCall`.
 
 ## Host Docker Hygiene (local / CI agent machines)
 

@@ -34,9 +34,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.awaitility.Awaitility;
+import org.awaitility.core.ConditionEvaluationListener;
+import org.awaitility.core.EvaluatedCondition;
+import org.awaitility.core.TimeoutEvent;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -48,6 +53,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  * the disk, the git state, the diff and the LiteLLM key behave as a woken sandbox must.
  */
 abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealTest {
+
+    private static final Logger logger = LoggerFactory.getLogger(AbstractSuspendResumeRealTest.class);
 
     protected static final String FIXTURE_TOKEN = "kratis-fixture-pat-token";
     protected static final String WORKSPACE = "/kratis/workspace";
@@ -253,6 +260,28 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
         Awaitility.await("resumed environment connected")
                 .atMost(Duration.ofSeconds(120))
                 .pollInterval(Duration.ofSeconds(1))
+                .conditionEvaluationListener(new ConditionEvaluationListener<>() {
+                    @Override
+                    public void conditionEvaluated(EvaluatedCondition<Object> condition) {
+                        // Only the timeout hook is used.
+                    }
+
+                    @Override
+                    public void onTimeout(TimeoutEvent timeoutEvent) {
+                        logger.error(
+                                "[test] Timed out waiting for resumed environment {}. status={}, registrations={} "
+                                        + "(baseline {}), acpInitialized={} (before {})",
+                                envId,
+                                environmentRepository
+                                        .findById(envId)
+                                        .map(ExecutionEnvironment::getStatus)
+                                        .orElse(null),
+                                registrationCount(envId),
+                                baseline.registrations(),
+                                acpInitializedCount(),
+                                acpInitializedBefore);
+                    }
+                })
                 .untilAsserted(() -> {
                     ExecutionEnvironment env =
                             environmentRepository.findById(envId).orElseThrow();

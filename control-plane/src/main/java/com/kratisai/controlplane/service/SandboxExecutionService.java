@@ -54,7 +54,7 @@ public class SandboxExecutionService {
 
     private static final Logger logger = LoggerFactory.getLogger(SandboxExecutionService.class);
 
-    private static final long TERMINATE_TIMEOUT_SECONDS = 30;
+    private static final long CANCEL_AGENT_TIMEOUT_SECONDS = 30;
 
     private final SandboxExecutionRepository sandboxExecutionRepository;
     private final ChatRepository chatRepository;
@@ -699,7 +699,10 @@ public class SandboxExecutionService {
         }
         try {
             environmentRpcClient.request(
-                    environmentId, new EnvironmentRpcPayload.Terminate(), TERMINATE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    environmentId,
+                    new EnvironmentRpcPayload.CancelAgent(),
+                    CANCEL_AGENT_TIMEOUT_SECONDS,
+                    TimeUnit.SECONDS);
         } catch (Exception e) {
             logger.warn("Failed to stop agent on connector environment {}: {}", environmentId, e.getMessage());
         }
@@ -727,16 +730,16 @@ public class SandboxExecutionService {
         cancelPendingPermissions(execution, "execution terminated");
 
         try {
-            EnvironmentConnectorResult.Terminate result = environmentRpcClient.request(
+            EnvironmentConnectorResult.CancelAgent result = environmentRpcClient.request(
                     execution.getEnvironment().getId(),
-                    new EnvironmentRpcPayload.Terminate(),
-                    TERMINATE_TIMEOUT_SECONDS,
+                    new EnvironmentRpcPayload.CancelAgent(),
+                    CANCEL_AGENT_TIMEOUT_SECONDS,
                     TimeUnit.SECONDS);
             if (result == null) {
                 logger.warn("Sidecar returned no terminate result for execution {}", execution.getId());
             } else {
                 logger.info(
-                        "Sent terminate to execution environment {} for execution {} (status {})",
+                        "Sent cancel_agent to execution environment {} for execution {} (status {})",
                         execution.getEnvironment().getId(),
                         execution.getId(),
                         result.status());

@@ -557,7 +557,7 @@ sleep 30
 	c.Close()
 }
 
-func TestExecuteTerminate_DaemonAgent(t *testing.T) {
+func TestExecuteCancelAgent_DaemonAgent(t *testing.T) {
 	// Write mock ACP agent script that simulates a daemon (ignores stdin close)
 	tempDir := t.TempDir()
 	scriptPath := filepath.Join(tempDir, "mock_agent.sh")
@@ -677,10 +677,10 @@ sleep 60
 		t.Fatal("expected ACP session to be stored")
 	}
 
-	// Now terminate
-	terminateParams := TerminateParams{}
+	// Now cancel agent
+	cancelAgentParams := CancelAgentParams{}
 
-	go c.ExecuteTerminate(terminateParams, uint64(103))
+	go c.ExecuteCancelAgent(cancelAgentParams, uint64(103))
 
 	// Wait for cancel response
 	select {
@@ -709,13 +709,13 @@ sleep 60
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
-	var result TerminateResult
+	var result CancelAgentResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
 		t.Fatalf("failed to parse result: %v", err)
 	}
 
-	if result.Status != TerminateTerminated {
-		t.Errorf("expected status 'terminated', got '%s'", result.Status)
+	if result.Status != CancelAgentCancelled {
+		t.Errorf("expected status 'cancelled', got '%s'", result.Status)
 	}
 
 	// Verify session was removed
@@ -792,7 +792,7 @@ func TestExecuteAcpPrompt_NoSession(t *testing.T) {
 	c.Close()
 }
 
-func TestExecuteTerminate_NoSession(t *testing.T) {
+func TestExecuteCancelAgent_NoSession(t *testing.T) {
 	responseChan := make(chan []byte, 1)
 	srv := newTestServer(t, func(conn *websocket.Conn) {
 		defer func() { _ = conn.Close() }()
@@ -818,10 +818,10 @@ func TestExecuteTerminate_NoSession(t *testing.T) {
 	errChan := make(chan error, 1)
 	go c.readLoop(errChan)
 
-	// Try to terminate without launching first
-	terminateParams := TerminateParams{}
+	// Try to cancel agent without launching first
+	cancelAgentParams := CancelAgentParams{}
 
-	go c.ExecuteTerminate(terminateParams, uint64(103))
+	go c.ExecuteCancelAgent(cancelAgentParams, uint64(103))
 
 	select {
 	case respBytes := <-responseChan:
@@ -830,12 +830,12 @@ func TestExecuteTerminate_NoSession(t *testing.T) {
 			t.Fatalf("failed to parse response: %v", err)
 		}
 
-		var result TerminateResult
+		var result CancelAgentResult
 		if err := json.Unmarshal(resp.Result, &result); err != nil {
 			t.Fatalf("failed to parse result: %v", err)
 		}
 
-		if result.Status != TerminateCompleted {
+		if result.Status != CancelAgentCompleted {
 			t.Errorf("expected status 'completed', got '%s'", result.Status)
 		}
 		if result.ExitCode != 0 {
@@ -1279,9 +1279,9 @@ sleep 30
 	c.Close()
 }
 
-// TestExecuteTerminate_SIGTERMPath tests termination of a process that ignores
+// TestExecuteCancelAgent_SIGTERMPath tests termination of a process that ignores
 // session/cancel but responds to SIGTERM.
-func TestExecuteTerminate_SIGTERMPath(t *testing.T) {
+func TestExecuteCancelAgent_SIGTERMPath(t *testing.T) {
 	tempDir := t.TempDir()
 	scriptPath := filepath.Join(tempDir, "stubborn_agent.sh")
 
@@ -1379,9 +1379,9 @@ done
 		t.Fatal("Timeout waiting for agent launch")
 	}
 
-	// Terminate - this should go through the SIGTERM path since agent ignores cancel
-	terminateParams := TerminateParams{}
-	go c.ExecuteTerminate(terminateParams, uint64(502))
+	// Cancel agent - this should go through the SIGTERM path since agent ignores cancel
+	cancelAgentParams := CancelAgentParams{}
+	go c.ExecuteCancelAgent(cancelAgentParams, uint64(502))
 
 	select {
 	case <-termDone:
@@ -1465,9 +1465,9 @@ func TestHandleServerRequest_ValidDispatch(t *testing.T) {
 	errChan := make(chan error, 1)
 	go c.readLoop(errChan)
 
-	// Test env.terminate dispatch with valid params
+	// Test env.cancel_agent dispatch with valid params
 	c.handleServerRequest(JsonRpcRequest{
-		Method: "env.terminate",
+		Method: "env.cancel_agent",
 		Params: map[string]interface{}{},
 		ID:     uint64(601),
 	})
@@ -1475,7 +1475,7 @@ func TestHandleServerRequest_ValidDispatch(t *testing.T) {
 	select {
 	case <-responseChan:
 	case <-time.After(3 * time.Second):
-		t.Fatal("Timeout waiting for terminate dispatch response")
+		t.Fatal("Timeout waiting for cancel_agent dispatch response")
 	}
 
 	// Test env.acp_prompt dispatch with no session (should return failed)
@@ -1505,9 +1505,9 @@ func TestHandleServerRequest_ValidDispatch(t *testing.T) {
 		ID:     uint64(604),
 	})
 
-	// Test env.terminate with invalid params (should return error)
+	// Test env.cancel_agent with invalid params (should return error)
 	c.handleServerRequest(JsonRpcRequest{
-		Method: "env.terminate",
+		Method: "env.cancel_agent",
 		Params: "not-a-struct",
 		ID:     uint64(605),
 	})
@@ -2018,9 +2018,9 @@ sleep 30
 	c.Close()
 }
 
-// TestExecuteTerminate_SIGKILLPath tests termination of a process that traps
+// TestExecuteCancelAgent_SIGKILLPath tests termination of a process that traps
 // both SIGTERM and requires SIGKILL to be killed.
-func TestExecuteTerminate_SIGKILLPath(t *testing.T) {
+func TestExecuteCancelAgent_SIGKILLPath(t *testing.T) {
 	tempDir := t.TempDir()
 	scriptPath := filepath.Join(tempDir, "unkillable_agent.sh")
 
@@ -2110,9 +2110,9 @@ done
 		t.Fatal("Timeout waiting for agent launch")
 	}
 
-	// Terminate - this should go through SIGTERM then SIGKILL path
-	terminateParams := TerminateParams{}
-	go c.ExecuteTerminate(terminateParams, uint64(702))
+	// Cancel agent - this should go through SIGTERM then SIGKILL path
+	cancelAgentParams := CancelAgentParams{}
+	go c.ExecuteCancelAgent(cancelAgentParams, uint64(702))
 
 	select {
 	case <-termDone:
@@ -2718,9 +2718,9 @@ exit 1
 	c.Close()
 }
 
-// TestExecuteTerminate_NonZeroExitAfterStdinClose tests termination of a process
+// TestExecuteCancelAgent_NonZeroExitAfterStdinClose tests termination of a process
 // that exits with a non-zero code after stdin is closed (exits before SIGTERM).
-func TestExecuteTerminate_NonZeroExitAfterStdinClose(t *testing.T) {
+func TestExecuteCancelAgent_NonZeroExitAfterStdinClose(t *testing.T) {
 	tempDir := t.TempDir()
 	scriptPath := filepath.Join(tempDir, "exit_agent.sh")
 
@@ -2817,9 +2817,9 @@ exit 42
 		t.Fatal("Timeout waiting for agent launch")
 	}
 
-	// Terminate - the agent should exit with code 42 after stdin close
-	terminateParams := TerminateParams{}
-	go c.ExecuteTerminate(terminateParams, uint64(802))
+	// Cancel agent - the agent should exit with code 42 after stdin close
+	cancelAgentParams := CancelAgentParams{}
+	go c.ExecuteCancelAgent(cancelAgentParams, uint64(802))
 
 	select {
 	case <-termDone:
@@ -2860,9 +2860,9 @@ exit 42
 	c.Close()
 }
 
-// TestExecuteTerminate_CancelsPendingPermissions tests that ExecuteTerminate
+// TestExecuteCancelAgent_CancelsPendingPermissions tests that ExecuteCancelAgent
 // cancels any pending permission requests before closing stdin.
-func TestExecuteTerminate_CancelsPendingPermissions(t *testing.T) {
+func TestExecuteCancelAgent_CancelsPendingPermissions(t *testing.T) {
 	tempDir := t.TempDir()
 	scriptPath := filepath.Join(tempDir, "mock_agent.sh")
 
@@ -2983,9 +2983,9 @@ sleep 30
 	// Give the permission request time to be sent
 	time.Sleep(500 * time.Millisecond)
 
-	// Now terminate - this should cancel the pending permission
-	terminateParams := TerminateParams{}
-	go c.ExecuteTerminate(terminateParams, uint64(903))
+	// Now cancel agent - this should cancel the pending permission
+	cancelAgentParams := CancelAgentParams{}
+	go c.ExecuteCancelAgent(cancelAgentParams, uint64(903))
 
 	// Wait for terminate to complete (wait for the terminate response)
 	select {
@@ -3014,7 +3014,7 @@ sleep 30
 }
 
 // TestUnexpectedExit_SendsEnvComplete verifies that when an agent process exits
-// unexpectedly (not via ExecuteTerminate), the exit watcher sends env.complete exactly once.
+// unexpectedly (not via ExecuteCancelAgent), the exit watcher sends env.complete exactly once.
 func TestUnexpectedExit_SendsEnvComplete(t *testing.T) {
 	tempDir := t.TempDir()
 	scriptPath := filepath.Join(tempDir, "early_exit_agent.sh")
@@ -3230,8 +3230,8 @@ sleep 60
 		t.Fatal("Timeout waiting for agent launch")
 	}
 
-	terminateParams := TerminateParams{}
-	go c.ExecuteTerminate(terminateParams, uint64(1402))
+	cancelAgentParams := CancelAgentParams{}
+	go c.ExecuteCancelAgent(cancelAgentParams, uint64(1402))
 
 	select {
 	case <-termDone:

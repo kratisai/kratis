@@ -1028,8 +1028,8 @@ func (c *Client) handleServerRequest(req JsonRpcRequest) {
 
 		go c.ExecuteAcpPrompt(params, req.ID)
 
-	case "env.terminate":
-		var params TerminateParams
+	case "env.cancel_agent":
+		var params CancelAgentParams
 		rawBytes, err := json.Marshal(req.Params)
 		if err != nil {
 			c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
@@ -1040,7 +1040,7 @@ func (c *Client) handleServerRequest(req JsonRpcRequest) {
 			return
 		}
 
-		go c.ExecuteTerminate(params, req.ID)
+		go c.ExecuteCancelAgent(params, req.ID)
 
 	case "env.git_diff_summary":
 		var params GitDiffSummaryParams

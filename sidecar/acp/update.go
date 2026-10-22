@@ -54,6 +54,11 @@ func (h *Handler) handleToolCallUpdate(u ToolCallUpdateMsg, _ map[string]any) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	outputBefore := ""
+	if existing, ok := h.toolCalls[u.ToolCallID]; ok {
+		outputBefore = existing.OutputText
+	}
+
 	info := h.accumulateToolCallLocked(u)
 	if info == nil {
 		return
@@ -97,6 +102,10 @@ func (h *Handler) handleToolCallUpdate(u ToolCallUpdateMsg, _ map[string]any) {
 	}
 
 	if info.Status == newStatus {
+		if (newStatus == ActivityCompleted || newStatus == ActivityFailed) &&
+			outputBefore == "" && info.OutputText != "" {
+			h.sink.SendActivity(h.buildToolActivity(info, newStatus))
+		}
 		return
 	}
 	if info.Status == ActivityCompleted || info.Status == ActivityFailed {
@@ -105,6 +114,9 @@ func (h *Handler) handleToolCallUpdate(u ToolCallUpdateMsg, _ map[string]any) {
 		// monotonic), so suppress the regression instead of reopening.
 		h.debugf("[ACP][TERM] toolCallId=%q suppressed status regression %s → %s (terminal is absorbing)",
 			u.ToolCallID, info.Status, newStatus)
+		if outputBefore == "" && info.OutputText != "" {
+			h.sink.SendActivity(h.buildToolActivity(info, info.Status))
+		}
 		return
 	}
 	info.Status = newStatus
@@ -168,6 +180,7 @@ func (h *Handler) accumulateToolCallLocked(u ToolCallUpdateMsg) *ToolCallInfo {
 		info = &ToolCallInfo{ToolCallID: u.ToolCallID, RecordedSeq: h.toolCallSeq}
 		h.toolCalls[u.ToolCallID] = info
 	}
+	info.ObservedInUpdate = true
 
 	if u.Kind != "" {
 		info.Kind = u.Kind
@@ -831,6 +844,20 @@ func extractRawOutputTextRaw(raw json.RawMessage) string {
 		return trimmed
 	case map[string]interface{}:
 		return extractOutputText(t)
+	case []interface{}:
+		var texts []string
+		for _, item := range t {
+			if block, ok := item.(map[string]interface{}); ok {
+				if text := extractOutputText(block); text != "" {
+					texts = append(texts, text)
+				}
+			} else if s, ok := item.(string); ok && s != "" {
+				texts = append(texts, s)
+			}
+		}
+		if len(texts) > 0 {
+			return strings.Join(texts, "\n")
+		}
 	}
 	return ""
 }

@@ -123,18 +123,19 @@ func runeCeilBoundary(s string, n int) int {
 // ToolCallInfo is the accumulated state of one ACP tool call, keyed by
 // toolCallId.
 type ToolCallInfo struct {
-	ToolCallID      string
-	Kind            string
-	Title           string
-	Status          ActivityStatus
-	ApprovalDecided bool
-	Approved        bool
-	Command         string
-	FilePath        string
-	Locations       []ToolLocation
-	RawInputMap     map[string]any
-	Meta            map[string]any
-	RawOutputRaw    json.RawMessage
+	ToolCallID       string
+	Kind             string
+	Title            string
+	Status           ActivityStatus
+	ApprovalDecided  bool
+	Approved         bool
+	ObservedInUpdate bool
+	Command          string
+	FilePath         string
+	Locations        []ToolLocation
+	RawInputMap      map[string]any
+	Meta             map[string]any
+	RawOutputRaw     json.RawMessage
 	// Todos: TodoWrite list from rawInput.todos; non-empty → relay as PLAN.
 	Todos []PlanEntry
 
@@ -165,7 +166,8 @@ type TerminalOutputState struct {
 }
 
 // Handler relays ACP agent traffic to the Kratis event sink. It is safe for
-// concurrent use: the transport dispatches each message in its own goroutine.
+// concurrent use: the transport applies session/update in stream order and
+// dispatches agent requests on their own goroutines.
 type Handler struct {
 	sink      EventSink
 	terminals *TerminalManager
@@ -1085,35 +1087,83 @@ func (h *Handler) correlatePermissionActionID(permissionToolCall PermissionToolC
 	}
 
 	h.mu.Lock()
-	if _, exists := h.toolCalls[requestedID]; exists {
-		h.mu.Unlock()
-		return requestedID
+	if info, exists := h.toolCalls[requestedID]; exists {
+		if info.ObservedInUpdate || permissionToolCall.Kind != "other" {
+			h.mu.Unlock()
+			return requestedID
+		}
+		// The id only exists because a previous permission fallback used it;
+		// it has no tool_call update behind it, so try to correlate the next
+		// permission to a real active call instead of reusing it.
 	}
-	previousAlias := h.permissionActionAliases[requestedID]
 	if permissionToolCall.Kind != "other" {
 		h.mu.Unlock()
 		return requestedID
 	}
 
-	candidateID := ""
-	candidateCount := 0
-	for toolCallID, info := range h.toolCalls {
-		if (info.Status == ActivityPending || info.Status == ActivityInProgress) && info.Kind != "" && info.Kind != "other" {
-			candidateID = toolCallID
-			candidateCount++
+	candidateID := h.soleUndecidedActiveToolCallLocked()
+	previousAlias := h.permissionActionAliases[requestedID]
+	if previousAlias != "" {
+		previous := h.toolCalls[previousAlias]
+		if previous != nil && !previous.ApprovalDecided {
+			h.mu.Unlock()
+			return previousAlias
 		}
+		if candidateID != "" {
+			h.permissionActionAliases[requestedID] = candidateID
+			h.mu.Unlock()
+			h.debugf("[PERM] Correlated generic permission id=%q to active toolCallId=%q", requestedID, candidateID)
+			return candidateID
+		}
+		if previous != nil && (previous.Status == ActivityPending || previous.Status == ActivityInProgress) {
+			// The call this source id was last correlated with is still
+			// executing; this is a duplicate request for it.
+			h.mu.Unlock()
+			return previousAlias
+		}
+		// The previous call is finished. A permission for the next call can
+		// arrive before its update is visible; surfacing it under the source
+		// id is preferable to folding it onto the completed actionId, where
+		// the control plane would reject it as a duplicate and lose the
+		// prompt.
+		h.mu.Unlock()
+		return requestedID
 	}
-	if candidateCount == 1 {
+
+	// Only correlate a generic source id to a tool call that is still waiting
+	// for a decision. A notification handler race can leave the previous
+	// call's completed update unapplied or its approval-decided state visible
+	// here; absorbing a new permission into that call would collapse two
+	// distinct prompts onto one actionId and lose the second one.
+	if candidateID != "" {
 		h.permissionActionAliases[requestedID] = candidateID
 		h.mu.Unlock()
 		h.debugf("[PERM] Correlated generic permission id=%q to active toolCallId=%q", requestedID, candidateID)
 		return candidateID
 	}
 	h.mu.Unlock()
-	if previousAlias != "" {
-		return previousAlias
-	}
 	return requestedID
+}
+
+// soleUndecidedActiveToolCallLocked returns the only live tool call that still
+// awaits an approval decision, or "" when there are none or the choice is
+// ambiguous. Callers must hold h.mu.
+func (h *Handler) soleUndecidedActiveToolCallLocked() string {
+	candidateID := ""
+	candidateCount := 0
+	for toolCallID, info := range h.toolCalls {
+		if info.ApprovalDecided {
+			continue
+		}
+		if (info.Status == ActivityPending || info.Status == ActivityInProgress) && info.Kind != "" && info.Kind != "other" {
+			candidateID = toolCallID
+			candidateCount++
+		}
+	}
+	if candidateCount != 1 {
+		return ""
+	}
+	return candidateID
 }
 
 func mapToolKindToActivity(kind string) ActivityType {
@@ -1132,8 +1182,8 @@ func mapToolKindToActivity(kind string) ActivityType {
 }
 
 func extractOutputText(output map[string]interface{}) string {
-	for _, key := range []string{"output", "formatted_output"} {
-		if text, ok := output[key].(string); ok {
+	for _, key := range []string{"output", "formatted_output", "stdout", "text", "result"} {
+		if text, ok := output[key].(string); ok && text != "" {
 			return text
 		}
 	}

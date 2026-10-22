@@ -14,5 +14,5 @@ properties:
     description: Optional terminal reason as reported by the agent (its own error message on a fatal abort, or the exit detail on an unexpected process death). Empty for natural completions.
   terminated:
     type: boolean
-    description: True when the connector deliberately stopped the agent (a control-plane-requested env.terminate or an internal teardown) rather than the process exiting on its own. A terminated completion is an expected stop, not an agent failure, even when the process exit code is non-zero. Absent for natural completions and unexpected process deaths.
+    description: True when the connector deliberately stopped the agent (a control-plane-requested env.cancel_agent or an internal teardown) rather than the process exiting on its own. A terminated completion is an expected stop, not an agent failure, even when the process exit code is non-zero. Absent for natural completions and unexpected process deaths.
 additionalProperties: false

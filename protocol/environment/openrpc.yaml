@@ -214,15 +214,16 @@ methods:
     name: result
     schema:
       $ref: ./schemas/results/acp_prompt.schema.yaml
-- name: env.terminate
-  summary: Terminate running environment execution
+- name: env.cancel_agent
+  summary: Cancel running agent execution process
+  description: Cancels the agent process group inside the sandbox workspace while keeping the sandbox environment container active
   x-kratis-direction: control-plane-to-connector
   x-kratis-message-kind: request
   params: []
   result:
     name: result
     schema:
-      $ref: ./schemas/results/terminate.schema.yaml
+      $ref: ./schemas/results/cancel_agent.schema.yaml
 - name: env.git_diff_summary
   summary: Retrieve git diff summary manifest for working tree / commits
   x-kratis-direction: control-plane-to-connector

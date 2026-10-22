@@ -502,12 +502,12 @@ class ChatExecutionControllerTest {
                     TextMessage msg = inv.getArgument(0);
                     JsonNode envelope = objectMapper.readTree(msg.getPayload());
                     if (envelope.has("method")
-                            && "env.terminate".equals(envelope.get("method").asText())) {
+                            && "env.cancel_agent".equals(envelope.get("method").asText())) {
                         ObjectNode response = objectMapper.createObjectNode();
                         response.put("jsonrpc", "2.0");
                         response.set("id", envelope.get("id"));
                         ObjectNode result = response.putObject("result");
-                        result.put("status", "terminated");
+                        result.put("status", "cancelled");
                         result.put("exitCode", 0);
                         environmentRpcClient.completeResponse(response);
                     }
