@@ -262,12 +262,21 @@ export const CLIENT_RESULTS = {
     .strict(),
   message_chunk: z
     .object({
+      attempt: z.number().int().min(1),
       chatId: uuid,
       content: z.string(),
       messageId: z.string(),
       role: z.enum(['user', 'assistant', 'system', 'tool']),
       timestamp: z.string(),
       type: z.literal('message_chunk'),
+    })
+    .strict(),
+  message_retract: z
+    .object({
+      attempt: z.number().int().min(1),
+      chatId: uuid,
+      messageId: z.string(),
+      type: z.literal('message_retract'),
     })
     .strict(),
   ping: z.object({ status: z.enum(['pong']), type: z.literal('ping') }).strict(),
@@ -299,7 +308,12 @@ export const CLIENT_RESULTS = {
     })
     .strict(),
   telemetry: z
-    .object({ chatId: uuid, event: z.union(telemetryEvents), type: z.literal('telemetry') })
+    .object({
+      attempt: z.number().int().min(1),
+      chatId: uuid,
+      event: z.union(telemetryEvents),
+      type: z.literal('telemetry'),
+    })
     .strict(),
   user_entity_changed: z
     .object({

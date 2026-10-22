@@ -24,7 +24,7 @@ describe('AgentWorkingBlock', () => {
   })
 
   it('scrolls wide generated content horizontally instead of widening the page', () => {
-    const items: WorkingItem[] = [{ id: 'thought-1', text: 'A generated thought', type: 'thought' }]
+    const items: WorkingItem[] = [{ attempt: 1, id: 'thought-1', text: 'A generated thought', type: 'thought' }]
     const { container } = render(
       <AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />,
     )
@@ -35,6 +35,7 @@ describe('AgentWorkingBlock', () => {
   it('renders markdown formatting in a thought item', () => {
     const items: WorkingItem[] = [
       {
+        attempt: 1,
         id: 'thought-1',
         text: '**Assessing Performance Implications**\n\nSome details in *italics*.',
         type: 'thought',
@@ -54,6 +55,7 @@ describe('AgentWorkingBlock', () => {
   it('renders markdown lists inside a thought item', () => {
     const items: WorkingItem[] = [
       {
+        attempt: 1,
         id: 'thought-1',
         text: '- First point\n- Second point',
         type: 'thought',
@@ -70,8 +72,8 @@ describe('AgentWorkingBlock', () => {
 
   it('renders multiple thought items independently', () => {
     const items: WorkingItem[] = [
-      { id: 'thought-1', text: 'First **bold** thought', type: 'thought' },
-      { id: 'thought-2', text: 'Second *italic* thought', type: 'thought' },
+      { attempt: 1, id: 'thought-1', text: 'First **bold** thought', type: 'thought' },
+      { attempt: 1, id: 'thought-2', text: 'Second *italic* thought', type: 'thought' },
     ]
 
     render(
@@ -85,6 +87,7 @@ describe('AgentWorkingBlock', () => {
   it('renders tool items as plain text, not markdown', () => {
     const items: WorkingItem[] = [
       {
+        attempt: 1,
         status: 'running',
         taskId: 'task-1',
         thought: 'Checking the **repo** for issues',
@@ -104,6 +107,7 @@ describe('AgentWorkingBlock', () => {
   it('renders failed tool items with subtle amber indicator and collapsible details toggle', () => {
     const items: WorkingItem[] = [
       {
+        attempt: 1,
         errorMessage: 'File not found: /src/legacy/config.json',
         status: 'error',
         taskId: 'task-error-1',
@@ -141,6 +145,7 @@ describe('AgentWorkingBlock', () => {
   it('renders failed tool item without error message subtly without crashing', () => {
     const items: WorkingItem[] = [
       {
+        attempt: 1,
         status: 'error',
         taskId: 'task-error-2',
         thought: 'Probing endpoint',
@@ -161,7 +166,7 @@ describe('AgentWorkingBlock', () => {
 
   it('renders formatted thoughts in the completed/expanded view too', async () => {
     const items: WorkingItem[] = [
-      { id: 'thought-1', text: 'A **finished** thought', type: 'thought' },
+      { attempt: 1, id: 'thought-1', text: 'A **finished** thought', type: 'thought' },
     ]
 
     render(
@@ -182,7 +187,7 @@ describe('AgentWorkingBlock', () => {
 
   describe('collapse/expand behavior', () => {
     const items: WorkingItem[] = [
-      { id: 'thought-1', text: 'Thinking it through', type: 'thought' },
+      { attempt: 1, id: 'thought-1', text: 'Thinking it through', type: 'thought' },
     ]
 
     it('is always expanded while streaming, with no toggle button', () => {

@@ -200,9 +200,9 @@ public class WikiGenerationService {
                     .maxIterations(maxTurns)
                     .executor(agentTaskExecutor)
                     .onToolCallCount(count -> usageTracker.recordToolCalls(batch.getId(), count))
-                    .onThought(thought -> logger.debug("GENERATE_WIKI: {}", thought))
-                    .onToolEvent(
-                            (taskId, toolName, phase, detail) -> logToolEvent(batchLogger, toolName, phase, detail))
+                    .onThought((attempt, thought) -> logger.debug("GENERATE_WIKI: {}", thought))
+                    .onToolEvent((attempt, taskId, toolName, phase, detail) ->
+                            logToolEvent(batchLogger, toolName, phase, detail))
                     .run(history, toolContext);
         } catch (ReActLoopFatalException e) {
             batchLogger.error(

@@ -47,6 +47,7 @@ describe('chat-store paused state and trailing replay handling', () => {
     useChatStore.getState().subscribeChat('chat-1')
 
     useChatStore.getState().handleTelemetryEvent('chat-1', {
+      attempt: 1,
       chatId: 'chat-1',
       event: { text: 'Analyzing codebase...' },
       type: 'telemetry',

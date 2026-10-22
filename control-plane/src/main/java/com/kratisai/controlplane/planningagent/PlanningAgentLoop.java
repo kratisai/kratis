@@ -69,11 +69,15 @@ public class PlanningAgentLoop {
         String output = ReActLoop.text(chatClient, toolCallbacks)
                 .maxIterations(maxIterations)
                 .executor(executor)
-                .onThought(text -> emitTelemetry(sink, context.chatId(), new TelemetryEvent.Thought(text)))
-                .onAnswerChunk(text -> emitToSink(
-                        sink, new ClientPayload.MessageChunkResult(context.chatId(), context.messageId(), text)))
-                .onToolEvent((taskId, toolName, phase, detail) ->
-                        emitToolEvent(sink, context.chatId(), taskId, toolName, phase, detail))
+                .onThought((attempt, text) ->
+                        emitTelemetry(sink, context.chatId(), attempt, new TelemetryEvent.Thought(text)))
+                .onAnswerChunk((attempt, text) -> emitToSink(
+                        sink,
+                        new ClientPayload.MessageChunkResult(context.chatId(), context.messageId(), attempt, text)))
+                .onToolEvent((attempt, taskId, toolName, phase, detail) ->
+                        emitToolEvent(sink, context.chatId(), attempt, taskId, toolName, phase, detail))
+                .onAttemptAborted(attempt -> emitToSink(
+                        sink, new ClientPayload.MessageRetractResult(context.chatId(), context.messageId(), attempt)))
                 .run(history, toolContext);
 
         if (output == null) {
@@ -86,6 +90,7 @@ public class PlanningAgentLoop {
     private void emitToolEvent(
             Sinks.Many<ClientPayload.ChatStreamPayload> sink,
             UUID chatId,
+            int attempt,
             String taskId,
             String toolName,
             ToolPhase phase,
@@ -96,11 +101,12 @@ public class PlanningAgentLoop {
                     case COMPLETE -> new TelemetryEvent.ToolComplete(taskId, detail);
                     case ERROR -> new TelemetryEvent.ToolError(taskId, detail);
                 };
-        emitTelemetry(sink, chatId, event);
+        emitTelemetry(sink, chatId, attempt, event);
     }
 
-    private void emitTelemetry(Sinks.Many<ClientPayload.ChatStreamPayload> sink, UUID chatId, TelemetryEvent event) {
-        emitToSink(sink, new ClientPayload.TelemetryResult(chatId, event));
+    private void emitTelemetry(
+            Sinks.Many<ClientPayload.ChatStreamPayload> sink, UUID chatId, int attempt, TelemetryEvent event) {
+        emitToSink(sink, new ClientPayload.TelemetryResult(chatId, attempt, event));
     }
 
     private void emitToSink(Sinks.Many<ClientPayload.ChatStreamPayload> sink, ClientPayload.ChatStreamPayload result) {

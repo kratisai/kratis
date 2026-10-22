@@ -282,15 +282,18 @@ class ReActLoopTest {
             return Flux.just(chatResponse(new AssistantMessage("recovered")));
         });
         List<String> answers = new ArrayList<>();
+        List<Integer> abortedAttempts = new ArrayList<>();
 
         String result = ReActLoop.text(client(model), noTools())
                 .executor(Runnable::run)
-                .onAnswerChunk(answers::add)
+                .onAnswerChunk((attempt, text) -> answers.add(attempt + ":" + text))
+                .onAttemptAborted(abortedAttempts::add)
                 .run(List.of(new UserMessage("go")), TOOL_CONTEXT);
 
         assertThat(result).isEqualTo("recovered");
         assertThat(calls.get()).isEqualTo(2);
-        assertThat(answers).containsExactly("partial", "recovered");
+        assertThat(answers).containsExactly("1:partial", "2:recovered");
+        assertThat(abortedAttempts).containsExactly(1);
     }
 
     @Test
@@ -364,12 +367,12 @@ class ReActLoopTest {
 
         String result = ReActLoop.text(client(model), noTools())
                 .executor(Runnable::run)
-                .onThought(thoughts::add)
-                .onAnswerChunk(answers::add)
+                .onThought((attempt, text) -> thoughts.add(attempt + ":" + text))
+                .onAnswerChunk((attempt, text) -> answers.add(attempt + ":" + text))
                 .run(List.of(new UserMessage("go")), TOOL_CONTEXT);
 
-        assertThat(thoughts).containsExactly("Weighing the trade-offs...", "Considering the options...");
-        assertThat(answers).containsExactly("The answer is 42.");
+        assertThat(thoughts).containsExactly("1:Weighing the trade-offs...", "1:Considering the options...");
+        assertThat(answers).containsExactly("1:The answer is 42.");
         assertThat(result).isEqualTo("The answer is 42.");
     }
 
@@ -419,7 +422,7 @@ class ReActLoopTest {
         AssistantMessage chunk2 =
                 AssistantMessage.builder().content(" more thinking").build();
 
-        var merged = ReActLoop.mergeChunks(List.of(chatResponse(chunk1), chatResponse(chunk2)));
+        var merged = ReActLoop.mergeChunks(List.of(chatResponse(chunk1), chatResponse(chunk2)), 1);
 
         assertThat(merged).isNotNull();
         AssistantMessage result = merged.message();
@@ -440,7 +443,7 @@ class ReActLoopTest {
                         ChatGenerationMetadata.builder().finishReason("STOP").build()),
                 new Generation(assistant("second part"))));
 
-        var merged = ReActLoop.mergeChunks(List.of(chunk));
+        var merged = ReActLoop.mergeChunks(List.of(chunk), 1);
 
         assertThat(merged).isNotNull();
         assertThat(merged.message().getText()).isEqualTo("First part second part");
@@ -449,8 +452,8 @@ class ReActLoopTest {
 
     @Test
     void mergeChunksShouldHandleNullAndEmpty() {
-        assertThat(ReActLoop.mergeChunks(null)).isNull();
-        assertThat(ReActLoop.mergeChunks(List.of())).isNull();
+        assertThat(ReActLoop.mergeChunks(null, 1)).isNull();
+        assertThat(ReActLoop.mergeChunks(List.of(), 1)).isNull();
     }
 
     @Test
@@ -464,7 +467,7 @@ class ReActLoopTest {
                 .toolCalls(List.of(toolCall("call_2", "tool_two", "{\"b\": 2}")))
                 .build();
 
-        var merged = ReActLoop.mergeChunks(List.of(chatResponse(chunk1), chatResponse(chunk2)));
+        var merged = ReActLoop.mergeChunks(List.of(chatResponse(chunk1), chatResponse(chunk2)), 1);
 
         assertThat(merged).isNotNull();
         AssistantMessage result = merged.message();
@@ -482,7 +485,7 @@ class ReActLoopTest {
                 AssistantMessage.builder().content("").build(),
                 ChatGenerationMetadata.builder().finishReason("max_tokens").build())));
 
-        var merged = ReActLoop.mergeChunks(List.of(first, last));
+        var merged = ReActLoop.mergeChunks(List.of(first, last), 1);
 
         assertThat(merged).isNotNull();
         assertThat(merged.message().getText()).isEqualTo("partial");
@@ -503,7 +506,7 @@ class ReActLoopTest {
                         toolCall("", "read_file", "{\"relativePath\": \"c.java\"}")))
                 .build();
 
-        var merged = ReActLoop.mergeChunks(List.of(chatResponse(chunk)));
+        var merged = ReActLoop.mergeChunks(List.of(chatResponse(chunk)), 1);
 
         assertThat(merged).isNotNull();
         AssistantMessage result = merged.message();
@@ -527,13 +530,16 @@ class ReActLoopTest {
     void handleChunk_ignoresEmptyText() {
         List<String> answers = new ArrayList<>();
         FakeChatModel model = new FakeChatModel();
-        ReActLoop<String> loop = ReActLoop.text(client(model), noTools()).onAnswerChunk(answers::add);
+        ReActLoop<String> loop = ReActLoop.text(client(model), noTools())
+                .onAnswerChunk((attempt, text) -> answers.add(attempt + ":" + text));
 
-        loop.handleChunk(chatResponse(AssistantMessage.builder()
-                .content("")
-                .toolCalls(List.of(toolCall("call_1", "some_tool", "{}")))
-                .build()));
-        loop.handleChunk(new ChatResponse(List.of()));
+        loop.handleChunk(
+                1,
+                chatResponse(AssistantMessage.builder()
+                        .content("")
+                        .toolCalls(List.of(toolCall("call_1", "some_tool", "{}")))
+                        .build()));
+        loop.handleChunk(1, new ChatResponse(List.of()));
 
         assertThat(answers).isEmpty();
     }

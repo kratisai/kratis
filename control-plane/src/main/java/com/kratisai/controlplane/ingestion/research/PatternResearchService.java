@@ -154,8 +154,9 @@ public class PatternResearchService {
                 .maxIterations(maxTurns)
                 .executor(agentTaskExecutor)
                 .onToolCallCount(count -> usageTracker.recordToolCalls(batch.getId(), count))
-                .onThought(thought -> logger.debug("RESEARCH_PATTERNS: {}", thought))
-                .onToolEvent((taskId, toolName, phase, detail) -> logToolEvent(batchLogger, toolName, phase, detail));
+                .onThought((attempt, thought) -> logger.debug("RESEARCH_PATTERNS: {}", thought))
+                .onToolEvent((attempt, taskId, toolName, phase, detail) ->
+                        logToolEvent(batchLogger, toolName, phase, detail));
 
         String systemPrompt = """
                 You are an expert software architect.

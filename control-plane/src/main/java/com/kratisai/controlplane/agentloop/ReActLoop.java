@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import org.jspecify.annotations.Nullable;
@@ -42,11 +43,16 @@ public final class ReActLoop<T> {
     }
 
     @FunctionalInterface
-    public interface ToolEventListener {
-        void onToolEvent(String taskId, String toolName, ToolPhase phase, String detail);
+    public interface AttemptTextListener {
+        void onText(int attempt, String text);
     }
 
-    record LlmTurn(AssistantMessage message, String finishReason) {}
+    @FunctionalInterface
+    public interface ToolEventListener {
+        void onToolEvent(int attempt, String taskId, String toolName, ToolPhase phase, String detail);
+    }
+
+    record LlmTurn(AssistantMessage message, String finishReason, int attempt) {}
 
     private final ChatClient chatClient;
     private final ToolCallback[] tools;
@@ -56,10 +62,11 @@ public final class ReActLoop<T> {
     // Builder-configured; volatile so a thread invoking run() always observes the configured value.
     private volatile int maxIterations = 25;
     private Executor executor = ForkJoinPool.commonPool();
-    private @Nullable Consumer<String> onThought;
-    private @Nullable Consumer<String> onAnswerChunk;
+    private @Nullable AttemptTextListener onThought;
+    private @Nullable AttemptTextListener onAnswerChunk;
     private @Nullable ToolEventListener onToolEvent;
     private @Nullable IntConsumer onToolCallCount;
+    private @Nullable IntConsumer onAttemptAborted;
 
     private ReActLoop(
             ChatClient chatClient,
@@ -96,12 +103,12 @@ public final class ReActLoop<T> {
         return this;
     }
 
-    public ReActLoop<T> onThought(Consumer<String> onThought) {
+    public ReActLoop<T> onThought(AttemptTextListener onThought) {
         this.onThought = onThought;
         return this;
     }
 
-    public ReActLoop<T> onAnswerChunk(Consumer<String> onAnswerChunk) {
+    public ReActLoop<T> onAnswerChunk(AttemptTextListener onAnswerChunk) {
         this.onAnswerChunk = onAnswerChunk;
         return this;
     }
@@ -113,6 +120,11 @@ public final class ReActLoop<T> {
 
     public ReActLoop<T> onToolCallCount(IntConsumer onToolCallCount) {
         this.onToolCallCount = onToolCallCount;
+        return this;
+    }
+
+    public ReActLoop<T> onAttemptAborted(IntConsumer onAttemptAborted) {
+        this.onAttemptAborted = onAttemptAborted;
         return this;
     }
 
@@ -129,6 +141,7 @@ public final class ReActLoop<T> {
         String feedback = "";
         String lastValidationError = null;
         ReActToolInvoker toolInvoker = new ReActToolInvoker(tools, onToolEvent);
+        AtomicInteger attemptSequence = new AtomicInteger();
 
         for (int turn = 0; turn <= maxIterations; turn++) {
             if (Thread.currentThread().isInterrupted()) {
@@ -148,7 +161,7 @@ public final class ReActLoop<T> {
                         finalTurn ? " (final turn; tools disabled)" : "");
 
                 ToolCallback[] turnTools = finalTurn ? new ToolCallback[0] : tools;
-                LlmTurn llmTurn = invokeLlm(history, toolContext, turnTools);
+                LlmTurn llmTurn = invokeLlm(history, toolContext, turnTools, attemptSequence);
                 if (llmTurn == null) {
                     log.debug(
                             "ReAct loop turn {}/{} produced no assistant message; aborting.", turn + 1, maxIterations);
@@ -172,7 +185,7 @@ public final class ReActLoop<T> {
                 if (onToolCallCount != null) {
                     onToolCallCount.accept(toolCalls.size());
                 }
-                history.add(toolInvoker.executeParallel(assistantMessage, toolContext, executor));
+                history.add(toolInvoker.executeParallel(assistantMessage, toolContext, executor, llmTurn.attempt()));
             } catch (StructuredOutputValidationException e) {
                 lastValidationError = e.getMessage();
                 log.debug(
@@ -213,12 +226,14 @@ public final class ReActLoop<T> {
                 + " and prefer parallel calls so you can synthesize a final answer before your turns run out.";
     }
 
-    private @Nullable LlmTurn invokeLlm(List<Message> history, ToolContext toolContext, ToolCallback[] turnTools) {
-        int attempt = 0;
+    private @Nullable LlmTurn invokeLlm(
+            List<Message> history, ToolContext toolContext, ToolCallback[] turnTools, AtomicInteger attemptSequence) {
+        int retry = 0;
         while (true) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new IllegalStateException("ReAct loop cancelled by thread interruption");
             }
+            int attempt = attemptSequence.incrementAndGet();
             try {
                 List<ChatResponse> chunks = chatClient
                         .prompt()
@@ -228,11 +243,12 @@ public final class ReActLoop<T> {
                         .options(DefaultToolCallingChatOptions.builder().internalToolExecutionEnabled(false))
                         .stream()
                         .chatResponse()
-                        .doOnNext(this::handleChunk)
+                        .doOnNext(chunk -> handleChunk(attempt, chunk))
                         .collectList()
                         .block();
-                return mergeChunks(chunks);
+                return mergeChunks(chunks, attempt);
             } catch (RuntimeException e) {
+                abortAttempt(attempt);
                 if (Thread.currentThread().isInterrupted() || hasInterruptedException(e)) {
                     Thread.currentThread().interrupt();
                     throw new IllegalStateException("ReAct loop cancelled by thread interruption", e);
@@ -244,17 +260,23 @@ public final class ReActLoop<T> {
                 if (!category.isTransient()) {
                     throw e;
                 }
-                if (attempt >= MAX_TRANSIENT_ATTEMPTS - 1) {
+                if (retry >= MAX_TRANSIENT_ATTEMPTS - 1) {
                     throw new ReActLoopFatalException(category, e);
                 }
-                attempt++;
+                retry++;
                 log.warn(
                         "ReAct loop LLM call failed with {}; retrying (attempt {}/{})",
                         category,
-                        attempt,
+                        retry,
                         MAX_TRANSIENT_ATTEMPTS);
-                sleepBeforeRetry(attempt);
+                sleepBeforeRetry(retry);
             }
+        }
+    }
+
+    private void abortAttempt(int attempt) {
+        if (onAttemptAborted != null) {
+            onAttemptAborted.accept(attempt);
         }
     }
 
@@ -280,7 +302,7 @@ public final class ReActLoop<T> {
         }
     }
 
-    void handleChunk(ChatResponse chunk) {
+    void handleChunk(int attempt, ChatResponse chunk) {
         for (Generation generation : chunk.getResults()) {
             AssistantMessage output = generation.getOutput();
             String text = output.getText();
@@ -289,10 +311,10 @@ public final class ReActLoop<T> {
             }
             if (ChatResponseAssembler.isThought(output)) {
                 if (onThought != null) {
-                    onThought.accept(text);
+                    onThought.onText(attempt, text);
                 }
             } else if (onAnswerChunk != null) {
-                onAnswerChunk.accept(text);
+                onAnswerChunk.onText(attempt, text);
             }
         }
     }
@@ -331,7 +353,7 @@ public final class ReActLoop<T> {
         }
     }
 
-    static @Nullable LlmTurn mergeChunks(List<ChatResponse> chunks) {
+    static @Nullable LlmTurn mergeChunks(List<ChatResponse> chunks, int attempt) {
         if (chunks == null || chunks.isEmpty()) {
             return null;
         }
@@ -371,7 +393,7 @@ public final class ReActLoop<T> {
                 .toolCalls(toolCalls)
                 .properties(mergedMetadata)
                 .build();
-        return new LlmTurn(message, finishReason);
+        return new LlmTurn(message, finishReason, attempt);
     }
 
     private static String baseSystemText(List<Message> history) {

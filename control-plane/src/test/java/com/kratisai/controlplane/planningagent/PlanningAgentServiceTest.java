@@ -111,8 +111,8 @@ class PlanningAgentServiceTest {
         UUID chatId = UUID.randomUUID();
 
         // Emit item 1 and item 2 before any subscriber
-        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "m1", "Hello "));
-        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "m1", "world!"));
+        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "m1", 1, "Hello "));
+        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "m1", 1, "world!"));
 
         // First late subscriber
         List<ClientPayload.ChatStreamPayload> list1 = new ArrayList<>();

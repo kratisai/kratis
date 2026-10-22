@@ -28,7 +28,8 @@ class ReActToolInvokerTest {
         List<Event> events = new ArrayList<>();
         ReActToolInvoker invoker = new ReActToolInvoker(
                 new ToolCallback[] {tool},
-                (taskId, toolName, phase, detail) -> events.add(new Event(taskId, toolName, phase, detail)));
+                (attempt, taskId, toolName, phase, detail) ->
+                        events.add(new Event(attempt, taskId, toolName, phase, detail)));
 
         ToolResponse response = invoker.execute(
                 new AssistantMessage.ToolCall(
@@ -36,9 +37,11 @@ class ReActToolInvokerTest {
                         "function",
                         "test_tool",
                         "{\"innerThought\":\"thinking about this\",\"actualArg\":\"value\"}"),
-                TOOL_CONTEXT);
+                TOOL_CONTEXT,
+                2);
 
         assertThat(response.responseData()).isEqualTo("result");
+        assertThat(events).extracting(Event::attempt).containsOnly(2);
         verify(tool).call(argThat(args -> args.contains("actualArg") && !args.contains("innerThought")), any());
         assertThat(events).hasSize(2);
         assertThat(events.get(0).phase()).isEqualTo(ToolPhase.START);
@@ -53,10 +56,11 @@ class ReActToolInvokerTest {
         List<Event> events = new ArrayList<>();
         ReActToolInvoker invoker = new ReActToolInvoker(
                 new ToolCallback[0],
-                (taskId, toolName, phase, detail) -> events.add(new Event(taskId, toolName, phase, detail)));
+                (attempt, taskId, toolName, phase, detail) ->
+                        events.add(new Event(attempt, taskId, toolName, phase, detail)));
 
         ToolResponse response =
-                invoker.execute(new AssistantMessage.ToolCall("id", "function", "missing", "{}"), TOOL_CONTEXT);
+                invoker.execute(new AssistantMessage.ToolCall("id", "function", "missing", "{}"), TOOL_CONTEXT, 1);
 
         assertThat(response.responseData()).contains("Tool not found: missing");
         assertThat(events).extracting(Event::phase).containsExactly(ToolPhase.START, ToolPhase.ERROR);
@@ -73,7 +77,7 @@ class ReActToolInvokerTest {
 
         ReActToolInvoker invoker = new ReActToolInvoker(new ToolCallback[] {tool}, null);
         ToolResponse response =
-                invoker.execute(new AssistantMessage.ToolCall("id", "function", "failing", "{}"), TOOL_CONTEXT);
+                invoker.execute(new AssistantMessage.ToolCall("id", "function", "failing", "{}"), TOOL_CONTEXT, 1);
 
         assertThat(response.responseData()).contains("boom");
     }
@@ -85,16 +89,22 @@ class ReActToolInvokerTest {
         List<Event> events = new ArrayList<>();
         ReActToolInvoker invoker = new ReActToolInvoker(
                 new ToolCallback[] {listRepositories, listDimensions},
-                (taskId, toolName, phase, detail) -> events.add(new Event(taskId, toolName, phase, detail)));
+                (attempt, taskId, toolName, phase, detail) ->
+                        events.add(new Event(attempt, taskId, toolName, phase, detail)));
 
         String innerThoughtArgs = "{\"innerThought\":\"working\"}";
         invoker.execute(
                 new AssistantMessage.ToolCall("dup-id", "function", "list_repositories", innerThoughtArgs),
-                TOOL_CONTEXT);
+                TOOL_CONTEXT,
+                1);
         invoker.execute(
-                new AssistantMessage.ToolCall("dup-id", "function", "list_dimensions", innerThoughtArgs), TOOL_CONTEXT);
+                new AssistantMessage.ToolCall("dup-id", "function", "list_dimensions", innerThoughtArgs),
+                TOOL_CONTEXT,
+                1);
         invoker.execute(
-                new AssistantMessage.ToolCall("dup-id", "function", "save_scratchpad", innerThoughtArgs), TOOL_CONTEXT);
+                new AssistantMessage.ToolCall("dup-id", "function", "save_scratchpad", innerThoughtArgs),
+                TOOL_CONTEXT,
+                1);
 
         List<Event> starts =
                 events.stream().filter(e -> e.phase() == ToolPhase.START).toList();
@@ -144,7 +154,7 @@ class ReActToolInvokerTest {
         assertThat(prepared.arguments()).isNull();
     }
 
-    private record Event(String taskId, String toolName, ToolPhase phase, String detail) {}
+    private record Event(int attempt, String taskId, String toolName, ToolPhase phase, String detail) {}
 
     private static ToolCallback tool(String name, String result) {
         ToolCallback tool = mock(ToolCallback.class);

@@ -4,12 +4,14 @@
 export type WorkingItem = WorkingThought | WorkingTool
 
 export interface WorkingThought {
+  attempt: number
   id: string
   text: string
   type: 'thought'
 }
 
 export interface WorkingTool {
+  attempt: number
   errorMessage?: string
   status: 'complete' | 'error' | 'running'
   taskId: string

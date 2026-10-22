@@ -4,6 +4,7 @@ type: object
 required:
 - type
 - chatId
+- attempt
 - event
 properties:
   type:
@@ -14,6 +15,10 @@ properties:
   chatId:
     type: string
     format: uuid
+  attempt:
+    type: integer
+    minimum: 1
+    description: "One-based sequence of the LLM call that produced this telemetry within the current turn. Events from a retracted attempt must be discarded."
   event:
     anyOf:
     - $ref: "#/$defs/Thought"

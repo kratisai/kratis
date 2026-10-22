@@ -4,5 +4,6 @@
   "chatId": "00000000-0000-0000-0000-000000000002",
   "messageId": "m1",
   "role": "assistant",
+  "attempt": 1,
   "timestamp": "2026-08-13T10:00:00Z"
 }

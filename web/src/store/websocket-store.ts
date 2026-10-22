@@ -16,6 +16,7 @@ import type {
   JsonRpcResponse,
   MessageChunkResult,
   MessageResult,
+  MessageRetractResult,
   PlanningStatusResult,
   TeamEntityChangedResult,
   TelemetryResult,
@@ -284,6 +285,9 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
         case 'message_chunk':
           handleMessageChunkResult(response.result)
           break
+        case 'message_retract':
+          handleMessageRetractResult(response.result)
+          break
         case 'ping':
           break
         case 'planning_status':
@@ -311,6 +315,10 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
 
   function handleMessageChunkResult(messageChunkResult: MessageChunkResult) {
     useChatStore.getState().handleMessageChunkResult(messageChunkResult)
+  }
+
+  function handleMessageRetractResult(messageRetractResult: MessageRetractResult) {
+    useChatStore.getState().handleMessageRetractResult(messageRetractResult)
   }
 
   function handlePlanningStatusResult(result: PlanningStatusResult) {

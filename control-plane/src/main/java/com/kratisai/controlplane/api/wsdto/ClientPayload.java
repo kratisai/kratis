@@ -61,7 +61,13 @@ public sealed interface ClientPayload {
     }
 
     record MessageChunkResult(
-            ClientPayloadType type, String content, UUID chatId, String messageId, MessageRole role, String timestamp)
+            ClientPayloadType type,
+            String content,
+            UUID chatId,
+            String messageId,
+            MessageRole role,
+            int attempt,
+            String timestamp)
             implements ClientPayload, ChatStreamPayload {
 
         public MessageChunkResult {
@@ -70,30 +76,53 @@ public sealed interface ClientPayload {
             Objects.requireNonNull(chatId, "chatId is required");
             Objects.requireNonNull(messageId, "messageId is required");
             Objects.requireNonNull(role, "role is required");
+            if (attempt < 1) {
+                throw new IllegalArgumentException("attempt must be >= 1");
+            }
             Objects.requireNonNull(timestamp, "timestamp is required");
         }
 
-        public MessageChunkResult(UUID chatId, String messageId, String content) {
+        public MessageChunkResult(UUID chatId, String messageId, int attempt, String content) {
             this(
                     ClientPayloadType.MESSAGE_CHUNK,
                     content,
                     chatId,
                     messageId,
                     MessageRole.ASSISTANT,
+                    attempt,
                     Instant.now().toString());
         }
     }
 
-    record TelemetryResult(ClientPayloadType type, UUID chatId, TelemetryEvent event)
+    record TelemetryResult(ClientPayloadType type, UUID chatId, int attempt, TelemetryEvent event)
             implements ClientPayload, ChatStreamPayload {
         public TelemetryResult {
             Objects.requireNonNull(type, "type is required");
             Objects.requireNonNull(chatId, "chatId is required");
+            if (attempt < 1) {
+                throw new IllegalArgumentException("attempt must be >= 1");
+            }
             Objects.requireNonNull(event, "event is required");
         }
 
-        public TelemetryResult(UUID chatId, TelemetryEvent event) {
-            this(ClientPayloadType.TELEMETRY, chatId, event);
+        public TelemetryResult(UUID chatId, int attempt, TelemetryEvent event) {
+            this(ClientPayloadType.TELEMETRY, chatId, attempt, event);
+        }
+    }
+
+    record MessageRetractResult(ClientPayloadType type, UUID chatId, String messageId, int attempt)
+            implements ClientPayload, ChatStreamPayload {
+        public MessageRetractResult {
+            Objects.requireNonNull(type, "type is required");
+            Objects.requireNonNull(chatId, "chatId is required");
+            Objects.requireNonNull(messageId, "messageId is required");
+            if (attempt < 1) {
+                throw new IllegalArgumentException("attempt must be >= 1");
+            }
+        }
+
+        public MessageRetractResult(UUID chatId, String messageId, int attempt) {
+            this(ClientPayloadType.MESSAGE_RETRACT, chatId, messageId, attempt);
         }
     }
 

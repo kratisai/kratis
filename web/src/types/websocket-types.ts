@@ -271,6 +271,7 @@ export type JsonRpcResult =
   | IngestionResult
   | MessageChunkResult
   | MessageResult
+  | MessageRetractResult
   | PingResult
   | PlanningStatusResult
   | SubscriptionResult
@@ -279,6 +280,7 @@ export type JsonRpcResult =
   | UserEntityChangedResult
 
 export interface MessageChunkResult {
+  attempt: number
   chatId?: string
   content: string
   messageId: string
@@ -294,6 +296,13 @@ export interface MessageResult {
   role: 'assistant' | 'system' | 'user'
   timestamp: string
   type: 'message'
+}
+
+export interface MessageRetractResult {
+  attempt: number
+  chatId: string
+  messageId: string
+  type: 'message_retract'
 }
 
 export interface PermissionOption {
@@ -354,6 +363,7 @@ export type TeamEntityType =
 export type TelemetryEvent = ThoughtEvent | ToolCompleteEvent | ToolErrorEvent | ToolStartEvent
 
 export interface TelemetryResult {
+  attempt: number
   chatId: string
   event: TelemetryEvent
   type: 'telemetry'

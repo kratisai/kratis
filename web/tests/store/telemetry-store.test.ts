@@ -49,6 +49,7 @@ describe('chat-store - working message lifecycle', () => {
     const chatId = 'chat-1'
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'Evaluating...' },
       type: 'telemetry',
@@ -66,6 +67,7 @@ describe('chat-store - working message lifecycle', () => {
     const chatId = 'chat-1'
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'Evaluating...' },
       type: 'telemetry',
@@ -82,6 +84,7 @@ describe('chat-store - working message lifecycle', () => {
     const chatId = 'chat-1'
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: {
         taskId: 'task-1',
@@ -106,6 +109,7 @@ describe('chat-store - working message lifecycle', () => {
     const chatId = 'chat-1'
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: {
         taskId: 'task-1',
@@ -116,6 +120,7 @@ describe('chat-store - working message lifecycle', () => {
     })
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: {
         status: 'success',
@@ -135,6 +140,7 @@ describe('chat-store - working message lifecycle', () => {
     const chatId = 'chat-1'
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: {
         taskId: 'task-1',
@@ -145,6 +151,7 @@ describe('chat-store - working message lifecycle', () => {
     })
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: {
         error: 'Timeout',
@@ -164,6 +171,7 @@ describe('chat-store - working message lifecycle', () => {
   it('clears working messages on clearChats', () => {
     const chatId = 'chat-1'
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'Thinking...' },
       type: 'telemetry',
@@ -181,12 +189,14 @@ describe('chat-store - working message lifecycle', () => {
     const chatId2 = 'chat-2'
 
     useChatStore.getState().handleTelemetryEvent(chatId1, {
+      attempt: 1,
       chatId: chatId1,
       event: { text: 'First thought' },
       type: 'telemetry',
     })
 
     useChatStore.getState().handleTelemetryEvent(chatId2, {
+      attempt: 1,
       chatId: chatId2,
       event: { text: 'Second thought' },
       type: 'telemetry',
@@ -206,6 +216,7 @@ describe('chat-store - working message lifecycle', () => {
   it('closes the open working message via finishWorking', () => {
     const chatId = 'chat-1'
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'Thinking...' },
       type: 'telemetry',
@@ -228,6 +239,7 @@ describe('chat-store - working message lifecycle', () => {
 
     // First turn
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'First turn thinking' },
       type: 'telemetry',
@@ -240,6 +252,7 @@ describe('chat-store - working message lifecycle', () => {
     // Second turn - a new telemetry event should create a brand new working message,
     // not reopen or append to the closed one.
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'Second turn thinking' },
       type: 'telemetry',
@@ -262,6 +275,7 @@ describe('chat-store - working message lifecycle', () => {
     const chatId = 'chat-1'
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'Weighing the ' },
       type: 'telemetry',
@@ -279,16 +293,19 @@ describe('chat-store - working message lifecycle', () => {
     const chatId = 'chat-1'
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'Weighing the ' },
       type: 'telemetry',
     })
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'trade-offs of ' },
       type: 'telemetry',
     })
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'each approach...' },
       type: 'telemetry',
@@ -306,16 +323,19 @@ describe('chat-store - working message lifecycle', () => {
     const chatId = 'chat-1'
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'First, I should check the repo.' },
       type: 'telemetry',
     })
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { taskId: 'task-1', thought: 'Checking repo', toolName: 'search_repo' },
       type: 'telemetry',
     })
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'Now let me consider the results.' },
       type: 'telemetry',
@@ -342,6 +362,7 @@ describe('chat-store - working message lifecycle', () => {
     })
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId: chatId,
       event: { text: 'Thinking...' },
       type: 'telemetry',

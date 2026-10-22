@@ -159,6 +159,30 @@ export function triggerMockExecutionOutput(
   })
 }
 
+/** Emit a streamed assistant `message_chunk` frame for one LLM attempt. */
+export function triggerMockMessageChunk(
+  ws: MockWebSocket,
+  chatId: string,
+  messageId: string,
+  content: string,
+  attempt = 1,
+) {
+  ws.onmessage?.({
+    data: JSON.stringify({
+      jsonrpc: '2.0',
+      result: {
+        attempt,
+        chatId,
+        content,
+        messageId,
+        role: 'assistant',
+        timestamp: new Date().toISOString(),
+        type: 'message_chunk',
+      },
+    }),
+  })
+}
+
 /** Emit a chat `message` frame (echoed user message or assistant reply). */
 export function triggerMockMessageEcho(
   ws: MockWebSocket,
@@ -177,6 +201,26 @@ export function triggerMockMessageEcho(
         role,
         timestamp: new Date().toISOString(),
         type: 'message',
+      },
+    }),
+  })
+}
+
+/** Emit the retraction of one failed LLM attempt's streamed output. */
+export function triggerMockMessageRetract(
+  ws: MockWebSocket,
+  chatId: string,
+  messageId: string,
+  attempt: number,
+) {
+  ws.onmessage?.({
+    data: JSON.stringify({
+      jsonrpc: '2.0',
+      result: {
+        attempt,
+        chatId,
+        messageId,
+        type: 'message_retract',
       },
     }),
   })
@@ -250,16 +294,19 @@ export function triggerMockPermissionResolved(
  */
 export function triggerMockTelemetry(
   ws: MockWebSocket,
+  chatId: string,
   text: string,
+  attempt = 1,
   taskId?: string,
   toolName?: string,
 ) {
   const event = taskId ? { taskId, thought: text, toolName } : { text }
   ws.onmessage?.({
     data: JSON.stringify({
-      id: 1,
       jsonrpc: '2.0',
       result: {
+        attempt,
+        chatId,
         event,
         type: 'telemetry',
       },
