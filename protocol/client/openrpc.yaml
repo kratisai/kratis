@@ -70,6 +70,7 @@ methods:
       - $ref: ./schemas/results/telemetry.schema.yaml
       - $ref: ./schemas/results/complete.schema.yaml
       - $ref: ./schemas/results/chat_error.schema.yaml
+      - $ref: ./schemas/results/message_retract.schema.yaml
       - $ref: ./schemas/results/canvas.schema.yaml
       - $ref: ./schemas/results/planning_status.schema.yaml
 - name: chat.subscribe
@@ -91,6 +92,7 @@ methods:
       - $ref: ./schemas/results/telemetry.schema.yaml
       - $ref: ./schemas/results/complete.schema.yaml
       - $ref: ./schemas/results/chat_error.schema.yaml
+      - $ref: ./schemas/results/message_retract.schema.yaml
       - $ref: ./schemas/results/canvas.schema.yaml
       - $ref: ./schemas/results/planning_status.schema.yaml
 - name: chat.unsubscribe
@@ -124,6 +126,7 @@ methods:
       - $ref: ./schemas/results/telemetry.schema.yaml
       - $ref: ./schemas/results/complete.schema.yaml
       - $ref: ./schemas/results/chat_error.schema.yaml
+      - $ref: ./schemas/results/message_retract.schema.yaml
       - $ref: ./schemas/results/canvas.schema.yaml
       - $ref: ./schemas/results/planning_status.schema.yaml
 - name: execution.subscribe

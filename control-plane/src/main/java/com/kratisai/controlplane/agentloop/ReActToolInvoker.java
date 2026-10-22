@@ -28,9 +28,10 @@ final class ReActToolInvoker {
         this.onToolEvent = onToolEvent;
     }
 
-    ToolResponseMessage executeParallel(AssistantMessage assistantMessage, ToolContext toolContext, Executor executor) {
+    ToolResponseMessage executeParallel(
+            AssistantMessage assistantMessage, ToolContext toolContext, Executor executor, int attempt) {
         List<CompletableFuture<ToolResponse>> futures = assistantMessage.getToolCalls().stream()
-                .map(toolCall -> CompletableFuture.supplyAsync(() -> execute(toolCall, toolContext), executor))
+                .map(toolCall -> CompletableFuture.supplyAsync(() -> execute(toolCall, toolContext, attempt), executor))
                 .toList();
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         List<ToolResponse> responses =
@@ -38,19 +39,19 @@ final class ReActToolInvoker {
         return ToolResponseMessage.builder().responses(responses).build();
     }
 
-    ToolResponse execute(AssistantMessage.ToolCall toolCall, ToolContext toolContext) {
+    ToolResponse execute(AssistantMessage.ToolCall toolCall, ToolContext toolContext, int attempt) {
         String taskId = UUID.randomUUID().toString();
         PreparedCall prepared = prepare(toolCall.arguments(), toolCall.name());
-        emit(taskId, toolCall.name(), ToolPhase.START, prepared.innerThought());
+        emit(attempt, taskId, toolCall.name(), ToolPhase.START, prepared.innerThought());
         try {
             ToolCallback tool = lookup(toolCall.name());
             String result = tool.call(prepared.arguments() != null ? prepared.arguments() : "{}", toolContext);
-            emit(taskId, toolCall.name(), ToolPhase.COMPLETE, "success");
+            emit(attempt, taskId, toolCall.name(), ToolPhase.COMPLETE, "success");
             return new ToolResponse(toolCall.id(), toolCall.name(), result);
         } catch (Exception e) {
             String message =
                     e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-            emit(taskId, toolCall.name(), ToolPhase.ERROR, message);
+            emit(attempt, taskId, toolCall.name(), ToolPhase.ERROR, message);
             return new ToolResponse(toolCall.id(), toolCall.name(), JsonParser.toJson(Map.of("error", message)));
         }
     }
@@ -62,9 +63,9 @@ final class ReActToolInvoker {
                 .orElseThrow(() -> new IllegalArgumentException("Tool not found: " + name));
     }
 
-    private void emit(String taskId, String toolName, ToolPhase phase, String detail) {
+    private void emit(int attempt, String taskId, String toolName, ToolPhase phase, String detail) {
         if (onToolEvent != null) {
-            onToolEvent.onToolEvent(taskId, toolName, phase, detail);
+            onToolEvent.onToolEvent(attempt, taskId, toolName, phase, detail);
         }
     }
 

@@ -540,6 +540,7 @@ describe('WebSocket Integration Flow', () => {
         data: JSON.stringify({
           jsonrpc: '2.0',
           result: {
+            attempt: 1,
             chatId: 'chat-1',
             event: { status: 'thinking' },
             type: 'telemetry',

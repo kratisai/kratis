@@ -159,8 +159,8 @@ class ClientChatSubscribeRpcHandlerTest {
 
         List<ClientPayload> sent = collect(handler.handle("ws-1", 102, params));
 
-        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-1", "Token 1"));
-        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-1", "Token 2"));
+        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-1", 1, "Token 1"));
+        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-1", 1, "Token 2"));
         sink.tryEmitNext(new ClientPayload.CompleteResult("msg-1"));
         sink.tryEmitComplete();
 
@@ -175,7 +175,7 @@ class ClientChatSubscribeRpcHandlerTest {
         Sinks.Many<ClientPayload.ChatStreamPayload> sink = Sinks.many().replay().all();
         chatFluxRegistry.register(chatId, sink.asFlux());
 
-        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-1", "Token 0"));
+        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-1", 1, "Token 0"));
 
         when(sessionRegistry.getUserId("ws-2")).thenReturn(Optional.of(userId.toString()));
 
@@ -184,7 +184,7 @@ class ClientChatSubscribeRpcHandlerTest {
         List<ClientPayload> sent1 = collect(handler.handle("ws-1", 201, params));
         List<ClientPayload> sent2 = collect(handler.handle("ws-2", 202, params));
 
-        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-1", "Token 1"));
+        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-1", 1, "Token 1"));
         sink.tryEmitNext(new ClientPayload.CompleteResult("msg-1"));
         sink.tryEmitComplete();
 

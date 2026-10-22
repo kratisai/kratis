@@ -9,6 +9,7 @@ import type {
   JsonRpcError,
   MessageChunkResult,
   MessageResult,
+  MessageRetractResult,
   PlanningStatusResult,
   TelemetryEvent,
   TelemetryResult,
@@ -62,6 +63,7 @@ interface ChatState {
   handleErrorResponse: (error: JsonRpcError) => void
   handleMessageChunkResult: (messageChunkResult: MessageChunkResult) => void
   handleMessageResult: (messageResult: MessageResult) => void
+  handleMessageRetractResult: (messageRetractResult: MessageRetractResult) => void
   handlePlanningStatusResult: (result: PlanningStatusResult) => void
   handleTelemetryEvent: (chatId: string, telemetryResult: TelemetryResult) => void
   markSending: (chatId: string) => void
@@ -83,8 +85,9 @@ interface TextChatMessage {
   timestamp: Date
 }
 
-// Module-level accumulators for streaming and throttling
-const currentStreamingContent = new Map<string, string>()
+// Module-level accumulators for streaming and throttling. Content is segmented by
+// LLM attempt so a retracted attempt can be removed without disturbing valid turns.
+const streamingSegments = new Map<string, Map<number, string>>()
 const pendingFlushTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const pendingMessageIds = new Set<string>()
 
@@ -98,12 +101,23 @@ function withoutChatId(chatIds: Set<string>, chatId: string): Set<string> {
 
 let thoughtCounter = 0
 
+function appendStreamingSegment(messageId: string, attempt: number, content: string): void {
+  const segments = streamingSegments.get(messageId) ?? new Map<number, string>()
+  segments.set(attempt, (segments.get(attempt) ?? '') + content)
+  streamingSegments.set(messageId, segments)
+}
+
 // Applies a single telemetry event to a working message's items array, returning a
 // new array (or the same array reference if the event didn't match anything, e.g. a
 // ToolComplete/ToolError for a taskId we never saw a ToolStart for).
-function applyTelemetryEvent(items: WorkingItem[], event: TelemetryEvent): WorkingItem[] {
+function applyTelemetryEvent(
+  items: WorkingItem[],
+  event: TelemetryEvent,
+  attempt: number,
+): WorkingItem[] {
   if (isToolStartEvent(event)) {
     const newTool: WorkingItem = {
+      attempt,
       status: 'running',
       taskId: event.taskId,
       thought: event.thought,
@@ -115,7 +129,7 @@ function applyTelemetryEvent(items: WorkingItem[], event: TelemetryEvent): Worki
 
   if (isToolErrorEvent(event)) {
     const itemIndex = items.findIndex(
-      (item) => item.type === 'tool' && item.taskId === event.taskId,
+      (item) => item.type === 'tool' && item.taskId === event.taskId && item.attempt === attempt,
     )
     if (itemIndex === -1) return items
     const updatedItems = [...items]
@@ -132,7 +146,7 @@ function applyTelemetryEvent(items: WorkingItem[], event: TelemetryEvent): Worki
 
   if (isToolCompleteEvent(event)) {
     const itemIndex = items.findIndex(
-      (item) => item.type === 'tool' && item.taskId === event.taskId,
+      (item) => item.type === 'tool' && item.taskId === event.taskId && item.attempt === attempt,
     )
     if (itemIndex === -1) return items
     const updatedItems = [...items]
@@ -148,7 +162,7 @@ function applyTelemetryEvent(items: WorkingItem[], event: TelemetryEvent): Worki
 
   if (isThoughtEvent(event)) {
     const last = items.at(-1)
-    if (last && last.type === 'thought') {
+    if (last && last.type === 'thought' && last.attempt === attempt) {
       const updatedItems = [...items]
       updatedItems[updatedItems.length - 1] = {
         ...last,
@@ -158,6 +172,7 @@ function applyTelemetryEvent(items: WorkingItem[], event: TelemetryEvent): Worki
     }
     thoughtCounter++
     const newThought: WorkingItem = {
+      attempt,
       id: `thought-${thoughtCounter}-${Date.now()}`,
       text: event.text,
       type: 'thought',
@@ -166,6 +181,11 @@ function applyTelemetryEvent(items: WorkingItem[], event: TelemetryEvent): Worki
   }
 
   return items
+}
+
+function streamingContentFor(messageId: string): string {
+  const segments = streamingSegments.get(messageId)
+  return segments ? [...segments.values()].join('') : ''
 }
 
 // Replaces the content of the text message with the given id, leaving working
@@ -203,7 +223,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       subscribedChatIds: new Set<string>(),
     })
 
-    currentStreamingContent.clear()
+    streamingSegments.clear()
     pendingMessageIds.clear()
     thoughtCounter = 0
 
@@ -278,7 +298,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       clearTimeout(timer)
       pendingFlushTimers.delete(messageId)
 
-      const accumulatedContent = currentStreamingContent.get(messageId) || ''
+      const accumulatedContent = streamingContentFor(messageId)
       set((state) => {
         const updatedMessages: Record<string, ChatMessage[]> = {}
         for (const [chatId, chatMessages] of Object.entries(state.messages)) {
@@ -303,7 +323,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       clearTimeout(pendingTimer)
       pendingFlushTimers.delete(messageId)
     }
-    const accumulatedContent = currentStreamingContent.get(messageId)
+    const accumulatedContent = streamingContentFor(messageId)
     if (accumulatedContent) {
       set((state) => {
         const chatMessages = state.messages[activeChatId] ?? []
@@ -314,8 +334,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           },
         }
       })
-      currentStreamingContent.delete(messageId)
     }
+    streamingSegments.delete(messageId)
     pendingMessageIds.delete(messageId)
 
     get().addMessage(activeChatId, {
@@ -347,8 +367,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         pendingFlushTimers.delete(messageId)
       }
 
-      if (currentStreamingContent.has(messageId)) {
-        const completeContent = currentStreamingContent.get(messageId) || ''
+      if (streamingSegments.has(messageId)) {
+        const completeContent = streamingContentFor(messageId)
 
         if (activeChatId) {
           set((state) => {
@@ -361,7 +381,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
           })
         }
-        currentStreamingContent.delete(messageId)
+        streamingSegments.delete(messageId)
       }
       pendingMessageIds.delete(messageId)
     }
@@ -388,7 +408,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       clearTimeout(timer)
       pendingFlushTimers.delete(messageId)
 
-      const accumulatedContent = currentStreamingContent.get(messageId) || ''
+      const accumulatedContent = streamingContentFor(messageId)
       set((state) => {
         const updatedMessages: Record<string, ChatMessage[]> = {}
         for (const [chatId, chatMessages] of Object.entries(state.messages)) {
@@ -403,7 +423,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     // Clear streaming accumulators
-    currentStreamingContent.clear()
+    streamingSegments.clear()
     pendingMessageIds.clear()
 
     // Clear canvas
@@ -418,7 +438,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     for (const [messageId, timer] of pendingFlushTimers.entries()) {
       clearTimeout(timer)
       pendingFlushTimers.delete(messageId)
-      const accumulatedContent = currentStreamingContent.get(messageId) || ''
+      const accumulatedContent = streamingContentFor(messageId)
       if (accumulatedContent) {
         set((state) => {
           const chatMessages = state.messages[currentChatId] ?? []
@@ -431,7 +451,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         })
       }
     }
-    currentStreamingContent.clear()
+    streamingSegments.clear()
     pendingMessageIds.clear()
 
     // Add error message to chat
@@ -450,13 +470,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   handleMessageChunkResult: (messageChunkResult: MessageChunkResult) => {
-    const { chatId, content, messageId, timestamp } = messageChunkResult
+    const { attempt, chatId, content, messageId, timestamp } = messageChunkResult
     const activeChatId = chatId || get().currentChatId
     if (!activeChatId) return
 
-    const existingContent = currentStreamingContent.get(messageId) || ''
-    const newContent = existingContent + content
-    currentStreamingContent.set(messageId, newContent)
+    appendStreamingSegment(messageId, attempt, content)
+    const newContent = streamingContentFor(messageId)
 
     if (!pendingMessageIds.has(messageId)) {
       pendingMessageIds.add(messageId)
@@ -490,7 +509,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const timer = setTimeout(() => {
       pendingFlushTimers.delete(messageId)
-      const accumulatedContent = currentStreamingContent.get(messageId) || ''
+      const accumulatedContent = streamingContentFor(messageId)
 
       set((state) => {
         const chatMessages = state.messages[activeChatId] ?? []
@@ -536,6 +555,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
       }
     })
+  },
+
+  handleMessageRetractResult: (messageRetractResult: MessageRetractResult) => {
+    const { attempt, chatId, messageId } = messageRetractResult
+    const activeChatId = chatId || get().currentChatId
+    if (!activeChatId) return
+
+    const segments = streamingSegments.get(messageId)
+    segments?.delete(attempt)
+    const hasContent = segments !== undefined && segments.size > 0
+    if (!hasContent) {
+      streamingSegments.delete(messageId)
+    }
+
+    const pendingTimer = pendingFlushTimers.get(messageId)
+    if (pendingTimer) {
+      clearTimeout(pendingTimer)
+      pendingFlushTimers.delete(messageId)
+    }
+
+    set((state) => {
+      const chatMessages = state.messages[activeChatId] ?? []
+      const remainingContent = streamingContentFor(messageId)
+      const updatedMessages = chatMessages.flatMap((message): ChatMessage[] => {
+        if (message.role === 'working') {
+          if (!message.isStreaming) return [message]
+          const items = message.items.filter((item) => item.attempt !== attempt)
+          if (items.length === message.items.length) return [message]
+          if (items.length === 0) return []
+          return [{ ...message, items }]
+        }
+        if (message.id === messageId) {
+          return hasContent ? [{ ...message, content: remainingContent }] : []
+        }
+        return [message]
+      })
+      return {
+        messages: {
+          ...state.messages,
+          [activeChatId]: updatedMessages,
+        },
+      }
+    })
+
+    if (!hasContent) {
+      pendingMessageIds.delete(messageId)
+    }
   },
 
   handlePlanningStatusResult: (result: PlanningStatusResult) => {
@@ -610,7 +676,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const updatedMessages = [...chatMessages]
         updatedMessages[openIndex] = {
           ...existing,
-          items: applyTelemetryEvent(existing.items, event),
+          items: applyTelemetryEvent(existing.items, event, telemetryResult.attempt),
         }
         return {
           messages: {
@@ -626,7 +692,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         endTime: null,
         id: `working-${Date.now()}`,
         isStreaming: true,
-        items: applyTelemetryEvent([], event),
+        items: applyTelemetryEvent([], event, telemetryResult.attempt),
         role: 'working',
         startTime: Date.now(),
         timestamp: new Date(),

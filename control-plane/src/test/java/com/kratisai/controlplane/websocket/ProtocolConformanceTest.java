@@ -873,6 +873,7 @@ class ProtocolConformanceTest {
             case TELEMETRY -> ClientPayload.TelemetryResult.class;
             case COMPLETE -> ClientPayload.CompleteResult.class;
             case CHAT_ERROR -> ClientPayload.ChatErrorResult.class;
+            case MESSAGE_RETRACT -> ClientPayload.MessageRetractResult.class;
             case CANVAS -> ClientPayload.CanvasResult.class;
             case INGESTION -> ClientPayload.IngestionResult.class;
             case TEAM_ENTITY_CHANGED -> ClientPayload.TeamEntityChangedResult.class;

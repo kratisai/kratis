@@ -7,6 +7,7 @@ required:
 - chatId
 - messageId
 - role
+- attempt
 - timestamp
 properties:
   type:
@@ -28,6 +29,10 @@ properties:
     - "assistant"
     - "system"
     - "tool"
+  attempt:
+    type: integer
+    minimum: 1
+    description: "One-based sequence of the LLM call that produced this chunk within the current turn. Chunks from a retracted attempt must be discarded."
   timestamp:
     type: string
 additionalProperties: true

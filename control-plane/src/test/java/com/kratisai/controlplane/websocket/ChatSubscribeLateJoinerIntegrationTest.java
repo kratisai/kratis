@@ -79,14 +79,14 @@ class ChatSubscribeLateJoinerIntegrationTest {
         Sinks.Many<ClientPayload.ChatStreamPayload> sink = Sinks.many().replay().all();
         chatFluxRegistry.register(chatId, sink.asFlux());
 
-        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-assistant", "Chunk 1 "));
+        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-assistant", 1, "Chunk 1 "));
 
         ClientRpcPayload.ChatSubscribe params =
                 new ClientRpcPayload.ChatSubscribe(chatId.toString(), teamId.toString());
         List<ClientPayload> payloads1 = new ArrayList<>();
         handler.handle(session1.getId(), 1, params).subscribe(payloads1::add);
 
-        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-assistant", "Chunk 2 "));
+        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-assistant", 1, "Chunk 2 "));
 
         WebSocketSession session2 = mock(WebSocketSession.class);
         when(session2.getId()).thenReturn("sess-2");
@@ -95,7 +95,7 @@ class ChatSubscribeLateJoinerIntegrationTest {
         List<ClientPayload> payloads2 = new ArrayList<>();
         handler.handle(session2.getId(), 2, params).subscribe(payloads2::add);
 
-        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-assistant", "Chunk 3"));
+        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-assistant", 1, "Chunk 3"));
         sink.tryEmitNext(new ClientPayload.CompleteResult("msg-assistant"));
         sink.tryEmitComplete();
 

@@ -19,6 +19,7 @@ public enum ClientPayloadType {
     TELEMETRY("telemetry"),
     COMPLETE("complete"),
     CHAT_ERROR("chat_error"),
+    MESSAGE_RETRACT("message_retract"),
     CANVAS("canvas"),
     INGESTION("ingestion"),
     TEAM_ENTITY_CHANGED("team_entity_changed"),

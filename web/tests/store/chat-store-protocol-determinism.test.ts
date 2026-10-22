@@ -81,6 +81,7 @@ describe('chat-store protocol determinism and deduplication', () => {
     useChatStore.setState({ currentChatId: chatId })
 
     const chunk1: MessageChunkResult = {
+      attempt: 1,
       chatId,
       content: 'Hello ',
       messageId: 'msg-asst-1',
@@ -90,6 +91,7 @@ describe('chat-store protocol determinism and deduplication', () => {
     }
 
     const chunk2: MessageChunkResult = {
+      attempt: 1,
       chatId,
       content: 'world!',
       messageId: 'msg-asst-1',

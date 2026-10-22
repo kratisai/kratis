@@ -1,0 +1,24 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: MessageRetractResult
+description: "Retracts every streamed chunk and telemetry item produced by one failed LLM attempt. The attempt is not part of the conversation and must not remain visible."
+type: object
+required:
+- type
+- chatId
+- messageId
+- attempt
+properties:
+  type:
+    type: string
+    const: "message_retract"
+    enum:
+    - "message_retract"
+  chatId:
+    type: string
+    format: uuid
+  messageId:
+    type: string
+  attempt:
+    type: integer
+    minimum: 1
+additionalProperties: false

@@ -133,11 +133,13 @@ describe('Chat Session Telemetry Flow (Flow D)', () => {
     // routed by chatId (see chat-store's handleTelemetryEvent), lazily creating a
     // working message on the first event rather than requiring one to be pre-created.
     useChatStore.getState().handleTelemetryEvent('test-session', {
+      attempt: 1,
       chatId: 'test-session',
       event: { text: 'Thinking...' },
       type: 'telemetry',
     })
     useChatStore.getState().handleTelemetryEvent('test-session', {
+      attempt: 1,
       chatId: 'test-session',
       event: {
         taskId: 'task-1',
@@ -191,12 +193,14 @@ describe('Chat Session Telemetry Flow (Flow D)', () => {
     // Send telemetry events directly - the working message is created lazily on the
     // first event, not pre-created when the user sends a message.
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId,
       event: { text: 'Evaluating...' },
       type: 'telemetry',
     })
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId,
       event: {
         taskId: 'task-1',
@@ -225,12 +229,14 @@ describe('Chat Session Telemetry Flow (Flow D)', () => {
     const chatId = 'chat-uc27'
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId,
       event: { text: 'Thinking...' },
       type: 'telemetry',
     })
 
     useChatStore.getState().handleTelemetryEvent(chatId, {
+      attempt: 1,
       chatId,
       event: {
         taskId: 'task-1',

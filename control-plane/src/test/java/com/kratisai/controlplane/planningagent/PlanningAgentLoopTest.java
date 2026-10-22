@@ -29,10 +29,15 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.ChatOptions;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.retry.TransientAiException;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
 class PlanningAgentLoopTest {
@@ -190,6 +195,25 @@ class PlanningAgentLoopTest {
     }
 
     @Test
+    void transientFailure_emitsRetractBeforeRetry() {
+        PlanningAgentLoop loop =
+                new PlanningAgentLoop(chatMemory, mock(ScratchpadService.class), noTools(), 25, Runnable::run);
+
+        loop.run(ChatClient.builder(new FlakyStreamingChatModel()).build(), context, sink);
+
+        assertThat(emissions)
+                .filteredOn(ClientPayload.MessageRetractResult.class::isInstance)
+                .containsExactly(new ClientPayload.MessageRetractResult(chatId, context.messageId(), 1));
+        assertThat(emissions)
+                .filteredOn(ClientPayload.MessageChunkResult.class::isInstance)
+                .extracting(e -> {
+                    ClientPayload.MessageChunkResult chunk = (ClientPayload.MessageChunkResult) e;
+                    return chunk.attempt() + ":" + chunk.content();
+                })
+                .containsExactly("1:partial", "2:recovered");
+    }
+
+    @Test
     void continuation_requiresNonNullDirective() {
         assertThatThrownBy(() -> nullDirectiveContext(context)).isInstanceOf(NullPointerException.class);
     }
@@ -217,6 +241,30 @@ class PlanningAgentLoopTest {
 
     private static ToolCallback[] noTools() {
         return new ToolCallback[0];
+    }
+
+    private static final class FlakyStreamingChatModel implements ChatModel {
+        private final ChatModel delegate = new FakeChatModel();
+        private int calls;
+
+        @Override
+        public ChatResponse call(Prompt prompt) {
+            throw new UnsupportedOperationException("call is not used by the ReAct loop");
+        }
+
+        @Override
+        public Flux<ChatResponse> stream(Prompt prompt) {
+            if (++calls == 1) {
+                ChatResponse partial = new ChatResponse(List.of(new Generation(new AssistantMessage("partial"))));
+                return Flux.concat(Flux.just(partial), Flux.error(new TransientAiException("503")));
+            }
+            return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage("recovered")))));
+        }
+
+        @Override
+        public ChatOptions getDefaultOptions() {
+            return delegate.getDefaultOptions();
+        }
     }
 
     private static ToolCallback tool() {

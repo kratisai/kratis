@@ -84,10 +84,10 @@ class MultiSubscriberBroadcastIntegrationTest {
         handler.handle(session2.getId(), 102, params).subscribe(payloads2::add);
 
         sink.tryEmitNext(
-                new ClientPayload.TelemetryResult(chatId, new TelemetryEvent.Thought("Planning execution...")));
+                new ClientPayload.TelemetryResult(chatId, 1, new TelemetryEvent.Thought("Planning execution...")));
         sink.tryEmitNext(new ClientPayload.TelemetryResult(
-                chatId, new TelemetryEvent.ToolStart("call-1", "execute_command", "Running bash tool")));
-        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-123", "Task completed."));
+                chatId, 1, new TelemetryEvent.ToolStart("call-1", "execute_command", "Running bash tool")));
+        sink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-123", 1, "Task completed."));
         sink.tryEmitNext(new ClientPayload.CompleteResult("msg-123"));
         sink.tryEmitComplete();
 
