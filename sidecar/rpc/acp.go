@@ -327,27 +327,26 @@ func truncateReason(msg string) string {
 	return string(runes[:maxReasonRunes]) + "…"
 }
 
-// ExecuteTerminate terminates the ACP agent process gracefully.
+// ExecuteCancelAgent cancels the ACP agent process gracefully.
 // Delegates to the supervisor for process lifecycle management.
-func (c *Client) ExecuteTerminate(_ TerminateParams, reqID interface{}) {
+func (c *Client) ExecuteCancelAgent(_ CancelAgentParams, reqID interface{}) {
 	c.mu.Lock()
 	sup := c.supervisor
 	c.mu.Unlock()
 
 	if sup == nil {
-		c.SendOutput("[Terminate] No active ACP session found - nothing to terminate", "stdout")
-		c.SendComplete(runner.CompletionInfo{ExitCode: 0, Reason: "terminated (no active agent session)", Terminated: true})
-		c.sendSuccessResponse(reqID, TerminateResult{Status: TerminateCompleted, ExitCode: 0})
+		c.SendOutput("[CancelAgent] No active ACP session found - nothing to cancel", "stdout")
+		c.SendComplete(runner.CompletionInfo{ExitCode: 0, Reason: "cancelled (no active agent session)", Terminated: true})
+		c.sendSuccessResponse(reqID, CancelAgentResult{Status: CancelAgentCompleted, ExitCode: 0})
 		return
 	}
 
-	c.SendOutput("[Terminate] Delegating to supervisor", "stdout")
+	c.SendOutput("[CancelAgent] Delegating to supervisor", "stdout")
 
 	exitCode, err := sup.Terminate()
 	if err != nil {
-		c.SendOutput(fmt.Sprintf("[Terminate] Error: %v", err), "stderr")
+		c.SendOutput(fmt.Sprintf("[CancelAgent] Error: %v", err), "stderr")
 	}
 
-	// Don't clear supervisor here - let it be cleared in closeAll() or when process exits
-	c.sendSuccessResponse(reqID, TerminateResult{Status: TerminateTerminated, ExitCode: exitCode})
+	c.sendSuccessResponse(reqID, CancelAgentResult{Status: CancelAgentCancelled, ExitCode: exitCode})
 }

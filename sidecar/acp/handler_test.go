@@ -1484,6 +1484,117 @@ func TestCorrelateGenericPermissionIDLeavesAmbiguousRequestsUnmodified(t *testin
 	}
 }
 
+// TestCorrelatePermissionIDDoesNotReuseApprovedToolCall reproduces the
+// notification race that lost the second HITL prompt: the next permission
+// arrives before its own tool_call update has been applied, while the
+// previously approved tool call is still the only visible live call. The
+// permission carries a real toolCallId, so it must not collapse onto the
+// already-decided call.
+func TestCorrelatePermissionIDDoesNotReuseApprovedToolCall(t *testing.T) {
+	h := NewHandler(nil, nil, "")
+	h.toolCalls["call-file"] = &ToolCallInfo{
+		ToolCallID:      "call-file",
+		Kind:            "edit",
+		Status:          ActivityInProgress,
+		ApprovalDecided: true,
+		Approved:        true,
+	}
+
+	permission := PermissionToolCall{ToolCallID: "call-terminal", Kind: "other"}
+	if got := h.correlatePermissionActionID(permission); got != "call-terminal" {
+		t.Fatalf("expected new permission to keep its own toolCallId, got %q", got)
+	}
+}
+
+// TestCorrelatePermissionIDUsesOwnIDWhenOnlyPreviousCallIsLive is the same
+// race when the previous call's completion update has not been applied yet, so
+// it still looks live to correlation. The new permission's id remains
+// authoritative once that call has been decided.
+func TestCorrelatePermissionIDUsesOwnIDWhenOnlyPreviousCallIsLive(t *testing.T) {
+	h := NewHandler(nil, nil, "")
+	h.toolCalls["call-file"] = &ToolCallInfo{
+		ToolCallID:      "call-file",
+		Kind:            "edit",
+		Status:          ActivityInProgress,
+		ApprovalDecided: true,
+		Approved:        false,
+	}
+
+	permission := PermissionToolCall{ToolCallID: "call-terminal", Kind: "other"}
+	if got := h.correlatePermissionActionID(permission); got != "call-terminal" {
+		t.Fatalf("expected denied previous call not to absorb a new permission, got %q", got)
+	}
+}
+
+// TestCorrelateGenericPermissionIDDoesNotReuseCompletedApprovedCall models
+// OpenHands: every permission carries the same generic source id. Once the
+// first call is approved and completed, the next permission must not be
+// folded back onto it if the new tool_call update has not been applied yet.
+func TestCorrelateGenericPermissionIDDoesNotReuseCompletedApprovedCall(t *testing.T) {
+	h := NewHandler(nil, nil, "")
+	h.toolCalls["call-file"] = &ToolCallInfo{
+		ToolCallID:      "call-file",
+		Kind:            "edit",
+		Status:          ActivityCompleted,
+		ApprovalDecided: true,
+		Approved:        true,
+	}
+	h.permissionActionAliases["confirmation-session"] = "call-file"
+
+	permission := PermissionToolCall{ToolCallID: "confirmation-session", Kind: "other"}
+	if got := h.correlatePermissionActionID(permission); got != "confirmation-session" {
+		t.Fatalf("expected a new permission not to reuse the completed approved call, got %q", got)
+	}
+}
+
+// TestCorrelateGenericPermissionIDRecoversAfterFallback covers a generic id
+// that a previous fallback materialized without a tool_call update. The next
+// permission must correlate to the new real call rather than reusing the
+// permission-only entry, which the control plane would reject as a duplicate.
+func TestCorrelateGenericPermissionIDRecoversAfterFallback(t *testing.T) {
+	h := NewHandler(nil, nil, "")
+	h.toolCalls["confirmation-session"] = &ToolCallInfo{
+		ToolCallID:      "confirmation-session",
+		Kind:            "other",
+		Status:          ActivityInProgress,
+		ApprovalDecided: true,
+		Approved:        true,
+	}
+	h.toolCalls["call-terminal"] = &ToolCallInfo{
+		ToolCallID: "call-terminal",
+		Kind:       "execute",
+		Status:     ActivityInProgress,
+	}
+
+	permission := PermissionToolCall{ToolCallID: "confirmation-session", Kind: "other"}
+	if got := h.correlatePermissionActionID(permission); got != "call-terminal" {
+		t.Fatalf("expected the permission to correlate to the new active call, got %q", got)
+	}
+}
+
+// TestCorrelatePermissionIDKeepsUnknownKindFromToolUpdate verifies that a real
+// tool call whose reported kind is "other" stays authoritative; only a
+// permission-only entry may be re-correlated.
+func TestCorrelatePermissionIDKeepsUnknownKindFromToolUpdate(t *testing.T) {
+	h := NewHandler(nil, nil, "")
+	h.toolCalls["call-mystery"] = &ToolCallInfo{
+		ToolCallID:       "call-mystery",
+		Kind:             "other",
+		Status:           ActivityInProgress,
+		ObservedInUpdate: true,
+	}
+	h.toolCalls["call-terminal"] = &ToolCallInfo{
+		ToolCallID: "call-terminal",
+		Kind:       "execute",
+		Status:     ActivityInProgress,
+	}
+
+	permission := PermissionToolCall{ToolCallID: "call-mystery", Kind: "other"}
+	if got := h.correlatePermissionActionID(permission); got != "call-mystery" {
+		t.Fatalf("expected a tool call observed in session/update to keep its id, got %q", got)
+	}
+}
+
 func TestHandlePermissionRequest_Cancellation(t *testing.T) {
 	// Create a mock EventSink that simulates cancellation
 	mockSink := &mockEventSink{

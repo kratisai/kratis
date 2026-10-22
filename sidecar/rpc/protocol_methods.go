@@ -48,7 +48,7 @@ var EnvironmentMethods = []MethodDef{
 	{Name: "env.checkout", MessageKind: Notification, Direction: ControlPlaneToConnector, Params: &CheckoutParams{}},
 	{Name: "env.launch_acp_agent", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &LaunchAcpAgentParams{}, Result: &LaunchAcpAgentResult{}},
 	{Name: "env.acp_prompt", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &AcpPromptParams{}, Result: &AcpPromptResult{}},
-	{Name: "env.terminate", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &TerminateParams{}, Result: &TerminateResult{}},
+	{Name: "env.cancel_agent", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &CancelAgentParams{}, Result: &CancelAgentResult{}},
 	{Name: "env.git_diff_summary", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GitDiffSummaryParams{}, Result: &GitDiffSummaryResult{}},
 	{Name: "env.read_file_slice", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &ReadFileSliceParams{}, Result: &ReadFileSliceResult{}},
 	{Name: "env.get_logs", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GetLogsParams{}, Result: &GetLogsResult{}},

@@ -51,16 +51,16 @@ public sealed interface EnvironmentConnectorResult {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record Terminate(
-            @JsonProperty("status") TerminateStatus status,
+    record CancelAgent(
+            @JsonProperty("status") CancelAgentStatus status,
             @JsonProperty("exitCode") int exitCode,
             @JsonProperty("error") String error)
             implements EnvironmentConnectorResult {
-        public Terminate {
+        public CancelAgent {
             Objects.requireNonNull(status, "status is required");
         }
 
-        public Terminate(TerminateStatus status, int exitCode) {
+        public CancelAgent(CancelAgentStatus status, int exitCode) {
             this(status, exitCode, null);
         }
     }

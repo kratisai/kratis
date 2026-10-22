@@ -66,6 +66,7 @@ public class ExecutionEnvironmentService {
     private final ExecutionActivityPersistenceService executionActivityPersistenceService;
     private final String connectUrl;
     private final TransactionTemplate terminationTemplate;
+    private final TransactionTemplate resumeIntentTemplate;
 
     public ExecutionEnvironmentService(
             ExecutionEnvironmentRepository executionEnvironmentRepository,
@@ -95,6 +96,8 @@ public class ExecutionEnvironmentService {
         this.connectUrl = sandboxProperties.getConnectUrl();
         this.terminationTemplate = new TransactionTemplate(transactionManager);
         this.terminationTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.resumeIntentTemplate = new TransactionTemplate(transactionManager);
+        this.resumeIntentTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     private void requireTeamMembership(UUID userId, UUID teamId) {
@@ -342,17 +345,18 @@ public class ExecutionEnvironmentService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Environment has no configured sandbox provider");
         }
 
-        // Two-phase resume: the intent commits before any Docker call.
-        commitResumeIntent(teamId, envId);
+        // Two-phase resume: the intent must commit before any Docker call so the
+        // connector's registration cannot be overwritten by this transaction.
+        resumeIntentTemplate.executeWithoutResult(status -> commitResumeIntent(teamId, envId));
 
         try {
             sandboxProvisioningService.reprovisionEnvironment(env);
         } catch (ResponseStatusException e) {
-            rollbackResume(envId, teamId);
+            resumeIntentTemplate.executeWithoutResult(status -> rollbackResume(envId, teamId));
             throw e;
         } catch (Exception e) {
             logger.error("Failed to resume sandbox for environment {}", envId, e);
-            rollbackResume(envId, teamId);
+            resumeIntentTemplate.executeWithoutResult(status -> rollbackResume(envId, teamId));
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to resume environment");
         }
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
@@ -365,10 +369,19 @@ public class ExecutionEnvironmentService {
                             teamId, execution.getChat().getId(), execution.getId()));
                 });
 
-        return toDto(env);
+        // The outer transaction loaded `env` before the resume. Read the row in
+        // a new transaction so the response reflects the committed status.
+        return resumeIntentTemplate.execute(status -> executionEnvironmentRepository
+                .findByTeamIdAndId(teamId, envId)
+                .map(this::toDto)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Environment not found")));
     }
 
-    /** Commits PENDING_CONNECT ahead of the Docker spawn, in its own transaction. */
+    /**
+     * Commits PENDING_CONNECT ahead of the Docker spawn. Call through {@link #resumeIntentTemplate};
+     * a self-invocation here would join the caller's transaction and let its late PENDING_CONNECT
+     * write overwrite the connector's CONNECTED registration.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void commitResumeIntent(UUID teamId, UUID envId) {
         ExecutionEnvironment env = executionEnvironmentRepository

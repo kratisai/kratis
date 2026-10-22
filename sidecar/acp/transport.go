@@ -234,6 +234,14 @@ func (t *AcpTransport) readStdout() {
 			if p, ok := raw["params"].(map[string]interface{}); ok {
 				paramsMap = p
 			}
+			if methodStr == "session/update" {
+				// Session state must be applied in stream order: a request that
+				// follows an update may reference state that update establishes
+				// (toolCallId correlation in particular). Requests stay on their
+				// own goroutines so a blocking permission does not stall stdout.
+				t.onNotification(methodStr, paramsMap, id, hasID)
+				continue
+			}
 			t.notificationWg.Add(1)
 			go func(method string, params map[string]interface{}, msgID interface{}, msgHasID bool) {
 				defer t.notificationWg.Done()

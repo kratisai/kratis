@@ -117,12 +117,12 @@ const (
 	PromptFailed    PromptStatus = "failed"
 )
 
-// TerminateStatus is the closed set of env.terminate result status values.
-type TerminateStatus string
+// CancelAgentStatus is the closed set of env.cancel_agent result status values.
+type CancelAgentStatus string
 
 const (
-	TerminateCompleted  TerminateStatus = "completed"
-	TerminateTerminated TerminateStatus = "terminated"
+	CancelAgentCompleted CancelAgentStatus = "completed"
+	CancelAgentCancelled CancelAgentStatus = "cancelled"
 )
 
 // RegisterResultType is the discriminator for the env.register result payload.
@@ -374,16 +374,16 @@ type AcpPromptResult struct {
 	Error      string       `json:"error,omitempty"`
 }
 
-// TerminateParams is the parameters payload for the env.terminate method.
-type TerminateParams struct {
+// CancelAgentParams is the parameters payload for the env.cancel_agent method.
+type CancelAgentParams struct {
 	// Empty - session is identified by the WebSocket connection
 }
 
-// TerminateResult is the success response payload for env.terminate.
-type TerminateResult struct {
-	Status   TerminateStatus `json:"status"`
-	ExitCode int             `json:"exitCode"`
-	Error    string          `json:"error,omitempty"`
+// CancelAgentResult is the success response payload for env.cancel_agent.
+type CancelAgentResult struct {
+	Status   CancelAgentStatus `json:"status"`
+	ExitCode int               `json:"exitCode"`
+	Error    string            `json:"error,omitempty"`
 }
 
 // GitDiffStatus represents file change status in diff summary.

@@ -164,6 +164,62 @@ func TestReadStdout_MultipleConcurrentNotifications(t *testing.T) {
 	<-transport.StdoutDone()
 }
 
+// TestReadStdout_AppliesSessionUpdateBeforeFollowingRequest verifies that
+// session state is ordered with respect to a request that refers to it. When
+// notifications were dispatched concurrently, session/request_permission could
+// correlate against a stale toolCalls view and fold a distinct prompt onto the
+// previous actionId, so the control plane rejected it as a duplicate.
+func TestReadStdout_AppliesSessionUpdateBeforeFollowingRequest(t *testing.T) {
+	pr, pw := io.Pipe()
+
+	requestHandled := make(chan struct{})
+	updateDone := make(chan struct{})
+	transport := NewAcpTransport(
+		nil, pr, nil,
+		func(method string, _ map[string]interface{}, _ interface{}, _ bool) {
+			switch method {
+			case "session/update":
+				time.Sleep(50 * time.Millisecond)
+				close(updateDone)
+			case "session/request_permission":
+				select {
+				case <-updateDone:
+				default:
+					t.Error("request was handled before the preceding session/update completed")
+				}
+				close(requestHandled)
+			}
+		},
+		nil,
+	)
+
+	transport.Start()
+
+	go func() {
+		for _, msg := range []map[string]interface{}{
+			{"jsonrpc": "2.0", "method": "session/update", "params": map[string]interface{}{}},
+			{
+				"jsonrpc": "2.0",
+				"method":  "session/request_permission",
+				"params":  map[string]interface{}{},
+				"id":      float64(7),
+			},
+		} {
+			msgBytes, _ := json.Marshal(msg)
+			_, _ = fmt.Fprintf(pw, "%s\n", msgBytes)
+		}
+		_ = pw.Close()
+	}()
+
+	select {
+	case <-requestHandled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("request was not handled")
+	}
+
+	<-transport.StdoutDone()
+}
+
 // TestReadStdout_ResponseRoutedDuringSlowPermissionHandler is an integration-style
 // test that simulates the exact Qwen deadlock scenario:
 // 1. Sidecar sends session/prompt (id=3) and blocks waiting for response

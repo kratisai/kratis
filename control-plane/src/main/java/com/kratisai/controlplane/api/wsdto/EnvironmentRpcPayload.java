@@ -70,7 +70,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
                         case Exec ignored -> EnvironmentConnectorResult.Exec.class;
                         case LaunchAcpAgent ignored -> EnvironmentConnectorResult.LaunchAcpAgent.class;
                         case AcpPrompt ignored -> EnvironmentConnectorResult.AcpPrompt.class;
-                        case Terminate ignored -> EnvironmentConnectorResult.Terminate.class;
+                        case CancelAgent ignored -> EnvironmentConnectorResult.CancelAgent.class;
                         case RegisterGitAuth ignored -> EnvironmentConnectorResult.RegisterGitAuth.class;
                         case RegisterGitIdentity ignored -> EnvironmentConnectorResult.RegisterGitIdentity.class;
                         case GitDiffSummary ignored -> EnvironmentConnectorResult.GitDiffSummary.class;
@@ -553,9 +553,9 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         }
     }
 
-    /** Terminate the sandbox execution. */
-    record Terminate() implements OutboundRequestPayload<EnvironmentConnectorResult.Terminate>, NoParamsPayload {
-        public static final String METHOD = "env.terminate";
+    /** Cancel running agent execution process. */
+    record CancelAgent() implements OutboundRequestPayload<EnvironmentConnectorResult.CancelAgent>, NoParamsPayload {
+        public static final String METHOD = "env.cancel_agent";
 
         @Override
         public String method() {

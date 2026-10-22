@@ -827,7 +827,7 @@ class ProtocolConformanceTest {
             case "env.exec" -> EnvironmentConnectorResult.Exec.class;
             case "env.launch_acp_agent" -> EnvironmentConnectorResult.LaunchAcpAgent.class;
             case "env.acp_prompt" -> EnvironmentConnectorResult.AcpPrompt.class;
-            case "env.terminate" -> EnvironmentConnectorResult.Terminate.class;
+            case "env.cancel_agent" -> EnvironmentConnectorResult.CancelAgent.class;
             case "env.registerGitAuth" -> EnvironmentConnectorResult.RegisterGitAuth.class;
             case "env.registerGitIdentity" -> EnvironmentConnectorResult.RegisterGitIdentity.class;
             case "env.git_diff_summary" -> EnvironmentConnectorResult.GitDiffSummary.class;
@@ -850,7 +850,7 @@ class ProtocolConformanceTest {
             case "exec" -> EnvironmentConnectorResult.Exec.class;
             case "launch_acp_agent" -> EnvironmentConnectorResult.LaunchAcpAgent.class;
             case "acp_prompt" -> EnvironmentConnectorResult.AcpPrompt.class;
-            case "terminate" -> EnvironmentConnectorResult.Terminate.class;
+            case "cancel_agent" -> EnvironmentConnectorResult.CancelAgent.class;
             case "register_git_auth" -> EnvironmentConnectorResult.RegisterGitAuth.class;
             case "register_git_identity" -> EnvironmentConnectorResult.RegisterGitIdentity.class;
             case "git_diff_summary" -> EnvironmentConnectorResult.GitDiffSummary.class;

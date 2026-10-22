@@ -611,7 +611,7 @@ func TestClient_HandleServerRequest_Errors(t *testing.T) {
 	})
 
 	c.handleServerRequest(JsonRpcRequest{
-		Method: "env.terminate",
+		Method: "env.cancel_agent",
 		Params: "not a struct",
 		ID:     uint64(1005),
 	})

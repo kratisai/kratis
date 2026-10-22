@@ -1,5 +1,5 @@
 {
   "jsonrpc": "2.0",
-  "method": "env.terminate",
+  "method": "env.cancel_agent",
   "id": 15
 }

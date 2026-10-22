@@ -1623,7 +1623,10 @@ class SandboxExecutionServiceTest {
 
         verify(environmentRpcClient)
                 .request(
-                        eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.Terminate.class), anyLong(), any(TimeUnit.class));
+                        eq(ENVIRONMENT_ID),
+                        any(EnvironmentRpcPayload.CancelAgent.class),
+                        anyLong(),
+                        any(TimeUnit.class));
     }
 
     @Test
@@ -1682,7 +1685,7 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
-    void terminateExecution_withoutPendingPermission_sendsOnlyTerminate() throws Exception {
+    void terminateExecution_withoutPendingPermission_sendsOnlyCancelAgent() throws Exception {
         SandboxExecution execution = createTestExecution();
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sessionRegistry.getSessionForEnvironment(execution.getEnvironment().getId()))
@@ -1696,7 +1699,10 @@ class SandboxExecutionServiceTest {
         verify(environmentRpcClient, never()).replyError(any(), any(), any());
         verify(environmentRpcClient)
                 .request(
-                        eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.Terminate.class), anyLong(), any(TimeUnit.class));
+                        eq(ENVIRONMENT_ID),
+                        any(EnvironmentRpcPayload.CancelAgent.class),
+                        anyLong(),
+                        any(TimeUnit.class));
     }
 
     @Test
@@ -1777,7 +1783,10 @@ class SandboxExecutionServiceTest {
 
         verify(environmentRpcClient)
                 .request(
-                        eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.Terminate.class), anyLong(), any(TimeUnit.class));
+                        eq(ENVIRONMENT_ID),
+                        any(EnvironmentRpcPayload.CancelAgent.class),
+                        anyLong(),
+                        any(TimeUnit.class));
         verify(sandboxProvider, never()).destroy(any());
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
         assertThat(execution.getEnvironment().getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
