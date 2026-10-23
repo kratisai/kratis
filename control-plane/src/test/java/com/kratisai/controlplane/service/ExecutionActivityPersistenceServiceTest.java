@@ -460,18 +460,93 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
-    void onExecutionComplete_closesTrailingOpenStreams() {
+    void onExecutionComplete_closesTrailingOpenStreamsAndCancelsPendingHitl() throws Exception {
         UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         SandboxExecutionActivity trailing =
                 row(executionId, 1, "msg-1", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "trailing message");
+        SandboxExecutionActivity pending = pendingApproval(executionId, "tool-call-1");
         when(repository.findByExecutionIdAndStatusOrderBySequenceAsc(executionId, ActivityStatus.IN_PROGRESS))
                 .thenReturn(List.of(trailing));
+        when(repository.findByExecutionIdAndStatus(executionId, ActivityStatus.PENDING))
+                .thenReturn(List.of(pending));
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution(executionId, teamId)));
 
         service.onExecutionComplete(
                 new SandboxExecutionCompleteEvent(UUID.randomUUID(), executionId, 0, SandboxExecutionStatus.COMPLETED));
 
         assertThat(trailing.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+        assertThat(pending.getStatus()).isEqualTo(ActivityStatus.FAILED);
         verify(repository).saveAll(List.of(trailing));
+        verify(repository).save(pending);
+        verify(eventPublisher).publishEvent(any(SandboxExecutionActivityEvent.class));
+    }
+
+    @Test
+    void cancelPendingActivities_marksRowsFailedAndPublishesCancelledDetail() throws Exception {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        SandboxExecutionActivity pending = pendingApproval(executionId, "tool-call-1");
+        when(repository.findByExecutionIdAndStatus(executionId, ActivityStatus.PENDING))
+                .thenReturn(List.of(pending));
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution(executionId, teamId)));
+
+        service.cancelPendingActivities(executionId, "execution terminated", HitlResolver.system());
+
+        assertThat(pending.getStatus()).isEqualTo(ActivityStatus.FAILED);
+        assertThat(service.detailOf(pending).hitl().response()).isEqualTo(HitlResponse.CANCELLED);
+        assertThat(service.detailOf(pending).hitl().resolvedBy().kind()).isEqualTo(HitlResolverKind.SYSTEM);
+        ArgumentCaptor<SandboxExecutionActivityEvent> captor =
+                ArgumentCaptor.forClass(SandboxExecutionActivityEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().teamId()).isEqualTo(teamId);
+        assertThat(captor.getValue().actionId()).isEqualTo("tool-call-1");
+    }
+
+    @Test
+    void cancelPendingActivities_ignoresAlreadyResolvedRows() {
+        UUID executionId = UUID.randomUUID();
+        when(repository.findByExecutionIdAndStatus(executionId, ActivityStatus.PENDING))
+                .thenReturn(List.of());
+
+        service.cancelPendingActivities(executionId, "execution terminated", HitlResolver.system());
+
+        verify(repository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    private SandboxExecutionActivity pendingApproval(UUID executionId, String actionId) throws Exception {
+        SandboxExecutionActivity activity =
+                row(executionId, 1, actionId, ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
+        HitlRequestSnapshot snapshot = new HitlRequestSnapshot(
+                executionId,
+                actionId,
+                HitlKind.APPROVAL,
+                "Approve",
+                "rm -rf /",
+                null,
+                null,
+                "Approve",
+                "execute",
+                List.of(),
+                null,
+                null,
+                null);
+        activity.setDetail(objectMapper.writeValueAsString(
+                emptyActivityDetail().withHitl(ActivityHitl.from(snapshot, HitlState.AWAITING_HUMAN))));
+        return activity;
+    }
+
+    private static SandboxExecution execution(UUID executionId, UUID teamId) {
+        Team team = new Team();
+        team.setId(teamId);
+        ChatEntity chat = new ChatEntity();
+        chat.setId(UUID.randomUUID());
+        chat.setTeam(team);
+        SandboxExecution execution = new SandboxExecution();
+        execution.setId(executionId);
+        execution.setChat(chat);
+        return execution;
     }
 
     @Test

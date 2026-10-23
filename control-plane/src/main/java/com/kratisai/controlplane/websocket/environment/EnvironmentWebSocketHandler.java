@@ -11,7 +11,6 @@ import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.config.WebSocketConfig;
 import com.kratisai.controlplane.service.EnvironmentRpcClient;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
-import com.kratisai.controlplane.service.PendingHitlRegistry;
 import com.kratisai.controlplane.service.WebSocketDispatch;
 import com.kratisai.controlplane.websocket.JsonRpcInbound;
 import jakarta.annotation.PreDestroy;
@@ -60,7 +59,6 @@ public class EnvironmentWebSocketHandler extends TextWebSocketHandler {
     private final Map<String, EnvironmentRpcHandler> handlers = new ConcurrentHashMap<>();
 
     private final EnvironmentSessionRegistry sessionRegistry;
-    private final PendingHitlRegistry pendingHitlRegistry;
     private final EnvironmentRpcClient environmentRpcClient;
     private final WebSocketDispatch dispatch;
     private final Executor messageExecutor;
@@ -71,7 +69,6 @@ public class EnvironmentWebSocketHandler extends TextWebSocketHandler {
     public EnvironmentWebSocketHandler(
             List<EnvironmentRpcHandler> rpcHandlers,
             EnvironmentSessionRegistry sessionRegistry,
-            PendingHitlRegistry pendingHitlRegistry,
             EnvironmentRpcClient environmentRpcClient,
             WebSocketDispatch dispatch,
             ObjectMapper objectMapper,
@@ -79,7 +76,6 @@ public class EnvironmentWebSocketHandler extends TextWebSocketHandler {
             @Qualifier("wsCleanupScheduler") TaskScheduler cleanupScheduler) {
         this.objectMapper = objectMapper.copy().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true);
         this.sessionRegistry = sessionRegistry;
-        this.pendingHitlRegistry = pendingHitlRegistry;
         this.environmentRpcClient = environmentRpcClient;
         this.dispatch = dispatch;
         this.messageExecutor = messageExecutor;
@@ -113,13 +109,8 @@ public class EnvironmentWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionClosed(@NonNull WebSocketSession session, @NonNull CloseStatus status) {
         sessionExecutors.remove(session.getId());
-        var removedHitl = pendingHitlRegistry.removeBySession(session);
-        if (!removedHitl.isEmpty()) {
-            logger.info(
-                    "Cleaned up {} pending HITL requests for disconnected session {}",
-                    removedHitl.size(),
-                    session.getId());
-        }
+        // Pending HITL activities stay PENDING across a socket drop. The sidecar's reconnect
+        // registration reconciles them once it reports which requests are still live.
         environmentRpcClient.failAll(session.getId(), "Environment WebSocket session closed: " + session.getId());
         sessionRegistry.removeSession(session.getId());
         logger.info("Environment WebSocket connection closed: {} with status {}", session.getId(), status);

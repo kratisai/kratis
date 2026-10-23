@@ -139,6 +139,15 @@ methods:
     name: result
     schema:
       $ref: ./schemas/results/hitl_activity.schema.yaml
+- name: env.hitl_resolved
+  summary: Deliver a resolved HITL decision to the sidecar
+  x-kratis-direction: control-plane-to-connector
+  x-kratis-message-kind: notification
+  params:
+  - name: params
+    required: true
+    schema:
+      $ref: ./schemas/requests/hitl_resolved.schema.yaml
 - name: env.exec
   summary: Execute a shell command in the sidecar workspace
   x-kratis-direction: control-plane-to-connector

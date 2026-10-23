@@ -1,25 +1,37 @@
 package com.kratisai.controlplane.websocket.environment;
 
+import com.kratisai.controlplane.api.wsdto.ActivityDetail;
+import com.kratisai.controlplane.api.wsdto.ActivityHitl;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.EnvironmentRegisterResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
+import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlResolution;
+import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
+import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.event.EnvironmentRegisteredEvent;
+import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
-import com.kratisai.controlplane.service.PendingHitlRegistry;
+import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
@@ -34,18 +46,21 @@ public class EnvironmentRegisterRpcHandler
     private static final Pattern CONTROL_CHARACTERS = Pattern.compile("\\p{Cntrl}");
 
     private final ExecutionEnvironmentRepository executionEnvironmentRepository;
+    private final SandboxExecutionActivityRepository activityRepository;
+    private final ExecutionActivityPersistenceService activityPersistenceService;
     private final EnvironmentSessionRegistry sessionRegistry;
-    private final PendingHitlRegistry pendingHitlRegistry;
     private final ApplicationEventPublisher eventPublisher;
 
     public EnvironmentRegisterRpcHandler(
             ExecutionEnvironmentRepository executionEnvironmentRepository,
+            SandboxExecutionActivityRepository activityRepository,
+            ExecutionActivityPersistenceService activityPersistenceService,
             EnvironmentSessionRegistry sessionRegistry,
-            PendingHitlRegistry pendingHitlRegistry,
             ApplicationEventPublisher eventPublisher) {
         this.executionEnvironmentRepository = executionEnvironmentRepository;
+        this.activityRepository = activityRepository;
+        this.activityPersistenceService = activityPersistenceService;
         this.sessionRegistry = sessionRegistry;
-        this.pendingHitlRegistry = pendingHitlRegistry;
         this.eventPublisher = eventPublisher;
     }
 
@@ -104,11 +119,6 @@ public class EnvironmentRegisterRpcHandler
         String oldSessionId = sessionRegistry.replaceSessionForEnvironment(sessionId, env.getId());
         if (oldSessionId != null) {
             logger.info("Replaced old session {} for environment {}", oldSessionId, env.getId());
-
-            int reboundCount = pendingHitlRegistry.rebindBySession(oldSessionId, sessionId);
-            if (reboundCount > 0) {
-                logger.info("Rebound {} pending HITL requests for environment {}", reboundCount, env.getId());
-            }
         }
 
         if (env.getStatus() != EnvironmentStatus.CONNECTED) {
@@ -121,9 +131,72 @@ public class EnvironmentRegisterRpcHandler
         env.setLastHeartbeat(Instant.now());
         executionEnvironmentRepository.save(env);
 
+        reconcilePendingHitl(env, reconnectState.pendingHitlIds());
+
         eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
 
         return EnvironmentRegisterResult.reconnected(env.getId().toString());
+    }
+
+    /**
+     * The sidecar is the authority on which requests it can still answer. Anything the database
+     * still considers PENDING but the sidecar no longer reports is stale; anything the sidecar
+     * reports that the database already resolved is replayed to it.
+     */
+    private void reconcilePendingHitl(ExecutionEnvironment env, List<String> sidecarPendingIds) {
+        Set<String> reported = new HashSet<>(sidecarPendingIds != null ? sidecarPendingIds : List.of());
+        List<SandboxExecutionActivity> pending =
+                activityRepository.findByEnvironmentIdAndStatus(env.getId(), ActivityStatus.PENDING);
+        Set<String> pendingActionIds = new HashSet<>();
+        for (SandboxExecutionActivity activity : pending) {
+            if (activity.getActionId() == null || !reported.contains(activity.getActionId())) {
+                activityPersistenceService.cancelActivity(
+                        activity, "Sidecar reconnected without this HITL request", HitlResolver.system());
+            } else {
+                pendingActionIds.add(activity.getActionId());
+            }
+        }
+
+        for (String actionId : reported) {
+            if (pendingActionIds.contains(actionId)) {
+                continue;
+            }
+            Optional<SandboxExecutionActivity> latest =
+                    activityRepository
+                            .findLatestByEnvironmentIdAndActionId(env.getId(), actionId, PageRequest.of(0, 1))
+                            .stream()
+                            .findFirst();
+            if (latest.isEmpty()) {
+                logger.info(
+                        "Sidecar reported pending HITL {} for environment {}, but no activity exists",
+                        actionId,
+                        env.getId());
+                continue;
+            }
+            replayResolved(env, latest.get());
+        }
+    }
+
+    private void replayResolved(ExecutionEnvironment env, SandboxExecutionActivity activity) {
+        if (activity.getStatus() == ActivityStatus.PENDING || activity.getActionId() == null) {
+            return;
+        }
+        ActivityDetail detail = activityPersistenceService.detailOf(activity);
+        ActivityHitl hitl = detail != null ? detail.hitl() : null;
+        if (hitl == null || hitl.response() == null) {
+            return;
+        }
+        logger.info("Replaying resolved HITL {} to reconnecting environment {}", activity.getActionId(), env.getId());
+        eventPublisher.publishEvent(new SandboxExecutionHitlResolvedEvent(
+                env.getTeam().getId(),
+                new HitlResolution(
+                        activity.getExecutionId(),
+                        activity.getActionId(),
+                        hitl.kind() != null ? hitl.kind() : HitlKind.APPROVAL,
+                        hitl.response(),
+                        hitl.optionId(),
+                        hitl.content(),
+                        hitl.resolvedBy() != null ? hitl.resolvedBy() : HitlResolver.system())));
     }
 
     private EnvironmentResponsePayload handleInitialRegistration(

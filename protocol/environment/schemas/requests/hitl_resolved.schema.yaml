@@ -1,0 +1,25 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: HitlResolvedParams
+type: object
+required:
+- actionId
+- response
+properties:
+  actionId:
+    type: string
+    description: The action id of the HITL request being resolved.
+  response:
+    type: string
+    enum:
+    - "approved"
+    - "answered"
+    - "declined"
+    - "cancelled"
+    description: The user's answer to the HITL request.
+  optionId:
+    type: string
+    description: Selected option (response=approved only).
+  content:
+    type: object
+    description: Submitted form payload (response=answered only).
+additionalProperties: false

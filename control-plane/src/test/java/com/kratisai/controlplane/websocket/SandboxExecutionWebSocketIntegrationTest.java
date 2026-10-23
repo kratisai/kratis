@@ -282,7 +282,6 @@ class SandboxExecutionWebSocketIntegrationTest {
                         .expectTrigger("execution_complete", 1),
                 sidecar -> sidecar.withAcpCommand("rm -rf /")
                         .expectTrigger("env.acp_prompt", 1)
-                        .expectTrigger("HITL request cancelled: execution terminated", 1)
                         .expectTrigger("env.cancel_agent", 1))) {
             assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 5, TimeUnit.SECONDS))
                     .isTrue();
@@ -291,11 +290,8 @@ class SandboxExecutionWebSocketIntegrationTest {
 
             sandboxExecutionService.terminateExecution(executionId);
 
-            assertThat(pair.sidecar().awaitTrigger("HITL request cancelled: execution terminated", 5, TimeUnit.SECONDS))
-                    .as("Sidecar should receive HITL cancellation error on termination")
-                    .isTrue();
             assertThat(pair.sidecar().awaitTrigger("env.cancel_agent", 5, TimeUnit.SECONDS))
-                    .as("Sidecar should receive env.cancel_agent after pending permission cancellation")
+                    .as("Sidecar should receive env.cancel_agent on termination")
                     .isTrue();
             assertThat(pair.client().awaitTrigger("\"state\":\"resolved\"", 5, TimeUnit.SECONDS))
                     .as("UI client should receive resolved state so the pending approval clears")

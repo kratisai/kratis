@@ -7,12 +7,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.*;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ModelProviderRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.repository.UserRepository;
 import com.kratisai.controlplane.service.*;
@@ -50,7 +52,7 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
  * <li>Client 1 calls POST /api/v1/hitl/resolve
  * <li>Assert BOTH UI clients receive resolved activity
  * <li>Assert sidecar receives the JSON-RPC approval response
- * <li>Verify the pending HITL request is cleared from PendingHitlRegistry
+ * <li>Verify the persisted HITL activity leaves PENDING state
  * <li>Verify activity log permission events are consistent across both clients
  * </ol>
  */
@@ -94,7 +96,7 @@ class ActivityLogSyncIntegrationTest {
     private DatabaseCleaner databaseCleaner;
 
     @Autowired
-    private PendingHitlRegistry pendingHitlRegistry;
+    private SandboxExecutionActivityRepository activityRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -247,8 +249,9 @@ class ActivityLogSyncIntegrationTest {
                 .as("Client 2 permission_required should contain the command")
                 .isTrue();
 
-        // 8. Verify pending permission is registered before approval
-        assertThat(pendingHitlRegistry.find(executionId, "tool-call-100")).isNotNull();
+        // 8. Verify the pending HITL activity is persisted before approval
+        assertThat(activityRepository.findByExecutionIdAndStatus(executionId, ActivityStatus.PENDING))
+                .isNotEmpty();
 
         // 9. Client 1 approves the permission via REST API
         MockMvc mockMvc =
@@ -294,10 +297,10 @@ class ActivityLogSyncIntegrationTest {
                 .as("Client 2 resolved event should contain the resolving user's display name")
                 .isTrue();
 
-        // 12. Verify pending permission is cleared from registry after approval
-        assertThat(pendingHitlRegistry.find(executionId, "tool-call-100"))
-                .as("Pending permission should be removed from registry after approval")
-                .isNull();
+        // 12. Verify the activity left PENDING after approval
+        assertThat(activityRepository.findByExecutionIdAndStatus(executionId, ActivityStatus.PENDING))
+                .as("Pending HITL activity should be resolved after approval")
+                .isEmpty();
 
         // 13. Verify activity log consistency: both clients received the same
         // permission events Both clients should have received:

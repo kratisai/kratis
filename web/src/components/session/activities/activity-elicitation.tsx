@@ -1,5 +1,6 @@
 import { CheckCircle2, HelpCircle, XCircle } from 'lucide-react'
 import { useState } from 'react'
+import { toast } from 'sonner'
 
 import type { ElicitationActivity } from '@/types/execution-activity-types'
 
@@ -16,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { queryClient } from '@/lib/query-client'
 import { useActivityStore } from '@/store/activity-store'
 
 interface ActivityElicitationProps {
@@ -65,7 +67,8 @@ export function ActivityElicitation({ activity, executionId }: ActivityElicitati
         feedback,
       )
     } catch {
-      // handled via websocket resolution
+      toast.error('This request has expired or was resolved elsewhere.')
+      void queryClient.invalidateQueries()
     } finally {
       setIsSubmitting(false)
     }

@@ -11,6 +11,7 @@ import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
+import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.HitlState;
 import com.kratisai.controlplane.api.wsdto.StopReason;
@@ -87,6 +88,15 @@ public class ExecutionActivityPersistenceService {
                 .orElse(false);
     }
 
+    public boolean hasPendingHitl(UUID executionId, String actionId) {
+        return repository
+                .findByExecutionIdAndActionId(executionId, actionId)
+                .filter(activity -> activity.getStatus() == ActivityStatus.PENDING)
+                .map(this::detailOf)
+                .map(detail -> detail.hitl() != null && detail.hitl().state() == HitlState.AWAITING_HUMAN)
+                .orElse(false);
+    }
+
     public ActivityDetail detailOf(SandboxExecutionActivity activity) {
         String detail = activity.getDetail();
         if (detail == null || detail.isBlank()) {
@@ -107,6 +117,57 @@ public class ExecutionActivityPersistenceService {
         }
         open.forEach(activity -> activity.setStatus(ActivityStatus.COMPLETED));
         repository.saveAll(open);
+    }
+
+    @Transactional
+    public void cancelPendingActivities(UUID executionId, String reason, HitlResolver resolver) {
+        List<SandboxExecutionActivity> pending =
+                repository.findByExecutionIdAndStatus(executionId, ActivityStatus.PENDING);
+        if (pending.isEmpty()) {
+            return;
+        }
+        Optional<UUID> teamId = teamIdFor(executionId);
+        for (SandboxExecutionActivity activity : pending) {
+            cancelActivity(activity, reason, resolver, teamId.orElse(null));
+        }
+    }
+
+    @Transactional
+    public void cancelActivity(SandboxExecutionActivity activity, String reason, HitlResolver resolver) {
+        if (activity.getStatus() != ActivityStatus.PENDING) {
+            return;
+        }
+        cancelActivity(
+                activity, reason, resolver, teamIdFor(activity.getExecutionId()).orElse(null));
+    }
+
+    private void cancelActivity(SandboxExecutionActivity activity, String reason, HitlResolver resolver, UUID teamId) {
+        ActivityDetail detail = detailOf(activity);
+        ActivityHitl hitl = detail != null ? detail.hitl() : null;
+        HitlKind kind = hitl != null && hitl.kind() != null ? hitl.kind() : HitlKind.APPROVAL;
+        HitlResolution resolution = new HitlResolution(
+                activity.getExecutionId(), activity.getActionId(), kind, HitlResponse.CANCELLED, null, null, resolver);
+        activity.setStatus(ActivityStatus.FAILED);
+        if (hitl != null) {
+            activity.setDetail(toJson(detail.withHitl(hitl.withResolution(resolution))));
+        } else if (detail != null) {
+            activity.setDetail(toJson(detail.withHitl(ActivityHitl.from(resolution))));
+        }
+        repository.save(activity);
+        logger.info(
+                "Cancelled pending HITL activity {} for execution {}: {}",
+                activity.getActionId(),
+                activity.getExecutionId(),
+                reason);
+        if (teamId != null) {
+            publishActivity(teamId, activity);
+        }
+    }
+
+    private Optional<UUID> teamIdFor(UUID executionId) {
+        return executionRepository
+                .findById(executionId)
+                .map(execution -> execution.getChat().getTeam().getId());
     }
 
     @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
@@ -247,6 +308,7 @@ public class ExecutionActivityPersistenceService {
     @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
     public void onExecutionComplete(SandboxExecutionCompleteEvent event) {
         closeOpenStreams(event.executionId());
+        cancelPendingActivities(event.executionId(), "Execution completed", HitlResolver.system());
     }
 
     @Transactional

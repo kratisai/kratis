@@ -42,6 +42,7 @@ var EnvironmentMethods = []MethodDef{
 	{Name: "env.acp_initialized", MessageKind: Notification, Direction: ConnectorToControlPlane, Params: &AcpInitializedParams{}},
 	{Name: "env.acp_prompt_complete", MessageKind: Notification, Direction: ConnectorToControlPlane, Params: &AcpPromptCompleteParams{}},
 	{Name: "env.hitl_activity", MessageKind: Request, Direction: ConnectorToControlPlane, Params: &HitlActivityParams{}, Result: &HitlActivityResult{}},
+	{Name: "env.hitl_resolved", MessageKind: Notification, Direction: ControlPlaneToConnector, Params: &HitlResolvedParams{}},
 	{Name: "env.exec", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &ExecParams{}, Result: &ExecResult{}},
 	{Name: "env.registerGitAuth", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &RegisterGitAuthParams{}, Result: &RegisterGitAuthResult{}},
 	{Name: "env.registerGitIdentity", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &RegisterGitIdentityParams{}, Result: &RegisterGitIdentityResult{}},

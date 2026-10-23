@@ -10,10 +10,7 @@ import com.kratisai.controlplane.api.restdto.SteerCommentDto;
 import com.kratisai.controlplane.api.restdto.SteerExecutionRequest;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
-import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResolver;
-import com.kratisai.controlplane.api.wsdto.HitlResponse;
-import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.PromptStatus;
 import com.kratisai.controlplane.api.wsdto.StopReason;
 import com.kratisai.controlplane.config.LiteLLMProperties;
@@ -21,7 +18,6 @@ import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.model.event.EnvironmentRegisteredEvent;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
-import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionSuspendedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityType;
@@ -68,7 +64,6 @@ public class SandboxExecutionService {
     private final TransactionTemplate transactionTemplate;
     private final TransactionTemplate finalizeUsageTransactionTemplate;
     private final SandboxProvisioningService sandboxProvisioningService;
-    private final PendingHitlRegistry pendingHitlRegistry;
     private final VirtualKeyService virtualKeyService;
     private final EnvironmentRpcClient environmentRpcClient;
     private final LiteLLMProperties litellmProperties;
@@ -90,7 +85,6 @@ public class SandboxExecutionService {
             CanvasService canvasService,
             ModelProviderRepository modelProviderRepository,
             SandboxProvisioningService sandboxProvisioningService,
-            PendingHitlRegistry pendingHitlRegistry,
             VirtualKeyService virtualKeyService,
             EnvironmentRpcClient environmentRpcClient,
             LiteLLMProperties litellmProperties,
@@ -109,7 +103,6 @@ public class SandboxExecutionService {
         this.canvasService = canvasService;
         this.modelProviderRepository = modelProviderRepository;
         this.sandboxProvisioningService = sandboxProvisioningService;
-        this.pendingHitlRegistry = pendingHitlRegistry;
         this.virtualKeyService = virtualKeyService;
         this.environmentRpcClient = environmentRpcClient;
         this.litellmProperties = litellmProperties;
@@ -751,37 +744,7 @@ public class SandboxExecutionService {
     }
 
     public void cancelPendingPermissions(SandboxExecution execution, String reason) {
-        List<PendingHitlRegistry.PendingHitl> pendingHitls = pendingHitlRegistry.removeAll(execution.getId());
-        if (pendingHitls.isEmpty()) {
-            return;
-        }
-        for (PendingHitlRegistry.PendingHitl pendingHitl : pendingHitls) {
-            logger.info(
-                    "Removed pending HITL request for execution {} (kind={}): {}",
-                    execution.getId(),
-                    pendingHitl.request().kind(),
-                    reason);
-            UUID teamId = pendingHitl.teamId();
-            transactionTemplate.executeWithoutResult(
-                    status -> eventPublisher.publishEvent(new SandboxExecutionHitlResolvedEvent(
-                            teamId,
-                            new HitlResolution(
-                                    execution.getId(),
-                                    pendingHitl.request().actionId(),
-                                    pendingHitl.request().kind(),
-                                    HitlResponse.CANCELLED,
-                                    null,
-                                    null,
-                                    HitlResolver.system()))));
-            try {
-                environmentRpcClient.replyError(
-                        execution.getEnvironment().getId(),
-                        pendingHitl.requestId(),
-                        new JsonRpcError(-32000, "HITL request cancelled: " + reason, null));
-            } catch (Exception e) {
-                logger.error("Failed to send cancellation error to environment", e);
-            }
-        }
+        activityPersistenceService.cancelPendingActivities(execution.getId(), reason, HitlResolver.system());
     }
 
     public SandboxExecutionDto toDto(SandboxExecution execution) {

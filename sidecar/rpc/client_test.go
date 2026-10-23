@@ -1506,6 +1506,56 @@ func TestClient_Start_HeartbeatErrorReconnect(t *testing.T) {
 	c.Close()
 }
 
+func TestRequestPermission_AsynchronousHitlResolvedNotification(t *testing.T) {
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req JsonRpcRequest
+			if err := json.Unmarshal(msg, &req); err != nil {
+				continue
+			}
+			if req.Method != "env.hitl_activity" {
+				continue
+			}
+			raw, _ := json.Marshal(req.Params)
+			var params HitlActivityParams
+			_ = json.Unmarshal(raw, &params)
+			_ = conn.WriteJSON(JsonRpcRequest{
+				JsonRPC: "2.0",
+				Method:  "env.hitl_resolved",
+				Params: HitlResolvedParams{
+					ActionID: params.ActionID,
+					Response: HitlApproved,
+					OptionID: "allow",
+				},
+			})
+		}
+	})
+
+	c := connectClient(t, wsURL(srv), "tok")
+	defer c.Close()
+	errChan := make(chan error, 1)
+	go c.readLoop(errChan)
+
+	selected, err := c.RequestPermission(acp.PermissionRequest{ActionID: "tool-call-9", Command: "ls"})
+	if err != nil {
+		t.Fatalf("expected async resolution to succeed, got %v", err)
+	}
+	if selected != "allow" {
+		t.Fatalf("expected option allow, got %q", selected)
+	}
+	c.mu.Lock()
+	pendingCount := len(c.pendingHitl)
+	c.mu.Unlock()
+	if pendingCount != 0 {
+		t.Fatalf("expected pending HITL map to be drained, got %d entries", pendingCount)
+	}
+}
+
 func TestRequestPermission_Cancellation(t *testing.T) {
 	srv := newTestServer(t, func(conn *websocket.Conn) {
 		defer func() { _ = conn.Close() }()
@@ -2092,7 +2142,10 @@ func TestClient_Register_ReconnectState(t *testing.T) {
 	// Simulate setting reconnect state
 	c.mu.Lock()
 	c.lastEventSequence = 42
-	c.pendingHitlIDs = []string{"perm-1", "perm-2"}
+	c.pendingHitl = map[string]chan HitlActivityResult{
+		"perm-1": make(chan HitlActivityResult, 1),
+		"perm-2": make(chan HitlActivityResult, 1),
+	}
 	c.mu.Unlock()
 
 	// Second registration (reconnect)

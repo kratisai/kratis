@@ -269,6 +269,15 @@ type HitlActivityResult struct {
 	Content  map[string]any `json:"content,omitempty"`
 }
 
+// HitlResolvedParams is the control plane's asynchronous answer to a HITL
+// request. The sidecar matches it to the waiting request by actionId.
+type HitlResolvedParams struct {
+	ActionID string         `json:"actionId"`
+	Response HitlResponse   `json:"response"`
+	OptionID string         `json:"optionId,omitempty"`
+	Content  map[string]any `json:"content,omitempty"`
+}
+
 // OutputParams is sent by the sidecar to stream stdout/stderr lines in real-time.
 type OutputParams struct {
 	Line        string       `json:"line"`

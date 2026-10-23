@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.hitl_resolved",
+  "params": {
+    "actionId": "tool-call-42",
+    "response": "approved",
+    "optionId": "allow-once"
+  }
+}

@@ -15,7 +15,6 @@ import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
 import com.kratisai.controlplane.api.wsdto.JsonRpcResponse;
 import com.kratisai.controlplane.service.EnvironmentRpcClient;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
-import com.kratisai.controlplane.service.PendingHitlRegistry;
 import com.kratisai.controlplane.service.WebSocketDispatch;
 import java.time.Duration;
 import java.time.Instant;
@@ -53,9 +52,6 @@ class EnvironmentWebSocketHandlerTest {
     private ApplicationEventPublisher eventPublisher;
 
     @Mock
-    private PendingHitlRegistry pendingHitlRegistry;
-
-    @Mock
     private EnvironmentRpcClient environmentRpcClient;
 
     @Mock
@@ -80,7 +76,6 @@ class EnvironmentWebSocketHandlerTest {
         handler = new EnvironmentWebSocketHandler(
                 Collections.emptyList(),
                 sessionRegistry,
-                pendingHitlRegistry,
                 environmentRpcClient,
                 dispatch,
                 objectMapper,
@@ -103,7 +98,6 @@ class EnvironmentWebSocketHandlerTest {
         new EnvironmentWebSocketHandler(
                 Collections.emptyList(),
                 sessionRegistry,
-                pendingHitlRegistry,
                 environmentRpcClient,
                 dispatch,
                 objectMapper,
@@ -162,7 +156,6 @@ class EnvironmentWebSocketHandlerTest {
         EnvironmentWebSocketHandler handlerWithMock = new EnvironmentWebSocketHandler(
                 List.of(mockRpcHandler),
                 sessionRegistry,
-                pendingHitlRegistry,
                 environmentRpcClient,
                 dispatch,
                 objectMapper,
@@ -201,7 +194,6 @@ class EnvironmentWebSocketHandlerTest {
             EnvironmentWebSocketHandler asyncHandler = new EnvironmentWebSocketHandler(
                     List.of(mockRpcHandler),
                     sessionRegistry,
-                    pendingHitlRegistry,
                     environmentRpcClient,
                     dispatch,
                     objectMapper,
@@ -264,7 +256,6 @@ class EnvironmentWebSocketHandlerTest {
         EnvironmentWebSocketHandler handlerWithMock = new EnvironmentWebSocketHandler(
                 List.of(mockRpcHandler),
                 sessionRegistry,
-                pendingHitlRegistry,
                 environmentRpcClient,
                 dispatch,
                 objectMapper,
