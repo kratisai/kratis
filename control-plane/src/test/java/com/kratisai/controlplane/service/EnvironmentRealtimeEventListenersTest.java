@@ -3,20 +3,19 @@ package com.kratisai.controlplane.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.HitlActivityResult;
+import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
-import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
-import java.time.Instant;
+import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,7 +29,10 @@ import org.springframework.web.socket.WebSocketSession;
 class EnvironmentRealtimeEventListenersTest {
 
     @Mock
-    private PendingHitlRegistry pendingHitlRegistry;
+    private SandboxExecutionRepository executionRepository;
+
+    @Mock
+    private EnvironmentSessionRegistry sessionRegistry;
 
     @Mock
     private EnvironmentRpcClient environmentRpcClient;
@@ -42,64 +44,23 @@ class EnvironmentRealtimeEventListenersTest {
 
     @BeforeEach
     void setUp() {
-        listeners = new EnvironmentRealtimeEventListeners(pendingHitlRegistry, environmentRpcClient);
-        lenient().when(session.getId()).thenReturn("ws-1");
+        listeners = new EnvironmentRealtimeEventListeners(executionRepository, sessionRegistry, environmentRpcClient);
     }
 
-    private PendingHitlRegistry.PendingHitl pendingApproval(Object requestId) {
-        return new PendingHitlRegistry.PendingHitl(
-                new HitlRequestSnapshot(
-                        UUID.randomUUID(),
-                        "tool-call-1",
-                        HitlKind.APPROVAL,
-                        "Approve ls",
-                        "ls",
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null),
-                session,
-                requestId,
-                Instant.now(),
-                UUID.randomUUID());
-    }
-
-    private PendingHitlRegistry.PendingHitl pendingQuestion(Object requestId) {
-        return new PendingHitlRegistry.PendingHitl(
-                new HitlRequestSnapshot(
-                        UUID.randomUUID(),
-                        "el-1",
-                        HitlKind.QUESTION,
-                        "Pick a target",
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        Map.of("type", "object"),
-                        null),
-                session,
-                requestId,
-                Instant.now(),
-                UUID.randomUUID());
+    private void stubOpenSession(UUID environmentId) {
+        when(executionRepository.findEnvironmentIdByExecutionId(any())).thenReturn(Optional.of(environmentId));
+        when(sessionRegistry.getSessionForEnvironment(environmentId)).thenReturn(session);
+        when(session.isOpen()).thenReturn(true);
     }
 
     @Test
-    void onHitlResolved_sendsApprovedToSidecarWhenPending() {
+    void onHitlResolved_sendsApprovedToSidecar() {
         UUID executionId = UUID.randomUUID();
-        UUID teamId = UUID.randomUUID();
-        PendingHitlRegistry.PendingHitl pendingRequest = pendingApproval(42);
-        when(pendingHitlRegistry.remove(executionId, "tool-call-1")).thenReturn(pendingRequest);
-        when(session.isOpen()).thenReturn(true);
+        UUID environmentId = UUID.randomUUID();
+        stubOpenSession(environmentId);
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
-                teamId,
+                UUID.randomUUID(),
                 new HitlResolution(
                         executionId,
                         "tool-call-1",
@@ -109,76 +70,23 @@ class EnvironmentRealtimeEventListenersTest {
                         null,
                         HitlResolver.user(UUID.randomUUID(), "Bob"))));
 
-        ArgumentCaptor<HitlActivityResult> captor = ArgumentCaptor.forClass(HitlActivityResult.class);
-        verify(environmentRpcClient).reply(any(String.class), eq(42), captor.capture());
-        assertThat(captor.getValue().response()).isEqualTo(HitlResponse.APPROVED);
-        assertThat(captor.getValue().optionId()).isEqualTo("allow-once");
+        ArgumentCaptor<EnvironmentRpcPayload.OutboundNotificationPayload> captor =
+                ArgumentCaptor.forClass(EnvironmentRpcPayload.OutboundNotificationPayload.class);
+        verify(environmentRpcClient).send(eq(environmentId), captor.capture());
+        EnvironmentRpcPayload.HitlResolved resolved = (EnvironmentRpcPayload.HitlResolved) captor.getValue();
+        assertThat(resolved.actionId()).isEqualTo("tool-call-1");
+        assertThat(resolved.response()).isEqualTo(HitlResponse.APPROVED);
+        assertThat(resolved.optionId()).isEqualTo("allow-once");
     }
 
     @Test
-    void onHitlResolved_cancelled_sendsCancelled() {
+    void onHitlResolved_sendsAnsweredContent() {
         UUID executionId = UUID.randomUUID();
-        UUID teamId = UUID.randomUUID();
-        PendingHitlRegistry.PendingHitl pendingRequest = pendingApproval(42);
-        when(pendingHitlRegistry.remove(executionId, "tool-call-1")).thenReturn(pendingRequest);
-        when(session.isOpen()).thenReturn(true);
-
-        listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
-                teamId,
-                new HitlResolution(
-                        executionId,
-                        "tool-call-1",
-                        HitlKind.APPROVAL,
-                        HitlResponse.CANCELLED,
-                        null,
-                        null,
-                        HitlResolver.timeout())));
-
-        ArgumentCaptor<HitlActivityResult> captor = ArgumentCaptor.forClass(HitlActivityResult.class);
-        verify(environmentRpcClient).reply(any(String.class), eq(42), captor.capture());
-        assertThat(captor.getValue().response()).isEqualTo(HitlResponse.CANCELLED);
-    }
-
-    @Test
-    void onHitlResolved_skipsWhenNoPendingRequest() {
-        UUID executionId = UUID.randomUUID();
-        when(pendingHitlRegistry.remove(executionId, "tool-call-1")).thenReturn(null);
+        UUID environmentId = UUID.randomUUID();
+        stubOpenSession(environmentId);
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
-                new HitlResolution(
-                        executionId,
-                        "tool-call-1",
-                        HitlKind.APPROVAL,
-                        HitlResponse.CANCELLED,
-                        null,
-                        null,
-                        HitlResolver.timeout())));
-
-        verify(environmentRpcClient, never()).reply(any(), any(), any());
-    }
-
-    @Test
-    void replyToSidecar_skipsClosedSession() {
-        UUID executionId = UUID.randomUUID();
-        PendingHitlRegistry.PendingHitl pendingRequest = pendingApproval(1);
-        when(session.isOpen()).thenReturn(false);
-
-        listeners.replyToSidecar(pendingRequest, executionId, HitlResponse.CANCELLED, null, null);
-
-        verify(environmentRpcClient, never()).reply(any(), any(), any());
-    }
-
-    @Test
-    void onHitlResolved_sendsAnsweredToSidecarWhenPending() {
-        UUID executionId = UUID.randomUUID();
-        UUID teamId = UUID.randomUUID();
-        PendingHitlRegistry.PendingHitl pendingRequest = pendingQuestion(7);
-        when(pendingHitlRegistry.remove(executionId, "el-1")).thenReturn(pendingRequest);
-        when(session.isOpen()).thenReturn(true);
-
-        listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
-                teamId,
                 new HitlResolution(
                         executionId,
                         "el-1",
@@ -188,63 +96,52 @@ class EnvironmentRealtimeEventListenersTest {
                         Map.of("target", "staging"),
                         HitlResolver.user(UUID.randomUUID(), "Alice"))));
 
-        ArgumentCaptor<HitlActivityResult> captor = ArgumentCaptor.forClass(HitlActivityResult.class);
-        verify(environmentRpcClient).reply(any(String.class), eq(7), captor.capture());
-        assertThat(captor.getValue().response()).isEqualTo(HitlResponse.ANSWERED);
-        assertThat(captor.getValue().content()).isEqualTo(Map.of("target", "staging"));
+        ArgumentCaptor<EnvironmentRpcPayload.OutboundNotificationPayload> captor =
+                ArgumentCaptor.forClass(EnvironmentRpcPayload.OutboundNotificationPayload.class);
+        verify(environmentRpcClient).send(eq(environmentId), captor.capture());
+        EnvironmentRpcPayload.HitlResolved resolved = (EnvironmentRpcPayload.HitlResolved) captor.getValue();
+        assertThat(resolved.response()).isEqualTo(HitlResponse.ANSWERED);
+        assertThat(resolved.content()).isEqualTo(Map.of("target", "staging"));
     }
 
     @Test
-    void onHitlResolved_declined_sendsCancelledToSidecar() {
+    void onHitlResolved_skipsWhenExecutionHasNoEnvironment() {
         UUID executionId = UUID.randomUUID();
-        UUID teamId = UUID.randomUUID();
-        PendingHitlRegistry.PendingHitl pendingRequest = pendingQuestion(7);
-        when(pendingHitlRegistry.remove(executionId, "el-1")).thenReturn(pendingRequest);
-        when(session.isOpen()).thenReturn(true);
-
-        listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
-                teamId,
-                new HitlResolution(
-                        executionId,
-                        "el-1",
-                        HitlKind.QUESTION,
-                        HitlResponse.DECLINED,
-                        null,
-                        null,
-                        HitlResolver.timeout())));
-
-        ArgumentCaptor<HitlActivityResult> captor = ArgumentCaptor.forClass(HitlActivityResult.class);
-        verify(environmentRpcClient).reply(any(String.class), eq(7), captor.capture());
-        assertThat(captor.getValue().response()).isEqualTo(HitlResponse.CANCELLED);
-    }
-
-    @Test
-    void onHitlResolved_skipsWhenNoPendingQuestion() {
-        UUID executionId = UUID.randomUUID();
-        when(pendingHitlRegistry.remove(executionId, "el-1")).thenReturn(null);
+        when(executionRepository.findEnvironmentIdByExecutionId(executionId)).thenReturn(Optional.empty());
 
         listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
                 UUID.randomUUID(),
                 new HitlResolution(
                         executionId,
-                        "el-1",
-                        HitlKind.QUESTION,
+                        "tool-call-1",
+                        HitlKind.APPROVAL,
                         HitlResponse.CANCELLED,
                         null,
                         null,
                         HitlResolver.timeout())));
 
-        verify(environmentRpcClient, never()).reply(any(), any(), any());
+        verify(environmentRpcClient, never()).send(any(), any());
     }
 
     @Test
-    void replyToSidecar_question_skipsClosedSession() {
+    void onHitlResolved_skipsClosedSession() {
         UUID executionId = UUID.randomUUID();
-        PendingHitlRegistry.PendingHitl pendingRequest = pendingQuestion(2);
+        UUID environmentId = UUID.randomUUID();
+        when(executionRepository.findEnvironmentIdByExecutionId(executionId)).thenReturn(Optional.of(environmentId));
+        when(sessionRegistry.getSessionForEnvironment(environmentId)).thenReturn(session);
         when(session.isOpen()).thenReturn(false);
 
-        listeners.replyToSidecar(pendingRequest, executionId, HitlResponse.DECLINED, null, null);
+        listeners.onSandboxExecutionHitlResolvedEvent(new SandboxExecutionHitlResolvedEvent(
+                UUID.randomUUID(),
+                new HitlResolution(
+                        executionId,
+                        "tool-call-1",
+                        HitlKind.APPROVAL,
+                        HitlResponse.CANCELLED,
+                        null,
+                        null,
+                        HitlResolver.timeout())));
 
-        verify(environmentRpcClient, never()).reply(any(), any(), any());
+        verify(environmentRpcClient, never()).send(any(), any());
     }
 }

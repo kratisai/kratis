@@ -1,13 +1,18 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CommandExecutionActivity } from '@/types/execution-activity-types'
 
 import { ActivityApproval } from '@/components/session/activities/activity-approval'
+import { queryClient } from '@/lib/query-client'
 import { useActivityStore } from '@/store/activity-store'
 
 const resolveHitl = vi.fn()
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
+vi.mock('@/lib/query-client', () => ({ queryClient: { invalidateQueries: vi.fn() } }))
 
 function pendingActivity(
   overrides: Partial<CommandExecutionActivity> = {},
@@ -685,5 +690,27 @@ describe('ActivityApproval', () => {
     )
 
     expect(screen.getByText(/Permission rejected/)).toBeInTheDocument()
+  })
+
+  it('shows feedback and refreshes activity state when resolution fails', async () => {
+    const user = userEvent.setup()
+    resolveHitl.mockRejectedValueOnce(new Error('409 conflict'))
+    render(
+      <ActivityApproval
+        activity={pendingActivity({
+          permissionOptions: [{ kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' }],
+        })}
+        executionId="exec-1"
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Allow once/ }))
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        'This request has expired or was resolved elsewhere.',
+      ),
+    )
+    expect(queryClient.invalidateQueries).toHaveBeenCalled()
   })
 })

@@ -131,7 +131,7 @@ class ActivityAndPermissionIntegrationTest {
                         })
                         .expectTrigger("env.acp_prompt", 1)
                         .expectTrigger("\"id\":99", 1)
-                        .expectTrigger("\"id\":100", 1))) {
+                        .expectTrigger("env.hitl_resolved", 1))) {
             // The sidecar only streams the activity and permission requests once the control plane
             // dispatches env.acp_prompt. Await that dispatch across the full checkout/launch chain
             // before asserting on the client broadcasts, which follow immediately after.
@@ -171,9 +171,9 @@ class ActivityAndPermissionIntegrationTest {
                             .content(objectMapper.writeValueAsString(approveRequest)))
                     .andExpect(status().isNoContent());
 
-            assertThat(pair.sidecar().awaitTrigger("\"id\":100", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("env.hitl_resolved", 5, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.sidecar().hasReceivedMessageContaining("\"id\":100", "\"optionId\":\"allow\""))
+            assertThat(pair.sidecar().hasReceivedMessageContaining("env.hitl_resolved", "\"optionId\":\"allow\""))
                     .isTrue();
         }
     }

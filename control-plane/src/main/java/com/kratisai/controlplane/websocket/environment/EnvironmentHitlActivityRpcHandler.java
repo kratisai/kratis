@@ -26,7 +26,6 @@ import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
 import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import com.kratisai.controlplane.service.HitlRuleService;
-import com.kratisai.controlplane.service.PendingHitlRegistry;
 import com.kratisai.controlplane.service.command.ShellCommandSplitter;
 import java.util.ArrayList;
 import java.util.List;
@@ -52,7 +51,6 @@ public class EnvironmentHitlActivityRpcHandler
     private final ExecutionEnvironmentRepository environmentRepository;
     private final SandboxExecutionRepository executionRepository;
     private final EnvironmentExecutionGuard executionGuard;
-    private final PendingHitlRegistry pendingHitlRegistry;
     private final ApplicationEventPublisher eventPublisher;
     private final ExecutionActivityPersistenceService activityPersistenceService;
 
@@ -62,7 +60,6 @@ public class EnvironmentHitlActivityRpcHandler
             ExecutionEnvironmentRepository environmentRepository,
             SandboxExecutionRepository executionRepository,
             EnvironmentExecutionGuard executionGuard,
-            PendingHitlRegistry pendingHitlRegistry,
             ApplicationEventPublisher eventPublisher,
             ExecutionActivityPersistenceService activityPersistenceService) {
         this.sessionRegistry = sessionRegistry;
@@ -70,7 +67,6 @@ public class EnvironmentHitlActivityRpcHandler
         this.environmentRepository = environmentRepository;
         this.executionRepository = executionRepository;
         this.executionGuard = executionGuard;
-        this.pendingHitlRegistry = pendingHitlRegistry;
         this.eventPublisher = eventPublisher;
         this.activityPersistenceService = activityPersistenceService;
     }
@@ -109,7 +105,7 @@ public class EnvironmentHitlActivityRpcHandler
 
         return switch (params.kind()) {
             case APPROVAL -> handleApproval(sessionId, requestId, params, envId, teamId);
-            case QUESTION -> handleQuestion(sessionId, requestId, params, envId, teamId);
+            case QUESTION -> handleQuestion(params, envId, teamId);
         };
     }
 
@@ -203,12 +199,9 @@ public class EnvironmentHitlActivityRpcHandler
             return Flux.just(HitlActivityResult.approved(allowOptionId));
         }
 
-        if (!pendingHitlRegistry.register(payload, sessionId, requestId, teamId)) {
-            throw duplicateHitlRequest(HitlKind.APPROVAL, execution.getId(), params.actionId());
-        }
         eventPublisher.publishEvent(new SandboxExecutionHitlRequiredEvent(teamId, payload));
         logger.info(
-                "Deferred command '{}' to HITL for execution {} and team {} — response sent when user resolves",
+                "Deferred command '{}' to HITL for execution {} and team {} — resolution arrives as env.hitl_resolved",
                 command,
                 execution.getId(),
                 teamId);
@@ -216,7 +209,7 @@ public class EnvironmentHitlActivityRpcHandler
     }
 
     private Flux<EnvironmentResponsePayload> handleQuestion(
-            String sessionId, Object requestId, EnvironmentRpcPayload.HitlActivity params, UUID envId, UUID teamId) {
+            EnvironmentRpcPayload.HitlActivity params, UUID envId, UUID teamId) {
         UUID execId = UUID.fromString(params.executionId());
         SandboxExecution execution = executionRepository.findById(execId).orElse(null);
         if (execution == null) {
@@ -244,12 +237,10 @@ public class EnvironmentHitlActivityRpcHandler
                 params.form(),
                 null);
 
-        if (!pendingHitlRegistry.register(payload, sessionId, requestId, teamId)) {
-            throw duplicateHitlRequest(HitlKind.QUESTION, execution.getId(), params.actionId());
-        }
+        rejectDuplicateQuestion(execution.getId(), params.actionId());
         eventPublisher.publishEvent(new SandboxExecutionHitlRequiredEvent(teamId, payload));
         logger.info(
-                "Deferred question '{}' to HITL for execution {} and team {} — response sent when user answers",
+                "Deferred question '{}' to HITL for execution {} and team {} — resolution arrives as env.hitl_resolved",
                 params.actionId(),
                 execution.getId(),
                 teamId);
@@ -257,9 +248,14 @@ public class EnvironmentHitlActivityRpcHandler
     }
 
     private void rejectDuplicateApproval(UUID executionId, String actionId) {
-        if (pendingHitlRegistry.find(executionId, actionId) != null
-                || activityPersistenceService.hasApprovalRequest(executionId, actionId)) {
+        if (activityPersistenceService.hasPendingHitl(executionId, actionId)) {
             throw duplicateHitlRequest(HitlKind.APPROVAL, executionId, actionId);
+        }
+    }
+
+    private void rejectDuplicateQuestion(UUID executionId, String actionId) {
+        if (activityPersistenceService.hasPendingHitl(executionId, actionId)) {
+            throw duplicateHitlRequest(HitlKind.QUESTION, executionId, actionId);
         }
     }
 

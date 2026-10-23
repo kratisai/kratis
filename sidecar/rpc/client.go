@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -133,7 +134,9 @@ type Client struct {
 	// lastEventSequence is the env.register reconnect cursor; events carry no
 	// sequence numbers yet, so it stays 0 until sequence tracking is added.
 	lastEventSequence int64
-	pendingHitlIDs    []string
+	// pendingHitl holds channels waiting for an asynchronous env.hitl_resolved,
+	// keyed by actionId so the notification can be matched without a request id.
+	pendingHitl map[string]chan HitlActivityResult
 
 	// Pending prompt completion (for reconnection recovery)
 	pendingPromptComplete *AcpPromptCompleteParams
@@ -181,6 +184,7 @@ func NewClient(serverURL, token, workspace string) *Client {
 		terminalLogFile:    defaultTerminalLogFile,
 		executor:           runner.NewExecutor(),
 		pending:            make(map[interface{}]chan *JsonRpcResponse),
+		pendingHitl:        make(map[string]chan HitlActivityResult),
 		nextID:             1,
 		requestTimeout:     10 * time.Second,
 		terminalManager:    acp.NewTerminalManager(workspace),
@@ -653,7 +657,7 @@ func (c *Client) PermissionCancelChan() <-chan struct{} {
 	return c.permCtx.Done()
 }
 
-// CancelPendingHitl cancels all pending HITL requests (approvals and questions).
+// CancelPendingHitl drains and cancels every HITL waiter (approvals and questions).
 func (c *Client) CancelPendingHitl() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -661,6 +665,37 @@ func (c *Client) CancelPendingHitl() {
 		c.permCancel()
 	}
 	c.permCtx, c.permCancel = context.WithCancel(context.Background())
+	for actionID, ch := range c.pendingHitl {
+		select {
+		case ch <- HitlActivityResult{Response: HitlCancelled}:
+		default:
+		}
+		delete(c.pendingHitl, actionID)
+	}
+}
+
+// resolveHitl delivers an asynchronous env.hitl_resolved to the matching waiter.
+func (c *Client) resolveHitl(params HitlResolvedParams) {
+	c.mu.Lock()
+	ch, ok := c.pendingHitl[params.ActionID]
+	if ok {
+		delete(c.pendingHitl, params.ActionID)
+	}
+	c.mu.Unlock()
+	if !ok {
+		log.Printf("[HITL] env.hitl_resolved for unknown actionId %q (already resolved or timed out)", params.ActionID)
+		return
+	}
+	result := HitlActivityResult{
+		Response: params.Response,
+		OptionID: params.OptionID,
+		Content:  params.Content,
+	}
+	select {
+	case ch <- result:
+	default:
+		log.Printf("[HITL] dropping env.hitl_resolved for actionId %q: waiter channel full", params.ActionID)
+	}
 }
 
 func (c *Client) readLoop(errChan chan<- error) {
@@ -868,11 +903,16 @@ func (c *Client) register() error {
 	isReconnect := c.isReconnected
 	c.isReconnected = true
 
+	pendingHitlIDs := make([]string, 0, len(c.pendingHitl))
+	for actionID := range c.pendingHitl {
+		pendingHitlIDs = append(pendingHitlIDs, actionID)
+	}
+	sort.Strings(pendingHitlIDs)
 	params := RegisterParams{
 		Token:             c.token,
 		IsReconnect:       isReconnect,
 		LastEventSequence: c.lastEventSequence,
-		PendingHitlIDs:    c.pendingHitlIDs,
+		PendingHitlIDs:    pendingHitlIDs,
 		ProtocolVersion:   1,
 		ConnectorVersion:  ConnectorVersion(),
 	}
@@ -933,6 +973,19 @@ func (c *Client) heartbeat() error {
 
 func (c *Client) handleServerRequest(req JsonRpcRequest) {
 	switch req.Method {
+	case "env.hitl_resolved":
+		var params HitlResolvedParams
+		rawBytes, err := json.Marshal(req.Params)
+		if err != nil {
+			log.Printf("[HITL] failed to decode env.hitl_resolved params: %v", err)
+			return
+		}
+		if err := json.Unmarshal(rawBytes, &params); err != nil {
+			log.Printf("[HITL] failed to decode env.hitl_resolved params: %v", err)
+			return
+		}
+		c.resolveHitl(params)
+
 	case "env.exec":
 		var params ExecParams
 		rawBytes, err := json.Marshal(req.Params)
@@ -1235,15 +1288,29 @@ func (c *Client) CreateElicitation(req acp.ElicitationRequest) (acp.ElicitationR
 	}
 }
 
-// requestHitl sends one env.hitl_activity to the control plane and blocks until
-// the user resolves it or it is cancelled/timed out.
+// requestHitl sends one env.hitl_activity to the control plane and waits for
+// either the immediate acknowledgement result (auto-resolved requests) or the
+// asynchronous env.hitl_resolved notification. A dropped connection does not
+// abort the wait: re-registration replays the decision.
 func (c *Client) requestHitl(req HitlActivityParams) (HitlActivityResult, error) {
 	c.mu.Lock()
 	id := c.nextID
 	c.nextID++
-	ch := make(chan *JsonRpcResponse, 2)
-	c.pending[id] = ch
+	rpcCh := make(chan *JsonRpcResponse, 2)
+	actionCh := make(chan HitlActivityResult, 2)
+	permCtx := c.permCtx
+	c.pending[id] = rpcCh
+	c.pendingHitl[req.ActionID] = actionCh
 	c.mu.Unlock()
+
+	cleanup := func() {
+		c.mu.Lock()
+		delete(c.pending, id)
+		if current, ok := c.pendingHitl[req.ActionID]; ok && current == actionCh {
+			delete(c.pendingHitl, req.ActionID)
+		}
+		c.mu.Unlock()
+	}
 
 	hitlDebug := func(format string, args ...interface{}) {
 		msg := fmt.Sprintf(format, args...)
@@ -1263,48 +1330,50 @@ func (c *Client) requestHitl(req HitlActivityParams) (HitlActivityResult, error)
 	hitlDebug("[HITL] requestHitl: sending env.hitl_activity to control plane, id=%d, kind=%q, actionId=%q", id, req.Kind, req.ActionID)
 	if err := c.writeJSON(reqMsg); err != nil {
 		hitlDebug("[HITL] requestHitl: failed to send request to control plane: %v", err)
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
+		cleanup()
 		return HitlActivityResult{}, err
 	}
 
-	hitlDebug("[HITL] requestHitl: request sent, waiting for control plane response (id=%d)", id)
+	hitlDebug("[HITL] requestHitl: request sent, waiting for decision (id=%d)", id)
 
-	select {
-	case resp := <-ch:
-		if resp.Error != nil {
-			hitlDebug("[HITL] requestHitl: response contains error [%d]: %s", resp.Error.Code, resp.Error.Message)
-			c.mu.Lock()
-			delete(c.pending, id)
-			c.mu.Unlock()
-			return HitlActivityResult{}, fmt.Errorf("hitl request error [%d]: %s", resp.Error.Code, resp.Error.Message)
+	timer := time.NewTimer(c.Timeouts.PermissionTimeout)
+	defer timer.Stop()
+	for {
+		select {
+		case res := <-actionCh:
+			cleanup()
+			hitlDebug("[HITL] requestHitl: decision received (id=%d, response=%q)", id, res.Response)
+			return res, nil
+		case resp := <-rpcCh:
+			if resp.Error != nil {
+				// A reconnect tears down the RPC waiter. Keep the action channel open so the
+				// re-registration replay can still deliver the decision.
+				if resp.Error.Code == -32000 && strings.Contains(strings.ToLower(resp.Error.Message), "connection") {
+					hitlDebug("[HITL] requestHitl: connection dropped (id=%d); waiting for reconnect replay", id)
+					continue
+				}
+				hitlDebug("[HITL] requestHitl: response contains error [%d]: %s", resp.Error.Code, resp.Error.Message)
+				cleanup()
+				return HitlActivityResult{}, fmt.Errorf("hitl request error [%d]: %s", resp.Error.Code, resp.Error.Message)
+			}
+			var res HitlActivityResult
+			if err := json.Unmarshal(resp.Result, &res); err != nil {
+				hitlDebug("[HITL] requestHitl: failed to parse result: %v, raw=%s", err, string(resp.Result))
+				cleanup()
+				return HitlActivityResult{}, fmt.Errorf("failed to parse hitl result: %w", err)
+			}
+			cleanup()
+			hitlDebug("[HITL] requestHitl: decision received (id=%d, response=%q)", id, res.Response)
+			return res, nil
+		case <-permCtx.Done():
+			hitlDebug("[HITL] requestHitl: CANCELLED (id=%d)", id)
+			cleanup()
+			return HitlActivityResult{}, fmt.Errorf("hitl request cancelled")
+		case <-timer.C:
+			hitlDebug("[HITL] requestHitl: TIMEOUT waiting for HITL response (id=%d)", id)
+			cleanup()
+			return HitlActivityResult{}, fmt.Errorf("timeout waiting for hitl response")
 		}
-		var res HitlActivityResult
-		if err := json.Unmarshal(resp.Result, &res); err != nil {
-			hitlDebug("[HITL] requestHitl: failed to parse result: %v, raw=%s", err, string(resp.Result))
-			c.mu.Lock()
-			delete(c.pending, id)
-			c.mu.Unlock()
-			return HitlActivityResult{}, fmt.Errorf("failed to parse hitl result: %w", err)
-		}
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		hitlDebug("[HITL] requestHitl: decision received (id=%d, response=%q)", id, res.Response)
-		return res, nil
-	case <-c.permCtx.Done():
-		hitlDebug("[HITL] requestHitl: CANCELLED (id=%d)", id)
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return HitlActivityResult{}, fmt.Errorf("hitl request cancelled")
-	case <-time.After(c.Timeouts.PermissionTimeout):
-		hitlDebug("[HITL] requestHitl: TIMEOUT waiting for HITL response (id=%d)", id)
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return HitlActivityResult{}, fmt.Errorf("timeout waiting for hitl response")
 	}
 }
 

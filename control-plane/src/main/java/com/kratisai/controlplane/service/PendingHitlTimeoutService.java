@@ -1,10 +1,18 @@
 package com.kratisai.controlplane.service;
 
+import com.kratisai.controlplane.api.wsdto.ActivityDetail;
+import com.kratisai.controlplane.api.wsdto.ActivityHitl;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
+import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
+import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionRepository;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -20,54 +28,74 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 public class PendingHitlTimeoutService {
 
     private static final Logger logger = LoggerFactory.getLogger(PendingHitlTimeoutService.class);
+    private static final Duration TIMEOUT = Duration.ofMinutes(30);
 
-    private final PendingHitlRegistry pendingHitlRegistry;
+    private final SandboxExecutionActivityRepository activityRepository;
+    private final SandboxExecutionRepository executionRepository;
+    private final ExecutionActivityPersistenceService activityPersistenceService;
     private final ApplicationEventPublisher eventPublisher;
-    private final EnvironmentRealtimeEventListeners environmentListeners;
     private final SandboxExecutionService sandboxExecutionService;
 
     public PendingHitlTimeoutService(
-            PendingHitlRegistry pendingHitlRegistry,
+            SandboxExecutionActivityRepository activityRepository,
+            SandboxExecutionRepository executionRepository,
+            ExecutionActivityPersistenceService activityPersistenceService,
             ApplicationEventPublisher eventPublisher,
-            EnvironmentRealtimeEventListeners environmentListeners,
             SandboxExecutionService sandboxExecutionService) {
-        this.pendingHitlRegistry = pendingHitlRegistry;
+        this.activityRepository = activityRepository;
+        this.executionRepository = executionRepository;
+        this.activityPersistenceService = activityPersistenceService;
         this.eventPublisher = eventPublisher;
-        this.environmentListeners = environmentListeners;
         this.sandboxExecutionService = sandboxExecutionService;
     }
 
     @Scheduled(fixedRate = 60000)
     @Transactional
     public void cleanupExpiredHitl() {
-        List<PendingHitlRegistry.PendingHitl> expired = pendingHitlRegistry.removeExpired();
+        Instant cutoff = Instant.now().minus(TIMEOUT);
+        List<SandboxExecutionActivity> expired =
+                activityRepository.findByStatusAndCreatedAtBefore(ActivityStatus.PENDING, cutoff);
 
-        for (PendingHitlRegistry.PendingHitl request : expired) {
-            UUID executionId = request.request().executionId();
+        for (SandboxExecutionActivity activity : expired) {
+            UUID executionId = activity.getExecutionId();
+            UUID teamId = executionRepository
+                    .findById(executionId)
+                    .map(execution -> execution.getChat().getTeam().getId())
+                    .orElse(null);
+            if (teamId == null) {
+                logger.warn("Skipping HITL timeout for missing execution {}", executionId);
+                continue;
+            }
+
+            ActivityDetail detail = activityPersistenceService.detailOf(activity);
+            ActivityHitl hitl = detail != null ? detail.hitl() : null;
+            HitlKind kind = hitl != null && hitl.kind() != null ? hitl.kind() : HitlKind.APPROVAL;
+            String message = hitl != null && hitl.message() != null ? hitl.message() : activity.getDescription();
 
             logger.info(
                     "Timing out pending HITL request for execution {} (actionId='{}', kind={}, team={})",
                     executionId,
-                    request.request().actionId(),
-                    request.request().kind(),
-                    request.teamId());
+                    activity.getActionId(),
+                    kind,
+                    teamId);
 
             eventPublisher.publishEvent(new SandboxExecutionHitlResolvedEvent(
-                    request.teamId(),
+                    teamId,
                     new HitlResolution(
                             executionId,
-                            request.request().actionId(),
-                            request.request().kind(),
+                            activity.getActionId(),
+                            kind,
                             HitlResponse.CANCELLED,
                             null,
                             null,
                             HitlResolver.timeout())));
+
+            String prompt = timeoutPrompt(kind, message);
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    environmentListeners.replyToSidecar(request, executionId, HitlResponse.CANCELLED, null, null);
                     try {
-                        sandboxExecutionService.dispatchSystemSteering(executionId, timeoutPrompt(request));
+                        sandboxExecutionService.dispatchSystemSteering(executionId, prompt);
                     } catch (Exception e) {
                         logger.warn("Failed to dispatch timeout steering for execution {}", executionId, e);
                     }
@@ -76,9 +104,8 @@ public class PendingHitlTimeoutService {
         }
     }
 
-    static String timeoutPrompt(PendingHitlRegistry.PendingHitl pending) {
-        String subject = pending.request().kind() == HitlKind.QUESTION ? "question" : "approval";
-        String message = pending.request().message();
+    static String timeoutPrompt(HitlKind kind, String message) {
+        String subject = kind == HitlKind.QUESTION ? "question" : "approval";
         String quoted = message == null || message.isBlank() ? "" : " (\"" + abbreviate(message, 200) + "\")";
         return ("System notice: the %s request%s timed out because no response was received; nobody was available "
                         + "to answer, so this is not a rejection. Continue the task without performing that action, "

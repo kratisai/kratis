@@ -2,6 +2,9 @@ package com.kratisai.controlplane.api.rest;
 
 import com.kratisai.controlplane.api.restdto.CreateHitlRuleRequest;
 import com.kratisai.controlplane.api.restdto.ResolveHitlRequest;
+import com.kratisai.controlplane.api.wsdto.ActivityDetail;
+import com.kratisai.controlplane.api.wsdto.ActivityHitl;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResolver;
@@ -10,15 +13,17 @@ import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.config.SecurityUtil;
 import com.kratisai.controlplane.model.HitlRule;
 import com.kratisai.controlplane.model.SandboxExecution;
+import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.repository.HitlRuleRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.repository.UserRepository;
-import com.kratisai.controlplane.service.PendingHitlRegistry;
+import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import com.kratisai.controlplane.service.SandboxExecutionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -53,7 +58,8 @@ public class SandboxHitlController {
     private final HitlRuleRepository hitlRuleRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final UserRepository userRepository;
-    private final PendingHitlRegistry pendingHitlRegistry;
+    private final SandboxExecutionActivityRepository activityRepository;
+    private final ExecutionActivityPersistenceService activityPersistenceService;
     private final ApplicationEventPublisher eventPublisher;
     private final SandboxExecutionService sandboxExecutionService;
 
@@ -62,14 +68,16 @@ public class SandboxHitlController {
             HitlRuleRepository hitlRuleRepository,
             TeamMemberRepository teamMemberRepository,
             UserRepository userRepository,
-            PendingHitlRegistry pendingHitlRegistry,
+            SandboxExecutionActivityRepository activityRepository,
+            ExecutionActivityPersistenceService activityPersistenceService,
             ApplicationEventPublisher eventPublisher,
             SandboxExecutionService sandboxExecutionService) {
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.hitlRuleRepository = hitlRuleRepository;
         this.teamMemberRepository = teamMemberRepository;
         this.userRepository = userRepository;
-        this.pendingHitlRegistry = pendingHitlRegistry;
+        this.activityRepository = activityRepository;
+        this.activityPersistenceService = activityPersistenceService;
         this.eventPublisher = eventPublisher;
         this.sandboxExecutionService = sandboxExecutionService;
     }
@@ -85,9 +93,18 @@ public class SandboxHitlController {
         SandboxExecution execution = findAndVerifyMembership(request.executionId(), userId);
         UUID teamId = execution.getEnvironment().getTeam().getId();
 
-        PendingHitlRegistry.PendingHitl pending = pendingHitlRegistry.find(request.executionId(), request.actionId());
-        if (pending == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No pending HITL request for this execution");
+        SandboxExecutionActivity activity = activityRepository
+                .findByExecutionIdAndActionId(request.executionId(), request.actionId())
+                .orElseThrow(() ->
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "No HITL request exists for this action"));
+        if (activity.getStatus() != ActivityStatus.PENDING) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT, "This HITL request has expired or was resolved elsewhere");
+        }
+        ActivityDetail detail = activityPersistenceService.detailOf(activity);
+        ActivityHitl hitl = detail != null ? detail.hitl() : null;
+        if (hitl == null || hitl.kind() == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "HITL request has no resolvable state");
         }
 
         HitlResponse response = request.response();
@@ -95,10 +112,10 @@ public class SandboxHitlController {
                 .findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
-        HitlKind kind = pending.request().kind();
+        HitlKind kind = hitl.kind();
         if (kind == HitlKind.APPROVAL) {
             validateApprovalResponse(response, request.optionId());
-            validateKnownOption(pending, request.optionId());
+            validateKnownOption(hitl, request.optionId());
             persistRememberedRules(request, response, execution, teamId, resolvingUser);
         } else {
             validateQuestionResponse(response);
@@ -204,11 +221,11 @@ public class SandboxHitlController {
         }
     }
 
-    private void validateKnownOption(PendingHitlRegistry.PendingHitl pending, String optionId) {
+    private void validateKnownOption(ActivityHitl hitl, String optionId) {
         if (optionId == null || optionId.isBlank()) {
             return;
         }
-        List<PermissionOption> options = pending.request().options();
+        List<PermissionOption> options = hitl.options();
         if (options == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "HITL request carried no options");
         }

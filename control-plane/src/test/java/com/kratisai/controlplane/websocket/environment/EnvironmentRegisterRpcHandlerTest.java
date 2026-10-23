@@ -13,21 +13,32 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.api.wsdto.ActivityDetail;
+import com.kratisai.controlplane.api.wsdto.ActivityHitl;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
+import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRegisterStatus;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload.EnvironmentRegisterResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
+import com.kratisai.controlplane.api.wsdto.HitlKind;
+import com.kratisai.controlplane.api.wsdto.HitlResolution;
+import com.kratisai.controlplane.api.wsdto.HitlResolver;
+import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
+import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.event.EnvironmentRegisteredEvent;
+import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
-import com.kratisai.controlplane.service.PendingHitlRegistry;
+import com.kratisai.controlplane.service.ExecutionActivityPersistenceService;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.time.Duration;
 import java.time.Instant;
@@ -55,7 +66,10 @@ class EnvironmentRegisterRpcHandlerTest {
     private EnvironmentSessionRegistry sessionRegistry;
 
     @Mock
-    private PendingHitlRegistry pendingHitlRegistry;
+    private SandboxExecutionActivityRepository activityRepository;
+
+    @Mock
+    private ExecutionActivityPersistenceService activityPersistenceService;
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
@@ -73,7 +87,11 @@ class EnvironmentRegisterRpcHandlerTest {
     @BeforeEach
     void setUp() {
         handler = new EnvironmentRegisterRpcHandler(
-                executionEnvironmentRepository, sessionRegistry, pendingHitlRegistry, eventPublisher);
+                executionEnvironmentRepository,
+                activityRepository,
+                activityPersistenceService,
+                sessionRegistry,
+                eventPublisher);
         handlerLogger = (Logger) LoggerFactory.getLogger(EnvironmentRegisterRpcHandler.class);
         logAppender = new ListAppender<>();
         logAppender.start();
@@ -245,7 +263,6 @@ class EnvironmentRegisterRpcHandlerTest {
         verify(sessionRegistry).registerEnvironmentSession(any(String.class), eq(envId));
         verify(eventPublisher).publishEvent(any(EnvironmentRegisteredEvent.class));
         verify(sessionRegistry, never()).replaceSessionForEnvironment(any(String.class), any());
-        verify(pendingHitlRegistry, never()).rebindBySession(any(), any(String.class));
     }
 
     @Test
@@ -255,8 +272,6 @@ class EnvironmentRegisterRpcHandlerTest {
         String oldSessionId = "ws-old";
         when(sessionRegistry.replaceSessionForEnvironment(any(String.class), eq(envId)))
                 .thenReturn(oldSessionId);
-        when(pendingHitlRegistry.rebindBySession(eq(oldSessionId), any(String.class)))
-                .thenReturn(0);
 
         EnvironmentRpcPayload.Register params =
                 new EnvironmentRpcPayload.Register(authToken, true, "acp-session-123", true, 42L, null, 1, "0.1.0");
@@ -272,7 +287,6 @@ class EnvironmentRegisterRpcHandlerTest {
         assertThat(result.status()).isEqualTo(EnvironmentRegisterStatus.RECONNECTED);
 
         verify(sessionRegistry).replaceSessionForEnvironment(any(String.class), eq(envId));
-        verify(pendingHitlRegistry).rebindBySession(eq(oldSessionId), any(String.class));
         verify(executionEnvironmentRepository).save(env);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
         assertThat(env.getLastHeartbeat()).isNotNull();
@@ -310,7 +324,6 @@ class EnvironmentRegisterRpcHandlerTest {
         when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
         when(sessionRegistry.replaceSessionForEnvironment(any(String.class), eq(envId)))
                 .thenReturn("ws-old");
-        when(pendingHitlRegistry.rebindBySession(any(), any(String.class))).thenReturn(0);
 
         EnvironmentRpcPayload.Register params =
                 new EnvironmentRpcPayload.Register(authToken, true, null, false, 0L, null, 1, "0.1.0");
@@ -321,45 +334,70 @@ class EnvironmentRegisterRpcHandlerTest {
     }
 
     @Test
-    void handle_withReconnect_shouldRebindPendingPermissions() {
+    void handle_withReconnect_cancelsActivitiesTheSidecarNoLongerReports() {
         ExecutionEnvironment env = createEnvironment();
         when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
-        String oldSessionId = "ws-old";
         when(sessionRegistry.replaceSessionForEnvironment(any(String.class), eq(envId)))
-                .thenReturn(oldSessionId);
-        when(pendingHitlRegistry.rebindBySession(eq(oldSessionId), any(String.class)))
-                .thenReturn(3);
+                .thenReturn("ws-old");
+        SandboxExecutionActivity live = activity("perm-1");
+        SandboxExecutionActivity stale = activity("perm-stale");
+        when(activityRepository.findByEnvironmentIdAndStatus(envId, ActivityStatus.PENDING))
+                .thenReturn(List.of(live, stale));
 
-        EnvironmentRpcPayload.Register params = new EnvironmentRpcPayload.Register(
-                authToken, true, null, false, 0L, List.of("perm-1", "perm-2", "perm-3"), 1, "0.1.0");
-        JsonRpcInboundRequest request =
-                new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
+        EnvironmentRpcPayload.Register params =
+                new EnvironmentRpcPayload.Register(authToken, true, null, false, 0L, List.of("perm-1"), 1, "0.1.0");
+        handler.handle("ws-new", 1, params).blockLast();
 
-        EnvironmentResponsePayload response =
-                handler.handle("ws-new", request, params).blockLast();
-
-        assertThat(response).isNotNull();
-        verify(pendingHitlRegistry).rebindBySession(eq(oldSessionId), any(String.class));
+        verify(activityPersistenceService, never()).cancelActivity(eq(live), any(), any());
+        verify(activityPersistenceService).cancelActivity(eq(stale), any(), eq(HitlResolver.system()));
     }
 
     @Test
-    void handle_withReconnectAndNoOldSession_shouldNotRebindPermissions() {
+    void handle_withReconnect_replaysDecisionsTheSidecarStillWaitsFor() {
         ExecutionEnvironment env = createEnvironment();
         when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
         when(sessionRegistry.replaceSessionForEnvironment(any(String.class), eq(envId)))
-                .thenReturn(null);
+                .thenReturn("ws-old");
+        when(activityRepository.findByEnvironmentIdAndStatus(envId, ActivityStatus.PENDING))
+                .thenReturn(List.of());
+        SandboxExecutionActivity resolved = activity("perm-2");
+        resolved.setStatus(ActivityStatus.FAILED);
+        when(activityRepository.findLatestByEnvironmentIdAndActionId(eq(envId), eq("perm-2"), any()))
+                .thenReturn(List.of(resolved));
+        ActivityHitl hitl = new ActivityHitl(
+                HitlKind.APPROVAL,
+                null,
+                "Approve ls",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                HitlResponse.CANCELLED,
+                null,
+                null,
+                HitlResolver.system());
+        ActivityDetail detail =
+                new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null).withHitl(hitl);
+        when(activityPersistenceService.detailOf(resolved)).thenReturn(detail);
 
         EnvironmentRpcPayload.Register params =
-                new EnvironmentRpcPayload.Register(authToken, true, null, false, 0L, null, 1, "0.1.0");
-        JsonRpcInboundRequest request =
-                new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
+                new EnvironmentRpcPayload.Register(authToken, true, null, false, 0L, List.of("perm-2"), 1, "0.1.0");
+        handler.handle("ws-new", 1, params).blockLast();
 
-        EnvironmentResponsePayload response =
-                handler.handle("ws-new", request, params).blockLast();
+        ArgumentCaptor<SandboxExecutionHitlResolvedEvent> captor =
+                ArgumentCaptor.forClass(SandboxExecutionHitlResolvedEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        HitlResolution resolution = captor.getValue().result();
+        assertThat(resolution.actionId()).isEqualTo("perm-2");
+        assertThat(resolution.response()).isEqualTo(HitlResponse.CANCELLED);
+    }
 
-        assertThat(response).isNotNull();
-        verify(sessionRegistry).replaceSessionForEnvironment(any(String.class), eq(envId));
-        verify(pendingHitlRegistry, never()).rebindBySession(any(), any(String.class));
+    private SandboxExecutionActivity activity(String actionId) {
+        return new SandboxExecutionActivity(
+                UUID.randomUUID(), 1, actionId, ActivityType.COMMAND, ActivityStatus.PENDING, "ls", null);
     }
 
     @Test
@@ -416,7 +454,6 @@ class EnvironmentRegisterRpcHandlerTest {
         when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
         when(sessionRegistry.replaceSessionForEnvironment(any(String.class), eq(envId)))
                 .thenReturn("ws-old");
-        when(pendingHitlRegistry.rebindBySession(any(), any(String.class))).thenReturn(0);
 
         EnvironmentRpcPayload.Register params =
                 new EnvironmentRpcPayload.Register(authToken, true, null, false, 0L, null, 1, "0.1.0");

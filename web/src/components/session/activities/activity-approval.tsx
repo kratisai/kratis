@@ -10,6 +10,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 import type {
   CommandExecutionActivity,
@@ -23,6 +24,7 @@ import { HitlFeedbackField } from '@/components/session/activities/hitl-feedback
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { queryClient } from '@/lib/query-client'
 import { cn } from '@/lib/utils'
 import { activityCommand, useActivityStore } from '@/store/activity-store'
 
@@ -105,7 +107,8 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
     try {
       await resolveHitl(executionId, actionId, response, optionId, undefined, rules, feedback)
     } catch {
-      // handled via websocket resolution
+      toast.error('This request has expired or was resolved elsewhere.')
+      void queryClient.invalidateQueries()
     } finally {
       setIsSubmitting(false)
     }

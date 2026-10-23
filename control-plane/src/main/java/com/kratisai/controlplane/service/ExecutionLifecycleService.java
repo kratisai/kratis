@@ -1,8 +1,9 @@
 package com.kratisai.controlplane.service;
 
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
-import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -17,12 +18,13 @@ import org.springframework.stereotype.Service;
 public class ExecutionLifecycleService {
 
     private final SandboxExecutionRepository sandboxExecutionRepository;
-    private final PendingHitlRegistry pendingHitlRegistry;
+    private final SandboxExecutionActivityRepository activityRepository;
 
     public ExecutionLifecycleService(
-            SandboxExecutionRepository sandboxExecutionRepository, PendingHitlRegistry pendingHitlRegistry) {
+            SandboxExecutionRepository sandboxExecutionRepository,
+            SandboxExecutionActivityRepository activityRepository) {
         this.sandboxExecutionRepository = Objects.requireNonNull(sandboxExecutionRepository);
-        this.pendingHitlRegistry = Objects.requireNonNull(pendingHitlRegistry);
+        this.activityRepository = Objects.requireNonNull(activityRepository);
     }
 
     public boolean hasRunningExecutions(UUID environmentId) {
@@ -36,10 +38,6 @@ public class ExecutionLifecycleService {
         if (environmentId == null) {
             return false;
         }
-        return sandboxExecutionRepository
-                .findByEnvironmentIdAndStatusIn(
-                        environmentId, List.of(SandboxExecutionStatus.RUNNING, SandboxExecutionStatus.IDLE))
-                .stream()
-                .anyMatch(execution -> pendingHitlRegistry.hasPendingForExecution(execution.getId()));
+        return activityRepository.existsByEnvironmentIdAndStatus(environmentId, ActivityStatus.PENDING);
     }
 }

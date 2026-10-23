@@ -200,6 +200,26 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         }
     }
 
+    /** Deliver a resolved HITL decision to the sidecar asynchronously. */
+    record HitlResolved(
+            @JsonProperty("actionId") String actionId,
+            @JsonProperty("response") HitlResponse response,
+            @JsonProperty("optionId") String optionId,
+            @JsonProperty("content") Map<String, Object> content)
+            implements OutboundNotificationPayload {
+        public static final String METHOD = "env.hitl_resolved";
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+
+        public HitlResolved {
+            Objects.requireNonNull(actionId, "actionId is required");
+            Objects.requireNonNull(response, "response is required");
+        }
+    }
+
     /** Stream a sandbox output line. */
     record Output(
             @JsonProperty("line") String line,

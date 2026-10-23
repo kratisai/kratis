@@ -1,13 +1,18 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ElicitationActivity } from '@/types/execution-activity-types'
 
 import { ActivityElicitation } from '@/components/session/activities/activity-elicitation'
+import { queryClient } from '@/lib/query-client'
 import { useActivityStore } from '@/store/activity-store'
 
 const resolveHitl = vi.fn()
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
+vi.mock('@/lib/query-client', () => ({ queryClient: { invalidateQueries: vi.fn() } }))
 
 function pendingActivity(overrides: Partial<ElicitationActivity> = {}): ElicitationActivity {
   return {
@@ -195,5 +200,20 @@ describe('ActivityElicitation', () => {
       />,
     )
     expect(screen.getByText(/Question declined/)).toBeInTheDocument()
+  })
+
+  it('shows feedback and refreshes activity state when resolution fails', async () => {
+    const user = userEvent.setup()
+    resolveHitl.mockRejectedValueOnce(new Error('404 not found'))
+    render(<ActivityElicitation activity={pendingActivity()} executionId="exec-1" />)
+
+    await user.click(screen.getByRole('button', { name: /submit/i }))
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        'This request has expired or was resolved elsewhere.',
+      ),
+    )
+    expect(queryClient.invalidateQueries).toHaveBeenCalled()
   })
 })

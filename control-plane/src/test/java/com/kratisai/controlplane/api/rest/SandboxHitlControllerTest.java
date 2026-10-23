@@ -7,35 +7,34 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.*;
+import com.kratisai.controlplane.api.wsdto.ActivityDetail;
+import com.kratisai.controlplane.api.wsdto.ActivityHitl;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.ApprovalOptionKind;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
+import com.kratisai.controlplane.api.wsdto.HitlState;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.service.CanvasService;
 import com.kratisai.controlplane.service.ExecutionEnvironmentService;
-import com.kratisai.controlplane.service.PendingHitlRegistry;
 import com.kratisai.controlplane.service.SandboxExecutionService;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
-import org.springframework.web.socket.WebSocketSession;
 
 @SpringIntegrationTest
 class SandboxHitlControllerTest {
@@ -85,9 +84,6 @@ class SandboxHitlControllerTest {
     private SandboxExecutionActivityRepository activityRepository;
 
     @Autowired
-    private PendingHitlRegistry pendingHitlRegistry;
-
-    @Autowired
     private SandboxExecutionRepository sandboxExecutionRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -101,7 +97,6 @@ class SandboxHitlControllerTest {
     @BeforeEach
     void setUp() throws Exception {
         databaseCleaner.cleanAll();
-        pendingHitlRegistry.clearAll();
 
         mockMvc =
                 MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
@@ -152,48 +147,55 @@ class SandboxHitlControllerTest {
         executionId = execDto.id();
     }
 
-    private void registerPendingApproval() {
-        pendingHitlRegistry.register(new PendingHitlRegistry.PendingHitl(
-                new HitlRequestSnapshot(
-                        executionId,
-                        "tool-call-42",
-                        HitlKind.APPROVAL,
-                        "Remove",
-                        "rm -rf /",
-                        null,
-                        null,
-                        "Remove",
-                        "execute",
-                        OPTIONS,
-                        null,
-                        null,
-                        null),
-                Mockito.mock(WebSocketSession.class),
-                "req-1",
-                Instant.now(),
-                teamId));
+    private void registerPendingApproval() throws Exception {
+        HitlRequestSnapshot snapshot = new HitlRequestSnapshot(
+                executionId,
+                "tool-call-42",
+                HitlKind.APPROVAL,
+                "Remove",
+                "rm -rf /",
+                null,
+                null,
+                "Remove",
+                "execute",
+                OPTIONS,
+                null,
+                null,
+                null);
+        upsertPendingActivity(snapshot, ActivityType.COMMAND, "rm -rf /");
     }
 
-    private void registerPendingQuestion() {
-        pendingHitlRegistry.register(new PendingHitlRegistry.PendingHitl(
-                new HitlRequestSnapshot(
-                        executionId,
-                        "el-1",
-                        HitlKind.QUESTION,
-                        "Choose a deployment target",
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        Map.of("type", "object"),
-                        null),
-                Mockito.mock(WebSocketSession.class),
-                "req-1",
-                Instant.now(),
-                teamId));
+    private void registerPendingQuestion() throws Exception {
+        HitlRequestSnapshot snapshot = new HitlRequestSnapshot(
+                executionId,
+                "el-1",
+                HitlKind.QUESTION,
+                "Choose a deployment target",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                Map.of("type", "object"),
+                null);
+        upsertPendingActivity(snapshot, ActivityType.ELICITATION, "Choose a deployment target");
+    }
+
+    private void upsertPendingActivity(HitlRequestSnapshot snapshot, ActivityType type, String description)
+            throws Exception {
+        SandboxExecutionActivity row = activityRepository
+                .findByExecutionIdAndActionId(executionId, snapshot.actionId())
+                .orElseGet(() -> new SandboxExecutionActivity(
+                        executionId, 1, snapshot.actionId(), type, ActivityStatus.PENDING, description, null));
+        ActivityDetail detail = new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null)
+                .withHitl(ActivityHitl.from(snapshot, HitlState.AWAITING_HUMAN));
+        row.setActivityType(type);
+        row.setStatus(ActivityStatus.PENDING);
+        row.setDescription(description);
+        row.setDetail(objectMapper.writeValueAsString(detail));
+        activityRepository.save(row);
     }
 
     // Leaving RUNNING stamps the lazy environment, which needs an open session.
@@ -514,7 +516,10 @@ class SandboxHitlControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isNoContent());
 
-        assertThat(pendingHitlRegistry.find(executionId, "el-1")).isNull();
+        SandboxExecutionActivity row = activityRepository
+                .findFirstByExecutionIdAndActionIdOrderBySequenceDesc(executionId, "el-1")
+                .orElseThrow();
+        assertThat(row.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
     }
 
     @Test
