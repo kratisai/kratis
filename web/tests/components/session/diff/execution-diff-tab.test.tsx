@@ -98,6 +98,34 @@ describe('ExecutionDiffTab', () => {
     expect(useDiffReviewStore.getState().collapsedFiles['src/B.ts']).toBe(false)
   })
 
+  it('does not clip sticky file headers in the file list container', async () => {
+    vi.spyOn(diffApi, 'fetchDiffSummary').mockResolvedValue({
+      baseCommit: 'commit-a',
+      files: [
+        {
+          additions: 1,
+          deletions: 0,
+          isCollapsedByDefault: true,
+          path: 'src/widget.ts',
+          status: 'MODIFIED',
+        },
+      ],
+      headCommit: 'commit-b',
+      totalAdditions: 1,
+      totalDeletions: 0,
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionDiffTab chatId="chat-1" executionId="exec-1" />
+      </QueryClientProvider>,
+    )
+
+    await screen.findByText('widget.ts')
+    const fileList = screen.getByTestId('diff-file-src/widget.ts').parentElement
+    expect(fileList).not.toHaveClass('overflow-hidden')
+  })
+
   it('sorts files alphabetically regardless of input order', async () => {
     vi.spyOn(diffApi, 'fetchDiffSummary').mockResolvedValue({
       baseCommit: 'commit-a',

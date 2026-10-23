@@ -1,11 +1,17 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DiffCommentDraft } from '@/types/diff-types'
 
 import { buildCommentExtendData, DiffHunkViewer } from '@/components/session/diff/diff-hunk-viewer'
+import { useEnvironments, useResumeEnvironment } from '@/hooks/use-environments'
 import * as diffApi from '@/lib/diff-api'
 import { useDiffReviewStore } from '@/store/diff-review-store'
+
+vi.mock('@/hooks/use-environments', () => ({
+  useEnvironments: vi.fn(),
+  useResumeEnvironment: vi.fn(),
+}))
 
 const SAMPLE_PATCH = `@@ -10,4 +10,5 @@ function calculateTotal()
  const a = 1;
@@ -36,6 +42,13 @@ describe('DiffHunkViewer', () => {
     // restoreAllMocks (not clearAllMocks) so a mockResolvedValueOnce left in the
     // queue by an earlier test cannot leak into the next one
     vi.restoreAllMocks()
+    vi.mocked(useEnvironments).mockReturnValue({
+      data: [],
+    } as unknown as ReturnType<typeof useEnvironments>)
+    vi.mocked(useResumeEnvironment).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    } as unknown as ReturnType<typeof useResumeEnvironment>)
     useDiffReviewStore.setState({
       activeCommentBox: null,
       activeStickyBreadcrumb: null,
@@ -76,11 +89,10 @@ describe('DiffHunkViewer', () => {
       />,
     )
 
-    const buttons = screen.getAllByRole('button', { name: /show more/i })
-    const topButton = buttons[0]
-    expect(topButton).toBeInTheDocument()
+    const topExpander = screen.getByTestId('diff-expand-top')
+    expect(within(topExpander).getAllByRole('button')).toHaveLength(2)
 
-    fireEvent.click(topButton)
+    fireEvent.click(within(topExpander).getByRole('button', { name: /^show$/i }))
     expect(diffApi.fetchFileSlice).toHaveBeenCalledWith('chat-1', 'exec-1', 'src/calc.ts', 1, 9)
 
     await waitFor(() => {
@@ -199,7 +211,7 @@ index 191f8cb..45e4ba8 100644
     expect(container).toHaveTextContent('activeStreams.remove(chatId);')
   })
 
-  it('suppresses top Show more button when diff starts at line 1', () => {
+  it('suppresses top expander when diff starts at line 1', () => {
     const patchAtLine1 = `@@ -1,4 +1,5 @@\n const a = 1;\n+const b = 2;\n const c = 3;\n const d = 4;\n`
     render(
       <DiffHunkViewer
@@ -211,12 +223,11 @@ index 191f8cb..45e4ba8 100644
       />,
     )
 
-    // Should only have 1 Show more button (the bottom one), not 2
-    const buttons = screen.getAllByRole('button', { name: /show more/i })
-    expect(buttons).toHaveLength(1)
+    expect(screen.queryByTestId('diff-expand-top')).not.toBeInTheDocument()
+    expect(screen.getByTestId('diff-expand-bottom')).toBeInTheDocument()
   })
 
-  it('suppresses bottom Show more button when expanding bottom reaches EOF', async () => {
+  it('suppresses bottom expander when expanding bottom reaches EOF', async () => {
     vi.spyOn(diffApi, 'fetchFileSlice').mockResolvedValue({
       lines: ['// last line of file'],
       path: 'src/calc.ts',
@@ -234,12 +245,12 @@ index 191f8cb..45e4ba8 100644
       />,
     )
 
-    const bottomButton = screen.getByRole('button', { name: /show more/i })
-    fireEvent.click(bottomButton)
+    const bottomExpander = screen.getByTestId('diff-expand-bottom')
+    fireEvent.click(within(bottomExpander).getByRole('button', { name: /^show$/i }))
 
     await waitFor(() => {
-      // After fetching only 1 line (< 10), EOF is reached and bottom button is suppressed
-      expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument()
+      // After fetching only 1 line (< 10), EOF is reached and bottom expander is suppressed
+      expect(screen.queryByTestId('diff-expand-bottom')).not.toBeInTheDocument()
     })
   })
 
@@ -365,7 +376,7 @@ index 191f8cb..45e4ba8 100644
     })
   })
 
-  it('immediately suppresses bottom Show more button when totalLines is covered by patch', () => {
+  it('immediately suppresses expanders when totalLines is covered by patch', () => {
     const patchFullFile = `@@ -1,4 +1,5 @@\n const a = 1;\n+const b = 2;\n const c = 3;\n const d = 4;\n`
     render(
       <DiffHunkViewer
@@ -378,8 +389,9 @@ index 191f8cb..45e4ba8 100644
       />,
     )
 
-    // Diff covers lines 1..5 and totalLines is 5 -> both top and bottom buttons suppressed
-    expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument()
+    // Diff covers lines 1..5 and totalLines is 5 -> both top and bottom expanders suppressed
+    expect(screen.queryByTestId('diff-expand-top')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('diff-expand-bottom')).not.toBeInTheDocument()
   })
 
   it('renders Show and More link buttons between hunks for multi-hunk diffs', () => {
@@ -393,11 +405,16 @@ index 191f8cb..45e4ba8 100644
       />,
     )
 
-    // top and bottom Show more buttons
-    expect(screen.getAllByRole('button', { name: /^show more$/i })).toHaveLength(2)
-    // between-hunks buttons: Show (up) and More (down)
-    expect(screen.getByRole('button', { name: /^show$/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^more$/i })).toBeInTheDocument()
+    const expanders = [
+      screen.getByTestId('diff-expand-top'),
+      screen.getByTestId('diff-expand-gap-0'),
+      screen.getByTestId('diff-expand-bottom'),
+    ]
+    for (const expander of expanders) {
+      expect(within(expander).getAllByRole('button')).toHaveLength(2)
+      expect(within(expander).getByRole('button', { name: /^show$/i })).toBeInTheDocument()
+      expect(within(expander).getByRole('button', { name: /^more$/i })).toBeInTheDocument()
+    }
   })
 
   it('adds lines to the previous hunk when expanding down between hunks', async () => {
@@ -418,7 +435,8 @@ index 191f8cb..45e4ba8 100644
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^more$/i }))
+    const gapExpander = screen.getByTestId('diff-expand-gap-0')
+    fireEvent.click(within(gapExpander).getByRole('button', { name: /^more$/i }))
     expect(sliceSpy).toHaveBeenCalledWith('chat-1', 'exec-1', 'src/multi.ts', 14, 23)
 
     await waitFor(() => {
@@ -426,8 +444,8 @@ index 191f8cb..45e4ba8 100644
     })
 
     // Gap lines 24..29 remain, so both between-hunks buttons stay
-    expect(screen.getByRole('button', { name: /^show$/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^more$/i })).toBeInTheDocument()
+    expect(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^show$/i })).toBeInTheDocument()
+    expect(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^more$/i })).toBeInTheDocument()
   })
 
   it('adds lines to the next hunk when expanding up between hunks', async () => {
@@ -448,7 +466,8 @@ index 191f8cb..45e4ba8 100644
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^show$/i }))
+    const gapExpander = screen.getByTestId('diff-expand-gap-0')
+    fireEvent.click(within(gapExpander).getByRole('button', { name: /^show$/i }))
     expect(sliceSpy).toHaveBeenCalledWith('chat-1', 'exec-1', 'src/multi.ts', 20, 29)
 
     await waitFor(() => {
@@ -456,8 +475,8 @@ index 191f8cb..45e4ba8 100644
     })
 
     // Gap lines 14..19 remain, so both between-hunks buttons stay
-    expect(screen.getByRole('button', { name: /^show$/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^more$/i })).toBeInTheDocument()
+    expect(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^show$/i })).toBeInTheDocument()
+    expect(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^more$/i })).toBeInTheDocument()
   })
 
   it('hides the between-hunks buttons once the gap is fully expanded', async () => {
@@ -485,20 +504,20 @@ index 191f8cb..45e4ba8 100644
     )
 
     // Expand down first (lines 14..23), then up (lines 24..29)
-    fireEvent.click(screen.getByRole('button', { name: /^more$/i }))
+    fireEvent.click(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^more$/i }))
     await screen.findByText('// gap line 1')
 
-    fireEvent.click(screen.getByRole('button', { name: /^show$/i }))
+    fireEvent.click(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^show$/i }))
     expect(sliceSpy).toHaveBeenLastCalledWith('chat-1', 'exec-1', 'src/multi.ts', 24, 29)
 
     await waitFor(() => {
       expect(screen.getByText('// gap line 16')).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /^show$/i })).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /^more$/i })).not.toBeInTheDocument()
+      expect(screen.queryByTestId('diff-expand-gap-0')).not.toBeInTheDocument()
     })
 
-    // top and bottom Show more buttons remain
-    expect(screen.getAllByRole('button', { name: /^show more$/i })).toHaveLength(2)
+    // top and bottom expanders remain
+    expect(screen.getByTestId('diff-expand-top')).toBeInTheDocument()
+    expect(screen.getByTestId('diff-expand-bottom')).toBeInTheDocument()
   })
 
   it('does not render between-hunks buttons when hunks are adjacent', () => {
@@ -525,10 +544,10 @@ index 191f8cb..45e4ba8 100644
       />,
     )
 
-    // Only top and bottom buttons; no gap between hunks
-    expect(screen.getAllByRole('button', { name: /^show more$/i })).toHaveLength(2)
-    expect(screen.queryByRole('button', { name: /^show$/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^more$/i })).not.toBeInTheDocument()
+    // Only top and bottom expanders; no gap between hunks
+    expect(screen.getByTestId('diff-expand-top')).toBeInTheDocument()
+    expect(screen.getByTestId('diff-expand-bottom')).toBeInTheDocument()
+    expect(screen.queryByTestId('diff-expand-gap-0')).not.toBeInTheDocument()
   })
 
   it('suppresses the between-hunks buttons when the slice fetch fails', async () => {
@@ -544,11 +563,69 @@ index 191f8cb..45e4ba8 100644
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^more$/i }))
+    fireEvent.click(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^more$/i }))
 
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /^show$/i })).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /^more$/i })).not.toBeInTheDocument()
+      expect(screen.queryByTestId('diff-expand-gap-0')).not.toBeInTheDocument()
     })
+  })
+
+  it('shows the resume drawer instead of expanding when the environment is sleeping', () => {
+    const mutateAsync = vi.fn().mockResolvedValue({})
+    vi.mocked(useEnvironments).mockReturnValue({
+      data: [{ id: 'env-sleeping', status: 'SLEEPING' }],
+    } as unknown as ReturnType<typeof useEnvironments>)
+    vi.mocked(useResumeEnvironment).mockReturnValue({
+      isPending: false,
+      mutateAsync,
+    } as unknown as ReturnType<typeof useResumeEnvironment>)
+    const sliceSpy = vi.spyOn(diffApi, 'fetchFileSlice')
+
+    render(
+      <DiffHunkViewer
+        chatId="chat-1"
+        comments={[]}
+        executionId="exec-1"
+        patch={SAMPLE_PATCH}
+        path="src/calc.ts"
+      />,
+    )
+
+    const topExpander = screen.getByTestId('diff-expand-top')
+    fireEvent.click(within(topExpander).getByRole('button', { name: /^show$/i }))
+
+    expect(screen.getByTestId('resume-environment-drawer')).toBeInTheDocument()
+    expect(
+      screen.getByText('Sandbox environment is sleeping. Resume environment to load more lines.'),
+    ).toBeInTheDocument()
+    expect(sliceSpy).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /resume environment/i }))
+    expect(mutateAsync).toHaveBeenCalledWith('env-sleeping')
+  })
+
+  it('toggles the resume drawer closed when clicking the same expander twice', () => {
+    vi.mocked(useEnvironments).mockReturnValue({
+      data: [{ id: 'env-sleeping', status: 'SLEEPING' }],
+    } as unknown as ReturnType<typeof useEnvironments>)
+
+    render(
+      <DiffHunkViewer
+        chatId="chat-1"
+        comments={[]}
+        executionId="exec-1"
+        patch={SAMPLE_PATCH}
+        path="src/calc.ts"
+      />,
+    )
+
+    const moreButton = within(screen.getByTestId('diff-expand-top')).getByRole('button', {
+      name: /^more$/i,
+    })
+    fireEvent.click(moreButton)
+    expect(screen.getByTestId('resume-environment-drawer')).toBeInTheDocument()
+
+    fireEvent.click(moreButton)
+    expect(screen.queryByTestId('resume-environment-drawer')).not.toBeInTheDocument()
   })
 })
