@@ -1,13 +1,14 @@
 import { DiffFile, DiffModeEnum, DiffView, type SplitSide } from '@git-diff-view/react'
 import '@git-diff-view/react/styles/diff-view.css'
 import langMap from 'lang-map'
-import { ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Loader2, Play } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 
 import type { DiffCommentDraft } from '@/types/diff-types'
 
 import { Button } from '@/components/ui/button'
+import { useEnvironments, useResumeEnvironment } from '@/hooks/use-environments'
 import { useIsMobile } from '@/hooks/use-is-mobile'
 import { fetchFileSlice } from '@/lib/diff-api'
 import { useDiffReviewStore } from '@/store/diff-review-store'
@@ -27,6 +28,7 @@ interface DiffHunkViewerProps {
   totalLines?: number
 }
 
+type ExpanderPosition = 'bottom' | 'top'
 type GapExpandDirection = 'down' | 'up'
 
 interface ParsedDiffHunk {
@@ -93,6 +95,13 @@ export function DiffHunkViewer({
   const [hasReachedTop, setHasReachedTop] = useState(false)
   const [hasReachedBottom, setHasReachedBottom] = useState(false)
   const [hasReachedGapEnd, setHasReachedGapEnd] = useState<Record<number, boolean>>({})
+  const [isResumeDrawerOpen, setIsResumeDrawerOpen] = useState(false)
+  const [resumeDrawerPosition, setResumeDrawerPosition] = useState<ExpanderPosition>('top')
+
+  const { data: environments } = useEnvironments()
+  const resumeEnvironment = useResumeEnvironment()
+  const sleepingEnvironment = environments?.find((env) => env.status === 'SLEEPING')
+  const isSleeping = sleepingEnvironment !== undefined
 
   // Reset expanded slices when file path or base patch changes
   useEffect(() => {
@@ -104,6 +113,7 @@ export function DiffHunkViewer({
     setHasReachedBottom(false)
     setHasReachedGapEnd({})
     setExpandingGap(null)
+    setIsResumeDrawerOpen(false)
   }, [patch, path])
 
   const fileLang = useMemo(() => getFileLanguage(path), [path])
@@ -201,6 +211,54 @@ export function DiffHunkViewer({
     }
   }
 
+  const requestExpand = (position: ExpanderPosition, expand: () => Promise<void>) => {
+    if (isSleeping) {
+      const isSameDrawer = isResumeDrawerOpen && resumeDrawerPosition === position
+      setIsResumeDrawerOpen(!isSameDrawer)
+      setResumeDrawerPosition(position)
+      return
+    }
+    void expand()
+  }
+
+  const handleResumeEnvironment = async () => {
+    if (!sleepingEnvironment) return
+    try {
+      await resumeEnvironment.mutateAsync(sleepingEnvironment.id)
+      setIsResumeDrawerOpen(false)
+    } catch {
+      // The mutation hook surfaces the failure via toast.
+    }
+  }
+
+  const renderResumeDrawer = (position: ExpanderPosition) => {
+    if (!isResumeDrawerOpen || resumeDrawerPosition !== position || !isSleeping) return null
+    return (
+      <div
+        className="flex w-full flex-col items-center justify-center gap-2 px-2 py-1 sm:flex-row"
+        data-testid="resume-environment-drawer"
+      >
+        <span className="text-muted-foreground text-center text-[11px]">
+          Sandbox environment is sleeping. Resume environment to load more lines.
+        </span>
+        <Button
+          className="h-6 shrink-0 text-[11px]"
+          disabled={resumeEnvironment.isPending || !sleepingEnvironment}
+          onClick={() => void handleResumeEnvironment()}
+          size="sm"
+          variant="secondary"
+        >
+          {resumeEnvironment.isPending ? (
+            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+          ) : (
+            <Play className="mr-1 h-3 w-3 fill-current" />
+          )}
+          Resume environment
+        </Button>
+      </div>
+    )
+  }
+
   const handleExpandGap = async (gapIndex: number, direction: GapExpandDirection) => {
     if (expandingGap !== null || !hasRemainingGap(gapIndex)) return
     const upper = effectiveHunks.at(gapIndex)
@@ -280,23 +338,37 @@ export function DiffHunkViewer({
       className="bg-card text-foreground flex flex-col font-mono text-xs"
       data-testid="diff-hunk-viewer"
     >
-      {/* Expand Top Context Button */}
+      {/* Expand Top Context Buttons */}
       {!isAtTop && (
-        <div className="border-border/40 bg-muted/20 flex items-center justify-center border-b py-0">
+        <div
+          className="border-border/40 bg-muted/20 flex flex-wrap items-center justify-center gap-1 border-b py-1"
+          data-testid="diff-expand-top"
+        >
           <Button
-            className="text-muted-foreground hover:text-foreground h-6 text-[11px]"
+            className="text-muted-foreground hover:text-foreground h-6 px-1.5 text-[11px]"
             disabled={isExpandingTop}
-            onClick={() => void handleExpandTop()}
+            onClick={() => requestExpand('top', handleExpandTop)}
             size="sm"
             variant="link"
           >
             {isExpandingTop ? (
-              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              <Loader2 className="h-3 w-3 animate-spin" />
             ) : (
-              <ChevronUp className="mr-1 h-3 w-3" />
+              <ChevronUp className="h-3 w-3" />
             )}
-            Show more
+            Show
           </Button>
+          <Button
+            className="text-muted-foreground hover:text-foreground h-6 px-1.5 text-[11px]"
+            disabled={isExpandingTop}
+            onClick={() => requestExpand('top', handleExpandTop)}
+            size="sm"
+            variant="link"
+          >
+            More
+            <ChevronDown className="h-3 w-3" />
+          </Button>
+          {renderResumeDrawer('top')}
         </div>
       )}
 
@@ -378,7 +450,10 @@ export function DiffHunkViewer({
 
           {/* Expand Context Between Hunks: up adds lines to the next hunk, down adds lines to the previous hunk */}
           {hunkIndex < diffFileInstances.length - 1 && hasRemainingGap(hunkIndex) && (
-            <div className="border-border/40 bg-muted/20 flex items-center justify-center gap-1 border-y py-1">
+            <div
+              className="border-border/40 bg-muted/20 flex items-center justify-center gap-1 border-y py-1"
+              data-testid={`diff-expand-gap-${hunkIndex}`}
+            >
               <Button
                 className="text-muted-foreground hover:text-foreground h-6 px-1.5 text-[11px]"
                 disabled={expandingGap?.index === hunkIndex}
@@ -414,23 +489,37 @@ export function DiffHunkViewer({
         </Fragment>
       ))}
 
-      {/* Expand Bottom Context Button */}
+      {/* Expand Bottom Context Buttons */}
       {!isAtBottom && (
-        <div className="border-border/40 bg-muted/20 flex items-center justify-center border-t py-1">
+        <div
+          className="border-border/40 bg-muted/20 flex flex-wrap items-center justify-center gap-1 border-t py-1"
+          data-testid="diff-expand-bottom"
+        >
           <Button
-            className="text-muted-foreground hover:text-foreground h-6 text-[11px]"
+            className="text-muted-foreground hover:text-foreground h-6 px-1.5 text-[11px]"
             disabled={isExpandingBottom}
-            onClick={() => void handleExpandBottom()}
+            onClick={() => requestExpand('bottom', handleExpandBottom)}
             size="sm"
             variant="link"
           >
             {isExpandingBottom ? (
-              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              <Loader2 className="h-3 w-3 animate-spin" />
             ) : (
-              <ChevronDown className="mr-1 h-3 w-3" />
+              <ChevronUp className="h-3 w-3" />
             )}
-            Show more
+            Show
           </Button>
+          <Button
+            className="text-muted-foreground hover:text-foreground h-6 px-1.5 text-[11px]"
+            disabled={isExpandingBottom}
+            onClick={() => requestExpand('bottom', handleExpandBottom)}
+            size="sm"
+            variant="link"
+          >
+            More
+            <ChevronDown className="h-3 w-3" />
+          </Button>
+          {renderResumeDrawer('bottom')}
         </div>
       )}
     </div>

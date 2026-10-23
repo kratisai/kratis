@@ -249,7 +249,7 @@ export function ExecutionDiffTab({
 
           {/* Integrated File Diffs List */}
           {sortedFiles.length > 0 && (
-            <div className="border-border/70 divide-border/60 bg-card mb-20 divide-y overflow-hidden rounded-lg border shadow-xs">
+            <div className="border-border/70 divide-border/60 bg-card mb-20 divide-y rounded-lg border shadow-xs">
               {sortedFiles.map((file) => (
                 <DiffFileCard
                   chatId={chatId}

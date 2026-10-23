@@ -43,6 +43,27 @@ describe('DiffFileCard', () => {
     expect(screen.getByText('-3')).toBeInTheDocument()
   })
 
+  it('keeps the file header sticky while the body scrolls', () => {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DiffFileCard
+          chatId="chat-1"
+          executionId="exec-1"
+          file={{
+            additions: 12,
+            deletions: 3,
+            isCollapsedByDefault: false,
+            path: 'src/config.ts',
+            status: 'MODIFIED',
+          }}
+        />
+      </QueryClientProvider>,
+    )
+
+    const header = screen.getByText('config.ts').closest('[class*="sticky"]')
+    expect(header).toHaveClass('sticky', 'top-0', 'z-10')
+  })
+
   it('toggles collapse on header click', () => {
     render(
       <QueryClientProvider client={queryClient}>
