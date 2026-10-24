@@ -421,9 +421,15 @@ public class ExecutionActivityPersistenceService {
             ActivityDetail detail) {
         existing.setActivityType(activityType);
         existing.setDescription(description);
-        existing.setStatus(status);
+        ActivityDetail current = detailOf(existing);
+        boolean awaitingHuman =
+                current != null && current.hitl() != null && current.hitl().state() == HitlState.AWAITING_HUMAN;
+        // An approval awaiting the human owns the status until resolution; ACP lifecycle updates
+        // must not reopen or close it, or the resolve endpoint rejects the decision.
+        if (!awaitingHuman) {
+            existing.setStatus(status);
+        }
         if (detail != null) {
-            ActivityDetail current = detailOf(existing);
             boolean keepApproval = current != null && current.hitl() != null;
             existing.setDetail(toJson(keepApproval ? detail.withHitl(current.hitl()) : detail));
         }

@@ -2,10 +2,13 @@ package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.config.SecurityProperties;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.security.SecureRandom;
 import java.util.Base64;
@@ -24,6 +27,10 @@ public class EncryptionKeyManager {
     private static final Logger logger = LoggerFactory.getLogger(EncryptionKeyManager.class);
     private static final int KEY_LENGTH_BYTES = 32; // 256 bits
 
+    // Several Spring contexts can start in one JVM; the file lock alone does not serialise threads
+    // of the same process, so the monitor covers them and the lock covers other processes.
+    private static final Object KEY_FILE_MONITOR = new Object();
+
     private final Path keyFilePath;
     private final String encryptionKey;
 
@@ -33,42 +40,47 @@ public class EncryptionKeyManager {
     }
 
     private String loadOrGenerateKey() {
-        try {
-            // Ensure parent directory exists
-            Path parentDir = keyFilePath.getParent();
-            if (parentDir != null && !Files.exists(parentDir)) {
-                Files.createDirectories(parentDir);
-                logger.info("Created encryption key directory: {}", parentDir);
-            }
-
-            // Check if key file exists
-            if (Files.exists(keyFilePath)) {
-                String existingKey =
-                        Files.readString(keyFilePath, StandardCharsets.UTF_8).trim();
-                if (!existingKey.isEmpty()) {
-                    logger.info("Loaded existing encryption key from: {}", keyFilePath);
-                    return existingKey;
-                } else {
-                    logger.warn(
-                            "Encryption key file exists but is empty at: {}. Generating a new key. Previously encrypted secrets will be unreadable.",
-                            keyFilePath);
+        synchronized (KEY_FILE_MONITOR) {
+            try {
+                Path parentDir = keyFilePath.getParent();
+                if (parentDir != null && !Files.exists(parentDir)) {
+                    Files.createDirectories(parentDir);
+                    logger.info("Created encryption key directory: {}", parentDir);
                 }
-            } else {
-                logger.warn(
-                        "No encryption key file found at: {}. Generating a new key. If you had previously encrypted secrets, they will be unreadable.",
-                        keyFilePath);
+                Path lockPath = keyFilePath.resolveSibling(keyFilePath.getFileName() + ".lock");
+                try (FileChannel lockChannel =
+                                FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                        FileLock ignored = lockChannel.lock()) {
+                    return readOrGenerateKeyLocked();
+                }
+            } catch (IOException e) {
+                throw new IllegalStateException("Failed to load or generate encryption key at path: " + keyFilePath, e);
             }
-
-            // Generate new key
-            String newKey = generateRandomKey();
-            Files.writeString(keyFilePath, newKey, StandardCharsets.UTF_8);
-            setRestrictiveFilePermissions(keyFilePath);
-            logger.info("Generated and persisted new encryption key to: {}", keyFilePath);
-            return newKey;
-
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to load or generate encryption key at path: " + keyFilePath, e);
         }
+    }
+
+    private String readOrGenerateKeyLocked() throws IOException {
+        if (Files.exists(keyFilePath)) {
+            String existingKey =
+                    Files.readString(keyFilePath, StandardCharsets.UTF_8).trim();
+            if (!existingKey.isEmpty()) {
+                logger.info("Loaded existing encryption key from: {}", keyFilePath);
+                return existingKey;
+            }
+            logger.warn(
+                    "Encryption key file exists but is empty at: {}. Generating a new key. Previously encrypted secrets will be unreadable.",
+                    keyFilePath);
+        } else {
+            logger.warn(
+                    "No encryption key file found at: {}. Generating a new key. If you had previously encrypted secrets, they will be unreadable.",
+                    keyFilePath);
+        }
+
+        String newKey = generateRandomKey();
+        Files.writeString(keyFilePath, newKey, StandardCharsets.UTF_8);
+        setRestrictiveFilePermissions(keyFilePath);
+        logger.info("Generated and persisted new encryption key to: {}", keyFilePath);
+        return newKey;
     }
 
     private String generateRandomKey() {

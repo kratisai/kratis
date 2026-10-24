@@ -6,14 +6,17 @@ import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.api.wsdto.ClientPayloadType;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
@@ -34,6 +37,7 @@ public abstract class WebSocketFixture<T extends WebSocketFixture<T>> extends Te
     protected final List<TypedRule<?>> typedRules = new CopyOnWriteArrayList<>();
     protected final Map<String, CountDownLatch> triggerLatches = new ConcurrentHashMap<>();
     private final Map<String, MessageLatch> messageLatches = new ConcurrentHashMap<>();
+    private final AtomicReference<CloseStatus> closeStatus = new AtomicReference<>();
 
     @FunctionalInterface
     public interface RuleHandler<T> {
@@ -86,6 +90,20 @@ public abstract class WebSocketFixture<T extends WebSocketFixture<T>> extends Te
 
     protected WebSocketFixture(String token) {
         this.token = token;
+    }
+
+    @Override
+    public void afterConnectionClosed(@NonNull WebSocketSession session, @NonNull CloseStatus status) {
+        closeStatus.set(status);
+    }
+
+    /** True once the server has closed this connection (for example after a handler threw). */
+    public boolean isClosed() {
+        return closeStatus.get() != null;
+    }
+
+    public Optional<CloseStatus> closeStatus() {
+        return Optional.ofNullable(closeStatus.get());
     }
 
     @SuppressWarnings("unchecked")
