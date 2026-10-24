@@ -6,6 +6,8 @@ export interface ChatDto {
   createdAt: string
   createdByDisplayName: string
   id: string
+  lastActivityAt?: null | string
+  status?: TopicStatus
   teamId: string
   title: string
   updatedAt: string
@@ -22,6 +24,8 @@ export interface CreateChatResponse {
   createdAt: string
   id: string
 }
+
+export type TopicStatus = 'Blocked' | 'Failed' | 'Idle' | 'MR pushed' | 'working'
 
 export async function archiveChatApi(chatId: string): Promise<void> {
   const response = await fetchWithAuth(`/api/v1/chats/${encodeURIComponent(chatId)}/archive`, {

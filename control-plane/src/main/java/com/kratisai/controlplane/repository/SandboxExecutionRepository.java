@@ -26,6 +26,8 @@ public interface SandboxExecutionRepository extends JpaRepository<SandboxExecuti
 
     Optional<SandboxExecution> findFirstByEnvironmentIdOrderByStartedAtDesc(UUID environmentId);
 
+    Optional<SandboxExecution> findFirstByChatIdOrderByStartedAtDesc(UUID chatId);
+
     List<SandboxExecution> findByStatusInAndEnvironment_StatusIn(
             Collection<SandboxExecutionStatus> statuses, Collection<EnvironmentStatus> environmentStatuses);
 

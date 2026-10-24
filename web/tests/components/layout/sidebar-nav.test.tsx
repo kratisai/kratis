@@ -9,29 +9,80 @@ vi.mock('@/hooks/use-chats', () => ({
   useArchiveChat: vi.fn(() => ({
     mutate: vi.fn(),
   })),
-  useChats: vi.fn(() => ({
-    data: [
-      {
-        archivedAt: null,
-        createdAt: '2024-01-01T00:00:00Z',
-        createdByDisplayName: 'User 1',
-        id: 'session-1',
-        teamId: 'team-1',
-        title: 'Test Session 1',
-        updatedAt: '2024-01-01T00:00:00Z',
-      },
-      {
-        archivedAt: '2024-01-02T00:00:00Z',
-        createdAt: '2024-01-01T00:00:00Z',
-        createdByDisplayName: 'User 1',
-        id: 'session-2',
-        teamId: 'team-1',
-        title: 'Archived Session 2',
-        updatedAt: '2024-01-02T00:00:00Z',
-      },
-    ],
-    isLoading: false,
-  })),
+  useChats: vi.fn(() => {
+    const recent = new Date().toISOString()
+    return {
+      data: [
+        {
+          archivedAt: null,
+          createdAt: recent,
+          createdByDisplayName: 'User 1',
+          id: 'session-1',
+          lastActivityAt: recent,
+          status: 'working',
+          teamId: 'team-1',
+          title: 'Test Session 1',
+          updatedAt: recent,
+        },
+        {
+          archivedAt: '2024-01-02T00:00:00Z',
+          createdAt: '2024-01-01T00:00:00Z',
+          createdByDisplayName: 'User 1',
+          id: 'session-2',
+          lastActivityAt: recent,
+          status: 'Failed',
+          teamId: 'team-1',
+          title: 'Archived Session 2',
+          updatedAt: recent,
+        },
+        {
+          archivedAt: null,
+          createdAt: recent,
+          createdByDisplayName: 'User 1',
+          id: 'session-3',
+          lastActivityAt: recent,
+          status: 'Idle',
+          teamId: 'team-1',
+          title: 'Idle Session',
+          updatedAt: recent,
+        },
+        {
+          archivedAt: null,
+          createdAt: recent,
+          createdByDisplayName: 'User 1',
+          id: 'session-4',
+          lastActivityAt: recent,
+          status: 'MR pushed',
+          teamId: 'team-1',
+          title: 'Published Session',
+          updatedAt: recent,
+        },
+        {
+          archivedAt: null,
+          createdAt: recent,
+          createdByDisplayName: 'User 1',
+          id: 'session-5',
+          lastActivityAt: recent,
+          status: 'Blocked',
+          teamId: 'team-1',
+          title: 'Blocked Session',
+          updatedAt: recent,
+        },
+        {
+          archivedAt: null,
+          createdAt: '2020-01-01T00:00:00Z',
+          createdByDisplayName: 'User 1',
+          id: 'session-6',
+          lastActivityAt: '2020-01-01T00:00:00Z',
+          status: 'Idle',
+          teamId: 'team-1',
+          title: 'Stale Session',
+          updatedAt: '2020-01-01T00:00:00Z',
+        },
+      ],
+      isLoading: false,
+    }
+  }),
   useUnarchiveChat: vi.fn(() => ({
     mutate: vi.fn(),
   })),
@@ -62,7 +113,7 @@ vi.mock('@/store/auth-store', () => ({
       getState: vi.fn(() => ({
         currentTeamId: 'team-1',
       })),
-    }
+    },
   ),
 }))
 
@@ -75,7 +126,9 @@ vi.mock('@tanstack/react-router', async () => {
     useNavigate: vi.fn(() => vi.fn()),
     useParams: vi.fn(() => ({})),
     useRouterState: vi.fn((opts) =>
-      opts && opts.select ? opts.select({ location: { pathname: '/ask' } }) : { location: { pathname: '/ask' } },
+      opts && opts.select
+        ? opts.select({ location: { pathname: '/ask' } })
+        : { location: { pathname: '/ask' } },
     ),
   }
 })
@@ -137,6 +190,28 @@ describe('SidebarNav', () => {
     renderWithProviders(<SidebarNav />)
 
     expect(screen.getByText('Test Session 1')).toBeTruthy()
+  })
+
+  it('renders topic status labels with their color classes', () => {
+    renderWithProviders(<SidebarNav />)
+
+    expect(screen.getByText('working')).toHaveClass('text-white', 'font-semibold')
+    expect(screen.getByText('Idle')).toHaveClass('text-yellow-400')
+    expect(screen.getByText('MR pushed')).toHaveClass('text-emerald-400')
+    expect(screen.getByText('Blocked')).toHaveClass('text-amber-400')
+    expect(screen.getByText('Failed')).toHaveClass('text-red-400')
+  })
+
+  it('renders the last activity date for topics inactive for more than a week', () => {
+    renderWithProviders(<SidebarNav />)
+
+    const expectedDate = new Date('2020-01-01T00:00:00Z').toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    })
+    expect(screen.getByText(expectedDate)).toHaveClass('text-gray-500')
+    expect(screen.getAllByText('Idle')).toHaveLength(1)
   })
 
   it('does not render the wiki sidebar section outside the wiki route', () => {
