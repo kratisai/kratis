@@ -63,7 +63,7 @@ export function DiffFileCard({ chatId, executionId, file }: DiffFileCardProps) {
     >
       {/* File Card Header */}
       <div
-        className="bg-muted/95 hover:bg-muted/90 border-border/40 sticky top-0 z-10 flex cursor-pointer items-center justify-between gap-0 border-b px-0 py-2 text-xs backdrop-blur-xs transition-colors select-none"
+        className="bg-muted/95 hover:bg-muted/90 border-border/40 sticky top-14 z-10 flex cursor-pointer items-center justify-between gap-0 border-b px-0 py-2 text-xs backdrop-blur-xs transition-colors select-none md:top-0"
         onClick={() => toggleFileCollapsed(file.path)}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1">
