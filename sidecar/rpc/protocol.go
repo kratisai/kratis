@@ -418,6 +418,7 @@ type GitDiffSummaryFile struct {
 type GitDiffSummaryParams struct {
 	BaseBranch  string `json:"baseBranch,omitempty"`
 	ExecutionID string `json:"executionId,omitempty"`
+	BranchName  string `json:"branchName,omitempty"`
 }
 
 // GitCommitMessage represents one commit in the unpushed log.
@@ -429,16 +430,20 @@ type GitCommitMessage struct {
 
 // GitDiffSummaryResult is the success response payload for env.git_diff_summary.
 type GitDiffSummaryResult struct {
-	BaseCommit     string               `json:"baseCommit"`
-	HeadCommit     string               `json:"headCommit"`
-	TotalAdditions int                  `json:"totalAdditions"`
-	TotalDeletions int                  `json:"totalDeletions"`
-	CommitsAhead   int                  `json:"commitsAhead"`
-	StagedFiles    int                  `json:"stagedFiles"`
-	UnstagedFiles  int                  `json:"unstagedFiles"`
-	HasChanges     bool                 `json:"hasChanges"`
-	CommitMessages []GitCommitMessage   `json:"commitMessages,omitempty"`
-	Files          []GitDiffSummaryFile `json:"files"`
+	BaseCommit          string               `json:"baseCommit"`
+	HeadCommit          string               `json:"headCommit"`
+	TotalAdditions      int                  `json:"totalAdditions"`
+	TotalDeletions      int                  `json:"totalDeletions"`
+	CommitsAhead        int                  `json:"commitsAhead"`
+	StagedFiles         int                  `json:"stagedFiles"`
+	UnstagedFiles       int                  `json:"unstagedFiles"`
+	HasChanges          bool                 `json:"hasChanges"`
+	CommitMessages      []GitCommitMessage   `json:"commitMessages,omitempty"`
+	Files               []GitDiffSummaryFile `json:"files"`
+	BranchName          string               `json:"branchName,omitempty"`
+	BranchExists        bool                 `json:"branchExists"`
+	BranchMerged        bool                 `json:"branchMerged"`
+	SuggestedBranchName string               `json:"suggestedBranchName,omitempty"`
 }
 
 // GitDiffManifestFile represents one file's summary and its diff section digest.
@@ -546,10 +551,13 @@ type GitPushParams struct {
 
 // GitPushResult is the success response payload for env.git_push.
 type GitPushResult struct {
-	CommitSha  string `json:"commitSha"`
-	BranchName string `json:"branchName"`
-	RemoteRef  string `json:"remoteRef,omitempty"`
-	Status     string `json:"status"`
+	CommitSha            string `json:"commitSha"`
+	BranchName           string `json:"branchName"`
+	RemoteRef            string `json:"remoteRef,omitempty"`
+	Status               string `json:"status"`
+	RequestedBranch      string `json:"requestedBranch,omitempty"`
+	BranchCreated        bool   `json:"branchCreated"`
+	PreviousBranchMerged bool   `json:"previousBranchMerged"`
 }
 
 // GitSetRemoteParams is the parameters payload for env.git_set_remote.

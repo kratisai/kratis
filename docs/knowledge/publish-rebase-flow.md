@@ -16,7 +16,7 @@ If a row has no value, use the repository branch, then `main`.
 | State | Base | Result |
 |-------|------|--------|
 | Diff view and first publish | `merge-base(origin/<target>, HEAD)` | Full branch vs target (the PR) |
-| Republish (`publishedBranch` set) | `merge-base(origin/<feature>, HEAD)` | Unpushed changes only |
+| Republish (open PR on `publishedBranch`) | `merge-base(origin/<feature>, HEAD)` | Unpushed changes only |
 | New repository (no `origin`) | Root commit | All work vs the root commit |
 
 The diff view always uses the first-publish base (three-dot vs the target).
@@ -81,6 +81,31 @@ The owner comes from the credential: GitHub user or App account, GitLab namespac
 Visibility is a create-time argument only. Do not persist it.
 Hide the control for Azure DevOps.
 
+## Multiple pull requests
+
+An execution can publish more than one pull request.
+`SandboxExecution.publishedPrs` keeps every published PR: `prNumber`, `prUrl`, `headBranch`,
+`baseBranch`, `status` (`OPEN`, `MERGED`, `CLOSED`), and `createdAt`.
+The newest entry is the active PR.
+`sandbox_execution_published_prs` (Liquibase `0.1/015`) stores the rows; the old
+`published_pr_number` and `published_pr_url` columns are dropped after their values are copied.
+
+The git remote decides the state; the database is a cache for rendering.
+
+1. `env.git_diff_summary` takes `branchName` and returns `branchExists`, `branchMerged`, and
+   `suggestedBranchName`.
+2. `publish-capabilities` writes the merged or closed status to the stored history and returns
+   `publishedPrs`, `previousPrMerged`, and `suggestedNewBranch`.
+3. The publish dialog offers **Update existing PR #X** while the PR is open, and
+   **Create a new Pull Request** by default when it is merged or closed.
+4. `publish-pr` accepts `createNewPr` and `newBranchName`. An explicit request for a new PR, or a
+   latest PR that is not open, opens a new PR instead of pushing to the old branch.
+5. `env.git_push` derives a fresh branch (`kratis/<executionId>-<n>`) when the requested branch is
+   already merged into the target. The result reports `requestedBranch`, `branchCreated`, and
+   `previousBranchMerged`.
+
+Branch names chosen by the user are kept unless the sidecar had to derive one.
+
 ## Squash
 
 `env.git_push` creates the delta commit before any rebase.
@@ -121,6 +146,7 @@ Re-run a completed execution by hand.
 
 `env.git_push` includes `targetBranch`.
 See `protocol/environment/schemas/requests/git_push.schema.yaml`.
+It returns `requestedBranch`, `branchCreated`, and `previousBranchMerged` with the commit data.
 
 `env.git_set_remote` takes `remoteUrl`, `defaultBranch`, and `executionId`.
 It returns `status`, `defaultBranch`, and `seedCommit`.

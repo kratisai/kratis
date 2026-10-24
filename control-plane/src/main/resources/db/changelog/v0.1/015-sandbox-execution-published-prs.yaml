@@ -1,0 +1,78 @@
+databaseChangeLog:
+- changeSet:
+    id: 015-sandbox-execution-published-prs-001
+    author: kratis
+    comment: >-
+      Stores every pull request published from an execution so iterative sessions can open
+      multiple PRs after earlier ones are merged.
+    changes:
+    - createTable:
+        tableName: sandbox_execution_published_prs
+        columns:
+        - column:
+            name: execution_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: pr_number
+            type: BIGINT
+            constraints:
+              nullable: false
+        - column:
+            name: pr_url
+            type: VARCHAR(1024)
+            constraints:
+              nullable: false
+        - column:
+            name: head_branch
+            type: VARCHAR(255)
+            constraints:
+              nullable: false
+        - column:
+            name: base_branch
+            type: VARCHAR(255)
+            constraints:
+              nullable: false
+        - column:
+            name: status
+            type: VARCHAR(50)
+            constraints:
+              nullable: false
+        - column:
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+            constraints:
+              nullable: false
+    - addForeignKeyConstraint:
+        baseTableName: sandbox_execution_published_prs
+        baseColumnNames: execution_id
+        constraintName: fk_published_prs_execution
+        referencedTableName: sandbox_executions
+        referencedColumnNames: id
+        onDelete: CASCADE
+    - createIndex:
+        tableName: sandbox_execution_published_prs
+        indexName: idx_published_prs_execution
+        columns:
+        - column:
+            name: execution_id
+    - sql:
+        dbms: postgresql
+        splitStatements: false
+        stripComments: true
+        sql: >-
+          INSERT INTO sandbox_execution_published_prs
+            (execution_id, pr_number, pr_url, head_branch, base_branch, status, created_at)
+          SELECT id, published_pr_number, published_pr_url, published_branch,
+                 COALESCE(target_branch, 'main'), 'OPEN', COALESCE(started_at, NOW())
+          FROM sandbox_executions
+          WHERE published_pr_number IS NOT NULL
+            AND published_pr_url IS NOT NULL
+            AND published_branch IS NOT NULL;
+    - dropColumn:
+        tableName: sandbox_executions
+        columnName: published_pr_number
+    - dropColumn:
+        tableName: sandbox_executions
+        columnName: published_pr_url

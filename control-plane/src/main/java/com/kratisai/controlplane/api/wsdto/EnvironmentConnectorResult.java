@@ -142,7 +142,11 @@ public sealed interface EnvironmentConnectorResult {
             @JsonProperty("unstagedFiles") Integer unstagedFiles,
             @JsonProperty("hasChanges") Boolean hasChanges,
             @JsonProperty("commitMessages") List<GitCommitMessage> commitMessages,
-            @JsonProperty("files") List<GitDiffSummaryFile> files)
+            @JsonProperty("files") List<GitDiffSummaryFile> files,
+            @JsonProperty("branchName") String branchName,
+            @JsonProperty("branchExists") Boolean branchExists,
+            @JsonProperty("branchMerged") Boolean branchMerged,
+            @JsonProperty("suggestedBranchName") String suggestedBranchName)
             implements EnvironmentConnectorResult {
         public GitDiffSummary {
             Objects.requireNonNull(baseCommit, "baseCommit is required");
@@ -150,6 +154,34 @@ public sealed interface EnvironmentConnectorResult {
             Objects.requireNonNull(files, "files is required");
             files = List.copyOf(files);
             commitMessages = commitMessages != null ? List.copyOf(commitMessages) : List.of();
+        }
+
+        public GitDiffSummary(
+                String baseCommit,
+                String headCommit,
+                int totalAdditions,
+                int totalDeletions,
+                Integer commitsAhead,
+                Integer stagedFiles,
+                Integer unstagedFiles,
+                Boolean hasChanges,
+                List<GitCommitMessage> commitMessages,
+                List<GitDiffSummaryFile> files) {
+            this(
+                    baseCommit,
+                    headCommit,
+                    totalAdditions,
+                    totalDeletions,
+                    commitsAhead,
+                    stagedFiles,
+                    unstagedFiles,
+                    hasChanges,
+                    commitMessages,
+                    files,
+                    null,
+                    null,
+                    null,
+                    null);
         }
 
         public GitDiffSummary(
@@ -188,12 +220,19 @@ public sealed interface EnvironmentConnectorResult {
             @JsonProperty("commitSha") String commitSha,
             @JsonProperty("branchName") String branchName,
             @JsonProperty("remoteRef") String remoteRef,
-            @JsonProperty("status") String status)
+            @JsonProperty("status") String status,
+            @JsonProperty("requestedBranch") String requestedBranch,
+            @JsonProperty("branchCreated") Boolean branchCreated,
+            @JsonProperty("previousBranchMerged") Boolean previousBranchMerged)
             implements EnvironmentConnectorResult {
         public GitPush {
             Objects.requireNonNull(commitSha, "commitSha is required");
             Objects.requireNonNull(branchName, "branchName is required");
             Objects.requireNonNull(status, "status is required");
+        }
+
+        public GitPush(String commitSha, String branchName, String remoteRef, String status) {
+            this(commitSha, branchName, remoteRef, status, null, null, null);
         }
     }
 

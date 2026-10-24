@@ -6,4 +6,7 @@ properties:
     type: string
   executionId:
     type: string
+  branchName:
+    type: string
+    description: Published branch to inspect for remote existence and merge status.
 additionalProperties: false

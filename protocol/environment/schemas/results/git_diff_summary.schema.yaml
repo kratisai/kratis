@@ -24,6 +24,14 @@ properties:
     type: integer
   hasChanges:
     type: boolean
+  branchName:
+    type: string
+  branchExists:
+    type: boolean
+  branchMerged:
+    type: boolean
+  suggestedBranchName:
+    type: string
   commitMessages:
     type: array
     items:

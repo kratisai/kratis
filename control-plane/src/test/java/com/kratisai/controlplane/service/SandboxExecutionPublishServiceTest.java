@@ -33,15 +33,18 @@ import com.kratisai.controlplane.model.CredentialType;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
+import com.kratisai.controlplane.model.PublishedPrStatus;
 import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
 import com.kratisai.controlplane.model.RepositoryVisibility;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
+import com.kratisai.controlplane.model.SandboxExecutionPublishedPr;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.*;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -1139,8 +1142,9 @@ class SandboxExecutionPublishServiceTest {
         assertThat(result.prNumber()).isEqualTo(101);
         assertThat(result.prUrl()).isEqualTo("https://github.com/test/repo/pull/101");
         assertThat(execution.getPublishedBranch()).isEqualTo("pr-branch");
-        assertThat(execution.getPublishedPrNumber()).isEqualTo(101L);
-        assertThat(execution.getPublishedPrUrl()).isEqualTo("https://github.com/test/repo/pull/101");
+        assertThat(execution.getLatestPublishedPr()).isNotNull();
+        assertThat(execution.getLatestPublishedPr().getPrNumber()).isEqualTo(101L);
+        assertThat(execution.getLatestPublishedPr().getPrUrl()).isEqualTo("https://github.com/test/repo/pull/101");
         verify(sandboxExecutionRepository).save(execution);
 
         ArgumentCaptor<EnvironmentRpcPayload.GitPush> pushCaptor =
@@ -1152,8 +1156,13 @@ class SandboxExecutionPublishServiceTest {
     @Test
     void publishPullRequest_republish_reusesPersistedBranchAndSkipsCreate() throws Exception {
         execution.setPublishedBranch("existing-branch");
-        execution.setPublishedPrNumber(77L);
-        execution.setPublishedPrUrl("https://github.com/test/repo/pull/77");
+        execution.addPublishedPr(new SandboxExecutionPublishedPr(
+                77L,
+                "https://github.com/test/repo/pull/77",
+                "existing-branch",
+                "main",
+                PublishedPrStatus.OPEN,
+                Instant.now()));
         stubExecutionLookup();
 
         RepoProvider repoProvider = mock(RepoProvider.class);
@@ -1264,5 +1273,152 @@ class SandboxExecutionPublishServiceTest {
         assertThatThrownBy(() -> service.getPublishCapabilities(userId, chatId, executionId))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Execution does not belong to chat");
+    }
+
+    @Test
+    void getPublishCapabilities_previousPrMerged_offersNewBranchAndHistory() throws Exception {
+        execution.setPublishedBranch("existing-branch");
+        execution.addPublishedPr(new SandboxExecutionPublishedPr(
+                77L,
+                "https://github.com/test/repo/pull/77",
+                "existing-branch",
+                "main",
+                PublishedPrStatus.OPEN,
+                Instant.now()));
+        stubExecutionLookup();
+
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        EnvironmentConnectorResult.GitDiffSummary summary = new EnvironmentConnectorResult.GitDiffSummary(
+                "base",
+                "head",
+                0,
+                0,
+                0,
+                0,
+                0,
+                false,
+                List.of(),
+                List.of(),
+                "existing-branch",
+                true,
+                true,
+                "kratis/exec-next-2");
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(summary);
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        assertThat(result.previousPrMerged()).isTrue();
+        assertThat(result.suggestedNewBranch()).isEqualTo("kratis/exec-next-2");
+        assertThat(result.publishedPrs()).hasSize(1);
+        assertThat(result.publishedPrs().getFirst().prNumber()).isEqualTo(77L);
+        assertThat(result.publishedPrs().getFirst().status()).isEqualTo(PublishedPrStatus.MERGED);
+    }
+
+    @Test
+    void publishPullRequest_afterMerge_createsNewBranchAndHistoricPr() throws Exception {
+        execution.addPublishedPr(new SandboxExecutionPublishedPr(
+                77L,
+                "https://github.com/test/repo/pull/77",
+                "existing-branch",
+                "main",
+                PublishedPrStatus.MERGED,
+                Instant.now()));
+        execution.setPublishedBranch("existing-branch");
+        stubExecutionLookup();
+
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+        GitAuthMaterial auth = GitAuthMaterial.ofToken("pat-token");
+        when(credentialResolver.resolve(repository)).thenReturn(auth);
+        when(repoProvider.createPullRequest(eq(repository), eq(auth), any(CreatePullRequestCommand.class)))
+                .thenReturn(new PullRequestResultDto(
+                        88L, "https://github.com/test/repo/pull/88", "kratis/exec-next-2", "main"));
+
+        EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
+                "sha888",
+                "kratis/exec-next-2",
+                "refs/heads/kratis/exec-next-2",
+                "success",
+                "existing-branch",
+                true,
+                true);
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(pushResult);
+
+        PublishPrRequestDto request = new PublishPrRequestDto(
+                "kratis/exec-next-2",
+                "main",
+                "Follow-up",
+                "Body",
+                false,
+                false,
+                null,
+                null,
+                null,
+                true,
+                "kratis/exec-next-2");
+
+        PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
+
+        assertThat(result.prNumber()).isEqualTo(88L);
+        assertThat(execution.getPublishedBranch()).isEqualTo("kratis/exec-next-2");
+        assertThat(execution.getLatestPublishedPr().getPrNumber()).isEqualTo(88L);
+        assertThat(execution.getPublishedPrs()).hasSize(2);
+        assertThat(execution.getPublishedPrs().get(1).getPrNumber()).isEqualTo(88L);
+        assertThat(execution.getPublishedPrs().get(1).getStatus()).isEqualTo(PublishedPrStatus.OPEN);
+
+        ArgumentCaptor<EnvironmentRpcPayload.GitPush> pushCaptor =
+                ArgumentCaptor.forClass(EnvironmentRpcPayload.GitPush.class);
+        verify(environmentRpcClient).request(eq(envId), pushCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
+        assertThat(pushCaptor.getValue().force()).isFalse();
+    }
+
+    @Test
+    void publishPullRequest_createNewPrOnOpenPr_derivesFreshBranchAndKeepsHistory() throws Exception {
+        execution.addPublishedPr(new SandboxExecutionPublishedPr(
+                77L,
+                "https://github.com/test/repo/pull/77",
+                "existing-branch",
+                "main",
+                PublishedPrStatus.OPEN,
+                Instant.now()));
+        execution.setPublishedBranch("existing-branch");
+        stubExecutionLookup();
+
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+        GitAuthMaterial auth = GitAuthMaterial.ofToken("pat-token");
+        when(credentialResolver.resolve(repository)).thenReturn(auth);
+        when(repoProvider.createPullRequest(eq(repository), eq(auth), any(CreatePullRequestCommand.class)))
+                .thenReturn(new PullRequestResultDto(
+                        99L, "https://github.com/test/repo/pull/99", "kratis/derived-2", "main"));
+
+        EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
+                "sha999", "kratis/derived-2", "refs/heads/kratis/derived-2", "success", "existing-branch", true, false);
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(pushResult);
+
+        PublishPrRequestDto request = new PublishPrRequestDto(
+                "existing-branch", "main", "Second PR", "Body", false, false, null, null, null, true, null);
+
+        PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
+
+        assertThat(result.prNumber()).isEqualTo(99L);
+        assertThat(execution.getPublishedPrs()).hasSize(2);
+        assertThat(execution.getPublishedPrs().get(1).getHeadBranch()).isEqualTo("kratis/derived-2");
+
+        ArgumentCaptor<EnvironmentRpcPayload.GitPush> pushCaptor =
+                ArgumentCaptor.forClass(EnvironmentRpcPayload.GitPush.class);
+        verify(environmentRpcClient).request(eq(envId), pushCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
+        assertThat(pushCaptor.getValue().branchName()).startsWith("kratis/");
     }
 }

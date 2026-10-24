@@ -100,11 +100,14 @@ public class SandboxExecution {
     @Column(name = "target_branch", length = 255)
     private String targetBranch;
 
-    @Column(name = "published_pr_number")
-    private Long publishedPrNumber;
-
-    @Column(name = "published_pr_url", length = 1024)
-    private String publishedPrUrl;
+    /**
+     * Every pull request published from this execution. The latest row mirrors the legacy
+     * {@code published*} fields above for older clients and queries.
+     */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "sandbox_execution_published_prs", joinColumns = @JoinColumn(name = "execution_id"))
+    @OrderBy("createdAt ASC")
+    private List<SandboxExecutionPublishedPr> publishedPrs = new ArrayList<>();
 
     @PrePersist
     protected void onCreate() {
@@ -360,19 +363,15 @@ public class SandboxExecution {
         this.targetBranch = targetBranch;
     }
 
-    public Long getPublishedPrNumber() {
-        return publishedPrNumber;
+    public List<SandboxExecutionPublishedPr> getPublishedPrs() {
+        return publishedPrs;
     }
 
-    public void setPublishedPrNumber(Long publishedPrNumber) {
-        this.publishedPrNumber = publishedPrNumber;
+    public SandboxExecutionPublishedPr getLatestPublishedPr() {
+        return publishedPrs.isEmpty() ? null : publishedPrs.get(publishedPrs.size() - 1);
     }
 
-    public String getPublishedPrUrl() {
-        return publishedPrUrl;
-    }
-
-    public void setPublishedPrUrl(String publishedPrUrl) {
-        this.publishedPrUrl = publishedPrUrl;
+    public void addPublishedPr(SandboxExecutionPublishedPr publishedPr) {
+        publishedPrs.add(publishedPr);
     }
 }

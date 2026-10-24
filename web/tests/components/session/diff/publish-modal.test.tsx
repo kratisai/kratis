@@ -315,8 +315,15 @@ describe('PublishModal', () => {
     vi.spyOn(publishApi, 'fetchPublishCapabilities').mockResolvedValue(
       makeCapabilities({
         publishedBranch: 'kratis/existing-branch',
-        publishedPrNumber: 42,
-        publishedPrUrl: 'https://github.com/org/repo/pull/42',
+        publishedPrs: [
+          {
+            baseBranch: 'main',
+            headBranch: 'kratis/existing-branch',
+            prNumber: 42,
+            prUrl: 'https://github.com/org/repo/pull/42',
+            status: 'OPEN',
+          },
+        ],
         suggestedTitle: 'feat: refine feature',
       }),
     )
@@ -699,6 +706,114 @@ describe('PublishModal', () => {
 
     await waitFor(() => {
       expect(downloadSpy).toHaveBeenCalledWith('chat-123', '9b3c2a3f-55b7-47a7-83ac-6b9c592f2a07')
+    })
+  })
+
+  it('creates a new pull request when the previous one was merged', async () => {
+    vi.spyOn(publishApi, 'fetchPublishCapabilities').mockResolvedValue(
+      makeCapabilities({
+        previousPrMerged: true,
+        publishedBranch: 'kratis/old-branch',
+        publishedPrs: [
+          {
+            baseBranch: 'main',
+            headBranch: 'kratis/old-branch',
+            prNumber: 42,
+            prUrl: 'https://github.com/org/repo/pull/42',
+            status: 'MERGED',
+          },
+        ],
+        suggestedNewBranch: 'kratis/exec-next-2',
+        suggestedTitle: 'feat: follow up',
+      }),
+    )
+
+    const publishSpy = vi.spyOn(publishApi, 'publishPullRequest').mockResolvedValue({
+      baseBranch: 'main',
+      headBranch: 'kratis/exec-next-2',
+      prNumber: 77,
+      prUrl: 'https://github.com/org/repo/pull/77',
+    })
+
+    renderModal()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('previous-pr-merged')).toHaveTextContent(
+        /pull request #42 was merged or closed/i,
+      )
+      expect(screen.getByTestId('pr-history')).toHaveTextContent('#42 kratis/old-branch')
+    })
+
+    const branchInput = screen.getByLabelText(/feature branch/i)
+    expect(branchInput).toHaveValue('kratis/exec-next-2')
+    expect(branchInput).not.toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: /^create pull request$/i }))
+
+    await waitFor(() => {
+      expect(publishSpy).toHaveBeenCalledWith(
+        'chat-123',
+        '9b3c2a3f-55b7-47a7-83ac-6b9c592f2a07',
+        expect.objectContaining({
+          branchName: 'kratis/exec-next-2',
+          createNewPr: true,
+          newBranchName: 'kratis/exec-next-2',
+        }),
+      )
+    })
+  })
+
+  it('can switch from updating an open pull request to creating a new one', async () => {
+    vi.spyOn(publishApi, 'fetchPublishCapabilities').mockResolvedValue(
+      makeCapabilities({
+        publishedBranch: 'kratis/existing-branch',
+        publishedPrs: [
+          {
+            baseBranch: 'main',
+            headBranch: 'kratis/existing-branch',
+            prNumber: 42,
+            prUrl: 'https://github.com/org/repo/pull/42',
+            status: 'OPEN',
+          },
+        ],
+        suggestedNewBranch: 'kratis/exec-next-2',
+      }),
+    )
+
+    const publishSpy = vi.spyOn(publishApi, 'publishPullRequest').mockResolvedValue({
+      baseBranch: 'main',
+      headBranch: 'kratis/exec-next-2',
+      prNumber: 78,
+      prUrl: 'https://github.com/org/repo/pull/78',
+    })
+
+    renderModal()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /push to pr #42/i })).toBeInTheDocument()
+      expect(screen.getByLabelText(/feature branch/i)).toBeDisabled()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /create a new pull request/i }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/feature branch/i)).toHaveValue('kratis/exec-next-2')
+      expect(screen.getByLabelText(/feature branch/i)).not.toBeDisabled()
+      expect(screen.getByRole('button', { name: /^create pull request$/i })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /^create pull request$/i }))
+
+    await waitFor(() => {
+      expect(publishSpy).toHaveBeenCalledWith(
+        'chat-123',
+        '9b3c2a3f-55b7-47a7-83ac-6b9c592f2a07',
+        expect.objectContaining({
+          branchName: 'kratis/exec-next-2',
+          createNewPr: true,
+          newBranchName: 'kratis/exec-next-2',
+        }),
+      )
     })
   })
 })
