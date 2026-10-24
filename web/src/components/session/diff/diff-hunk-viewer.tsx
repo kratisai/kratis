@@ -28,7 +28,7 @@ interface DiffHunkViewerProps {
   totalLines?: number
 }
 
-type ExpanderPosition = 'bottom' | 'top'
+type ExpanderTarget = { index: number; kind: 'gap' } | { kind: 'bottom' } | { kind: 'top' }
 type GapExpandDirection = 'down' | 'up'
 
 interface ParsedDiffHunk {
@@ -96,7 +96,7 @@ export function DiffHunkViewer({
   const [hasReachedBottom, setHasReachedBottom] = useState(false)
   const [hasReachedGapEnd, setHasReachedGapEnd] = useState<Record<number, boolean>>({})
   const [isResumeDrawerOpen, setIsResumeDrawerOpen] = useState(false)
-  const [resumeDrawerPosition, setResumeDrawerPosition] = useState<ExpanderPosition>('top')
+  const [resumeDrawerTarget, setResumeDrawerTarget] = useState<ExpanderTarget>({ kind: 'top' })
 
   const { data: environments } = useEnvironments()
   const resumeEnvironment = useResumeEnvironment()
@@ -211,11 +211,11 @@ export function DiffHunkViewer({
     }
   }
 
-  const requestExpand = (position: ExpanderPosition, expand: () => Promise<void>) => {
+  const requestExpand = (target: ExpanderTarget, expand: () => Promise<void>) => {
     if (isSleeping) {
-      const isSameDrawer = isResumeDrawerOpen && resumeDrawerPosition === position
+      const isSameDrawer = isResumeDrawerOpen && isSameExpander(resumeDrawerTarget, target)
       setIsResumeDrawerOpen(!isSameDrawer)
-      setResumeDrawerPosition(position)
+      setResumeDrawerTarget(target)
       return
     }
     void expand()
@@ -231,8 +231,9 @@ export function DiffHunkViewer({
     }
   }
 
-  const renderResumeDrawer = (position: ExpanderPosition) => {
-    if (!isResumeDrawerOpen || resumeDrawerPosition !== position || !isSleeping) return null
+  const renderResumeDrawer = (target: ExpanderTarget) => {
+    if (!isResumeDrawerOpen || !isSameExpander(resumeDrawerTarget, target) || !isSleeping)
+      return null
     return (
       <div
         className="flex w-full flex-col items-center justify-center gap-2 px-2 py-1 sm:flex-row"
@@ -347,7 +348,7 @@ export function DiffHunkViewer({
           <Button
             className="text-muted-foreground hover:text-foreground h-6 px-1.5 text-[11px]"
             disabled={isExpandingTop}
-            onClick={() => requestExpand('top', handleExpandTop)}
+            onClick={() => requestExpand({ kind: 'top' }, handleExpandTop)}
             size="sm"
             variant="link"
           >
@@ -361,14 +362,14 @@ export function DiffHunkViewer({
           <Button
             className="text-muted-foreground hover:text-foreground h-6 px-1.5 text-[11px]"
             disabled={isExpandingTop}
-            onClick={() => requestExpand('top', handleExpandTop)}
+            onClick={() => requestExpand({ kind: 'top' }, handleExpandTop)}
             size="sm"
             variant="link"
           >
             More
             <ChevronDown className="h-3 w-3" />
           </Button>
-          {renderResumeDrawer('top')}
+          {renderResumeDrawer({ kind: 'top' })}
         </div>
       )}
 
@@ -451,13 +452,17 @@ export function DiffHunkViewer({
           {/* Expand Context Between Hunks: up adds lines to the next hunk, down adds lines to the previous hunk */}
           {hunkIndex < diffFileInstances.length - 1 && hasRemainingGap(hunkIndex) && (
             <div
-              className="border-border/40 bg-muted/20 flex items-center justify-center gap-1 border-y py-1"
+              className="border-border/40 bg-muted/20 flex flex-wrap items-center justify-center gap-1 border-y py-1"
               data-testid={`diff-expand-gap-${hunkIndex}`}
             >
               <Button
                 className="text-muted-foreground hover:text-foreground h-6 px-1.5 text-[11px]"
                 disabled={expandingGap?.index === hunkIndex}
-                onClick={() => void handleExpandGap(hunkIndex, 'up')}
+                onClick={() =>
+                  requestExpand({ index: hunkIndex, kind: 'gap' }, () =>
+                    handleExpandGap(hunkIndex, 'up'),
+                  )
+                }
                 size="sm"
                 title="Show more lines above"
                 variant="link"
@@ -472,7 +477,11 @@ export function DiffHunkViewer({
               <Button
                 className="text-muted-foreground hover:text-foreground h-6 px-1.5 text-[11px]"
                 disabled={expandingGap?.index === hunkIndex}
-                onClick={() => void handleExpandGap(hunkIndex, 'down')}
+                onClick={() =>
+                  requestExpand({ index: hunkIndex, kind: 'gap' }, () =>
+                    handleExpandGap(hunkIndex, 'down'),
+                  )
+                }
                 size="sm"
                 title="Show more lines below"
                 variant="link"
@@ -484,6 +493,7 @@ export function DiffHunkViewer({
                   <ChevronDown className="h-3 w-3" />
                 )}
               </Button>
+              {renderResumeDrawer({ index: hunkIndex, kind: 'gap' })}
             </div>
           )}
         </Fragment>
@@ -498,7 +508,7 @@ export function DiffHunkViewer({
           <Button
             className="text-muted-foreground hover:text-foreground h-6 px-1.5 text-[11px]"
             disabled={isExpandingBottom}
-            onClick={() => requestExpand('bottom', handleExpandBottom)}
+            onClick={() => requestExpand({ kind: 'bottom' }, handleExpandBottom)}
             size="sm"
             variant="link"
           >
@@ -512,14 +522,14 @@ export function DiffHunkViewer({
           <Button
             className="text-muted-foreground hover:text-foreground h-6 px-1.5 text-[11px]"
             disabled={isExpandingBottom}
-            onClick={() => requestExpand('bottom', handleExpandBottom)}
+            onClick={() => requestExpand({ kind: 'bottom' }, handleExpandBottom)}
             size="sm"
             variant="link"
           >
             More
             <ChevronDown className="h-3 w-3" />
           </Button>
-          {renderResumeDrawer('bottom')}
+          {renderResumeDrawer({ kind: 'bottom' })}
         </div>
       )}
     </div>
@@ -606,6 +616,12 @@ function getFileLanguage(filePath: string): string {
     }
   }
   return ext || 'plaintext'
+}
+
+function isSameExpander(a: ExpanderTarget, b: ExpanderTarget): boolean {
+  if (a.kind !== b.kind) return false
+  if (a.kind === 'gap' && b.kind === 'gap') return a.index === b.index
+  return true
 }
 
 function normalizeDiffPatch(rawPatch: string, path: string): string[] {

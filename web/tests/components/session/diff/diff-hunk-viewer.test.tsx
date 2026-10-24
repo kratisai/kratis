@@ -604,6 +604,40 @@ index 191f8cb..45e4ba8 100644
     expect(mutateAsync).toHaveBeenCalledWith('env-sleeping')
   })
 
+  it('shows the resume drawer for between-hunks expansion when the environment is sleeping', () => {
+    const mutateAsync = vi.fn().mockResolvedValue({})
+    vi.mocked(useEnvironments).mockReturnValue({
+      data: [{ id: 'env-sleeping', status: 'SLEEPING' }],
+    } as unknown as ReturnType<typeof useEnvironments>)
+    vi.mocked(useResumeEnvironment).mockReturnValue({
+      isPending: false,
+      mutateAsync,
+    } as unknown as ReturnType<typeof useResumeEnvironment>)
+    const sliceSpy = vi.spyOn(diffApi, 'fetchFileSlice')
+
+    render(
+      <DiffHunkViewer
+        chatId="chat-1"
+        comments={[]}
+        executionId="exec-1"
+        patch={MULTI_HUNK_PATCH}
+        path="src/multi.ts"
+      />,
+    )
+
+    const gapExpander = screen.getByTestId('diff-expand-gap-0')
+    fireEvent.click(within(gapExpander).getByRole('button', { name: /^more$/i }))
+
+    expect(within(gapExpander).getByTestId('resume-environment-drawer')).toBeInTheDocument()
+    expect(
+      screen.getByText('Sandbox environment is sleeping. Resume environment to load more lines.'),
+    ).toBeInTheDocument()
+    expect(sliceSpy).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /resume environment/i }))
+    expect(mutateAsync).toHaveBeenCalledWith('env-sleeping')
+  })
+
   it('toggles the resume drawer closed when clicking the same expander twice', () => {
     vi.mocked(useEnvironments).mockReturnValue({
       data: [{ id: 'env-sleeping', status: 'SLEEPING' }],

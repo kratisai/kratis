@@ -61,7 +61,8 @@ describe('DiffFileCard', () => {
     )
 
     const header = screen.getByText('config.ts').closest('[class*="sticky"]')
-    expect(header).toHaveClass('sticky', 'top-0', 'z-10')
+    // Offset below the sticky mobile app header, but pinned to the desktop diff scroller.
+    expect(header).toHaveClass('sticky', 'top-14', 'md:top-0', 'z-10')
   })
 
   it('toggles collapse on header click', () => {
