@@ -29,6 +29,8 @@ public interface SandboxExecutionActivityRepository extends JpaRepository<Sandbo
 
     List<SandboxExecutionActivity> findByExecutionIdAndStatus(UUID executionId, ActivityStatus status);
 
+    boolean existsByExecutionIdAndStatus(UUID executionId, ActivityStatus status);
+
     List<SandboxExecutionActivity> findByStatusAndCreatedAtBefore(ActivityStatus status, Instant cutoff);
 
     @Query("SELECT a FROM SandboxExecutionActivity a JOIN SandboxExecution e ON a.executionId = e.id"

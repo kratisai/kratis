@@ -5,10 +5,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kratisai.controlplane.api.restdto.ChatDto;
+import com.kratisai.controlplane.api.restdto.TopicStatus;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ChatMemoryEntity;
 import com.kratisai.controlplane.model.ChatUsageSession;
+import com.kratisai.controlplane.model.SandboxExecution;
+import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
@@ -16,6 +20,8 @@ import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.repository.AgentChatMemoryRepository;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
 import com.kratisai.controlplane.repository.UserRepository;
@@ -43,6 +49,8 @@ public class ChatService {
     private final TeamMemberRepository teamMemberRepository;
     private final AgentChatMemoryRepository chatMemoryRepository;
     private final ChatUsageSessionRepository chatUsageSessionRepository;
+    private final SandboxExecutionRepository sandboxExecutionRepository;
+    private final SandboxExecutionActivityRepository activityRepository;
     private final ApplicationEventPublisher eventPublisher;
 
     public ChatService(
@@ -52,6 +60,8 @@ public class ChatService {
             TeamMemberRepository teamMemberRepository,
             AgentChatMemoryRepository chatMemoryRepository,
             ChatUsageSessionRepository chatUsageSessionRepository,
+            SandboxExecutionRepository sandboxExecutionRepository,
+            SandboxExecutionActivityRepository activityRepository,
             ApplicationEventPublisher eventPublisher) {
         this.chatRepository = chatRepository;
         this.teamRepository = teamRepository;
@@ -59,6 +69,8 @@ public class ChatService {
         this.teamMemberRepository = teamMemberRepository;
         this.chatMemoryRepository = chatMemoryRepository;
         this.chatUsageSessionRepository = chatUsageSessionRepository;
+        this.sandboxExecutionRepository = sandboxExecutionRepository;
+        this.activityRepository = activityRepository;
         this.eventPublisher = eventPublisher;
     }
 
@@ -218,6 +230,10 @@ public class ChatService {
                 .max(Instant::compareTo)
                 .orElse(null);
 
+        SandboxExecution latest = sandboxExecutionRepository
+                .findFirstByChatIdOrderByStartedAtDesc(chat.getId())
+                .orElse(null);
+
         return new ChatDto(
                 chat.getId(),
                 chat.getTeam().getId(),
@@ -231,7 +247,47 @@ public class ChatService {
                 promptTokens,
                 completionTokens,
                 usageLastUpdatedAt,
-                chat.isAllowAllPermissions());
+                chat.isAllowAllPermissions(),
+                deriveStatus(latest),
+                deriveLastActivityAt(chat, latest));
+    }
+
+    private TopicStatus deriveStatus(SandboxExecution latest) {
+        if (latest == null) {
+            return TopicStatus.IDLE;
+        }
+        if (activityRepository.existsByExecutionIdAndStatus(latest.getId(), ActivityStatus.PENDING)) {
+            return TopicStatus.BLOCKED;
+        }
+        if (latest.getStatus() == SandboxExecutionStatus.RUNNING) {
+            return TopicStatus.WORKING;
+        }
+        if (latest.getPublishedPrNumber() != null) {
+            return TopicStatus.MR_PUSHED;
+        }
+        if (latest.getStatus() == SandboxExecutionStatus.FAILED) {
+            return TopicStatus.FAILED;
+        }
+        return TopicStatus.IDLE;
+    }
+
+    private Instant deriveLastActivityAt(ChatEntity chat, SandboxExecution latest) {
+        Instant lastActivityAt = chat.getUpdatedAt();
+        if (latest == null) {
+            return lastActivityAt;
+        }
+        lastActivityAt = latestInstant(lastActivityAt, latest.getStartedAt());
+        return latestInstant(lastActivityAt, latest.getCompletedAt());
+    }
+
+    private Instant latestInstant(Instant first, Instant second) {
+        if (first == null) {
+            return second;
+        }
+        if (second == null) {
+            return first;
+        }
+        return first.isAfter(second) ? first : second;
     }
 
     /** Archive a chat. */

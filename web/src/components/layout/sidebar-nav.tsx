@@ -14,6 +14,8 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 
+import type { TopicStatus } from '@/lib/chat-api'
+
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
@@ -22,6 +24,52 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth-store'
 
 import { WikiSidebarSection } from './wiki-sidebar-section'
+
+const STALE_TOPIC_MS = 7 * 24 * 60 * 60 * 1000
+
+const STATUS_STYLES: Record<TopicStatus, string> = {
+  Blocked: 'text-amber-400',
+  Failed: 'text-red-400',
+  Idle: 'text-yellow-400',
+  'MR pushed': 'text-emerald-400',
+  working: 'text-white font-semibold',
+}
+
+interface TopicStatusLabelProps {
+  lastActivityAt?: null | string
+  status?: TopicStatus
+}
+
+function formatLastActivity(timestamp: number): string {
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+function TopicStatusLabel({ lastActivityAt, status }: TopicStatusLabelProps) {
+  const lastActivity = lastActivityAt ? new Date(lastActivityAt).getTime() : Number.NaN
+  const inactive = Number.isFinite(lastActivity) && Date.now() - lastActivity > STALE_TOPIC_MS
+
+  if (inactive) {
+    return (
+      <span className="block truncate text-[10px] leading-tight text-gray-500">
+        {formatLastActivity(lastActivity)}
+      </span>
+    )
+  }
+
+  if (!status) {
+    return null
+  }
+
+  return (
+    <span className={cn('block truncate text-[10px] leading-tight', STATUS_STYLES[status])}>
+      {status}
+    </span>
+  )
+}
 
 const navItems = [
   { icon: MessageSquare, label: 'Ask Kratis', to: '/ask' as const },
@@ -174,7 +222,11 @@ export function SidebarNav({ className, onClose, showLabels = true }: SidebarNav
                         params={{ id: chat.id }}
                         to="/chats/$id"
                       >
-                        {chat.title}
+                        <span className="block">{chat.title}</span>
+                        <TopicStatusLabel
+                          lastActivityAt={chat.lastActivityAt}
+                          status={chat.status}
+                        />
                       </Link>
                       <Button
                         aria-label={status === 'active' ? 'Archive chat' : 'Unarchive chat'}
