@@ -13,7 +13,9 @@ import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.ApprovalOptionKind;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
+import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
+import com.kratisai.controlplane.api.wsdto.HitlState;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.model.*;
@@ -33,6 +35,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -62,9 +65,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.socket.WebSocketSession;
@@ -116,6 +121,7 @@ public abstract class AbstractAgentExecutionRealTest {
     private static final AtomicBoolean INITIALIZED = new AtomicBoolean(false);
     private static final String TEST_IMAGE_NAME = "kratis-e2e-test:latest";
     private static final String DUMMY_REPO_CONTAINER_PATH = "/kratis/dummy-repo";
+    private static final Duration HITL_STALL_TIMEOUT = Duration.ofSeconds(20);
 
     @BeforeAll
     static void beforeAll() throws Exception {
@@ -275,6 +281,10 @@ public abstract class AbstractAgentExecutionRealTest {
     protected WireMockLlmServer wireMockLlmServer;
     private volatile boolean executionFailedEarly;
     private final AtomicInteger hitlRequestCount = new AtomicInteger(0);
+    private final List<String> hitlFailures = Collections.synchronizedList(new ArrayList<>());
+    private final Map<String, Instant> awaitingApprovals = new ConcurrentHashMap<>();
+    private final AtomicReference<String> harnessStall = new AtomicReference<>();
+    private ClientWebSocketFixture uiClientFixture;
     private final AtomicInteger acpInitializedCount = new AtomicInteger(0);
     private final AtomicReference<ClientPayload.ExecutionAcpInitializedResult> acpInitialized = new AtomicReference<>();
     private final Set<ActivityType> receivedActivityTypes = ConcurrentHashMap.newKeySet();
@@ -586,7 +596,7 @@ public abstract class AbstractAgentExecutionRealTest {
         // Connect a UI client WebSocket subscriber with typed rules
         lineLogger = new LineLogger("execution");
 
-        ClientWebSocketFixture uiClientFixture = new ClientWebSocketFixture(
+        uiClientFixture = new ClientWebSocketFixture(
                         authToken, testContext.team().getId())
                 .whenType(
                         ClientPayload.ExecutionOutputResult.class,
@@ -599,6 +609,7 @@ public abstract class AbstractAgentExecutionRealTest {
                     }
                 })
                 .whenType(ClientPayload.ExecutionActivityResult.class, (wsSession, msg) -> {
+                    trackApprovalState(msg);
                     receivedActivityTypes.add(msg.activityType());
                     activityTimeline.add(msg.activityType() + ":" + msg.status());
                     captureAcpConformance(msg);
@@ -637,16 +648,29 @@ public abstract class AbstractAgentExecutionRealTest {
                 // Auto-approve all HITL permission requests so agent execution proceeds without
                 // blocking
                 .autoApprovePermissions((executionId, actionId, command, options) -> {
+                    awaitingApprovals.putIfAbsent(actionId, Instant.now());
                     try {
                         conformanceActionIds.add(actionId);
                         String optionId = firstAllowOptionId(options);
                         ResolveHitlRequest approveRequest =
                                 new ResolveHitlRequest(executionId, actionId, HitlResponse.APPROVED, optionId, null);
-                        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        MvcResult result = mockMvc.perform(post("/api/v1/hitl/resolve")
                                         .header("Authorization", "Bearer " + authToken)
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(objectMapper.writeValueAsString(approveRequest)))
-                                .andExpect(status().isNoContent());
+                                .andReturn();
+                        int httpStatus = result.getResponse().getStatus();
+                        if (httpStatus != HttpStatus.NO_CONTENT.value()) {
+                            String failure = String.format(
+                                    "actionId=%s command='%s' resolve returned %d: %s",
+                                    actionId,
+                                    command,
+                                    httpStatus,
+                                    result.getResponse().getContentAsString());
+                            hitlFailures.add(failure);
+                            logger.error("[execution][permission] Approval rejected: {}", failure);
+                            return;
+                        }
                         hitlRequestCount.incrementAndGet();
                         logger.info(
                                 "[execution][permission] Auto-approved permission #{} for execution={}, command='{}'",
@@ -654,12 +678,9 @@ public abstract class AbstractAgentExecutionRealTest {
                                 executionId,
                                 command);
                     } catch (Exception e) {
-                        logger.error(
-                                "[execution][permission] Failed to auto-approve permission for execution={}, command='{}'",
-                                executionId,
-                                command,
-                                e);
-                        throw new RuntimeException("Failed to auto-approve permission", e);
+                        String failure = String.format("actionId=%s command='%s' threw %s", actionId, command, e);
+                        hitlFailures.add(failure);
+                        logger.error("[execution][permission] Failed to auto-approve permission: {}", failure, e);
                     }
                 });
         var wsContainer = ContainerProvider.getWebSocketContainer();
@@ -963,6 +984,64 @@ public abstract class AbstractAgentExecutionRealTest {
         }
     }
 
+    /**
+     * Tracks approvals from the UI stream. An approval still awaiting the human long after the
+     * auto-approver ran means the decision never landed, not that the agent is slow.
+     */
+    private void trackApprovalState(ClientPayload.ExecutionActivityResult msg) {
+        if (msg.actionId() == null) {
+            return;
+        }
+        var hitl = msg.detail() != null ? msg.detail().hitl() : null;
+        if (hitl != null && hitl.kind() == HitlKind.APPROVAL && hitl.state() == HitlState.AWAITING_HUMAN) {
+            awaitingApprovals.putIfAbsent(msg.actionId(), Instant.now());
+        } else {
+            awaitingApprovals.remove(msg.actionId());
+        }
+    }
+
+    /**
+     * Latches the first reason this harness cannot finish: a rejected approval, a closed UI socket, or
+     * an approval awaiting the human past {@link #HITL_STALL_TIMEOUT}. Waits poll this so they end with
+     * the cause rather than running out their timeout.
+     */
+    private boolean harnessStalled() {
+        if (harnessStall.get() != null) {
+            return true;
+        }
+        String reason = null;
+        if (!hitlFailures.isEmpty()) {
+            reason = "approval rejected: " + String.join("; ", hitlFailures);
+        } else if (uiClientFixture != null && uiClientFixture.isClosed()) {
+            reason = "UI WebSocket closed before the execution finished (close status: "
+                    + uiClientFixture.closeStatus().map(Object::toString).orElse("unknown") + ")";
+        } else {
+            Instant now = Instant.now();
+            for (Map.Entry<String, Instant> awaiting : awaitingApprovals.entrySet()) {
+                if (Duration.between(awaiting.getValue(), now).compareTo(HITL_STALL_TIMEOUT) > 0) {
+                    reason = String.format(
+                            "approval actionId=%s still AWAITING_HUMAN after %s",
+                            awaiting.getKey(), HITL_STALL_TIMEOUT);
+                    break;
+                }
+            }
+        }
+        if (reason == null) {
+            return false;
+        }
+        harnessStall.compareAndSet(null, reason);
+        logger.error("[test] Harness '{}' stalled: {}", getHarness().getName(), reason);
+        return true;
+    }
+
+    private void assertNoHarnessStall() {
+        assertThat(harnessStall.get())
+                .as(
+                        "Harness '%s' cannot make progress. UI output:\n%s",
+                        getHarness().getName(), collectUiOutputMessages())
+                .isNull();
+    }
+
     /** Log the execution state on timeout — the bare ConditionTimeoutException is otherwise opaque. */
     private ConditionEvaluationListener<Object> awaitTimeoutDiagnostics(String what, UUID envId) {
         return new ConditionEvaluationListener<>() {
@@ -975,13 +1054,16 @@ public abstract class AbstractAgentExecutionRealTest {
             public void onTimeout(TimeoutEvent timeoutEvent) {
                 logger.error(
                         "[test] Timed out waiting for {}. executionFailedEarly={}, terminal={}, status={}, "
-                                + "acpInitialized={}, uiSessionOpen={}. UI output:\n{}",
+                                + "acpInitialized={}, uiSessionOpen={}, rejectedApprovals={}, awaitingApprovals={}. "
+                                + "UI output:\n{}",
                         what,
                         executionFailedEarly,
                         isExecutionTerminalOrFailed(envId),
                         getExecutionStatus(envId),
                         acpInitialized.get(),
                         uiClientSession != null && uiClientSession.isOpen(),
+                        hitlFailures,
+                        awaitingApprovals.keySet(),
                         collectUiOutputMessages());
             }
         };
@@ -1104,10 +1186,12 @@ public abstract class AbstractAgentExecutionRealTest {
                 .atMost(180, TimeUnit.SECONDS)
                 .pollInterval(Duration.ofSeconds(1))
                 .conditionEvaluationListener(awaitTimeoutDiagnostics("ACP agent initialization", env.getId()))
-                .until(() -> executionFailedEarly
+                .until(() -> harnessStalled()
+                        || executionFailedEarly
                         || isExecutionTerminalOrFailed(env.getId())
                         || getExecutionStatus(env.getId()) == SandboxExecutionStatus.IDLE
                         || acpInitializedPayloadReceived());
+        assertNoHarnessStall();
 
         // Fail fast on FAILED (the complete fan-out is async, so give the broadcast a moment).
         awaitFailureBroadcastIfFailed(env.getId());
@@ -1129,9 +1213,11 @@ public abstract class AbstractAgentExecutionRealTest {
                 .atMost(300, TimeUnit.SECONDS)
                 .pollInterval(Duration.ofSeconds(2))
                 .conditionEvaluationListener(awaitTimeoutDiagnostics("ACP prompt completion", env.getId()))
-                .until(() -> allExpectedFilesExist()
+                .until(() -> harnessStalled()
+                        || allExpectedFilesExist()
                         || isExecutionTerminalOrFailed(env.getId())
                         || getExecutionStatus(env.getId()) == SandboxExecutionStatus.IDLE);
+        assertNoHarnessStall();
 
         // Fail fast if the execution was reported as FAILED via WebSocket
         awaitFailureBroadcastIfFailed(env.getId());
@@ -1216,20 +1302,23 @@ public abstract class AbstractAgentExecutionRealTest {
         Awaitility.await("HITL request count for harness " + getHarness().getName())
                 .atMost(30, TimeUnit.SECONDS)
                 .pollInterval(Duration.ofMillis(500))
-                .untilAsserted(() -> assertThat(hitlRequestCount.get())
-                        .as(
-                                "Harness '%s' HITL permission request count mismatch. Expected %d requests but got %d. "
-                                        + "Diagnostics: wireMockMatched=%d (>=2 means the mocked agent requested both "
-                                        + "tool calls), activities=%s, timeline=%s. A short count with >=2 matched "
-                                        + "LLM requests means a permission was not surfaced to the client (Kratis "
-                                        + "delivery race), not agent variation.",
-                                getHarness().getName(),
-                                expectedHitl,
-                                hitlRequestCount.get(),
-                                wireMockLlmServer.getTotalMatchedRequests(),
-                                receivedActivityTypes,
-                                activityTimeline)
-                        .isEqualTo(expectedHitl));
+                .until(() -> harnessStalled() || hitlRequestCount.get() == expectedHitl);
+        assertNoHarnessStall();
+        assertThat(hitlRequestCount.get())
+                .as(
+                        "Harness '%s' HITL permission request count mismatch. Expected %d requests but got %d. "
+                                + "Diagnostics: wireMockMatched=%d (>=2 means the mocked agent requested both "
+                                + "tool calls), activities=%s, timeline=%s, rejectedApprovals=%s. A short count "
+                                + "with >=2 matched LLM requests means an approval was not resolved; see "
+                                + "rejectedApprovals and the approval actionIds in the UI output.",
+                        getHarness().getName(),
+                        expectedHitl,
+                        hitlRequestCount.get(),
+                        wireMockLlmServer.getTotalMatchedRequests(),
+                        receivedActivityTypes,
+                        activityTimeline,
+                        hitlFailures)
+                .isEqualTo(expectedHitl);
 
         assertAcpConformanceAndReportMatrix();
 

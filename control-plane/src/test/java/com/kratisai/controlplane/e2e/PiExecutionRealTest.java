@@ -54,12 +54,6 @@ class PiExecutionRealTest extends AbstractAgentExecutionRealTest {
             logger.info("[Pi Debug] Latest log content:\n{}", new String(latestLog.output()));
             // Check Pi configuration files
             logger.info("[Pi Debug] === Pi Configuration ===");
-            var authConfig = verifier.executeInContainer("sh", "-c", "cat $HOME/.pi/agent/auth.json");
-            logger.info("[Pi Debug] auth.json: {}", new String(authConfig.output()));
-            var modelsConfig = verifier.executeInContainer("sh", "-c", "cat $HOME/.pi/agent/models.json");
-            logger.info("[Pi Debug] models.json: {}", new String(modelsConfig.output()));
-            var settingsConfig = verifier.executeInContainer("sh", "-c", "cat $HOME/.pi/agent/settings.json");
-            logger.info("[Pi Debug] settings.json: {}", new String(settingsConfig.output()));
         } catch (Exception e) {
             logger.warn("[Pi Debug] Failed to capture Pi logs: {}", e.getMessage());
         }

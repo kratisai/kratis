@@ -15,6 +15,7 @@ import com.kratisai.controlplane.api.wsdto.ActivityHitl;
 import com.kratisai.controlplane.api.wsdto.ActivityLocation;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
+import com.kratisai.controlplane.api.wsdto.ApprovalOptionKind;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlRequestSnapshot;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
@@ -22,6 +23,7 @@ import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.HitlResolverKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.HitlState;
+import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.api.wsdto.PlanEntry;
 import com.kratisai.controlplane.api.wsdto.PlanEntryPriority;
 import com.kratisai.controlplane.api.wsdto.PlanEntryStatus;
@@ -1041,7 +1043,7 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
-    void recordActivity_mergeKeepsControlPlaneApprovalState() throws Exception {
+    void recordActivity_mergeKeepsAwaitingApprovalPendingAndApprovalState() throws Exception {
         UUID executionId = UUID.randomUUID();
         SandboxExecutionActivity existing =
                 row(executionId, 1, "tool-call-42", ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
@@ -1058,7 +1060,7 @@ class ExecutionActivityPersistenceServiceTest {
                 ActivityStatus.IN_PROGRESS,
                 emptyActivityDetail());
 
-        assertThat(existing.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
+        assertThat(existing.getStatus()).isEqualTo(ActivityStatus.PENDING);
         assertThat(existing.getDetail()).contains("awaiting_human");
     }
 
@@ -1196,5 +1198,139 @@ class ExecutionActivityPersistenceServiceTest {
 
         verify(repository, never()).save(any());
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    private static HitlRequestSnapshot commandApprovalRequest(UUID executionId, String actionId) {
+        return new HitlRequestSnapshot(
+                executionId,
+                actionId,
+                HitlKind.APPROVAL,
+                "Confirm command",
+                "chmod +x /kratis/workspace/kratis_task.sh",
+                null,
+                null,
+                "Confirm command",
+                "execute",
+                List.of(new PermissionOption("accept", "Yes", ApprovalOptionKind.ALLOW_ONCE)),
+                null,
+                null,
+                null);
+    }
+
+    private static SandboxExecutionHitlResolvedEvent approvedEvent(UUID executionId, String actionId) {
+        return new SandboxExecutionHitlResolvedEvent(
+                UUID.randomUUID(),
+                new HitlResolution(
+                        executionId,
+                        actionId,
+                        HitlKind.APPROVAL,
+                        HitlResponse.APPROVED,
+                        "accept",
+                        null,
+                        HitlResolver.user(UUID.randomUUID(), "Alice")));
+    }
+
+    private static ActivityDetail commandDetail(String output) {
+        return new ActivityDetail(null, "chmod", null, output, null, null, null, null, null, null, null);
+    }
+
+    @Test
+    void acpUpdatesDoNotOwnStatusWhenPermissionArrivesBeforeToolCall() {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        String actionId = "call_b6a3c30c";
+        when(repository.findByExecutionIdAndActionId(executionId, actionId)).thenReturn(Optional.empty());
+        when(repository.nextSequence(executionId)).thenReturn(1L);
+
+        service.onHitlRequired(
+                new SandboxExecutionHitlRequiredEvent(teamId, commandApprovalRequest(executionId, actionId)));
+        SandboxExecutionActivity row = capturedSave();
+        assertThat(row.getStatus()).isEqualTo(ActivityStatus.PENDING);
+
+        when(repository.findByExecutionIdAndActionId(executionId, actionId)).thenReturn(Optional.of(row));
+        service.recordActivity(
+                executionId,
+                ActivityType.COMMAND,
+                "chmod +x /kratis/workspace/kratis_task.sh",
+                actionId,
+                ActivityStatus.IN_PROGRESS,
+                commandDetail(null));
+
+        assertThat(row.getStatus()).isEqualTo(ActivityStatus.PENDING);
+        assertThat(row.getDescription()).isEqualTo("chmod +x /kratis/workspace/kratis_task.sh");
+        assertThat(service.detailOf(row).hitl().state()).isEqualTo(HitlState.AWAITING_HUMAN);
+
+        service.recordActivity(
+                executionId,
+                ActivityType.COMMAND,
+                "chmod +x /kratis/workspace/kratis_task.sh",
+                actionId,
+                ActivityStatus.COMPLETED,
+                commandDetail("Hello Kratis - what a lovely day\n"));
+
+        assertThat(row.getStatus()).isEqualTo(ActivityStatus.PENDING);
+        assertThat(service.detailOf(row).output()).isEqualTo("Hello Kratis - what a lovely day\n");
+        assertThat(service.detailOf(row).hitl().state()).isEqualTo(HitlState.AWAITING_HUMAN);
+
+        service.onHitlResolved(approvedEvent(executionId, actionId));
+        assertThat(row.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
+
+        service.recordActivity(
+                executionId,
+                ActivityType.COMMAND,
+                "chmod +x /kratis/workspace/kratis_task.sh",
+                actionId,
+                ActivityStatus.COMPLETED,
+                commandDetail("Hello Kratis - what a lovely day\n"));
+        assertThat(row.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+    }
+
+    @Test
+    void acpUpdatesDoNotOwnStatusWhenToolCallArrivesBeforePermission() {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        String actionId = "call_b6a3c30c";
+        when(repository.findByExecutionIdAndActionId(executionId, actionId)).thenReturn(Optional.empty());
+        when(repository.nextSequence(executionId)).thenReturn(1L);
+
+        service.recordActivity(
+                executionId,
+                ActivityType.COMMAND,
+                "chmod +x /kratis/workspace/kratis_task.sh",
+                actionId,
+                ActivityStatus.IN_PROGRESS,
+                commandDetail(null));
+        SandboxExecutionActivity row = capturedSave();
+        assertThat(row.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
+
+        when(repository.findByExecutionIdAndActionId(executionId, actionId)).thenReturn(Optional.of(row));
+        service.onHitlRequired(
+                new SandboxExecutionHitlRequiredEvent(teamId, commandApprovalRequest(executionId, actionId)));
+        assertThat(row.getStatus()).isEqualTo(ActivityStatus.PENDING);
+        assertThat(service.detailOf(row).hitl().state()).isEqualTo(HitlState.AWAITING_HUMAN);
+
+        service.recordActivity(
+                executionId,
+                ActivityType.COMMAND,
+                "chmod +x /kratis/workspace/kratis_task.sh",
+                actionId,
+                ActivityStatus.IN_PROGRESS,
+                commandDetail("Hello Kratis - what a lovely day\n"));
+
+        assertThat(row.getStatus()).isEqualTo(ActivityStatus.PENDING);
+        assertThat(service.detailOf(row).output()).isEqualTo("Hello Kratis - what a lovely day\n");
+        assertThat(service.detailOf(row).hitl().state()).isEqualTo(HitlState.AWAITING_HUMAN);
+
+        service.onHitlResolved(approvedEvent(executionId, actionId));
+        assertThat(row.getStatus()).isEqualTo(ActivityStatus.IN_PROGRESS);
+
+        service.recordActivity(
+                executionId,
+                ActivityType.COMMAND,
+                "chmod +x /kratis/workspace/kratis_task.sh",
+                actionId,
+                ActivityStatus.COMPLETED,
+                commandDetail("Hello Kratis - what a lovely day\n"));
+        assertThat(row.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
     }
 }
