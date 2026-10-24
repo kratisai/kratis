@@ -3,6 +3,7 @@ package com.kratisai.controlplane.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -17,9 +18,11 @@ import com.kratisai.controlplane.model.ProviderType;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.repository.ModelProviderRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
+import com.kratisai.controlplane.service.ProviderPricing.Rate;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +47,9 @@ class LiteLLMProvisioningServiceTest {
     @Mock
     private TeamRepository teamRepository;
 
+    @Mock
+    private ProviderPricing providerPricing;
+
     private LiteLLMProvisioningService provisioningService;
 
     private Team testTeam;
@@ -52,7 +58,7 @@ class LiteLLMProvisioningServiceTest {
     @BeforeEach
     void setUp() {
         provisioningService = new LiteLLMProvisioningService(
-                liteLLMClient, modelProviderRepository, teamRepository, new LiteLLMProperties());
+                liteLLMClient, modelProviderRepository, teamRepository, new LiteLLMProperties(), providerPricing);
 
         testTeam = new Team();
         testTeam.setId(UUID.fromString("12345678-1234-1234-1234-123456789abc"));
@@ -245,6 +251,45 @@ class LiteLLMProvisioningServiceTest {
         // The gateway serves /chat/completions directly off /api/gateway; appending /v1 would 404.
         assertThat(params.apiBase()).isEqualTo("https://api.kilo.ai/api/gateway");
         assertThat(params.model()).isEqualTo("anthropic/claude-sonnet-4.5");
+    }
+
+    @Test
+    void provisionModel_kilo_withPublishedRates_shouldPinProviderPricingWithoutFetchingLiteLLMMap() {
+        ModelProvider kilo = kiloProvider();
+        when(providerPricing.rateFor(kilo, "anthropic/claude-sonnet-4.5"))
+                .thenReturn(Optional.of(published(3.0e-06, 1.5e-05)));
+
+        provisioningService.provisionModel(kilo);
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        AddModelRequest request = requestCaptor.getValue();
+        assertThat(request.modelInfo().inputCostPerToken()).isEqualTo(3.0e-06);
+        assertThat(request.modelInfo().outputCostPerToken()).isEqualTo(1.5e-05);
+        assertThat(request.litellmParams().inputCostPerToken()).isEqualTo(3.0e-06);
+        assertThat(request.litellmParams().outputCostPerToken()).isEqualTo(1.5e-05);
+        verify(liteLLMClient, never()).modelCostMap();
+    }
+
+    @Test
+    void provisionModel_kilo_withoutPublishedRates_shouldNotPinCosts() {
+        provisioningService.provisionModel(kiloProvider());
+
+        ArgumentCaptor<AddModelRequest> requestCaptor = ArgumentCaptor.forClass(AddModelRequest.class);
+        verify(liteLLMClient).addModel(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().modelInfo().inputCostPerToken()).isNull();
+        assertThat(requestCaptor.getValue().litellmParams().inputCostPerToken()).isNull();
+    }
+
+    private ModelProvider kiloProvider() {
+        ModelProvider kilo = new ModelProvider("Kilo Gateway", ProviderType.KILO, "kilo-api-key", null);
+        kilo.setTeam(testTeam);
+        kilo.setModels(List.of(new ProviderModel("anthropic/claude-sonnet-4.5", ModelKind.CHAT)));
+        return kilo;
+    }
+
+    private static Rate published(double input, double output) {
+        return new Rate(input, output);
     }
 
     @Test

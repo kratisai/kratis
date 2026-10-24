@@ -5,11 +5,13 @@ import com.kratisai.controlplane.client.litellm.LiteLLMDto.*;
 import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.ModelProvider;
+import com.kratisai.controlplane.model.PricingSource;
 import com.kratisai.controlplane.model.ProviderModel;
 import com.kratisai.controlplane.model.ProviderType;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.repository.ModelProviderRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
+import com.kratisai.controlplane.service.ProviderPricing.Rate;
 import jakarta.annotation.PostConstruct;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -47,6 +49,7 @@ public class LiteLLMProvisioningService {
     private final LiteLLMClient liteLLMClient;
     private final ModelProviderRepository modelProviderRepository;
     private final TeamRepository teamRepository;
+    private final ProviderPricing providerPricing;
     private final boolean reconciliationEnabled;
 
     private final AtomicBoolean reconciliationSettled = new AtomicBoolean(false);
@@ -56,10 +59,12 @@ public class LiteLLMProvisioningService {
             LiteLLMClient liteLLMClient,
             ModelProviderRepository modelProviderRepository,
             TeamRepository teamRepository,
-            LiteLLMProperties liteLLMProperties) {
+            LiteLLMProperties liteLLMProperties,
+            ProviderPricing providerPricing) {
         this.liteLLMClient = liteLLMClient;
         this.modelProviderRepository = modelProviderRepository;
         this.teamRepository = teamRepository;
+        this.providerPricing = providerPricing;
         this.reconciliationEnabled = liteLLMProperties.getReconciliation().isEnabled();
     }
 
@@ -392,10 +397,26 @@ public class LiteLLMProvisioningService {
     }
 
     private boolean needsPricingOverride(ModelProvider provider, String modelName, ModelCostLookup costLookup) {
-        return resolveModelCost(provider, modelName, costLookup) != null;
+        return resolveLiteLLMMapCost(provider, modelName, costLookup) != null;
     }
 
     private @Nullable ModelCostEntry resolveModelCost(
+            ModelProvider provider, String modelName, ModelCostLookup costLookup) {
+        Optional<Rate> published = providerPricing.rateFor(provider, modelName);
+        if (published.isPresent()) {
+            return new ModelCostEntry(
+                    published.get().inputCostPerToken(), published.get().outputCostPerToken());
+        }
+        if (provider.getProviderType().getPricingSource() == PricingSource.PROVIDER_API) {
+            logger.warn(
+                    "No published rate for '{}' on provider '{}'; LiteLLM will price it at $0 unless mapped",
+                    modelName,
+                    provider.getDisplayName());
+        }
+        return resolveLiteLLMMapCost(provider, modelName, costLookup);
+    }
+
+    private @Nullable ModelCostEntry resolveLiteLLMMapCost(
             ModelProvider provider, String modelName, ModelCostLookup costLookup) {
         // Only providers that need a pinned override fault the cost map in; others must not pay the round trip.
         return switch (provider.getProviderType()) {

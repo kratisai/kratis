@@ -27,6 +27,21 @@ class ProviderTypeTest {
     }
 
     @Test
+    void pricingSource_usesProviderApiOnlyForGatewaysThatPublishRates() {
+        assertThat(ProviderType.ANTHROPIC.getPricingSource()).isEqualTo(PricingSource.LITELLM);
+        assertThat(ProviderType.AZURE_OPENAI.getPricingSource()).isEqualTo(PricingSource.LITELLM);
+        assertThat(ProviderType.BEDROCK.getPricingSource()).isEqualTo(PricingSource.LITELLM);
+        assertThat(ProviderType.DEEPSEEK.getPricingSource()).isEqualTo(PricingSource.LITELLM);
+        assertThat(ProviderType.GOOGLE.getPricingSource()).isEqualTo(PricingSource.LITELLM);
+        assertThat(ProviderType.GROQ.getPricingSource()).isEqualTo(PricingSource.LITELLM);
+        assertThat(ProviderType.KILO.getPricingSource()).isEqualTo(PricingSource.PROVIDER_API);
+        assertThat(ProviderType.MISTRAL.getPricingSource()).isEqualTo(PricingSource.LITELLM);
+        assertThat(ProviderType.OLLAMA.getPricingSource()).isEqualTo(PricingSource.LITELLM);
+        assertThat(ProviderType.OPENAI.getPricingSource()).isEqualTo(PricingSource.LITELLM);
+        assertThat(ProviderType.OTHER.getPricingSource()).isEqualTo(PricingSource.LITELLM);
+    }
+
+    @Test
     void apiType_isDefinedForEveryValue() {
         assertThat(ProviderType.ANTHROPIC.getApiType()).isEqualTo(ApiType.ANTHROPIC_MESSAGES);
         assertThat(ProviderType.AZURE_OPENAI.getApiType()).isEqualTo(ApiType.OPENAI_COMPATIBLE);

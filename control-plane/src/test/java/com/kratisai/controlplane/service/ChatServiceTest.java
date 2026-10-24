@@ -8,7 +8,9 @@ import com.kratisai.controlplane.api.restdto.TopicStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ChatUsageSession;
+import com.kratisai.controlplane.model.PublishedPrStatus;
 import com.kratisai.controlplane.model.SandboxExecution;
+import com.kratisai.controlplane.model.SandboxExecutionPublishedPr;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
@@ -104,7 +106,7 @@ class ChatServiceTest {
         List<ChatDto> dtos = chatService.listChatsForTeam(teamId, userId, false, "active");
 
         assertThat(dtos).hasSize(1);
-        ChatDto dto = dtos.get(0);
+        ChatDto dto = dtos.getFirst();
         assertThat(dto.totalSpend()).isEqualTo(3.5);
         assertThat(dto.totalTokens()).isEqualTo(200L);
         assertThat(dto.promptTokens()).isEqualTo(130L);
@@ -153,7 +155,8 @@ class ChatServiceTest {
     void listChatsForTeam_publishedPullRequest_returnsMrPushed() {
         ChatEntity chat = persistedChat(Instant.parse("2026-05-01T10:00:00Z"));
         SandboxExecution execution = execution(chat, SandboxExecutionStatus.IDLE);
-        execution.setPublishedPrNumber(42L);
+        execution.addPublishedPr(new SandboxExecutionPublishedPr(
+                42L, "https://github.com/test/repo/pull/42", "feature", "main", PublishedPrStatus.OPEN, Instant.now()));
         when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
                 .thenReturn(Optional.of(execution));
 
@@ -212,6 +215,6 @@ class ChatServiceTest {
         when(chatRepository.findTop20ByTeamIdAndArchivedAtIsNullOrderByUpdatedAtDesc(teamId))
                 .thenReturn(List.of(chat));
         when(chatUsageSessionRepository.findByChatId(chat.getId())).thenReturn(List.of());
-        return chatService.listChatsForTeam(teamId, userId, false, "active").get(0);
+        return chatService.listChatsForTeam(teamId, userId, false, "active").getFirst();
     }
 }
