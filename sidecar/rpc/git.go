@@ -597,8 +597,41 @@ func (c *Client) ExecuteGitDiffSummary(params GitDiffSummaryParams, reqID interf
 		}
 		return
 	}
+	c.inspectPublishedBranch(&res, params)
 	if reqID != nil {
 		c.sendSuccessResponse(reqID, res)
+	}
+}
+
+// inspectPublishedBranch fills the remote branch state used by the publish
+// dialog to decide between updating an existing pull request and opening a new
+// one. It is best-effort: a repository without an origin keeps the zero values.
+func (c *Client) inspectPublishedBranch(res *GitDiffSummaryResult, params GitDiffSummaryParams) {
+	branchName := strings.TrimSpace(params.BranchName)
+	if branchName == "" {
+		return
+	}
+	workspace := c.resolveWorkspace()
+	if !hasOriginRemote(workspace) {
+		return
+	}
+	cmdEnv := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	fetchCmd := exec.Command("git", "fetch", "origin") //nolint:gosec
+	fetchCmd.Dir = workspace
+	fetchCmd.Env = cmdEnv
+	if out, err := fetchCmd.CombinedOutput(); err != nil {
+		log.Printf("git fetch origin during branch inspection failed (continuing): %v, output: %s", err, string(out))
+	}
+
+	res.BranchName = branchName
+	res.BranchExists = c.remoteBranchExists(workspace, cmdEnv, branchName)
+	if res.BranchExists {
+		if targetRef, err := resolveBaseRef(workspace, params.BaseBranch); err == nil {
+			res.BranchMerged = c.branchMergedInto(workspace, cmdEnv, branchName, targetRef)
+		}
+	}
+	if !res.BranchExists || res.BranchMerged {
+		res.SuggestedBranchName = c.deriveNewBranchName(workspace, cmdEnv, params.ExecutionID, branchName)
 	}
 }
 
@@ -1360,8 +1393,22 @@ func (c *Client) ExecuteGitPush(params GitPushParams, reqID interface{}) {
 		return
 	}
 
-	// 3. Determine whether the branch already exists remotely (republish).
-	republished := c.revParseExists(workspace, cmdEnv, "origin/"+branchName)
+	// 3. Determine whether the branch already exists remotely (republish) and
+	// whether it was merged into the target. The remote is authoritative: a
+	// deleted or merged branch must not block a later publish.
+	requestedBranch := branchName
+	remoteBranchExists := c.remoteBranchExists(workspace, cmdEnv, branchName)
+	previousBranchMerged := false
+	if remoteBranchExists {
+		previousBranchMerged = c.branchMergedInto(workspace, cmdEnv, branchName, targetRef)
+	}
+	branchCreated := false
+	if previousBranchMerged {
+		branchName = c.deriveNewBranchName(workspace, cmdEnv, params.ExecutionID, branchName)
+		branchCreated = true
+		remoteBranchExists = false
+	}
+	republished := remoteBranchExists
 
 	// 4. Stage and create the delta commit on top of the current branch.
 	if !c.stageAll(workspace, cmdEnv, reqID) {
@@ -1449,10 +1496,13 @@ func (c *Client) ExecuteGitPush(params GitPushParams, reqID interface{}) {
 	remoteRef := fmt.Sprintf("refs/heads/%s", branchName)
 	if reqID != nil {
 		c.sendSuccessResponse(reqID, GitPushResult{
-			CommitSha:  commitSha,
-			BranchName: branchName,
-			RemoteRef:  remoteRef,
-			Status:     "success",
+			CommitSha:            commitSha,
+			BranchName:           branchName,
+			RemoteRef:            remoteRef,
+			Status:               "success",
+			RequestedBranch:      requestedBranch,
+			BranchCreated:        branchCreated,
+			PreviousBranchMerged: previousBranchMerged,
 		})
 	}
 }
@@ -1547,12 +1597,58 @@ func (c *Client) ExecuteGitSetRemote(params GitSetRemoteParams, reqID interface{
 	}
 }
 
-// revParseExists reports whether the given ref resolves in the workspace.
-func (c *Client) revParseExists(workspace string, cmdEnv []string, ref string) bool {
-	cmd := exec.Command("git", "rev-parse", "--verify", ref) //nolint:gosec
+// remoteBranchExists asks origin directly instead of trusting a possibly stale
+// remote-tracking ref, so a branch deleted remotely is not treated as republish.
+func (c *Client) remoteBranchExists(workspace string, cmdEnv []string, branchName string) bool {
+	cmd := exec.Command("git", "ls-remote", "--exit-code", "--heads", "origin", "refs/heads/"+branchName) //nolint:gosec
 	cmd.Dir = workspace
 	cmd.Env = cmdEnv
 	return cmd.Run() == nil
+}
+
+// branchMergedInto reports whether origin/<branchName> is reachable from ref.
+func (c *Client) branchMergedInto(workspace string, cmdEnv []string, branchName string, ref string) bool {
+	if strings.TrimSpace(ref) == "" {
+		return false
+	}
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", "origin/"+branchName, ref) //nolint:gosec
+	cmd.Dir = workspace
+	cmd.Env = cmdEnv
+	return cmd.Run() == nil
+}
+
+// deriveNewBranchName picks the next free iteration branch. It prefers
+// kratis/<executionId>-<n> so successive publishes stay grouped, and falls back
+// to <requestedBranch>-<n> when no execution id is available.
+func (c *Client) deriveNewBranchName(workspace string, cmdEnv []string, executionID string, requestedBranch string) string {
+	prefix := "kratis/" + strings.TrimSpace(executionID)
+	if strings.TrimSpace(executionID) == "" {
+		prefix = strings.TrimSpace(requestedBranch)
+		if prefix == "" {
+			prefix = "kratis/feature"
+		}
+	}
+
+	used := map[string]bool{}
+	listCmd := exec.Command("git", "ls-remote", "--heads", "origin", "refs/heads/"+prefix+"-*") //nolint:gosec
+	listCmd.Dir = workspace
+	listCmd.Env = cmdEnv
+	if out, err := listCmd.Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			used[strings.TrimPrefix(fields[1], "refs/heads/")] = true
+		}
+	}
+
+	for iteration := 2; ; iteration++ {
+		candidate := fmt.Sprintf("%s-%d", prefix, iteration)
+		if !used[candidate] {
+			return candidate
+		}
+	}
 }
 
 func (c *Client) stageAll(workspace string, cmdEnv []string, reqID interface{}) bool {

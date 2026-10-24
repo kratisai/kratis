@@ -586,13 +586,18 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
     /** Retrieve git diff summary manifest for working tree / commits. */
     record GitDiffSummary(
             @JsonProperty("baseBranch") String baseBranch,
-            @JsonProperty("executionId") String executionId)
+            @JsonProperty("executionId") String executionId,
+            @JsonProperty("branchName") String branchName)
             implements OutboundRequestPayload<EnvironmentConnectorResult.GitDiffSummary> {
         public static final String METHOD = "env.git_diff_summary";
 
         @Override
         public String method() {
             return METHOD;
+        }
+
+        public GitDiffSummary(String baseBranch, String executionId) {
+            this(baseBranch, executionId, null);
         }
     }
 

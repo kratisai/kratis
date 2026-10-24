@@ -549,3 +549,141 @@ func TestExecuteGitPush_RebaseConflictAbortsAndRestores(t *testing.T) {
 		t.Errorf("Expected remote feature branch to remain at its pushed state, got %s want %s", remoteTip, preConflictTip)
 	}
 }
+
+type jsonRpcSuccessEnvelope[T any] struct {
+	Result T `json:"result"`
+}
+
+// setupMergedFeatureBranch creates a feature branch, pushes it, merges it into
+// main on the bare remote, and leaves the workspace checked out on the feature.
+func setupMergedFeatureBranch(t *testing.T, bareDir, workDir, branch string) {
+	t.Helper()
+	runGitCmd(t, workDir, "checkout", "-b", branch)
+	if err := os.WriteFile(filepath.Join(workDir, "feature.txt"), []byte("feature\n"), 0600); err != nil {
+		t.Fatalf("Failed to write feature file: %v", err)
+	}
+	runGitCmd(t, workDir, "add", "feature.txt")
+	runGitCmd(t, workDir, "commit", "-m", "feat: merged feature")
+	runGitCmd(t, workDir, "push", "-u", "origin", branch)
+
+	mergeDir, err := os.MkdirTemp("", "kratis-git-merge-feature-*")
+	if err != nil {
+		t.Fatalf("Failed to create merge temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(mergeDir) }()
+	runGitCmd(t, mergeDir, "clone", bareDir, ".")
+	runGitCmd(t, mergeDir, "config", "user.name", "Test")
+	runGitCmd(t, mergeDir, "config", "user.email", "test@kratis.ai")
+	runGitCmd(t, mergeDir, "merge", "--no-ff", "-m", "Merge "+branch, "origin/"+branch)
+	runGitCmd(t, mergeDir, "push", "origin", "main")
+}
+
+func TestExecuteGitPush_NewBranchAfterPreviousBranchMerged(t *testing.T) {
+	bareDir, workDir := setupTestGitRepoWithRemote(t)
+	defer func() {
+		_ = os.RemoveAll(bareDir)
+		_ = os.RemoveAll(workDir)
+	}()
+
+	const oldBranch = "kratis/feature-123"
+	setupMergedFeatureBranch(t, bareDir, workDir, oldBranch)
+
+	if err := os.WriteFile(filepath.Join(workDir, "delta.txt"), []byte("delta\n"), 0600); err != nil {
+		t.Fatalf("Failed to write delta: %v", err)
+	}
+
+	client, received := connectedGitClient(t, workDir)
+	client.ExecuteGitPush(GitPushParams{
+		BranchName:    oldBranch,
+		CommitMessage: "feat: follow-up after merge",
+		Squash:        true,
+		TargetBranch:  "main",
+		ExecutionID:   "exec-abc",
+	}, "req-push-new-branch")
+
+	var envelope jsonRpcSuccessEnvelope[GitPushResult]
+	found := false
+	deadline := time.Now().Add(3 * time.Second)
+	for !found && time.Now().Before(deadline) {
+		select {
+		case data := <-received:
+			if err := json.Unmarshal(data, &envelope); err == nil && envelope.Result.BranchName != "" {
+				found = true
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	if !found {
+		t.Fatal("Expected a successful git_push response")
+	}
+
+	if !envelope.Result.BranchCreated {
+		t.Errorf("Expected branchCreated=true, got %#v", envelope.Result)
+	}
+	if !envelope.Result.PreviousBranchMerged {
+		t.Errorf("Expected previousBranchMerged=true, got %#v", envelope.Result)
+	}
+	if envelope.Result.BranchName != "kratis/exec-abc-2" {
+		t.Errorf("Expected derived branch kratis/exec-abc-2, got %q", envelope.Result.BranchName)
+	}
+	if envelope.Result.RequestedBranch != oldBranch {
+		t.Errorf("Expected requestedBranch=%q, got %q", oldBranch, envelope.Result.RequestedBranch)
+	}
+
+	// The new branch must exist remotely and contain the follow-up delta.
+	if got := gitOutput(t, bareDir, "rev-parse", envelope.Result.BranchName); got == "" {
+		t.Fatal("Expected the derived branch to exist on the remote")
+	}
+	files := gitOutput(t, bareDir, "diff", "--name-only", "main.."+envelope.Result.BranchName)
+	if !strings.Contains(files, "delta.txt") {
+		t.Errorf("Expected delta.txt on the new branch, got %q", files)
+	}
+	if strings.Contains(files, "feature.txt") {
+		t.Errorf("Merged feature changes must not be re-applied on the new branch, got %q", files)
+	}
+}
+
+func TestExecuteGitDiffSummary_ReportsMergedPublishedBranch(t *testing.T) {
+	bareDir, workDir := setupTestGitRepoWithRemote(t)
+	defer func() {
+		_ = os.RemoveAll(bareDir)
+		_ = os.RemoveAll(workDir)
+	}()
+
+	const branch = "kratis/feature-123"
+	setupMergedFeatureBranch(t, bareDir, workDir, branch)
+
+	client, received := connectedGitClient(t, workDir)
+	client.ExecuteGitDiffSummary(
+		GitDiffSummaryParams{BaseBranch: "main", BranchName: branch, ExecutionID: "exec-abc"},
+		"req-diff-status")
+
+	var envelope jsonRpcSuccessEnvelope[GitDiffSummaryResult]
+	found := false
+	deadline := time.Now().Add(3 * time.Second)
+	for !found && time.Now().Before(deadline) {
+		select {
+		case data := <-received:
+			if err := json.Unmarshal(data, &envelope); err == nil && envelope.Result.HeadCommit != "" {
+				found = true
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	if !found {
+		t.Fatal("Expected a successful git_diff_summary response")
+	}
+
+	if envelope.Result.BranchName != branch {
+		t.Errorf("Expected branchName=%q, got %q", branch, envelope.Result.BranchName)
+	}
+	if !envelope.Result.BranchExists {
+		t.Error("Expected branchExists=true")
+	}
+	if !envelope.Result.BranchMerged {
+		t.Error("Expected branchMerged=true")
+	}
+	if envelope.Result.SuggestedBranchName != "kratis/exec-abc-2" {
+		t.Errorf("Expected suggested branch kratis/exec-abc-2, got %q", envelope.Result.SuggestedBranchName)
+	}
+}

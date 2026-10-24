@@ -3,7 +3,8 @@
   "method": "env.git_diff_summary",
   "params": {
     "baseBranch": "main",
-    "executionId": "123e4567-e89b-12d3-a456-426614174000"
+    "executionId": "123e4567-e89b-12d3-a456-426614174000",
+    "branchName": "kratis/task-123"
   },
   "id": 11
 }

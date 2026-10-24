@@ -14,4 +14,13 @@ properties:
     type: string
   status:
     type: string
+  requestedBranch:
+    type: string
+    description: The branch name supplied by the caller before any new-branch derivation.
+  branchCreated:
+    type: boolean
+    description: True when the sidecar derived a fresh branch name instead of using the requested one.
+  previousBranchMerged:
+    type: boolean
+    description: True when the requested branch existed on origin and was merged into the target branch.
 additionalProperties: false

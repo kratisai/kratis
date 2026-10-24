@@ -78,6 +78,7 @@ export function PublishModal({
   const [repositoryName, setRepositoryName] = useState('')
   const [visibility, setVisibility] = useState<RepositoryVisibility>('PRIVATE')
   const [credentialId, setCredentialId] = useState('')
+  const [publishMode, setPublishMode] = useState<'new' | 'update'>('update')
   const [prResult, setPrResult] = useState<null | PullRequestResult>(null)
   const [pushResult, setPushResult] = useState<null | PushBranchResponse>(null)
   const [actionError, setActionError] = useState<null | PublishActionError>(null)
@@ -92,9 +93,17 @@ export function PublishModal({
   const capabilities = capabilitiesQuery.data
   const stats = capabilities?.stats
   const supportsPr = capabilities?.supportsPullRequests ?? false
-  const alreadyPublished = capabilities?.publishedPrNumber != null
-  const branchLocked = capabilities?.publishedBranch != null
-  const creatingPr = supportsPr && !alreadyPublished
+  const publishedPrs = capabilities?.publishedPrs ?? []
+  const latestPublishedPr = publishedPrs.length > 0 ? publishedPrs[publishedPrs.length - 1] : null
+  const previousPrMerged =
+    capabilities?.previousPrMerged ??
+    (latestPublishedPr != null && latestPublishedPr.status !== 'OPEN')
+  const existingPrOpen = latestPublishedPr != null && !previousPrMerged
+  const updatingExisting = existingPrOpen && publishMode === 'update'
+  const branchLocked = supportsPr ? updatingExisting : capabilities?.publishedBranch != null
+  const creatingPr = supportsPr && !updatingExisting
+  const suggestedNewBranch =
+    capabilities?.suggestedNewBranch || `kratis/feature-${executionId.slice(0, 8)}`
   const baseBranch = capabilities?.defaultBaseBranch || ''
   const hasChanges = stats?.hasChanges ?? true
   const canEscalateToAgent = executionStatus === 'RUNNING' || executionStatus === 'IDLE'
@@ -137,7 +146,18 @@ export function PublishModal({
   useEffect(() => {
     if (!open || !capabilitiesQuery.data) return
     const data = capabilitiesQuery.data
-    setBranchName(data.publishedBranch || `kratis/feature-${executionId.slice(0, 8)}`)
+    const prs = data.publishedPrs ?? []
+    const latest = prs.length > 0 ? prs[prs.length - 1] : null
+    const merged = data.previousPrMerged ?? false
+    const existingOpen = latest != null && !merged
+    setPublishMode(existingOpen ? 'update' : 'new')
+    if (existingOpen) {
+      setBranchName(latest.headBranch)
+    } else if (merged) {
+      setBranchName(data.suggestedNewBranch || `kratis/feature-${executionId.slice(0, 8)}`)
+    } else {
+      setBranchName(data.publishedBranch || `kratis/feature-${executionId.slice(0, 8)}`)
+    }
     setCommitMessage(data.suggestedTitle)
     setBody(data.suggestedBody)
     setRepositoryName(data.suggestedRepositoryName || '')
@@ -183,18 +203,22 @@ export function PublishModal({
       if (creatingPr) {
         request.body = body.trim()
         request.draft = isDraft
+        if (latestPublishedPr) {
+          request.createNewPr = true
+          request.newBranchName = branchName.trim()
+        }
       }
       return publishPullRequest(chatId, executionId, request)
     },
     onError: (err: Error) => {
       setActionError(toActionError(err, 'Failed to publish changes to remote repository'))
-      toast.error(alreadyPublished ? 'Failed to push changes' : 'Failed to create Pull Request')
+      toast.error(updatingExisting ? 'Failed to push changes' : 'Failed to create Pull Request')
     },
     onSuccess: (data) => {
       setPrResult(data)
       setActionError(null)
       toast.success(
-        alreadyPublished
+        updatingExisting
           ? `Pushed changes to Pull Request #${data.prNumber}`
           : `Pull Request #${data.prNumber} created successfully!`,
       )
@@ -318,12 +342,12 @@ export function PublishModal({
               <div className="space-y-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
                 <div className="flex items-center gap-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
                   <CheckCircle2 className="h-5 w-5 shrink-0" />
-                  {alreadyPublished ? 'Changes Pushed' : 'Pull Request Created Successfully'}
+                  {updatingExisting ? 'Changes Pushed' : 'Pull Request Created Successfully'}
                 </div>
                 <p className="text-muted-foreground text-xs">
                   Your changes have been pushed to branch{' '}
                   <code className="font-mono">{prResult.headBranch}</code>
-                  {alreadyPublished ? (
+                  {updatingExisting ? (
                     <>
                       {' '}
                       against <code className="font-mono">{prResult.baseBranch}</code>.
@@ -396,6 +420,100 @@ export function PublishModal({
               </div>
             )}
 
+            {publishedPrs.length > 0 && (
+              <div
+                className="border-border/60 bg-muted/20 rounded-md border px-3 py-2"
+                data-testid="pr-history"
+              >
+                <p className="text-muted-foreground mb-1.5 text-[11px] font-semibold tracking-wide uppercase">
+                  Pull request history
+                </p>
+                <ul className="space-y-1">
+                  {publishedPrs.map((pr) => (
+                    <li
+                      className="flex items-center justify-between gap-2 text-xs"
+                      key={`${pr.prNumber}-${pr.headBranch}`}
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span
+                          className={
+                            pr.status === 'MERGED'
+                              ? 'rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400'
+                              : pr.status === 'CLOSED'
+                                ? 'bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px] font-semibold'
+                                : 'rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400'
+                          }
+                        >
+                          {pr.status}
+                        </span>
+                        <a
+                          className="text-primary truncate underline"
+                          href={pr.prUrl}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          #{pr.prNumber} {pr.headBranch}
+                        </a>
+                      </span>
+                      <span className="text-muted-foreground shrink-0">→ {pr.baseBranch}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {latestPublishedPr && previousPrMerged && !prResult && (
+              <div
+                className="flex items-start gap-2 rounded-md border border-violet-500/30 bg-violet-500/10 p-3 text-xs text-violet-700 dark:text-violet-300"
+                data-testid="previous-pr-merged"
+              >
+                <GitPullRequest className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <span className="font-semibold">
+                    Pull request #{latestPublishedPr.prNumber} was merged or closed.
+                  </span>
+                  <p className="text-muted-foreground mt-0.5">
+                    Publishing now creates a new feature branch and a new pull request, keeping the
+                    earlier one in history.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {existingPrOpen && !prResult && !pushResult && (
+              <div className="border-border/60 flex flex-col gap-2 rounded-md border p-2 sm:flex-row">
+                <button
+                  aria-pressed={publishMode === 'update'}
+                  className={`flex-1 rounded px-2 py-1.5 text-left text-xs ${
+                    publishMode === 'update'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-muted'
+                  }`}
+                  disabled={isPending}
+                  onClick={() => setPublishMode('update')}
+                  type="button"
+                >
+                  Update existing PR #{latestPublishedPr.prNumber}
+                </button>
+                <button
+                  aria-pressed={publishMode === 'new'}
+                  className={`flex-1 rounded px-2 py-1.5 text-left text-xs ${
+                    publishMode === 'new'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-muted'
+                  }`}
+                  disabled={isPending}
+                  onClick={() => {
+                    setPublishMode('new')
+                    setBranchName(suggestedNewBranch)
+                  }}
+                  type="button"
+                >
+                  Create a new Pull Request
+                </button>
+              </div>
+            )}
+
             {!prResult && !pushResult && (
               <>
                 {capabilities && !patchOnlyNewRepo && (
@@ -428,17 +546,17 @@ export function PublishModal({
                           )}
                         </>
                       )}
-                      {alreadyPublished && (
+                      {updatingExisting && (
                         <>
                           Pushes new commits to <code className="font-mono">{branchName}</code> and
                           updates pull request{' '}
                           <a
                             className="text-primary underline"
-                            href={capabilities.publishedPrUrl}
+                            href={latestPublishedPr.prUrl}
                             rel="noreferrer"
                             target="_blank"
                           >
-                            #{capabilities.publishedPrNumber}
+                            #{latestPublishedPr.prNumber}
                           </a>
                           .
                         </>
@@ -669,8 +787,8 @@ export function PublishModal({
                             ? isNewRepo
                               ? 'Create Repository & Pull Request'
                               : 'Create Pull Request'
-                            : alreadyPublished
-                              ? `Push to PR #${capabilities.publishedPrNumber}`
+                            : updatingExisting
+                              ? `Push to PR #${latestPublishedPr.prNumber}`
                               : 'Push Branch'}
                         </Button>
                       )}

@@ -19,6 +19,7 @@ import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionEnvironmentType;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
+import com.kratisai.controlplane.model.PublishedPrStatus;
 import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
@@ -39,6 +40,7 @@ import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import java.util.List;
 import java.util.UUID;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -96,6 +98,9 @@ class SandboxExecutionPublishControllerTest {
 
     @Autowired
     private CredentialService credentialService;
+
+    @Autowired
+    private DataSource dataSource;
 
     private String authToken;
     private ChatEntity chat;
@@ -258,7 +263,7 @@ class SandboxExecutionPublishControllerTest {
         SandboxExecution persisted =
                 sandboxExecutionRepository.findById(execution.getId()).orElseThrow();
         assertThat(persisted.getPublishedBranch()).isEqualTo("kratis/test-branch");
-        assertThat(persisted.getPublishedPrNumber()).isNull();
+        assertThat(persisted.getPublishedPrs()).isEmpty();
     }
 
     @Test
@@ -290,8 +295,62 @@ class SandboxExecutionPublishControllerTest {
         SandboxExecution persisted =
                 sandboxExecutionRepository.findById(execution.getId()).orElseThrow();
         assertThat(persisted.getPublishedBranch()).isEqualTo("kratis/pr-feature");
-        assertThat(persisted.getPublishedPrNumber()).isEqualTo(42L);
-        assertThat(persisted.getPublishedPrUrl()).isEqualTo("https://github.com/test-owner/test-repo/pull/42");
+        assertThat(persisted.getLatestPublishedPr()).isNotNull();
+        assertThat(persisted.getLatestPublishedPr().getPrNumber()).isEqualTo(42L);
+        assertThat(persisted.getLatestPublishedPr().getPrUrl())
+                .isEqualTo("https://github.com/test-owner/test-repo/pull/42");
+        assertThat(persisted.getLatestPublishedPr().getStatus()).isEqualTo(PublishedPrStatus.OPEN);
+        assertThat(persisted.getPublishedPrs()).hasSize(1);
+    }
+
+    @Test
+    void publishPullRequest_secondIteration_appendsToPrHistory() throws Exception {
+        PublishPrRequestDto first =
+                new PublishPrRequestDto("kratis/pr-feature", "main", "Feature Title", "Feature Body", false, true);
+        mockMvc.perform(post("/api/v1/chats/{chatId}/executions/{execId}/publish-pr", chat.getId(), execution.getId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + authToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(first)))
+                .andExpect(status().isOk());
+
+        // Simulate the remote reporting the first PR as merged with follow-up changes.
+        try (var connection = dataSource.getConnection();
+                var statement = connection.prepareStatement(
+                        "UPDATE sandbox_execution_published_prs SET status = 'MERGED' WHERE execution_id = ?")) {
+            statement.setObject(1, execution.getId());
+            statement.executeUpdate();
+        }
+
+        PublishPrRequestDto second = new PublishPrRequestDto(
+                "kratis/follow-up",
+                "main",
+                "Follow-up Title",
+                "Follow-up Body",
+                false,
+                false,
+                null,
+                null,
+                null,
+                true,
+                "kratis/follow-up");
+        mockMvc.perform(post("/api/v1/chats/{chatId}/executions/{execId}/publish-pr", chat.getId(), execution.getId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + authToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(second)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.headBranch").value("kratis/follow-up"));
+
+        mockMvc.perform(get(
+                                "/api/v1/chats/{chatId}/executions/{execId}/publish-capabilities",
+                                chat.getId(),
+                                execution.getId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.publishedPrs.length()").value(2))
+                .andExpect(jsonPath("$.publishedPrs[0].status").value("MERGED"))
+                .andExpect(jsonPath("$.publishedPrs[1].headBranch").value("kratis/follow-up"));
+
+        assertThat(fakeGitHubApiClient.createPullRequestInvocations()).isEqualTo(2);
     }
 
     @Test

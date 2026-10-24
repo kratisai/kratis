@@ -41,12 +41,13 @@ export interface PublishCapabilities {
   canCreateRepository: boolean
   defaultBaseBranch: string
   newRepo: boolean
+  previousPrMerged?: boolean
   publishedBranch?: string
-  publishedPrNumber?: null | number
-  publishedPrUrl?: string
+  publishedPrs?: PublishedPr[]
   repositoryType: string
   stats: PublishStats
   suggestedBody: string
+  suggestedNewBranch?: string
   suggestedRepositoryName?: string
   suggestedTitle: string
   supportsPullRequests: boolean
@@ -57,8 +58,10 @@ export interface PublishPrRequest {
   baseBranch?: string
   body?: string
   branchName: string
+  createNewPr?: boolean
   credentialId?: string
   draft?: boolean
+  newBranchName?: string
   repositoryName?: string
   squash?: boolean
   title: string
@@ -100,6 +103,17 @@ export interface SteerExecutionRequest {
 }
 
 type GitDiffStatus = 'ADDED' | 'DELETED' | 'MODIFIED' | 'RENAMED'
+
+interface PublishedPr {
+  baseBranch: string
+  createdAt?: string
+  headBranch: string
+  prNumber: number
+  prUrl: string
+  status: PublishedPrStatus
+}
+
+type PublishedPrStatus = 'CLOSED' | 'MERGED' | 'OPEN'
 
 interface PublishStats {
   additions: number
