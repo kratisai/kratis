@@ -2423,3 +2423,52 @@ func extractRawOutputText(update map[string]interface{}) string {
 
 	return ""
 }
+
+func TestHandleSessionUpdate_SuggestionToolCallRawPayloadRelayed(t *testing.T) {
+	sink := &mockEventSink{}
+	h := NewHandler(sink, nil, "")
+	h.SetDebug(false)
+
+	h.handleSessionUpdate(map[string]interface{}{"update": map[string]interface{}{
+		"sessionUpdate": "tool_call",
+		"toolCallId":    "sug-1",
+		"kind":          "other",
+		"title":         "Suggest",
+		"status":        "pending",
+		"rawInput": map[string]interface{}{
+			"suggest": "Would you like to review the changes?",
+			"actions": []interface{}{map[string]interface{}{"label": "Review", "prompt": "/review uncommitted"}},
+		},
+	}})
+
+	var found bool
+	for _, o := range sink.outputs {
+		if strings.HasPrefix(o.line, "[ACP][TOOL] tool_call toolCallId=\"sug-1\" kind=\"other\" title=\"Suggest\" status=\"pending\" rawInput=true rawOutput=false") &&
+			strings.Contains(o.line, "/review uncommitted") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected [ACP][TOOL] raw payload line, got outputs: %+v", sink.outputs)
+	}
+}
+
+func TestHandleSessionUpdate_NonSuggestionToolCallNotRelayedRaw(t *testing.T) {
+	sink := &mockEventSink{}
+	h := NewHandler(sink, nil, "")
+	h.SetDebug(false)
+
+	h.handleSessionUpdate(map[string]interface{}{"update": map[string]interface{}{
+		"sessionUpdate": "tool_call",
+		"toolCallId":    "exec-1",
+		"kind":          "execute",
+		"title":         "git status",
+		"status":        "pending",
+	}})
+
+	for _, o := range sink.outputs {
+		if strings.HasPrefix(o.line, "[ACP][TOOL]") {
+			t.Fatalf("unexpected raw payload relay for execute tool call: %q", o.line)
+		}
+	}
+}

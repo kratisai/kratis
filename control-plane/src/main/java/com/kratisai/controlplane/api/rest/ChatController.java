@@ -7,7 +7,6 @@ import com.kratisai.controlplane.api.restdto.UpdateChatPermissionsRequest;
 import com.kratisai.controlplane.config.SecurityUtil;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.planningagent.PlanningAgentService;
-import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -43,13 +42,10 @@ public class ChatController {
 
     private final ChatService chatService;
     private final PlanningAgentService planningAgentService;
-    private final ChatFluxRegistry chatFluxRegistry;
 
-    public ChatController(
-            ChatService chatService, PlanningAgentService planningAgentService, ChatFluxRegistry chatFluxRegistry) {
+    public ChatController(ChatService chatService, PlanningAgentService planningAgentService) {
         this.chatService = chatService;
         this.planningAgentService = planningAgentService;
-        this.chatFluxRegistry = chatFluxRegistry;
     }
 
     @GetMapping
@@ -95,10 +91,10 @@ public class ChatController {
 
         ChatEntity chat = chatService.createChat(request.teamId(), userId, title);
 
-        // Start execution in background (registered so subscribers receive updates via chat.subscribe WS channel)
-        var streamFlux = planningAgentService.streamMessage(
+        // Start execution in background. The turn registers its live stream so subscribers
+        // (including later reconnect attempts) can attach via the chat.subscribe WS channel.
+        planningAgentService.streamMessage(
                 request.teamId(), request.providerId(), request.modelName(), chat.getId(), message);
-        chatFluxRegistry.register(chat.getId(), streamFlux);
 
         planningAgentService.evaluateInitialTitleAsync(
                 request.teamId(), request.providerId(), request.modelName(), chat.getId(), message);

@@ -13,7 +13,6 @@ import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
 import com.kratisai.controlplane.repository.ModelProviderRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
-import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import java.util.HashMap;
@@ -34,7 +33,6 @@ public class ClientChatContinueRpcHandler
     private final ChatService chatService;
     private final ClientSessionRegistry sessionRegistry;
     private final TeamMemberRepository teamMemberRepository;
-    private final ChatFluxRegistry chatFluxRegistry;
     private final ChatRepository chatRepository;
     private final ModelProviderRepository modelProviderRepository;
     private final ChatUsageSessionRepository chatUsageSessionRepository;
@@ -44,7 +42,6 @@ public class ClientChatContinueRpcHandler
             ChatService chatService,
             ClientSessionRegistry sessionRegistry,
             TeamMemberRepository teamMemberRepository,
-            ChatFluxRegistry chatFluxRegistry,
             ChatRepository chatRepository,
             ModelProviderRepository modelProviderRepository,
             ChatUsageSessionRepository chatUsageSessionRepository) {
@@ -52,7 +49,6 @@ public class ClientChatContinueRpcHandler
         this.chatService = chatService;
         this.sessionRegistry = sessionRegistry;
         this.teamMemberRepository = teamMemberRepository;
-        this.chatFluxRegistry = chatFluxRegistry;
         this.chatRepository = chatRepository;
         this.modelProviderRepository = modelProviderRepository;
         this.chatUsageSessionRepository = chatUsageSessionRepository;
@@ -143,7 +139,6 @@ public class ClientChatContinueRpcHandler
         try {
             Flux<ClientPayload.ChatStreamPayload> resultFlux =
                     planningAgentService.continuePlanning(teamId, providerId, modelName, chatId, directive);
-            chatFluxRegistry.register(chatId, resultFlux);
 
             return resultFlux.onErrorResume(error -> {
                 logger.error("Error streaming continued response", error);

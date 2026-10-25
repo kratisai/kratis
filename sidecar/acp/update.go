@@ -20,6 +20,7 @@ func (h *Handler) handleSessionUpdate(params map[string]interface{}) {
 	switch u.SessionUpdate {
 	case "tool_call", "tool_call_update":
 		h.resetChunkStream("tool activity: " + u.SessionUpdate)
+		h.debugSuggestionToolCall(u, params)
 		h.handleToolCallUpdate(u, updateAsMap(params))
 	case "agent_message_chunk":
 		h.handleMessageChunk(u, "agent", updateAsMap(params))
@@ -45,6 +46,23 @@ func (h *Handler) handleSessionUpdate(params map[string]interface{}) {
 		h.sink.SendOutput(desc, "stdout")
 		h.sendActivity(ActivityTypeThinking, desc, "", ActivityInProgress, ActivityDetail{})
 	}
+}
+
+// debugSuggestionToolCall relays the raw wire payload of generic (kind "other")
+// or suggestion-titled tool calls to env.output so pending suggestions can be
+// diagnosed from the activity log. Payloads are bounded by boundDetail.
+func (h *Handler) debugSuggestionToolCall(u ToolCallUpdateMsg, params map[string]interface{}) {
+	if u.Kind != string(KindOther) && !strings.Contains(strings.ToLower(u.Title), "suggest") {
+		return
+	}
+	raw, err := json.Marshal(params["update"])
+	if err != nil {
+		return
+	}
+	payload, _ := boundDetail(string(raw))
+	h.debugf("[ACP][TOOL] %s toolCallId=%q kind=%q title=%q status=%q rawInput=%t rawOutput=%t payload=%s",
+		u.SessionUpdate, u.ToolCallID, u.Kind, u.Title, u.Status,
+		len(u.RawInput) > 0, len(u.RawOutput) > 0, payload)
 }
 
 // handleToolCallUpdate merges one tool_call update into the per-toolCallId

@@ -19,6 +19,7 @@ import com.kratisai.controlplane.model.LlmUsage;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
 import com.kratisai.controlplane.repository.ModelProviderRepository;
+import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ChatUsageSessionService;
@@ -28,13 +29,10 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -52,17 +50,7 @@ class PlanningAgentServiceTest {
     private ChatService chatService;
     private ChatUsageSessionService chatUsageSessionService;
     private LiteLLMProvisioningService liteLLMProvisioningService;
-    private ChatTitleService chatTitleService;
-    private ChatMemory chatMemory;
-    private CanvasTool canvasTool;
-    private RepositoryTool repositoryTool;
-    private DimensionTool dimensionTool;
-    private WikiTool wikiTool;
-    private ScratchpadTool scratchpadTool;
-    private WebSearchTool webSearchTool;
-    private ScratchpadService scratchpadService;
-    private PlanningProperties planningProperties;
-    private AsyncTaskExecutor agentTaskExecutor;
+    private ChatFluxRegistry chatFluxRegistry;
     private PlanningAgentService planningAgentService;
 
     @BeforeEach
@@ -72,17 +60,8 @@ class PlanningAgentServiceTest {
         chatService = mock(ChatService.class);
         chatUsageSessionService = mock(ChatUsageSessionService.class);
         liteLLMProvisioningService = mock(LiteLLMProvisioningService.class);
-        chatTitleService = mock(ChatTitleService.class);
-        chatMemory = mock(ChatMemory.class);
-        canvasTool = mock(CanvasTool.class);
-        repositoryTool = mock(RepositoryTool.class);
-        dimensionTool = mock(DimensionTool.class);
-        wikiTool = mock(WikiTool.class);
-        scratchpadTool = mock(ScratchpadTool.class);
-        webSearchTool = mock(WebSearchTool.class);
-        scratchpadService = mock(ScratchpadService.class);
-        planningProperties = new PlanningProperties();
-        agentTaskExecutor = new SimpleAsyncTaskExecutor("test-agent-");
+        chatFluxRegistry = new ChatFluxRegistry();
+        AsyncTaskExecutor agentTaskExecutor = new SimpleAsyncTaskExecutor("test-agent-");
 
         planningAgentService = new PlanningAgentService(
                 modelProviderRepository,
@@ -90,16 +69,17 @@ class PlanningAgentServiceTest {
                 chatService,
                 chatUsageSessionService,
                 liteLLMProvisioningService,
-                chatTitleService,
-                chatMemory,
-                canvasTool,
-                repositoryTool,
-                dimensionTool,
-                wikiTool,
-                scratchpadTool,
-                webSearchTool,
-                scratchpadService,
-                planningProperties,
+                mock(ChatTitleService.class),
+                mock(ChatMemory.class),
+                mock(CanvasTool.class),
+                mock(RepositoryTool.class),
+                mock(DimensionTool.class),
+                mock(WikiTool.class),
+                mock(ScratchpadTool.class),
+                mock(WebSearchTool.class),
+                mock(ScratchpadService.class),
+                new PlanningProperties(),
+                chatFluxRegistry,
                 agentTaskExecutor);
     }
 
@@ -139,7 +119,7 @@ class PlanningAgentServiceTest {
     }
 
     @Test
-    void streamMessage_cancellingFluxCancelsExecutionAndDoesNotPersistError() throws Exception {
+    void streamMessage_clientDisconnect_keepsRunningAndReplaysForReconnect() throws Exception {
         UUID teamId = UUID.randomUUID();
         UUID providerId = UUID.randomUUID();
         UUID chatId = UUID.randomUUID();
@@ -159,21 +139,16 @@ class PlanningAgentServiceTest {
         when(chatModelFactory.createChatModelViaLiteLLM(any(), any(), any(), eq(true)))
                 .thenReturn(chatModel);
 
-        // Mock orchestrationLoop inside planningAgentService
-        CountDownLatch agentStartedLatch = new CountDownLatch(1);
-        CountDownLatch agentCancelledLatch = new CountDownLatch(1);
-        AtomicBoolean wasInterrupted = new AtomicBoolean(false);
+        CountDownLatch agentStarted = new CountDownLatch(1);
+        CountDownLatch releaseAgent = new CountDownLatch(1);
 
         PlanningAgentLoop mockLoop = mock(PlanningAgentLoop.class);
         org.mockito.Mockito.doAnswer(invocation -> {
-                    agentStartedLatch.countDown();
-                    try {
-                        Thread.sleep(5000);
-                    } catch (InterruptedException e) {
-                        wasInterrupted.set(true);
-                        agentCancelledLatch.countDown();
-                        throw e;
-                    }
+                    Sinks.Many<ClientPayload.ChatStreamPayload> loopSink = invocation.getArgument(2);
+                    loopSink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-1", 1, "Chunk 1 "));
+                    agentStarted.countDown();
+                    assertThat(releaseAgent.await(3, TimeUnit.SECONDS)).isTrue();
+                    loopSink.tryEmitNext(new ClientPayload.MessageChunkResult(chatId, "msg-1", 1, "Chunk 2"));
                     return null;
                 })
                 .when(mockLoop)
@@ -186,48 +161,32 @@ class PlanningAgentServiceTest {
         Flux<ClientPayload.ChatStreamPayload> flux =
                 planningAgentService.streamMessage(teamId, providerId, "gpt-4o", chatId, "Hello");
 
-        Disposable subscription = flux.subscribe();
+        Disposable firstSubscription = flux.subscribe();
+        assertThat(agentStarted.await(3, TimeUnit.SECONDS)).isTrue();
 
-        // Wait for agent loop to start running
-        assertThat(agentStartedLatch.await(3, TimeUnit.SECONDS)).isTrue();
+        firstSubscription.dispose();
 
-        // Cancel the subscription
-        subscription.dispose();
+        assertThat(chatFluxRegistry.containsKey(chatId)).isTrue();
 
-        // Wait for task cancellation interrupt
-        assertThat(agentCancelledLatch.await(3, TimeUnit.SECONDS)).isTrue();
-        assertThat(wasInterrupted.get()).isTrue();
+        List<ClientPayload.ChatStreamPayload> reconnected = new ArrayList<>();
+        CountDownLatch reconnectedComplete = new CountDownLatch(1);
+        flux.subscribe(reconnected::add, error -> reconnectedComplete.countDown(), reconnectedComplete::countDown);
 
-        // The interrupt reaches the worker before its finally block runs, so wait for the usage
-        // sync that finally performs before asserting the terminal state.
+        assertThat(reconnected)
+                .anyMatch(p -> p instanceof ClientPayload.MessageChunkResult chunk
+                        && chunk.content().equals("Chunk 1 "));
+
+        releaseAgent.countDown();
+
+        assertThat(reconnectedComplete.await(3, TimeUnit.SECONDS)).isTrue();
+        assertThat(reconnected)
+                .anyMatch(p -> p instanceof ClientPayload.MessageChunkResult chunk
+                        && chunk.content().equals("Chunk 2"));
+        assertThat(reconnected.getLast()).isInstanceOf(ClientPayload.CompleteResult.class);
+
         verify(chatUsageSessionService, timeout(5000)).syncUsage(chatId, "vk-123");
-
-        // Once the worker has finished, the error must NOT have been persisted to DB
         verify(chatService, never()).saveAssistantErrorMessage(any(), anyString(), anyInt());
-
-        // Verify task was removed from activeAgentTasks
-        Field tasksField = PlanningAgentService.class.getDeclaredField("activeAgentTasks");
-        tasksField.setAccessible(true);
-        @SuppressWarnings("rawtypes")
-        Map activeTasks = (Map) tasksField.get(planningAgentService);
-        assertThat(activeTasks).doesNotContainKey(chatId);
-    }
-
-    @Test
-    void cancelExecution_cancelsFutureDirectly() throws Exception {
-        UUID chatId = UUID.randomUUID();
-        Future<?> mockFuture = mock(Future.class);
-
-        Field tasksField = PlanningAgentService.class.getDeclaredField("activeAgentTasks");
-        tasksField.setAccessible(true);
-        @SuppressWarnings("rawtypes")
-        Map activeTasks = (Map) tasksField.get(planningAgentService);
-        activeTasks.put(chatId, mockFuture);
-
-        planningAgentService.cancelExecution(chatId);
-
-        verify(mockFuture).cancel(true);
-        assertThat(activeTasks).doesNotContainKey(chatId);
+        assertThat(chatFluxRegistry.containsKey(chatId)).isFalse();
     }
 
     @Test
@@ -324,8 +283,8 @@ class PlanningAgentServiceTest {
 
         assertThat(completeLatch.await(3, TimeUnit.SECONDS)).isTrue();
         assertThat(received).hasSize(1);
-        assertThat(received.get(0)).isInstanceOf(ClientPayload.PlanningStatusResult.class);
-        ClientPayload.PlanningStatusResult status = (ClientPayload.PlanningStatusResult) received.get(0);
+        assertThat(received.getFirst()).isInstanceOf(ClientPayload.PlanningStatusResult.class);
+        ClientPayload.PlanningStatusResult status = (ClientPayload.PlanningStatusResult) received.getFirst();
         assertThat(status.status()).isEqualTo("paused");
         assertThat(status.reason()).isEqualTo("max_iterations");
 

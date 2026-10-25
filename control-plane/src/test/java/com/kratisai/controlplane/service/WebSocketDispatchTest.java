@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
@@ -8,6 +9,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -80,6 +82,48 @@ class WebSocketDispatchTest {
         verify(mockSession).sendMessage(captor.capture());
         assertThat(captor.getValue().getPayload()).contains("\"code\":-32602");
         assertThat(captor.getValue().getPayload()).contains("\"id\":4");
+    }
+
+    @Test
+    void streamClientResponses_sendFailureDropsSubscriptionWithoutPropagating() throws Exception {
+        doThrow(new IOException("Broken pipe")).when(mockSession).sendMessage(any());
+        Sinks.Many<ClientPayload> sink = Sinks.many().replay().all();
+        sink.tryEmitNext(new ClientPayload.CompleteResult("msg-1"));
+
+        assertThatCode(() -> dispatch.streamClientResponses(mockSession, 1, sink.asFlux()))
+                .doesNotThrowAnyException();
+
+        assertThat(dispatch.getSessionSubscriptionCount("session-1")).isZero();
+
+        sink.tryEmitNext(new ClientPayload.CompleteResult("msg-2"));
+
+        verify(mockSession, times(1)).sendMessage(any(TextMessage.class));
+    }
+
+    @Test
+    void streamClientResponses_oneSessionFailureDoesNotAffectOtherSubscribers() throws Exception {
+        WebSocketSession failingSession = mock(WebSocketSession.class);
+        when(failingSession.getId()).thenReturn("sess-fail");
+        doThrow(new IOException("Broken pipe")).when(failingSession).sendMessage(any());
+
+        WebSocketSession healthySession = mock(WebSocketSession.class);
+        when(healthySession.getId()).thenReturn("sess-ok");
+
+        Sinks.Many<ClientPayload> sink = Sinks.many().replay().all();
+        sink.tryEmitNext(new ClientPayload.CompleteResult("msg-1"));
+
+        dispatch.streamClientResponses(failingSession, 1, sink.asFlux());
+        dispatch.streamClientResponses(healthySession, 2, sink.asFlux());
+
+        sink.tryEmitNext(new ClientPayload.CompleteResult("msg-2"));
+
+        ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
+        verify(healthySession, times(2)).sendMessage(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(TextMessage::getPayload)
+                .anyMatch(payload -> payload.contains("msg-2"));
+        assertThat(dispatch.getSessionSubscriptionCount("sess-fail")).isZero();
+        assertThat(dispatch.getSessionSubscriptionCount("sess-ok")).isOne();
     }
 
     @Test
@@ -214,6 +258,7 @@ class WebSocketDispatchTest {
     @Test
     void streamEnvironmentResponses_sendsPayload() throws Exception {
         WebSocketSession envSession = mock(WebSocketSession.class);
+        when(envSession.getId()).thenReturn("env-session");
         dispatch.streamEnvironmentResponses(
                 envSession, 8, Flux.just(EnvironmentResponsePayload.HitlActivityResult.approved("ok")));
 

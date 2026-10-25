@@ -17,7 +17,10 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -34,7 +37,8 @@ import reactor.core.publisher.Flux;
  *
  * <p>Broadcasts are one-to-many, so each recipient's write is serialized per client session over a
  * shared pool: a slow client can't block the caller or other recipients, and per-client order is
- * preserved. Session-directed streams stay synchronous (point-to-point).
+ * preserved. Session-directed streams stay synchronous (point-to-point); a write failure drops only
+ * that session's subscription so a disconnected client cannot fail the producer (agent loop).
  */
 @Component
 public class WebSocketDispatch {
@@ -155,38 +159,59 @@ public class WebSocketDispatch {
 
     private <R> void subscribeAndSend(WebSocketSession to, Object requestId, Flux<R> flux, ResponseSender<R> sender) {
         String sessionId = to.getId();
-        Set<Disposable> subscriptions = sessionId != null
-                ? sessionSubscriptions.computeIfAbsent(sessionId, k -> ConcurrentHashMap.newKeySet())
-                : null;
-        Disposable[] disposableRef = new Disposable[1];
+        Set<Disposable> subscriptions =
+                sessionSubscriptions.computeIfAbsent(sessionId, k -> ConcurrentHashMap.newKeySet());
+        AtomicReference<Disposable> disposableRef = new AtomicReference<>();
+        AtomicBoolean sendFailed = new AtomicBoolean();
         Disposable disposable = flux.subscribe(
-                payload -> sender.send(to, requestId, payload),
-                error -> {
-                    if (subscriptions != null && disposableRef[0] != null) {
-                        subscriptions.remove(disposableRef[0]);
-                        if (subscriptions.isEmpty()) {
-                            sessionSubscriptions.remove(sessionId, subscriptions);
-                        }
-                    }
-                    if (error instanceof RpcErrorException rpcError) {
-                        sendError(to, requestId, rpcError.error());
+                payload -> {
+                    if (sendFailed.get()) {
                         return;
                     }
-                    logger.error("WebSocket stream failed for session {}", to.getId(), error);
-                    sendError(to, requestId, JsonRpcError.InternalError(error));
-                },
-                () -> {
-                    if (subscriptions != null && disposableRef[0] != null) {
-                        subscriptions.remove(disposableRef[0]);
-                        if (subscriptions.isEmpty()) {
-                            sessionSubscriptions.remove(sessionId, subscriptions);
-                        }
+                    try {
+                        sender.send(to, requestId, payload);
+                    } catch (RuntimeException e) {
+                        sendFailed.set(true);
+                        logger.warn("Failed to send stream payload to session {}; dropping subscription", sessionId, e);
+                        disposeAndUnregister(disposableRef.get(), sessionId, subscriptions);
                     }
-                });
-        disposableRef[0] = disposable;
-        if (subscriptions != null && !disposable.isDisposed()) {
+                },
+                error -> {
+                    disposeAndUnregister(disposableRef.get(), sessionId, subscriptions);
+                    try {
+                        if (error instanceof RpcErrorException rpcError) {
+                            sendError(to, requestId, rpcError.error());
+                            return;
+                        }
+                        logger.error("WebSocket stream failed for session {}", sessionId, error);
+                        sendError(to, requestId, JsonRpcError.InternalError(error));
+                    } catch (RuntimeException sendFailure) {
+                        logger.warn(
+                                "Failed to send stream error to session {}; dropping subscription",
+                                sessionId,
+                                sendFailure);
+                    }
+                },
+                () -> disposeAndUnregister(disposableRef.get(), sessionId, subscriptions));
+        disposableRef.set(disposable);
+        if (sendFailed.get() && !disposable.isDisposed()) {
+            disposable.dispose();
+        }
+        if (!disposable.isDisposed()) {
             subscriptions.add(disposable);
-        } else if (subscriptions != null && subscriptions.isEmpty()) {
+        } else if (subscriptions.isEmpty()) {
+            sessionSubscriptions.remove(sessionId, subscriptions);
+        }
+    }
+
+    private void disposeAndUnregister(
+            @Nullable Disposable disposable, String sessionId, Set<Disposable> subscriptions) {
+        if (disposable == null) {
+            return;
+        }
+        disposable.dispose();
+        subscriptions.remove(disposable);
+        if (subscriptions.isEmpty()) {
             sessionSubscriptions.remove(sessionId, subscriptions);
         }
     }

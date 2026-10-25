@@ -18,7 +18,6 @@ import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
 import com.kratisai.controlplane.repository.ModelProviderRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
-import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import java.util.List;
@@ -35,7 +34,6 @@ class ClientChatContinueRpcHandlerTest {
     private ChatService chatService;
     private ClientSessionRegistry sessionRegistry;
     private TeamMemberRepository teamMemberRepository;
-    private ChatFluxRegistry chatFluxRegistry;
     private ModelProviderRepository modelProviderRepository;
     private ChatUsageSessionRepository chatUsageSessionRepository;
     private ClientChatContinueRpcHandler handler;
@@ -44,8 +42,6 @@ class ClientChatContinueRpcHandlerTest {
     private UUID teamId;
     private UUID providerId;
     private UUID chatId;
-    private ChatEntity chat;
-    private Team team;
 
     @BeforeEach
     void setUp() {
@@ -53,7 +49,6 @@ class ClientChatContinueRpcHandlerTest {
         chatService = mock(ChatService.class);
         sessionRegistry = mock(ClientSessionRegistry.class);
         teamMemberRepository = mock(TeamMemberRepository.class);
-        chatFluxRegistry = new ChatFluxRegistry();
         ChatRepository chatRepository = mock(ChatRepository.class);
         modelProviderRepository = mock(ModelProviderRepository.class);
         chatUsageSessionRepository = mock(ChatUsageSessionRepository.class);
@@ -63,7 +58,6 @@ class ClientChatContinueRpcHandlerTest {
                 chatService,
                 sessionRegistry,
                 teamMemberRepository,
-                chatFluxRegistry,
                 chatRepository,
                 modelProviderRepository,
                 chatUsageSessionRepository);
@@ -73,9 +67,9 @@ class ClientChatContinueRpcHandlerTest {
         providerId = UUID.randomUUID();
         chatId = UUID.randomUUID();
 
-        team = new Team("Engineering", "Engineering team");
+        Team team = new Team("Engineering", "Engineering team");
         team.setId(teamId);
-        chat = mock(ChatEntity.class);
+        ChatEntity chat = mock(ChatEntity.class);
         when(chat.getTeam()).thenReturn(team);
 
         when(sessionRegistry.getUserId("ws-1")).thenReturn(Optional.of(userId.toString()));
@@ -84,7 +78,7 @@ class ClientChatContinueRpcHandlerTest {
     }
 
     @Test
-    void handle_successfulResume_registersFlux() {
+    void handle_successfulResume_returnsFlux() {
         String directive = "Continue planning remaining steps";
         when(chatService.readAndResolveInterstitialDirective(chatId)).thenReturn(Optional.of(directive));
         when(planningAgentService.continuePlanning(teamId, providerId, "gpt-4o", chatId, directive))
@@ -95,7 +89,6 @@ class ClientChatContinueRpcHandlerTest {
 
         StepVerifier.create(handler.handle("ws-1", 1, params)).verifyComplete();
         verify(chatService).verifyChat(chatId, teamId);
-        assertThat(chatFluxRegistry.containsKey(chatId)).isTrue();
     }
 
     @Test
@@ -118,7 +111,6 @@ class ClientChatContinueRpcHandlerTest {
         ClientRpcPayload.ChatContinue params = new ClientRpcPayload.ChatContinue(chatId.toString());
 
         StepVerifier.create(handler.handle("ws-1", 1, params)).verifyComplete();
-        assertThat(chatFluxRegistry.containsKey(chatId)).isTrue();
     }
 
     @Test

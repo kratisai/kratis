@@ -12,7 +12,6 @@ import com.kratisai.controlplane.api.wsdto.JsonRpcErrorCodes;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.planningagent.PlanningAgentService;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
-import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import java.util.Optional;
@@ -28,7 +27,6 @@ class ClientChatSendRpcHandlerTest {
     private ChatService chatService;
     private ClientSessionRegistry sessionRegistry;
     private TeamMemberRepository teamMemberRepository;
-    private ChatFluxRegistry chatFluxRegistry;
     private ClientChatSendRpcHandler handler;
     private UUID userId;
     private UUID teamId;
@@ -41,9 +39,8 @@ class ClientChatSendRpcHandlerTest {
         chatService = mock(ChatService.class);
         sessionRegistry = mock(ClientSessionRegistry.class);
         teamMemberRepository = mock(TeamMemberRepository.class);
-        chatFluxRegistry = new ChatFluxRegistry();
-        handler = new ClientChatSendRpcHandler(
-                planningAgentService, chatService, sessionRegistry, teamMemberRepository, chatFluxRegistry);
+        handler =
+                new ClientChatSendRpcHandler(planningAgentService, chatService, sessionRegistry, teamMemberRepository);
 
         userId = UUID.randomUUID();
         teamId = UUID.randomUUID();
@@ -55,7 +52,7 @@ class ClientChatSendRpcHandlerTest {
     }
 
     @Test
-    void handle_successfulStream_registersFlux() {
+    void handle_successfulStream_returnsFlux() {
         when(planningAgentService.streamMessage(teamId, providerId, "gpt-4o", chatId, "hello"))
                 .thenReturn(Flux.empty());
 
@@ -64,7 +61,6 @@ class ClientChatSendRpcHandlerTest {
 
         StepVerifier.create(handler.handle("ws-1", 1, params)).verifyComplete();
         verify(chatService).verifyChat(chatId, teamId);
-        assertThat(chatFluxRegistry.containsKey(chatId)).isTrue();
     }
 
     @Test
