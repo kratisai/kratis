@@ -9,6 +9,7 @@ import com.kratisai.controlplane.api.wsdto.JsonRpcErrorCodes;
 import com.kratisai.controlplane.config.PlanningProperties;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.repository.ModelProviderRepository;
+import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ChatUsageSessionService;
@@ -18,8 +19,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Future;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -56,8 +55,8 @@ public class PlanningAgentService {
     private final LiteLLMProvisioningService liteLLMProvisioningService;
     private final PlanningAgentLoop orchestrationLoop;
     private final ChatTitleService chatTitleService;
+    private final ChatFluxRegistry chatFluxRegistry;
     private final AsyncTaskExecutor agentTaskExecutor;
-    private final Map<UUID, Future<?>> activeAgentTasks = new ConcurrentHashMap<>();
 
     public PlanningAgentService(
             ModelProviderRepository modelProviderRepository,
@@ -75,6 +74,7 @@ public class PlanningAgentService {
             WebSearchTool webSearchTool,
             ScratchpadService scratchpadService,
             PlanningProperties planningProperties,
+            ChatFluxRegistry chatFluxRegistry,
             @Qualifier("agentTaskExecutor") AsyncTaskExecutor agentTaskExecutor) {
 
         this.modelProviderRepository = modelProviderRepository;
@@ -83,6 +83,7 @@ public class PlanningAgentService {
         this.chatUsageSessionService = chatUsageSessionService;
         this.liteLLMProvisioningService = liteLLMProvisioningService;
         this.chatTitleService = chatTitleService;
+        this.chatFluxRegistry = chatFluxRegistry;
         this.agentTaskExecutor = agentTaskExecutor;
 
         ToolCallback[] toolCallbacks =
@@ -146,6 +147,7 @@ public class PlanningAgentService {
                 modelProvider.getId(),
                 modelName);
         Sinks.Many<ClientPayload.ChatStreamPayload> sink = Sinks.many().replay().all();
+        Flux<ClientPayload.ChatStreamPayload> stream = sink.asFlux();
 
         String litellmModelName = liteLLMProvisioningService.buildLiteLLMModelName(modelProvider, modelName);
         String virtualKey = chatUsageSessionService
@@ -156,17 +158,17 @@ public class PlanningAgentService {
                 chatModelFactory.createChatModelViaLiteLLM(modelProvider, litellmModelName, virtualKey, true);
         ChatClient chatClient = ChatClient.builder(chatModel).build();
 
-        Future<?> task = agentTaskExecutor.submit(
-                () -> execute(chatClient, context, sink, modelProvider, modelName, virtualKey));
-        activeAgentTasks.put(chatId, task);
-        return sink.asFlux().doOnCancel(() -> cancelExecution(chatId));
-    }
-
-    public void cancelExecution(UUID chatId) {
-        Future<?> task = activeAgentTasks.remove(chatId);
-        if (task != null) {
-            task.cancel(true);
+        // The turn owns the registry entry. Subscriber disconnects must not cancel the run or
+        // remove the entry, so reconnecting clients can replay the stream while it is active.
+        chatFluxRegistry.register(chatId, stream);
+        try {
+            agentTaskExecutor.execute(
+                    () -> execute(chatClient, context, sink, stream, modelProvider, modelName, virtualKey));
+        } catch (RuntimeException e) {
+            chatFluxRegistry.remove(chatId, stream);
+            throw e;
         }
+        return stream;
     }
 
     public String initialPlaceholderTitle(String userQuery) {
@@ -244,6 +246,7 @@ public class PlanningAgentService {
             ChatClient chatClient,
             PlanningContext context,
             Sinks.Many<ClientPayload.ChatStreamPayload> sink,
+            Flux<ClientPayload.ChatStreamPayload> stream,
             ModelProvider provider,
             String modelName,
             String virtualKey) {
@@ -286,7 +289,7 @@ public class PlanningAgentService {
                 sink.tryEmitComplete();
             }
         } finally {
-            activeAgentTasks.remove(context.chatId());
+            chatFluxRegistry.remove(context.chatId(), stream);
             chatUsageSessionService.syncUsage(context.chatId(), virtualKey);
         }
         if (!Thread.currentThread().isInterrupted()) {

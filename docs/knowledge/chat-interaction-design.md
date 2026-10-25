@@ -22,7 +22,8 @@ The Kratis AI platform provides a real-time, deterministic, dual-transport (REST
   4. Human-in-the-Loop approvals and questions, carried as the `detail.hitl` state of an `execution_activity`
   5. Interactive canvas document creations and updates (`canvas`)
   6. Terminal chat failures (`chat_error`) emitted in-band when the agent loop fails, so every subscriber can close out the turn instead of leaving it dangling
-- **Automatic Lifecycle Cleanup**: The stream registry automatically removes the `chatId` entry when the reactive stream terminates (`onComplete`, `onError`, or `cancel`).
+- **Disconnect Transparency**: A client disconnect cancels only that session's subscription, never the agent turn. The turn keeps running and events stay in the replay buffer, so a later `chat.subscribe` replays everything it missed.
+- **Automatic Lifecycle Cleanup**: The stream registry entry is owned by the agent turn and removed when the execution finishes (success or error), not when an individual subscriber disconnects. A subscriber must never remove or cancel another subscriber's turn.
 
 ### 3. Payload Type Differentiation
 WebSocket JSON-RPC payloads strictly differentiate historical replays, live text chunks, telemetry/tool events, execution logs, and HITL permission gates:

@@ -8,7 +8,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
-import reactor.test.StepVerifier;
 
 class ChatFluxRegistryTest {
 
@@ -22,65 +21,54 @@ class ChatFluxRegistryTest {
     @Test
     void registerAndGet_returnsRegisteredFlux() {
         UUID chatId = UUID.randomUUID();
-        Sinks.Many<ClientPayload.ChatStreamPayload> sink = Sinks.many().replay().all();
-        Flux<ClientPayload.ChatStreamPayload> flux = sink.asFlux();
+        Flux<ClientPayload.ChatStreamPayload> flux = Flux.empty();
 
         registry.register(chatId, flux);
 
         assertThat(registry.containsKey(chatId)).isTrue();
         assertThat(registry.size()).isEqualTo(1);
-        assertThat(registry.get(chatId)).isNotNull();
+        assertThat(registry.get(chatId)).isSameAs(flux);
     }
 
     @Test
-    void autoRemovesOnFluxComplete() {
+    void subscriberCancellation_doesNotRemoveRegisteredFlux() {
         UUID chatId = UUID.randomUUID();
         Sinks.Many<ClientPayload.ChatStreamPayload> sink = Sinks.many().replay().all();
         Flux<ClientPayload.ChatStreamPayload> flux = sink.asFlux();
 
         registry.register(chatId, flux);
-        Flux<ClientPayload.ChatStreamPayload> registeredFlux = registry.get(chatId);
+        flux.subscribe().dispose();
 
-        sink.tryEmitNext(new ClientPayload.CompleteResult("msg-1"));
-        sink.tryEmitComplete();
-
-        StepVerifier.create(registeredFlux)
-                .expectNextMatches(r -> r instanceof ClientPayload.CompleteResult)
-                .verifyComplete();
-
-        assertThat(registry.containsKey(chatId)).isFalse();
-        assertThat(registry.get(chatId)).isNull();
-        assertThat(registry.size()).isEqualTo(0);
+        assertThat(registry.containsKey(chatId)).isTrue();
+        assertThat(registry.get(chatId)).isSameAs(flux);
     }
 
     @Test
-    void autoRemovesOnFluxError() {
+    void remove_removesRegisteredFlux() {
         UUID chatId = UUID.randomUUID();
-        Sinks.Many<ClientPayload.ChatStreamPayload> sink = Sinks.many().replay().all();
-        Flux<ClientPayload.ChatStreamPayload> flux = sink.asFlux();
+        Flux<ClientPayload.ChatStreamPayload> flux = Flux.empty();
 
         registry.register(chatId, flux);
-        Flux<ClientPayload.ChatStreamPayload> registeredFlux = registry.get(chatId);
-
-        sink.tryEmitError(new RuntimeException("Test failure"));
-
-        StepVerifier.create(registeredFlux).expectError(RuntimeException.class).verify();
+        registry.remove(chatId, flux);
 
         assertThat(registry.containsKey(chatId)).isFalse();
         assertThat(registry.get(chatId)).isNull();
     }
 
     @Test
-    void getAndRemove_removesAndReturnsFlux() {
+    void remove_doesNotRemoveNewerStreamForSameChat() {
         UUID chatId = UUID.randomUUID();
-        Sinks.Many<ClientPayload.ChatStreamPayload> sink = Sinks.many().replay().all();
-        Flux<ClientPayload.ChatStreamPayload> flux = sink.asFlux();
+        Sinks.Many<ClientPayload.ChatStreamPayload> firstSink =
+                Sinks.many().replay().all();
+        Sinks.Many<ClientPayload.ChatStreamPayload> secondSink =
+                Sinks.many().replay().all();
+        Flux<ClientPayload.ChatStreamPayload> first = firstSink.asFlux();
+        Flux<ClientPayload.ChatStreamPayload> second = secondSink.asFlux();
 
-        registry.register(chatId, flux);
+        registry.register(chatId, first);
+        registry.register(chatId, second);
+        registry.remove(chatId, first);
 
-        Flux<ClientPayload.ChatStreamPayload> removed = registry.getAndRemove(chatId);
-        assertThat(removed).isNotNull();
-        assertThat(registry.containsKey(chatId)).isFalse();
-        assertThat(registry.get(chatId)).isNull();
+        assertThat(registry.get(chatId)).isSameAs(second);
     }
 }

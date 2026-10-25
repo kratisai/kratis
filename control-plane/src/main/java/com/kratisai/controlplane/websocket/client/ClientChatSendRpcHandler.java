@@ -7,7 +7,6 @@ import com.kratisai.controlplane.api.wsdto.JsonRpcErrorCodes;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.planningagent.PlanningAgentService;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
-import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
 import java.util.HashMap;
@@ -28,19 +27,16 @@ public class ClientChatSendRpcHandler
     private final ChatService chatService;
     private final ClientSessionRegistry sessionRegistry;
     private final TeamMemberRepository teamMemberRepository;
-    private final ChatFluxRegistry chatFluxRegistry;
 
     public ClientChatSendRpcHandler(
             PlanningAgentService planningAgentService,
             ChatService chatService,
             ClientSessionRegistry sessionRegistry,
-            TeamMemberRepository teamMemberRepository,
-            ChatFluxRegistry chatFluxRegistry) {
+            TeamMemberRepository teamMemberRepository) {
         this.planningAgentService = planningAgentService;
         this.chatService = chatService;
         this.sessionRegistry = sessionRegistry;
         this.teamMemberRepository = teamMemberRepository;
-        this.chatFluxRegistry = chatFluxRegistry;
     }
 
     @Override
@@ -96,7 +92,6 @@ public class ClientChatSendRpcHandler
         try {
             Flux<ClientPayload.ChatStreamPayload> resultFlux =
                     planningAgentService.streamMessage(teamId, providerId, modelName, chatId, message);
-            chatFluxRegistry.register(chatId, resultFlux);
 
             return resultFlux.onErrorResume(error -> {
                 logger.error("Error streaming response", error);
