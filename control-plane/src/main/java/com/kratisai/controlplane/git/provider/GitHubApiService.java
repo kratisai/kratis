@@ -501,6 +501,43 @@ public class GitHubApiService {
         return branches.isArray() && !branches.isEmpty();
     }
 
+    public PullRequestSnapshot getPullRequest(String owner, String repo, long pullNumber, String token) {
+        try {
+            ResponseEntity<String> response =
+                    gitHubApiClient.getPullRequest(owner, repo, pullNumber, "Bearer " + token);
+            JsonNode root = parse(response);
+            return toPullRequestSnapshot(root);
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return null;
+            }
+            throw new ProviderUnavailableException("GitHub getPullRequest failed: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new ProviderUnavailableException("GitHub getPullRequest failed: " + e.getMessage(), e);
+        }
+    }
+
+    public Optional<PullRequestSnapshot> findOpenPullRequestForHead(
+            String owner, String repo, String headBranch, String token) {
+        try {
+            String headQuery = owner + ":" + headBranch;
+            ResponseEntity<String> response =
+                    gitHubApiClient.listPullRequests(owner, repo, headQuery, "open", "Bearer " + token);
+            JsonNode root = parse(response);
+            if (root.isArray() && !root.isEmpty()) {
+                return Optional.of(toPullRequestSnapshot(root.get(0)));
+            }
+            return Optional.empty();
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw new ProviderUnavailableException("GitHub findOpenPullRequestForHead failed: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new ProviderUnavailableException("GitHub findOpenPullRequestForHead failed: " + e.getMessage(), e);
+        }
+    }
+
     public RemoteRepositoryDto createRepository(
             String owner, boolean organization, CreateRepositoryCommand command, String token) {
         Map<String, Object> body = new HashMap<>();
@@ -516,6 +553,27 @@ public class GitHubApiService {
                     "GitHub repository creation failed with status: " + response.getStatusCode());
         }
         return toRemoteRepositoryDto(parse(response));
+    }
+
+    private PullRequestSnapshot toPullRequestSnapshot(JsonNode node) {
+        long number = node.path("number").asLong();
+        String stateStr = node.path("state").asText("");
+        boolean merged = node.path("merged").asBoolean(false)
+                || (!node.path("merged_at").isNull()
+                        && !node.path("merged_at").asText("").isEmpty());
+        PullRequestSnapshot.PullRequestState state;
+        if (merged) {
+            state = PullRequestSnapshot.PullRequestState.MERGED;
+        } else if ("closed".equalsIgnoreCase(stateStr)) {
+            state = PullRequestSnapshot.PullRequestState.CLOSED;
+        } else {
+            state = PullRequestSnapshot.PullRequestState.OPEN;
+        }
+        String url = node.path("html_url").asText("");
+        String headBranch = node.path("head").path("ref").asText("");
+        String baseBranch = node.path("base").path("ref").asText("");
+        String headSha = node.path("head").path("sha").asText("");
+        return new PullRequestSnapshot(number, state, url, headBranch, baseBranch, headSha);
     }
 
     private JsonNode parse(ResponseEntity<String> response) {

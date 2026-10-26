@@ -15,10 +15,38 @@ public record PublishPrRequestDto(
         RepositoryVisibility visibility,
         UUID credentialId,
         Boolean createNewPr,
-        String newBranchName) {
+        String newBranchName,
+        String digest) {
     public PublishPrRequestDto {
         Objects.requireNonNull(branchName, "branchName is required");
         Objects.requireNonNull(title, "title is required");
+    }
+
+    public PublishPrRequestDto(
+            String branchName,
+            String baseBranch,
+            String title,
+            String body,
+            Boolean draft,
+            Boolean squash,
+            String repositoryName,
+            RepositoryVisibility visibility,
+            UUID credentialId,
+            Boolean createNewPr,
+            String newBranchName) {
+        this(
+                branchName,
+                baseBranch,
+                title,
+                body,
+                draft,
+                squash,
+                repositoryName,
+                visibility,
+                credentialId,
+                createNewPr,
+                newBranchName,
+                null);
     }
 
     public PublishPrRequestDto(

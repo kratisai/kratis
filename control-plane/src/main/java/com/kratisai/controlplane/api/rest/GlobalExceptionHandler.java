@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.api.rest;
 
+import com.kratisai.controlplane.service.PublishException;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashMap;
@@ -54,6 +55,14 @@ public class GlobalExceptionHandler {
 
         ValidationErrorResponse response = new ValidationErrorResponse(ex.getReason(), Map.of());
         return ResponseEntity.status(ex.getStatusCode()).body(response);
+    }
+
+    @ExceptionHandler(PublishException.class)
+    public ResponseEntity<ValidationErrorResponse> handlePublishException(PublishException ex) {
+        logger.warn("Publish exception: {} - {}", ex.getErrorCode(), ex.getMessage());
+        ValidationErrorResponse response = new ValidationErrorResponse(
+                ex.getMessage(), Map.of("errorCode", ex.getErrorCode().name()));
+        return ResponseEntity.status(ex.getErrorCode().httpStatus()).body(response);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

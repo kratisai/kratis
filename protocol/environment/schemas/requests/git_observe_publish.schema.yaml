@@ -1,0 +1,9 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: GitObservePublishParams
+type: object
+properties:
+  executionId:
+    type: string
+  headBranch:
+    type: string
+additionalProperties: false

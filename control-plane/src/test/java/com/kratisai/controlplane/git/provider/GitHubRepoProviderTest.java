@@ -248,4 +248,40 @@ class GitHubRepoProviderTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("personal accounts");
     }
+
+    @Test
+    void getPullRequest_delegatesToService() {
+        PullRequestSnapshot snapshot = new PullRequestSnapshot(
+                383L,
+                PullRequestSnapshot.PullRequestState.OPEN,
+                "https://github.com/test-owner/test-repo/pull/383",
+                "canvas-repos",
+                "main",
+                "sha-head");
+        when(gitHubApiService.getPullRequest(eq("test-owner"), eq("test-repo"), eq(383L), eq("tok")))
+                .thenReturn(snapshot);
+
+        PullRequestSnapshot result = provider.getPullRequest(testRepo, GitAuthMaterial.ofToken("tok"), 383L);
+
+        assertThat(result).isEqualTo(snapshot);
+    }
+
+    @Test
+    void findOpenPullRequestForHead_delegatesToService() {
+        PullRequestSnapshot snapshot = new PullRequestSnapshot(
+                383L,
+                PullRequestSnapshot.PullRequestState.OPEN,
+                "https://github.com/test-owner/test-repo/pull/383",
+                "canvas-repos",
+                "main",
+                "sha-head");
+        when(gitHubApiService.findOpenPullRequestForHead(
+                        eq("test-owner"), eq("test-repo"), eq("canvas-repos"), eq("tok")))
+                .thenReturn(Optional.of(snapshot));
+
+        Optional<PullRequestSnapshot> result =
+                provider.findOpenPullRequestForHead(testRepo, GitAuthMaterial.ofToken("tok"), "canvas-repos");
+
+        assertThat(result).contains(snapshot);
+    }
 }

@@ -1,0 +1,20 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "newBaseSha": "abcdef1234567890abcdef1234567890abcdef12",
+    "changeSet": {
+      "additions": 10,
+      "deletions": 2,
+      "digest": "d1g35t",
+      "files": [
+        {
+          "path": "README.md",
+          "status": "modified",
+          "additions": 10,
+          "deletions": 2
+        }
+      ]
+    }
+  },
+  "id": 102
+}

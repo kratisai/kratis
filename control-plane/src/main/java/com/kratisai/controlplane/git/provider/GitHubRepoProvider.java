@@ -79,6 +79,23 @@ public class GitHubRepoProvider implements RepoProvider {
     }
 
     @Override
+    public PullRequestSnapshot getPullRequest(Repository repo, GitAuthMaterial auth, long number) {
+        String token = auth.maybeToken()
+                .orElseThrow(() -> new IllegalStateException("GitHub PR status requires a token, but none resolved"));
+        return gitHubApiService.getPullRequest(
+                extractOwner(repo.getUrl()), extractRepoName(repo.getUrl()), number, token);
+    }
+
+    @Override
+    public Optional<PullRequestSnapshot> findOpenPullRequestForHead(
+            Repository repo, GitAuthMaterial auth, String headBranch) {
+        String token = auth.maybeToken()
+                .orElseThrow(() -> new IllegalStateException("GitHub PR search requires a token, but none resolved"));
+        return gitHubApiService.findOpenPullRequestForHead(
+                extractOwner(repo.getUrl()), extractRepoName(repo.getUrl()), headBranch, token);
+    }
+
+    @Override
     public RemoteRepositoryDto createRepository(
             RepoCredential credential, GitAuthMaterial auth, CreateRepositoryCommand command) {
         String token = auth.maybeToken()

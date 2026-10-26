@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.git_observe_publish",
+  "params": {
+    "executionId": "exec-123",
+    "headBranch": "kratis/test-branch"
+  },
+  "id": 101
+}

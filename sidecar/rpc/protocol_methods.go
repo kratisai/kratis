@@ -50,9 +50,10 @@ var EnvironmentMethods = []MethodDef{
 	{Name: "env.launch_acp_agent", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &LaunchAcpAgentParams{}, Result: &LaunchAcpAgentResult{}},
 	{Name: "env.acp_prompt", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &AcpPromptParams{}, Result: &AcpPromptResult{}},
 	{Name: "env.cancel_agent", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &CancelAgentParams{}, Result: &CancelAgentResult{}},
-	{Name: "env.git_diff_summary", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GitDiffSummaryParams{}, Result: &GitDiffSummaryResult{}},
 	{Name: "env.read_file_slice", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &ReadFileSliceParams{}, Result: &ReadFileSliceResult{}},
 	{Name: "env.get_logs", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GetLogsParams{}, Result: &GetLogsResult{}},
+	{Name: "env.git_observe_publish", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GitObservePublishParams{}, Result: &GitObservePublishResult{}},
+	{Name: "env.git_rebase", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GitRebaseParams{}, Result: &GitRebaseResult{}},
 	{Name: "env.git_push", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GitPushParams{}, Result: &GitPushResult{}},
 	{Name: "env.git_set_remote", MessageKind: Request, Direction: ControlPlaneToConnector, Params: &GitSetRemoteParams{}, Result: &GitSetRemoteResult{}},
 }

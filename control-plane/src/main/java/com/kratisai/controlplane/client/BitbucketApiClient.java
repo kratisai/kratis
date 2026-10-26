@@ -55,6 +55,20 @@ public interface BitbucketApiClient {
             @RequestBody Map<String, Object> body,
             @RequestHeader("Authorization") String authorization);
 
+    @GetExchange("/repositories/{workspace}/{repo}/pullrequests/{id}")
+    ResponseEntity<String> getPullRequest(
+            @PathVariable("workspace") String workspace,
+            @PathVariable("repo") String repo,
+            @PathVariable("id") long id,
+            @RequestHeader("Authorization") String authorization);
+
+    @GetExchange("/repositories/{workspace}/{repo}/pullrequests")
+    ResponseEntity<String> listPullRequests(
+            @PathVariable("workspace") String workspace,
+            @PathVariable("repo") String repo,
+            @RequestParam("q") String query,
+            @RequestHeader("Authorization") String authorization);
+
     @PostExchange("/repositories/{workspace}/{repo}/pullrequests")
     ResponseEntity<String> createPullRequest(
             @PathVariable("workspace") String workspace,

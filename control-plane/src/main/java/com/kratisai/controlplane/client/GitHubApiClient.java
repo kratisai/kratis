@@ -66,6 +66,21 @@ public interface GitHubApiClient {
             @RequestParam("ref") String ref,
             @RequestHeader("Authorization") String authorization);
 
+    @GetExchange("/repos/{owner}/{repo}/pulls/{pullNumber}")
+    ResponseEntity<String> getPullRequest(
+            @PathVariable("owner") String owner,
+            @PathVariable("repo") String repo,
+            @PathVariable("pullNumber") long pullNumber,
+            @RequestHeader("Authorization") String authorization);
+
+    @GetExchange("/repos/{owner}/{repo}/pulls")
+    ResponseEntity<String> listPullRequests(
+            @PathVariable("owner") String owner,
+            @PathVariable("repo") String repo,
+            @RequestParam("head") String head,
+            @RequestParam("state") String state,
+            @RequestHeader("Authorization") String authorization);
+
     @PostExchange("/repos/{owner}/{repo}/pulls")
     ResponseEntity<String> createPullRequest(
             @PathVariable("owner") String owner,

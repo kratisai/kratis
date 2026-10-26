@@ -169,6 +169,9 @@ type Client struct {
 	pushingDiff       bool
 	diffSeq           uint64
 
+	// publishingMu ensures at most one publish operation runs per client
+	publishingMu sync.Mutex
+
 	// debug gates sidecar-internal diagnostics out of env.output (they always
 	// remain in the Go log)
 	debug bool
@@ -286,6 +289,39 @@ func (c *Client) persistSessionID(sessionID string) {
 // sandbox suspend snapshot and is never part of the git working tree.
 func (c *Client) diffBaseBranchPath() string {
 	return filepath.Join(filepath.Dir(c.envFilePath()), "diff_base_branch")
+}
+
+// executionBaseShaPath returns the location of the persisted execution base SHA.
+// It sits beside the environment file (outside the workspace) so it survives a
+// sandbox suspend snapshot and is never part of the git working tree.
+func (c *Client) executionBaseShaPath() string {
+	return filepath.Join(filepath.Dir(c.envFilePath()), "execution_base_sha")
+}
+
+// readPersistedExecutionBaseSha returns the base commit SHA recorded at checkout or updated after rebase.
+func (c *Client) readPersistedExecutionBaseSha() string {
+	data, err := os.ReadFile(c.executionBaseShaPath())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// persistExecutionBaseSha records the execution base SHA so a connector restarted from
+// a suspend snapshot can still resolve the base commit.
+func (c *Client) persistExecutionBaseSha(sha string) {
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return
+	}
+	path := c.executionBaseShaPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		log.Printf("[GIT] Failed to create base sha directory %s: %v", filepath.Dir(path), err)
+		return
+	}
+	if err := os.WriteFile(path, []byte(sha), 0o600); err != nil {
+		log.Printf("[GIT] Failed to persist execution base sha to %s: %v", path, err)
+	}
 }
 
 // readPersistedBaseBranch returns the branch recorded at checkout, or "" when no
@@ -1095,21 +1131,6 @@ func (c *Client) handleServerRequest(req JsonRpcRequest) {
 
 		go c.ExecuteCancelAgent(params, req.ID)
 
-	case "env.git_diff_summary":
-		var params GitDiffSummaryParams
-		if req.Params != nil {
-			rawBytes, err := json.Marshal(req.Params)
-			if err != nil {
-				c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
-				return
-			}
-			if err := json.Unmarshal(rawBytes, &params); err != nil {
-				c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
-				return
-			}
-		}
-		go c.ExecuteGitDiffSummary(params, req.ID)
-
 	case "env.read_file_slice":
 		var params ReadFileSliceParams
 		rawBytes, err := json.Marshal(req.Params)
@@ -1147,7 +1168,35 @@ func (c *Client) handleServerRequest(req JsonRpcRequest) {
 			c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
 			return
 		}
-		go c.ExecuteGitPush(params, req.ID)
+		go c.ExecuteGitPublish(params, req.ID)
+
+	case "env.git_observe_publish":
+		var params GitObservePublishParams
+		if req.Params != nil {
+			rawBytes, err := json.Marshal(req.Params)
+			if err != nil {
+				c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
+				return
+			}
+			if err := json.Unmarshal(rawBytes, &params); err != nil {
+				c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
+				return
+			}
+		}
+		go c.ExecuteGitObservePublish(params, req.ID)
+
+	case "env.git_rebase":
+		var params GitRebaseParams
+		rawBytes, err := json.Marshal(req.Params)
+		if err != nil {
+			c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
+			return
+		}
+		if err := json.Unmarshal(rawBytes, &params); err != nil {
+			c.sendErrorResponse(req.ID, -32602, "Invalid parameters", err.Error())
+			return
+		}
+		go c.ExecuteGitRebase(params, req.ID)
 
 	case "env.git_set_remote":
 		var params GitSetRemoteParams

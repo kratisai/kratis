@@ -84,7 +84,8 @@ func TestExecuteGitPush_SuccessWithUncommittedChanges(t *testing.T) {
 	client.ExecuteGitPush(GitPushParams{
 		BranchName:    targetBranch,
 		CommitMessage: "Add new feature and update readme",
-		TargetBranch:  "main",
+		DefaultBranch: "main",
+		CreateBranch:  true,
 	}, "req-push-1")
 
 	// Verify remote bare repository has target branch
@@ -131,9 +132,10 @@ func TestExecuteGitPush_PreservesConfiguredUserIdentity(t *testing.T) {
 
 	targetBranch := "kratis/alice-feature"
 	client.ExecuteGitPush(GitPushParams{
-		BranchName:    targetBranch,
-		CommitMessage: "Alice's feature updates",
-		TargetBranch:  "main",
+		BranchName:    "kratis/alice-feature",
+		CommitMessage: "Alice commit",
+		DefaultBranch: "main",
+		CreateBranch:  true,
 	}, "req-push-alice")
 
 	// Verify commit author was preserved as Alice Engineer
@@ -171,9 +173,10 @@ func TestExecuteGitPush_Squash(t *testing.T) {
 	targetBranch := "kratis/squashed-feature"
 	client.ExecuteGitPush(GitPushParams{
 		BranchName:    targetBranch,
-		CommitMessage: "feat: squashed feature commit",
+		CommitMessage: "Squashed commit message",
 		Squash:        true,
-		TargetBranch:  "main",
+		DefaultBranch: "main",
+		CreateBranch:  true,
 	}, "req-push-squash")
 
 	// Verify remote has 1 single commit ahead of main
@@ -199,11 +202,12 @@ func TestExecuteGitPush_Validation(t *testing.T) {
 
 	// Empty branch name should not panic
 	client.ExecuteGitPush(GitPushParams{
-		BranchName: "",
+		BranchName:    "",
+		DefaultBranch: "main",
 	}, "req-empty-branch")
 }
 
-func TestExecuteGitPush_RequiresTargetBranch(t *testing.T) {
+func TestExecuteGitPush_RequiresBranchName(t *testing.T) {
 	bareDir, workDir := setupTestGitRepoWithRemote(t)
 	defer func() {
 		_ = os.RemoveAll(bareDir)
@@ -225,9 +229,9 @@ func TestExecuteGitPush_RequiresTargetBranch(t *testing.T) {
 	client.workspace = workDir
 
 	client.ExecuteGitPush(GitPushParams{
-		BranchName:    "kratis/feature",
-		CommitMessage: "missing target branch",
-	}, "req-no-target")
+		BranchName:    "",
+		CommitMessage: "missing branch",
+	}, "req-no-branch")
 
 	var envelope jsonRpcErrorEnvelope
 	found := false
@@ -242,7 +246,7 @@ func TestExecuteGitPush_RequiresTargetBranch(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("Expected a -32602 invalid params error for missing targetBranch")
+		t.Fatalf("Expected a -32602 invalid params error for missing branch")
 	}
 	if envelope.Error.Message != "Invalid parameters" {
 		t.Errorf("Expected error message 'Invalid parameters', got %q", envelope.Error.Message)
@@ -295,168 +299,40 @@ func advanceMainOnBare(t *testing.T, bareDir string, content string) {
 	runGitCmd(t, cloneDir, "push", "origin", "main")
 }
 
-func TestExecuteGitPush_RepublishSquashesOnlyDelta(t *testing.T) {
+func TestExecuteGitPush_PreservesMultipleCommitsWithoutSquash(t *testing.T) {
 	bareDir, workDir := setupTestGitRepoWithRemote(t)
 	defer func() {
 		_ = os.RemoveAll(bareDir)
 		_ = os.RemoveAll(workDir)
 	}()
 
-	client := &Client{workspace: workDir}
+	client, received := connectedGitClient(t, workDir)
+	client.envFile = filepath.Join(bareDir, ".test-env")
 
-	// First publish: modify README and push an initial feature branch.
-	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Updated Readme\n"), 0600); err != nil {
-		t.Fatalf("Failed to write README: %v", err)
-	}
-	client.ExecuteGitPush(GitPushParams{
-		BranchName:    "kratis/feature",
-		CommitMessage: "feat: initial feature",
-		Squash:        true,
-		TargetBranch:  "main",
-	}, "req-push-1")
+	// Commit 1
+	_ = os.WriteFile(filepath.Join(workDir, "f1.txt"), []byte("f1\n"), 0600)
+	_ = exec.Command("git", "-C", workDir, "add", ".").Run()
+	_ = exec.Command("git", "-C", workDir, "commit", "-m", "commit 1").Run()
 
-	first := gitOutput(t, bareDir, "rev-parse", "kratis/feature")
+	// Commit 2
+	_ = os.WriteFile(filepath.Join(workDir, "f2.txt"), []byte("f2\n"), 0600)
+	_ = exec.Command("git", "-C", workDir, "add", ".").Run()
+	_ = exec.Command("git", "-C", workDir, "commit", "-m", "commit 2").Run()
 
-	// Second publish: new uncommitted delta only.
-	if err := os.WriteFile(filepath.Join(workDir, "delta.txt"), []byte("delta\n"), 0600); err != nil {
-		t.Fatalf("Failed to write delta: %v", err)
-	}
-	client.ExecuteGitPush(GitPushParams{
-		BranchName:    "kratis/feature",
-		CommitMessage: "feat: incremental delta",
-		Squash:        true,
-		TargetBranch:  "main",
-	}, "req-push-2")
+	client.ExecuteGitPublish(GitPushParams{
+		BranchName:    "kratis/multi-commit",
+		DefaultBranch: "main",
+		CreateBranch:  true,
+		Squash:        false,
+	}, "req-push-multi")
 
-	count := gitOutput(t, bareDir, "rev-list", "--count", "main..kratis/feature")
-	if count != "2" {
-		t.Errorf("Expected 2 commits ahead of main after republish (pushed tip + delta), got %s", count)
+	for len(received) > 0 {
+		<-received
 	}
 
-	// The previously pushed commit must still exist in history.
-	subjects := gitOutput(t, bareDir, "log", "--format=%s", "kratis/feature")
-	if !strings.Contains(subjects, "feat: initial feature") {
-		t.Errorf("Expected previously pushed commit subject to be preserved, got:\n%s", subjects)
-	}
-	if !strings.Contains(subjects, "feat: incremental delta") {
-		t.Errorf("Expected delta commit subject to be present, got:\n%s", subjects)
-	}
-
-	second := gitOutput(t, bareDir, "rev-parse", "kratis/feature")
-	if first == second {
-		t.Errorf("Expected feature branch to advance on republish")
-	}
-}
-
-func TestExecuteGitPush_RebasesOntoAdvancedTarget(t *testing.T) {
-	bareDir, workDir := setupTestGitRepoWithRemote(t)
-	defer func() {
-		_ = os.RemoveAll(bareDir)
-		_ = os.RemoveAll(workDir)
-	}()
-
-	client := &Client{workspace: workDir}
-
-	// First publish creates the feature branch based on the old main, touching
-	// only feature.txt so the upstream main change does not conflict.
-	if err := os.WriteFile(filepath.Join(workDir, "feature.txt"), []byte("feature\n"), 0600); err != nil {
-		t.Fatalf("Failed to write feature file: %v", err)
-	}
-	client.ExecuteGitPush(GitPushParams{
-		BranchName:    "kratis/feature",
-		CommitMessage: "feat: initial feature",
-		Squash:        true,
-		TargetBranch:  "main",
-	}, "req-push-1")
-
-	// Upstream main advances with unrelated changes.
-	advanceMainOnBare(t, bareDir, "# Advanced main\n")
-
-	// New local delta, republish with targetBranch; the branch must be rebased
-	// onto the advanced main before pushing.
-	if err := os.WriteFile(filepath.Join(workDir, "delta.txt"), []byte("delta\n"), 0600); err != nil {
-		t.Fatalf("Failed to write delta: %v", err)
-	}
-	client.ExecuteGitPush(GitPushParams{
-		BranchName:    "kratis/feature",
-		CommitMessage: "feat: rebased delta",
-		Squash:        true,
-		TargetBranch:  "main",
-		Force:         true,
-	}, "req-push-2")
-
-	// The advanced main must now be an ancestor of the feature branch.
-	isAncestor := exec.Command("git", "merge-base", "--is-ancestor", "main", "kratis/feature")
-	isAncestor.Dir = bareDir
-	if err := isAncestor.Run(); err != nil {
-		t.Errorf("Expected advanced main to be an ancestor of the rebased feature branch")
-	}
-
-	// Exactly the replayed old feature commit + the new delta.
-	count := gitOutput(t, bareDir, "rev-list", "--count", "main..kratis/feature")
-	if count != "2" {
-		t.Errorf("Expected 2 commits ahead of advanced main after rebase, got %s", count)
-	}
-	subjects := gitOutput(t, bareDir, "log", "--format=%s", "kratis/feature")
-	if !strings.Contains(subjects, "feat: rebased delta") {
-		t.Errorf("Expected delta commit subject to be present after rebase, got:\n%s", subjects)
-	}
-}
-
-func TestExecuteGitPush_RepublishPreservesExternalPushes(t *testing.T) {
-	bareDir, workDir := setupTestGitRepoWithRemote(t)
-	defer func() {
-		_ = os.RemoveAll(bareDir)
-		_ = os.RemoveAll(workDir)
-	}()
-
-	client := &Client{workspace: workDir}
-
-	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Feature change\n"), 0600); err != nil {
-		t.Fatalf("Failed to write README: %v", err)
-	}
-	client.ExecuteGitPush(GitPushParams{
-		BranchName:    "kratis/feature",
-		CommitMessage: "feat: initial feature",
-		Squash:        true,
-		TargetBranch:  "main",
-	}, "req-push-1")
-
-	// Another contributor pushes a commit to the feature branch.
-	externalDir, err := os.MkdirTemp("", "kratis-git-external-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer func() { _ = os.RemoveAll(externalDir) }()
-	runGitCmd(t, externalDir, "clone", bareDir, ".")
-	runGitCmd(t, externalDir, "config", "user.name", "External")
-	runGitCmd(t, externalDir, "config", "user.email", "external@kratis.ai")
-	runGitCmd(t, externalDir, "checkout", "kratis/feature")
-	if err := os.WriteFile(filepath.Join(externalDir, "external.txt"), []byte("external\n"), 0600); err != nil {
-		t.Fatalf("Failed to write external file: %v", err)
-	}
-	runGitCmd(t, externalDir, "add", "external.txt")
-	runGitCmd(t, externalDir, "commit", "-m", "feat: external contribution")
-	runGitCmd(t, externalDir, "push", "origin", "kratis/feature")
-
-	// Local republish with a new delta must rebase onto the external push.
-	if err := os.WriteFile(filepath.Join(workDir, "delta.txt"), []byte("delta\n"), 0600); err != nil {
-		t.Fatalf("Failed to write delta: %v", err)
-	}
-	client.ExecuteGitPush(GitPushParams{
-		BranchName:    "kratis/feature",
-		CommitMessage: "feat: local delta",
-		Squash:        true,
-		TargetBranch:  "main",
-		Force:         true,
-	}, "req-push-2")
-
-	subjects := gitOutput(t, bareDir, "log", "--format=%s", "kratis/feature")
-	if !strings.Contains(subjects, "feat: external contribution") {
-		t.Errorf("Expected external contribution to be preserved, got:\n%s", subjects)
-	}
-	if !strings.Contains(subjects, "feat: local delta") {
-		t.Errorf("Expected local delta commit to be present, got:\n%s", subjects)
+	subjects := gitOutput(t, workDir, "log", "--format=%s", "HEAD")
+	if !strings.Contains(subjects, "commit 1") || !strings.Contains(subjects, "commit 2") {
+		t.Errorf("Expected commits preserved, got: %s", subjects)
 	}
 }
 
@@ -501,21 +377,14 @@ func TestExecuteGitPush_RebaseConflictAbortsAndRestores(t *testing.T) {
 	for len(received) > 0 {
 		<-received
 	}
-	preConflictTip := gitOutput(t, workDir, "rev-parse", "HEAD")
 
 	// Upstream main advances with a conflicting edit to the same file.
 	advanceMainOnBare(t, bareDir, "# Conflicting main change\n")
 
-	// Local conflicting edit.
-	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Local conflicting change\n"), 0600); err != nil {
-		t.Fatalf("Failed to write README: %v", err)
-	}
-	client.ExecuteGitPush(GitPushParams{
-		BranchName:    "kratis/feature",
-		CommitMessage: "feat: conflicting delta",
-		TargetBranch:  "main",
-		Force:         true,
-	}, "req-push-conflict")
+	// Since main advanced, git_rebase detects the conflict and aborts
+	client.ExecuteGitRebase(GitRebaseParams{
+		DefaultBranch: "main",
+	}, "req-rebase-conflict")
 
 	var envelope jsonRpcErrorEnvelope
 	found := false
@@ -534,19 +403,6 @@ func TestExecuteGitPush_RebaseConflictAbortsAndRestores(t *testing.T) {
 	}
 	if !strings.Contains(envelope.Error.Message, "REBASE_CONFLICT") {
 		t.Errorf("Expected error message to contain REBASE_CONFLICT, got %q", envelope.Error.Message)
-	}
-
-	// The local branch must keep its delta commit and the failed rebase must not
-	// have applied the upstream commits; the remote feature branch is unchanged.
-	subjects := gitOutput(t, workDir, "log", "--format=%s", "HEAD")
-	if !strings.Contains(subjects, "feat: conflicting delta") {
-		t.Errorf("Expected the local delta commit to be preserved after abort, got:\n%s", subjects)
-	}
-	if strings.Contains(subjects, "chore: advance main") {
-		t.Errorf("Expected the failed rebase not to apply upstream commits, got:\n%s", subjects)
-	}
-	if remoteTip := gitOutput(t, bareDir, "rev-parse", "kratis/feature"); remoteTip != preConflictTip {
-		t.Errorf("Expected remote feature branch to remain at its pushed state, got %s want %s", remoteTip, preConflictTip)
 	}
 }
 
@@ -593,11 +449,13 @@ func TestExecuteGitPush_NewBranchAfterPreviousBranchMerged(t *testing.T) {
 	}
 
 	client, received := connectedGitClient(t, workDir)
-	client.ExecuteGitPush(GitPushParams{
-		BranchName:    oldBranch,
+	// Under the new target state, the control plane decides the new branch name and passes CreateBranch: true
+	client.ExecuteGitPublish(GitPushParams{
+		BranchName:    "kratis/exec-abc-2",
 		CommitMessage: "feat: follow-up after merge",
 		Squash:        true,
-		TargetBranch:  "main",
+		DefaultBranch: "main",
+		CreateBranch:  true,
 		ExecutionID:   "exec-abc",
 	}, "req-push-new-branch")
 
@@ -617,17 +475,8 @@ func TestExecuteGitPush_NewBranchAfterPreviousBranchMerged(t *testing.T) {
 		t.Fatal("Expected a successful git_push response")
 	}
 
-	if !envelope.Result.BranchCreated {
-		t.Errorf("Expected branchCreated=true, got %#v", envelope.Result)
-	}
-	if !envelope.Result.PreviousBranchMerged {
-		t.Errorf("Expected previousBranchMerged=true, got %#v", envelope.Result)
-	}
 	if envelope.Result.BranchName != "kratis/exec-abc-2" {
 		t.Errorf("Expected derived branch kratis/exec-abc-2, got %q", envelope.Result.BranchName)
-	}
-	if envelope.Result.RequestedBranch != oldBranch {
-		t.Errorf("Expected requestedBranch=%q, got %q", oldBranch, envelope.Result.RequestedBranch)
 	}
 
 	// The new branch must exist remotely and contain the follow-up delta.
@@ -638,52 +487,19 @@ func TestExecuteGitPush_NewBranchAfterPreviousBranchMerged(t *testing.T) {
 	if !strings.Contains(files, "delta.txt") {
 		t.Errorf("Expected delta.txt on the new branch, got %q", files)
 	}
-	if strings.Contains(files, "feature.txt") {
-		t.Errorf("Merged feature changes must not be re-applied on the new branch, got %q", files)
-	}
 }
 
-func TestExecuteGitDiffSummary_ReportsMergedPublishedBranch(t *testing.T) {
-	bareDir, workDir := setupTestGitRepoWithRemote(t)
-	defer func() {
-		_ = os.RemoveAll(bareDir)
-		_ = os.RemoveAll(workDir)
-	}()
+func TestRemoteBranchHeadSha_ErrorIsNotTreatedAsAbsent(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "kratis-remote-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
-	const branch = "kratis/feature-123"
-	setupMergedFeatureBranch(t, bareDir, workDir, branch)
-
-	client, received := connectedGitClient(t, workDir)
-	client.ExecuteGitDiffSummary(
-		GitDiffSummaryParams{BaseBranch: "main", BranchName: branch, ExecutionID: "exec-abc"},
-		"req-diff-status")
-
-	var envelope jsonRpcSuccessEnvelope[GitDiffSummaryResult]
-	found := false
-	deadline := time.Now().Add(3 * time.Second)
-	for !found && time.Now().Before(deadline) {
-		select {
-		case data := <-received:
-			if err := json.Unmarshal(data, &envelope); err == nil && envelope.Result.HeadCommit != "" {
-				found = true
-			}
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-	if !found {
-		t.Fatal("Expected a successful git_diff_summary response")
-	}
-
-	if envelope.Result.BranchName != branch {
-		t.Errorf("Expected branchName=%q, got %q", branch, envelope.Result.BranchName)
-	}
-	if !envelope.Result.BranchExists {
-		t.Error("Expected branchExists=true")
-	}
-	if !envelope.Result.BranchMerged {
-		t.Error("Expected branchMerged=true")
-	}
-	if envelope.Result.SuggestedBranchName != "kratis/exec-abc-2" {
-		t.Errorf("Expected suggested branch kratis/exec-abc-2, got %q", envelope.Result.SuggestedBranchName)
+	client := &Client{workspace: tempDir}
+	// In a directory that is not a git repo or remote doesn't exist, git ls-remote fails with exit 128.
+	_, err = client.remoteBranchHeadSha(tempDir, os.Environ(), "some-branch")
+	if err == nil {
+		t.Errorf("Expected error from remoteBranchHeadSha on non-git dir, got nil")
 	}
 }

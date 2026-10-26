@@ -85,6 +85,28 @@ public class FakeGitLabApiClientConfig {
         }
 
         @Override
+        public ResponseEntity<String> getMergeRequest(
+                UriBuilderFactory baseUri, String project, long iid, String privateToken) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
+            }
+            return ResponseEntity.ok(
+                    "{\"iid\": " + iid + ", \"web_url\": \"https://gitlab.com/" + project + "/-/merge_requests/" + iid
+                            + "\", \"source_branch\": \"feat\", \"target_branch\": \"main\", \"state\": \"opened\", \"sha\": \"sha1\"}");
+        }
+
+        @Override
+        public ResponseEntity<String> listMergeRequests(
+                UriBuilderFactory baseUri, String project, String sourceBranch, String state, String privateToken) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
+            }
+            return ResponseEntity.ok("[{\"iid\": 10, \"web_url\": \"https://gitlab.com/" + project
+                    + "/-/merge_requests/10\", \"source_branch\": \"" + sourceBranch
+                    + "\", \"target_branch\": \"main\", \"state\": \"opened\", \"sha\": \"sha1\"}]");
+        }
+
+        @Override
         public ResponseEntity<String> createMergeRequest(
                 UriBuilderFactory baseUri, String project, java.util.Map<String, Object> body, String privateToken) {
             if (shouldThrow) {

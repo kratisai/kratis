@@ -70,6 +70,23 @@ public class GitLabRepoProvider implements RepoProvider {
     }
 
     @Override
+    public PullRequestSnapshot getPullRequest(Repository repo, GitAuthMaterial auth, long number) {
+        String token = auth.maybeToken()
+                .orElseThrow(() -> new IllegalStateException("GitLab MR status requires a token, but none resolved"));
+        String projectPath = GitLabApiService.extractProjectPath(repo.getUrl());
+        return gitLabApiService.getMergeRequest(projectPath, number, token, resolveBaseUrl(repo));
+    }
+
+    @Override
+    public Optional<PullRequestSnapshot> findOpenPullRequestForHead(
+            Repository repo, GitAuthMaterial auth, String headBranch) {
+        String token = auth.maybeToken()
+                .orElseThrow(() -> new IllegalStateException("GitLab MR search requires a token, but none resolved"));
+        String projectPath = GitLabApiService.extractProjectPath(repo.getUrl());
+        return gitLabApiService.findOpenMergeRequestForHead(projectPath, headBranch, token, resolveBaseUrl(repo));
+    }
+
+    @Override
     public boolean supportsRepositoryCreation() {
         return true;
     }

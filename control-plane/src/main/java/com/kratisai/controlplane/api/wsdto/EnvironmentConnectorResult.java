@@ -59,10 +59,6 @@ public sealed interface EnvironmentConnectorResult {
         public CancelAgent {
             Objects.requireNonNull(status, "status is required");
         }
-
-        public CancelAgent(CancelAgentStatus status, int exitCode) {
-            this(status, exitCode, null);
-        }
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -76,19 +72,6 @@ public sealed interface EnvironmentConnectorResult {
     record RegisterGitIdentity(@JsonProperty("status") GitRegistrationStatus status)
             implements EnvironmentConnectorResult {
         public RegisterGitIdentity {
-            Objects.requireNonNull(status, "status is required");
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    record GitDiffSummaryFile(
-            @JsonProperty("path") String path,
-            @JsonProperty("status") GitDiffStatus status,
-            @JsonProperty("additions") int additions,
-            @JsonProperty("deletions") int deletions,
-            @JsonProperty("isCollapsedByDefault") boolean isCollapsedByDefault) {
-        public GitDiffSummaryFile {
-            Objects.requireNonNull(path, "path is required");
             Objects.requireNonNull(status, "status is required");
         }
     }
@@ -128,69 +111,6 @@ public sealed interface EnvironmentConnectorResult {
         public GitCommitMessage {
             Objects.requireNonNull(sha, "sha is required");
             Objects.requireNonNull(subject, "subject is required");
-        }
-    }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    record GitDiffSummary(
-            @JsonProperty("baseCommit") String baseCommit,
-            @JsonProperty("headCommit") String headCommit,
-            @JsonProperty("totalAdditions") int totalAdditions,
-            @JsonProperty("totalDeletions") int totalDeletions,
-            @JsonProperty("commitsAhead") Integer commitsAhead,
-            @JsonProperty("stagedFiles") Integer stagedFiles,
-            @JsonProperty("unstagedFiles") Integer unstagedFiles,
-            @JsonProperty("hasChanges") Boolean hasChanges,
-            @JsonProperty("commitMessages") List<GitCommitMessage> commitMessages,
-            @JsonProperty("files") List<GitDiffSummaryFile> files,
-            @JsonProperty("branchName") String branchName,
-            @JsonProperty("branchExists") Boolean branchExists,
-            @JsonProperty("branchMerged") Boolean branchMerged,
-            @JsonProperty("suggestedBranchName") String suggestedBranchName)
-            implements EnvironmentConnectorResult {
-        public GitDiffSummary {
-            Objects.requireNonNull(baseCommit, "baseCommit is required");
-            Objects.requireNonNull(headCommit, "headCommit is required");
-            Objects.requireNonNull(files, "files is required");
-            files = List.copyOf(files);
-            commitMessages = commitMessages != null ? List.copyOf(commitMessages) : List.of();
-        }
-
-        public GitDiffSummary(
-                String baseCommit,
-                String headCommit,
-                int totalAdditions,
-                int totalDeletions,
-                Integer commitsAhead,
-                Integer stagedFiles,
-                Integer unstagedFiles,
-                Boolean hasChanges,
-                List<GitCommitMessage> commitMessages,
-                List<GitDiffSummaryFile> files) {
-            this(
-                    baseCommit,
-                    headCommit,
-                    totalAdditions,
-                    totalDeletions,
-                    commitsAhead,
-                    stagedFiles,
-                    unstagedFiles,
-                    hasChanges,
-                    commitMessages,
-                    files,
-                    null,
-                    null,
-                    null,
-                    null);
-        }
-
-        public GitDiffSummary(
-                String baseCommit,
-                String headCommit,
-                int totalAdditions,
-                int totalDeletions,
-                List<GitDiffSummaryFile> files) {
-            this(baseCommit, headCommit, totalAdditions, totalDeletions, 0, 0, 0, !files.isEmpty(), List.of(), files);
         }
     }
 
@@ -245,6 +165,62 @@ public sealed interface EnvironmentConnectorResult {
         public GitSetRemote {
             Objects.requireNonNull(status, "status is required");
             Objects.requireNonNull(defaultBranch, "defaultBranch is required");
+        }
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record GitChangeSetFile(
+            @JsonProperty("path") String path,
+            @JsonProperty("status") String status,
+            @JsonProperty("additions") int additions,
+            @JsonProperty("deletions") int deletions) {
+        public GitChangeSetFile {
+            Objects.requireNonNull(path, "path is required");
+            Objects.requireNonNull(status, "status is required");
+        }
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record GitChangeSetStats(
+            @JsonProperty("additions") int additions,
+            @JsonProperty("deletions") int deletions,
+            @JsonProperty("files") List<GitChangeSetFile> files,
+            @JsonProperty("digest") String digest) {
+        public GitChangeSetStats {
+            files = files != null ? List.copyOf(files) : List.of();
+            Objects.requireNonNull(digest, "digest is required");
+        }
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record GitObservePublish(
+            @JsonProperty("defaultBranch") String defaultBranch,
+            @JsonProperty("defaultSha") String defaultSha,
+            @JsonProperty("executionBaseSha") String executionBaseSha,
+            @JsonProperty("defaultIsAncestorOfHead") Boolean defaultIsAncestorOfHead,
+            @JsonProperty("incomingCommitCount") int incomingCommitCount,
+            @JsonProperty("commitCount") int commitCount,
+            @JsonProperty("hasUncommittedChanges") Boolean hasUncommittedChanges,
+            @JsonProperty("headSha") String headSha,
+            @JsonProperty("changeSet") GitChangeSetStats changeSet)
+            implements EnvironmentConnectorResult {
+        public GitObservePublish {
+            Objects.requireNonNull(defaultBranch, "defaultBranch is required");
+            Objects.requireNonNull(defaultSha, "defaultSha is required");
+            Objects.requireNonNull(executionBaseSha, "executionBaseSha is required");
+            Objects.requireNonNull(defaultIsAncestorOfHead, "defaultIsAncestorOfHead is required");
+            Objects.requireNonNull(hasUncommittedChanges, "hasUncommittedChanges is required");
+            Objects.requireNonNull(changeSet, "changeSet is required");
+        }
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record GitRebase(
+            @JsonProperty("newBaseSha") String newBaseSha,
+            @JsonProperty("changeSet") GitChangeSetStats changeSet) implements EnvironmentConnectorResult {
+        public GitRebase {
+            Objects.requireNonNull(newBaseSha, "newBaseSha is required");
+            Objects.requireNonNull(changeSet, "changeSet is required");
         }
     }
 }

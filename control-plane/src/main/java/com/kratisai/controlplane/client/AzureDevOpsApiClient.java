@@ -67,6 +67,25 @@ public interface AzureDevOpsApiClient {
             @RequestBody Map<String, Object> body,
             @RequestHeader("Authorization") String authorization);
 
+    @GetExchange("/{project}/_apis/git/repositories/{repository}/pullrequests/{pullRequestId}")
+    ResponseEntity<String> getPullRequest(
+            UriBuilderFactory baseUri,
+            @PathVariable("project") String project,
+            @PathVariable("repository") String repository,
+            @PathVariable("pullRequestId") long pullRequestId,
+            @RequestParam("api-version") String apiVersion,
+            @RequestHeader("Authorization") String authorization);
+
+    @GetExchange("/{project}/_apis/git/repositories/{repository}/pullrequests")
+    ResponseEntity<String> listPullRequests(
+            UriBuilderFactory baseUri,
+            @PathVariable("project") String project,
+            @PathVariable("repository") String repository,
+            @RequestParam("searchCriteria.sourceRefName") String sourceRefName,
+            @RequestParam("searchCriteria.status") String status,
+            @RequestParam("api-version") String apiVersion,
+            @RequestHeader("Authorization") String authorization);
+
     @PostExchange("/{project}/_apis/git/repositories/{repository}/pullrequests")
     ResponseEntity<String> createPullRequest(
             UriBuilderFactory baseUri,

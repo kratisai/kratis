@@ -65,6 +65,25 @@ public class AzureRepoProvider implements RepoProvider {
     }
 
     @Override
+    public PullRequestSnapshot getPullRequest(Repository repo, GitAuthMaterial auth, long number) {
+        String token = auth.maybeToken()
+                .orElseThrow(
+                        () -> new IllegalStateException("Azure DevOps PR status requires a token, but none resolved"));
+        AzureDevOpsApiService.Coordinates coords = AzureDevOpsApiService.parse(repo.getUrl());
+        return azureDevOpsApiService.getPullRequest(coords, number, token);
+    }
+
+    @Override
+    public Optional<PullRequestSnapshot> findOpenPullRequestForHead(
+            Repository repo, GitAuthMaterial auth, String headBranch) {
+        String token = auth.maybeToken()
+                .orElseThrow(
+                        () -> new IllegalStateException("Azure DevOps PR search requires a token, but none resolved"));
+        AzureDevOpsApiService.Coordinates coords = AzureDevOpsApiService.parse(repo.getUrl());
+        return azureDevOpsApiService.findOpenPullRequestForHead(coords, headBranch, token);
+    }
+
+    @Override
     public boolean supportsRepositoryCreation() {
         return true;
     }

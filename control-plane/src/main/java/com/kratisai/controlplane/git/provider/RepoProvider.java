@@ -7,6 +7,7 @@ import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Provider-specific content and repository-listing access, dispatched by {@link RepositoryType}.
@@ -27,6 +28,15 @@ public interface RepoProvider {
     }
 
     PullRequestResultDto createPullRequest(Repository repo, GitAuthMaterial auth, CreatePullRequestCommand command);
+
+    default PullRequestSnapshot getPullRequest(Repository repo, GitAuthMaterial auth, long number) {
+        throw new UnsupportedOperationException("Pull request status is not supported for " + supportedType());
+    }
+
+    default Optional<PullRequestSnapshot> findOpenPullRequestForHead(
+            Repository repo, GitAuthMaterial auth, String headBranch) {
+        throw new UnsupportedOperationException("Finding open pull requests is not supported for " + supportedType());
+    }
 
     /** Repository creation is a host API operation, so SSH/GENERIC transports cannot support it. */
     default boolean supportsRepositoryCreation() {

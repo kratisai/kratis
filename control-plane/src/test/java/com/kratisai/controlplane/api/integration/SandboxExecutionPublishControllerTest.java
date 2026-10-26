@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kratisai.controlplane.api.restdto.PublishPrRequestDto;
 import com.kratisai.controlplane.api.restdto.PushBranchRequestDto;
+import com.kratisai.controlplane.model.ChangeSet;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.CredentialType;
 import com.kratisai.controlplane.model.EnvironmentStatus;
@@ -19,12 +20,12 @@ import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionEnvironmentType;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
-import com.kratisai.controlplane.model.PublishedPrStatus;
 import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.repository.ChangeSetRepository;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import com.kratisai.controlplane.repository.RepoCredentialRepository;
@@ -40,7 +41,6 @@ import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import java.util.List;
 import java.util.UUID;
-import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -94,13 +94,13 @@ class SandboxExecutionPublishControllerTest {
     private EnvironmentRpcClient environmentRpcClient;
 
     @Autowired
+    private ChangeSetRepository changeSetRepository;
+
+    @Autowired
     private FakeGitHubApiClientConfig.FakeGitHubApiClient fakeGitHubApiClient;
 
     @Autowired
     private CredentialService credentialService;
-
-    @Autowired
-    private DataSource dataSource;
 
     private String authToken;
     private ChatEntity chat;
@@ -143,7 +143,7 @@ class SandboxExecutionPublishControllerTest {
         execution.setEnvironment(environment);
         execution.setRepository(repository);
         execution.setModelProvider(modelProvider);
-        execution.setStatus(SandboxExecutionStatus.RUNNING);
+        execution.setStatus(SandboxExecutionStatus.IDLE);
         execution = sandboxExecutionRepository.save(execution);
 
         WebSocketSession mockSession = Mockito.mock(WebSocketSession.class);
@@ -189,28 +189,35 @@ class SandboxExecutionPublishControllerTest {
                                 result.put("status", "success");
                                 environmentRpcClient.completeResponse(response);
                             }
-                            case "env.git_diff_summary" -> {
+                            case "env.git_observe_publish" -> {
                                 ObjectNode result = response.putObject("result");
-                                result.put("baseCommit", "base-123");
-                                result.put("headCommit", "head-456");
-                                result.put("totalAdditions", 10);
-                                result.put("totalDeletions", 2);
-                                result.put("commitsAhead", 1);
-                                result.put("stagedFiles", 0);
-                                result.put("unstagedFiles", 0);
-                                result.put("hasChanges", true);
-                                ArrayNode commits = result.putArray("commitMessages");
-                                ObjectNode commit = commits.addObject();
-                                commit.put("sha", "c123");
-                                commit.put("subject", "feat(auth): implement token verification");
-                                commit.put("body", "Added verification logic and tests.");
-                                ArrayNode files = result.putArray("files");
+                                result.put("defaultBranch", "main");
+                                result.put("defaultSha", "sha-main");
+                                result.put("executionBaseSha", "sha-main");
+                                result.put("defaultIsAncestorOfHead", true);
+                                result.put("incomingCommitCount", 0);
+                                result.put("commitCount", 1);
+                                result.put("hasUncommittedChanges", false);
+                                ObjectNode cs = result.putObject("changeSet");
+                                cs.put("additions", 10);
+                                cs.put("deletions", 2);
+                                cs.put("digest", "test-digest");
+                                ArrayNode files = cs.putArray("files");
                                 ObjectNode file = files.addObject();
                                 file.put("path", "src/App.java");
-                                file.put("status", "MODIFIED");
+                                file.put("status", "modified");
                                 file.put("additions", 10);
                                 file.put("deletions", 2);
-                                file.put("isCollapsedByDefault", false);
+                                environmentRpcClient.completeResponse(response);
+                            }
+                            case "env.git_rebase" -> {
+                                ObjectNode result = response.putObject("result");
+                                result.put("newBaseSha", "sha-main-rebased");
+                                ObjectNode cs = result.putObject("changeSet");
+                                cs.put("additions", 10);
+                                cs.put("deletions", 2);
+                                cs.put("digest", "test-digest-rebased");
+                                cs.putArray("files");
                                 environmentRpcClient.completeResponse(response);
                             }
                             default -> {
@@ -263,7 +270,9 @@ class SandboxExecutionPublishControllerTest {
         SandboxExecution persisted =
                 sandboxExecutionRepository.findById(execution.getId()).orElseThrow();
         assertThat(persisted.getPublishedBranch()).isEqualTo("kratis/test-branch");
-        assertThat(persisted.getPublishedPrs()).isEmpty();
+        List<ChangeSet> changeSets = changeSetRepository.findByExecutionIdOrderBySeqAsc(execution.getId());
+        assertThat(changeSets).hasSize(1);
+        assertThat(changeSets.getFirst().getPrNumber()).isNull();
     }
 
     @Test
@@ -276,6 +285,14 @@ class SandboxExecutionPublishControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isConflict());
+    }
+
+    @Test
+    void rebase_success_returnsUpdatedCapabilities() throws Exception {
+        mockMvc.perform(post("/api/v1/chats/{chatId}/executions/{execId}/rebase", chat.getId(), execution.getId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP_TO_DATE"));
     }
 
     @Test
@@ -295,12 +312,10 @@ class SandboxExecutionPublishControllerTest {
         SandboxExecution persisted =
                 sandboxExecutionRepository.findById(execution.getId()).orElseThrow();
         assertThat(persisted.getPublishedBranch()).isEqualTo("kratis/pr-feature");
-        assertThat(persisted.getLatestPublishedPr()).isNotNull();
-        assertThat(persisted.getLatestPublishedPr().getPrNumber()).isEqualTo(42L);
-        assertThat(persisted.getLatestPublishedPr().getPrUrl())
-                .isEqualTo("https://github.com/test-owner/test-repo/pull/42");
-        assertThat(persisted.getLatestPublishedPr().getStatus()).isEqualTo(PublishedPrStatus.OPEN);
-        assertThat(persisted.getPublishedPrs()).hasSize(1);
+        List<ChangeSet> changeSets = changeSetRepository.findByExecutionIdOrderBySeqAsc(execution.getId());
+        assertThat(changeSets).hasSize(1);
+        assertThat(changeSets.getFirst().getPrNumber()).isEqualTo(42L);
+        assertThat(changeSets.getFirst().getPrUrl()).isEqualTo("https://github.com/test-owner/test-repo/pull/42");
     }
 
     @Test
@@ -313,44 +328,16 @@ class SandboxExecutionPublishControllerTest {
                         .content(objectMapper.writeValueAsString(first)))
                 .andExpect(status().isOk());
 
-        // Simulate the remote reporting the first PR as merged with follow-up changes.
-        try (var connection = dataSource.getConnection();
-                var statement = connection.prepareStatement(
-                        "UPDATE sandbox_execution_published_prs SET status = 'MERGED' WHERE execution_id = ?")) {
-            statement.setObject(1, execution.getId());
-            statement.executeUpdate();
-        }
-
         PublishPrRequestDto second = new PublishPrRequestDto(
-                "kratis/follow-up",
-                "main",
-                "Follow-up Title",
-                "Follow-up Body",
-                false,
-                false,
-                null,
-                null,
-                null,
-                true,
-                "kratis/follow-up");
+                "kratis/pr-feature-2", "main", "Feature Title 2", "Feature Body 2", false, true);
         mockMvc.perform(post("/api/v1/chats/{chatId}/executions/{execId}/publish-pr", chat.getId(), execution.getId())
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + authToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(second)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.headBranch").value("kratis/follow-up"));
+                .andExpect(status().isOk());
 
-        mockMvc.perform(get(
-                                "/api/v1/chats/{chatId}/executions/{execId}/publish-capabilities",
-                                chat.getId(),
-                                execution.getId())
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + authToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.publishedPrs.length()").value(2))
-                .andExpect(jsonPath("$.publishedPrs[0].status").value("MERGED"))
-                .andExpect(jsonPath("$.publishedPrs[1].headBranch").value("kratis/follow-up"));
-
-        assertThat(fakeGitHubApiClient.createPullRequestInvocations()).isEqualTo(2);
+        List<ChangeSet> changeSets = changeSetRepository.findByExecutionIdOrderBySeqAsc(execution.getId());
+        assertThat(changeSets).hasSize(2);
     }
 
     @Test
@@ -366,7 +353,7 @@ class SandboxExecutionPublishControllerTest {
                 .andExpect(jsonPath("$.prNumber").value(42));
 
         PublishPrRequestDto republish =
-                new PublishPrRequestDto("kratis/edited-branch", "main", "Updated Title", "Updated Body", false, true);
+                new PublishPrRequestDto("kratis/pr-feature", "main", "Updated Title", "Updated Body", false, true);
 
         mockMvc.perform(post("/api/v1/chats/{chatId}/executions/{execId}/publish-pr", chat.getId(), execution.getId())
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + authToken)

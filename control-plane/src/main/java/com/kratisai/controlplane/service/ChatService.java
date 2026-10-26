@@ -262,7 +262,7 @@ public class ChatService {
         if (latest.getStatus() == SandboxExecutionStatus.RUNNING) {
             return TopicStatus.WORKING;
         }
-        if (!latest.getPublishedPrs().isEmpty()) {
+        if (!latest.getChangeSets().isEmpty()) {
             return TopicStatus.MR_PUSHED;
         }
         if (latest.getStatus() == SandboxExecutionStatus.FAILED) {

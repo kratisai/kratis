@@ -233,19 +233,6 @@ methods:
     name: result
     schema:
       $ref: ./schemas/results/cancel_agent.schema.yaml
-- name: env.git_diff_summary
-  summary: Retrieve git diff summary manifest for working tree / commits
-  x-kratis-direction: control-plane-to-connector
-  x-kratis-message-kind: request
-  params:
-  - name: params
-    required: false
-    schema:
-      $ref: ./schemas/requests/git_diff_summary.schema.yaml
-  result:
-    name: result
-    schema:
-      $ref: ./schemas/results/git_diff_summary.schema.yaml
 - name: env.read_file_slice
   summary: Read slice of lines from a workspace file for hunk expansion
   x-kratis-direction: control-plane-to-connector
@@ -298,3 +285,29 @@ methods:
     name: result
     schema:
       $ref: ./schemas/results/git_set_remote.schema.yaml
+- name: env.git_observe_publish
+  summary: Observe origin and local git state for publish preview
+  x-kratis-direction: control-plane-to-connector
+  x-kratis-message-kind: request
+  params:
+  - name: params
+    required: true
+    schema:
+      $ref: ./schemas/requests/git_observe_publish.schema.yaml
+  result:
+    name: result
+    schema:
+      $ref: ./schemas/results/git_observe_publish.schema.yaml
+- name: env.git_rebase
+  summary: Rebase workspace commits onto default branch
+  x-kratis-direction: control-plane-to-connector
+  x-kratis-message-kind: request
+  params:
+  - name: params
+    required: true
+    schema:
+      $ref: ./schemas/requests/git_rebase.schema.yaml
+  result:
+    name: result
+    schema:
+      $ref: ./schemas/results/git_rebase.schema.yaml

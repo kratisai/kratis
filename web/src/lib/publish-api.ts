@@ -79,6 +79,16 @@ export async function pushBranch(
   return response.json()
 }
 
+export async function rebaseExecution(
+  chatId: string,
+  executionId: string,
+): Promise<PublishCapabilities> {
+  const response = await fetchWithAuth(`/api/v1/chats/${chatId}/executions/${executionId}/rebase`, {
+    method: 'POST',
+  })
+  return response.json()
+}
+
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}): Promise<Response> {
   const { accessToken } = useAuthStore.getState()
   const headers: HeadersInit = {

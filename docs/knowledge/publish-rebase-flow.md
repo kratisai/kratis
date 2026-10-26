@@ -1,33 +1,34 @@
 # Publish & Rebase Flow
 
-Git publish for sandbox executions.
+Git publish for sandbox executions. Target-state design and details: [`docs/plans/publish-state-reconciliation.md`](../plans/publish-state-reconciliation.md).
 
 UI: `web/src/components/session/diff/`
-RPCs: `sidecar/rpc/git.go`
+RPCs: `sidecar/rpc/git_publish.go`
 
-## Diff bases
+## Target-State Rules
 
 `SandboxExecution.targetBranch` is the branch the PR merges into (example: `main`).
 The control plane copies it from `Repository.branch` at execution creation.
 The default is `main`.
-It is a property of the execution, not a request parameter.
-If a row has no value, use the repository branch, then `main`.
 
-| State | Base | Result |
-|-------|------|--------|
-| Diff view and first publish | `merge-base(origin/<target>, HEAD)` | Full branch vs target (the PR) |
-| Republish (open PR on `publishedBranch`) | `merge-base(origin/<feature>, HEAD)` | Unpushed changes only |
-| New repository (no `origin`) | Root commit | All work vs the root commit |
+1. **Rebase is a separate step before publish.**
+   If the default branch has advanced since checkout or the last rebase, the state is `REBASE_REQUIRED`, and publish is disabled until `rebase` succeeds.
+2. **Rebase updates the execution base.**
+   On clean rebase, the workspace is updated, the execution base SHA advances to the new default-branch SHA, and publish becomes enabled (`UP_TO_DATE`).
+3. **Live state decides publish actions.**
+   Git does not decide PR lifecycle. The live provider check decides whether to update an open PR, open a new PR, or open a new branch.
 
-The diff view always uses the first-publish base (three-dot vs the target).
-It does not show changes that merged into the target after this branch diverged.
+| Live PR state | Target | Branch rule |
+|---|---|---|
+| No prior PR | `OPEN_PR` | Requested branch. If it exists with no PR, update it under a lease. |
+| OPEN | `UPDATE_PR` | Current head branch, force-with-lease on its observed SHA. |
+| CLOSED, not merged | `OPEN_PR` | Same head branch, lease on its observed SHA. The user edits before publish. |
+| MERGED | `OPEN_PR_NEW_BRANCH` | `kratis/<executionId>-<n>`. The merged branch is not changed. |
+| Provider unavailable, prior PR exists | none | Blocked with `PROVIDER_UNAVAILABLE`. |
 
 `env.checkout` always clones with an `origin` remote.
-Provisioning runs `git init` with no remote.
-The connector persists the checked-out branch to `<credentials-dir>/diff_base_branch`
-(beside `acp_session_id`), so it survives a suspend snapshot and is never in the
-working tree; the diff base is the in-memory branch, then that persisted value.
-A resume never re-runs `env.checkout`, so without it the branch would be unknown.
+The connector persists the checked-out branch to `<credentials-dir>/diff_base_branch` and the base commit SHA to `<credentials-dir>/execution_base_sha`.
+A resume never re-runs `env.checkout`, so without persistence the base would be unknown.
 
 The sidecar treats a missing `origin` as a new repository, diffing against the root
 commit (`git rev-list --max-parents=0 HEAD`). A workspace with an `origin` remote is
@@ -35,7 +36,7 @@ never treated as new: when no branch is recorded the base is git's own `origin/H
 (its default branch), falling back to the root commit only when the remote has no
 resolvable default branch (a new repository given a remote but never pushed).
 If the target branch is missing, `resolveBaseRef` returns an error.
-`env.git_diff_summary` and the diff push never fall back to `HEAD` or `HEAD~1`.
+The diff push never falls back to `HEAD` or `HEAD~1`.
 
 ## Diff storage and the read path
 
@@ -51,9 +52,9 @@ from that persisted copy and never calls the connector — diffs stay viewable
 while the sandbox sleeps, disconnects, or terminates. Only hunk context
 expansion (`/diff/context`) reads live file content from a connected sandbox.
 
-The publish flow (`SandboxExecutionPublishService`) still pulls a fresh summary
-via `env.git_diff_summary` because it must stage and commit the sandbox's
-current working tree at publish time.
+The publish flow (`SandboxExecutionPublishService`) pulls a fresh summary via
+`env.git_observe_publish` because it must stage and commit the sandbox's current
+working tree at publish time.
 
 ## New repository publish
 
@@ -92,8 +93,8 @@ The newest entry is the active PR.
 
 The git remote decides the state; the database is a cache for rendering.
 
-1. `env.git_diff_summary` takes `branchName` and returns `branchExists`, `branchMerged`, and
-   `suggestedBranchName`.
+1. `publish-capabilities` calls `env.git_observe_publish` for the target branch head and
+   reads live PR state from the provider.
 2. `publish-capabilities` writes the merged or closed status to the stored history and returns
    `publishedPrs`, `previousPrMerged`, and `suggestedNewBranch`.
 3. The publish dialog offers **Update existing PR #X** while the PR is open, and

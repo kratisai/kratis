@@ -39,6 +39,16 @@ public class SandboxExecutionPublishController {
         return ResponseEntity.ok(publishService.getPublishCapabilities(userId, chatId, executionId));
     }
 
+    @PostMapping("/rebase")
+    @Operation(
+            summary = "Rebase workspace onto default branch",
+            description =
+                    "Stashes uncommitted changes, replays workspace history onto origin default branch, and restores stash")
+    public ResponseEntity<PublishCapabilitiesDto> rebase(@PathVariable UUID chatId, @PathVariable UUID executionId) {
+        UUID userId = SecurityUtil.getCurrentUserId();
+        return ResponseEntity.ok(publishService.rebase(userId, chatId, executionId));
+    }
+
     @PostMapping("/push-branch")
     @Operation(
             summary = "Push working tree to remote branch",

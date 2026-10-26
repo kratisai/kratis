@@ -1,0 +1,27 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "defaultBranch": "main",
+    "defaultSha": "abcdef1234567890abcdef1234567890abcdef12",
+    "executionBaseSha": "abcdef1234567890abcdef1234567890abcdef12",
+    "defaultIsAncestorOfHead": true,
+    "incomingCommitCount": 0,
+    "commitCount": 1,
+    "hasUncommittedChanges": false,
+    "headSha": "1234567890abcdef1234567890abcdef12345678",
+    "changeSet": {
+      "additions": 10,
+      "deletions": 2,
+      "digest": "d1g35t",
+      "files": [
+        {
+          "path": "README.md",
+          "status": "modified",
+          "additions": 10,
+          "deletions": 2
+        }
+      ]
+    }
+  },
+  "id": 101
+}

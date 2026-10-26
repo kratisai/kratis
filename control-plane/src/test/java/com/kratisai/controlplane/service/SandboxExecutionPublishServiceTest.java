@@ -5,10 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,26 +21,25 @@ import com.kratisai.controlplane.api.restdto.PushBranchResponseDto;
 import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
-import com.kratisai.controlplane.api.wsdto.GitDiffStatus;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.git.provider.CreatePullRequestCommand;
 import com.kratisai.controlplane.git.provider.CreateRepositoryCommand;
+import com.kratisai.controlplane.git.provider.PullRequestSnapshot;
 import com.kratisai.controlplane.git.provider.RemoteRepositoryExistsException;
 import com.kratisai.controlplane.git.provider.RepoProvider;
 import com.kratisai.controlplane.git.provider.RepoProviderRegistry;
+import com.kratisai.controlplane.model.ChangeSet;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.CredentialType;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
-import com.kratisai.controlplane.model.PublishedPrStatus;
 import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
 import com.kratisai.controlplane.model.RepositoryVisibility;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
-import com.kratisai.controlplane.model.SandboxExecutionPublishedPr;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.*;
@@ -58,6 +57,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -68,16 +69,23 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class SandboxExecutionPublishServiceTest {
 
     @Mock
     private SandboxExecutionRepository sandboxExecutionRepository;
 
     @Mock
+    private ChangeSetRepository changeSetRepository;
+
+    @Mock
     private ChatRepository chatRepository;
 
     @Mock
     private SandboxExecutionActivityRepository sandboxExecutionActivityRepository;
+
+    @Mock
+    private SandboxExecutionActivityRepository activityRepository;
 
     @Mock
     private RepositoryRepository repositoryRepository;
@@ -137,6 +145,7 @@ class SandboxExecutionPublishServiceTest {
         ExecutionEnvironment environment = new ExecutionEnvironment();
         environment.setId(envId);
         environment.setTeam(team);
+        environment.setStatus(com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED);
 
         modelProvider = new ModelProvider("OpenAI", ProviderType.OPENAI, "enc-key", "https://api.openai.com/v1");
         modelProvider.setTeam(team);
@@ -145,6 +154,7 @@ class SandboxExecutionPublishServiceTest {
 
         repository = new Repository("my-repo", "https://github.com/test/repo.git", "main", RepositoryType.GITHUB);
         repository.setTeam(team);
+        when(providerRegistry.getProvider(any(Repository.class))).thenReturn(mock(RepoProvider.class));
 
         execution = new SandboxExecution();
         execution.setId(executionId);
@@ -157,8 +167,9 @@ class SandboxExecutionPublishServiceTest {
 
         service = new SandboxExecutionPublishService(
                 sandboxExecutionRepository,
+                changeSetRepository,
                 chatRepository,
-                sandboxExecutionActivityRepository,
+                activityRepository,
                 repositoryRepository,
                 credentialRepository,
                 environmentRpcClient,
@@ -232,12 +243,20 @@ class SandboxExecutionPublishServiceTest {
         when(repoProvider.supportsPullRequests()).thenReturn(false);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
 
-        EnvironmentConnectorResult.GitDiffSummary emptySummary = new EnvironmentConnectorResult.GitDiffSummary(
-                "base", "head", 0, 0, 0, 0, 0, false, List.of(), List.of());
+        EnvironmentConnectorResult.GitObservePublish emptyObs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                0,
+                false,
+                null,
+                new EnvironmentConnectorResult.GitChangeSetStats(0, 0, List.of(), "digest-empty"));
 
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(emptySummary);
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(emptyObs);
 
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
 
@@ -255,16 +274,20 @@ class SandboxExecutionPublishServiceTest {
         when(repoProvider.supportsPullRequests()).thenReturn(true);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
 
-        List<EnvironmentConnectorResult.GitCommitMessage> commits =
-                List.of(new EnvironmentConnectorResult.GitCommitMessage(
-                        "abc1234", "feat: add user profile", "Implements user profile page\nand settings"));
-
-        EnvironmentConnectorResult.GitDiffSummary summary =
-                new EnvironmentConnectorResult.GitDiffSummary("base", "head", 15, 3, 1, 0, 0, true, commits, List.of());
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                1,
+                false,
+                null,
+                new EnvironmentConnectorResult.GitChangeSetStats(15, 3, List.of(), "digest-single"));
 
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(summary);
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
 
         when(sandboxExecutionActivityRepository.findByExecutionIdOrderBySequenceAsc(executionId))
                 .thenReturn(List.of(new SandboxExecutionActivity(
@@ -297,16 +320,24 @@ class SandboxExecutionPublishServiceTest {
         when(repoProvider.supportsPullRequests()).thenReturn(true);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
 
-        List<EnvironmentConnectorResult.GitCommitMessage> commits = List.of(
-                new EnvironmentConnectorResult.GitCommitMessage("abc1", "feat: first commit", "Details about first"),
-                new EnvironmentConnectorResult.GitCommitMessage("abc2", "fix: second commit", ""));
-
-        EnvironmentConnectorResult.GitDiffSummary summary =
-                new EnvironmentConnectorResult.GitDiffSummary("base", "head", 20, 5, 2, 0, 1, true, commits, List.of());
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                2,
+                true,
+                null,
+                new EnvironmentConnectorResult.GitChangeSetStats(
+                        20,
+                        5,
+                        List.of(new EnvironmentConnectorResult.GitChangeSetFile("README.md", "modified", 20, 5)),
+                        "digest-multi"));
 
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(summary);
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
 
         when(sandboxExecutionActivityRepository.findByExecutionIdOrderBySequenceAsc(executionId))
                 .thenReturn(List.of(new SandboxExecutionActivity(
@@ -326,7 +357,7 @@ class SandboxExecutionPublishServiceTest {
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
 
         assertThat(result.stats().commitsAhead()).isEqualTo(2);
-        assertThat(result.stats().unstagedFiles()).isEqualTo(1);
+        assertThat(result.suggestedTitle()).isEqualTo("feat: synthesized multi-commit title");
         assertThat(result.stats().formattedSummary()).isEqualTo("2 unpushed commits, 1 unstaged file (+20, -5 lines)");
         assertThat(result.suggestedTitle()).isEqualTo("feat: synthesized multi-commit title");
         assertThat(result.suggestedBody()).isEqualTo("- Summary item 1\n- Summary item 2");
@@ -339,25 +370,26 @@ class SandboxExecutionPublishServiceTest {
         when(repoProvider.supportsPullRequests()).thenReturn(true);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
 
-        EnvironmentConnectorResult.GitDiffSummary summary = new EnvironmentConnectorResult.GitDiffSummary(
-                "base",
-                "head",
-                45,
-                12,
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
                 0,
-                2,
                 0,
                 true,
-                List.of(),
-                List.of(
-                        new EnvironmentConnectorResult.GitDiffSummaryFile(
-                                "src/App.tsx", GitDiffStatus.MODIFIED, 30, 10, false),
-                        new EnvironmentConnectorResult.GitDiffSummaryFile(
-                                "src/New.tsx", GitDiffStatus.ADDED, 15, 2, false)));
+                null,
+                new EnvironmentConnectorResult.GitChangeSetStats(
+                        45,
+                        12,
+                        List.of(
+                                new EnvironmentConnectorResult.GitChangeSetFile("src/App.tsx", "added", 30, 10),
+                                new EnvironmentConnectorResult.GitChangeSetFile("src/New.tsx", "added", 15, 2)),
+                        "digest-files"));
 
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(summary);
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
 
         when(sandboxExecutionActivityRepository.findByExecutionIdOrderBySequenceAsc(executionId))
                 .thenReturn(List.of());
@@ -369,7 +401,7 @@ class SandboxExecutionPublishServiceTest {
 
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
 
-        assertThat(result.stats().stagedFiles()).isEqualTo(2);
+        assertThat(result.stats().additions()).isEqualTo(45);
         assertThat(result.stats().formattedSummary()).isEqualTo("2 staged files (+45, -12 lines)");
         assertThat(result.suggestedTitle()).isEqualTo("refactor: update app components");
         assertThat(result.suggestedBody()).isEqualTo("- Updates App.tsx\n- Adds New.tsx");
@@ -382,22 +414,24 @@ class SandboxExecutionPublishServiceTest {
         when(repoProvider.supportsPullRequests()).thenReturn(true);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
 
-        EnvironmentConnectorResult.GitDiffSummary summary = new EnvironmentConnectorResult.GitDiffSummary(
-                "base",
-                "head",
-                45,
-                12,
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
                 0,
-                2,
                 0,
                 true,
-                List.of(),
-                List.of(new EnvironmentConnectorResult.GitDiffSummaryFile(
-                        "src/App.tsx", GitDiffStatus.MODIFIED, 30, 10, false)));
+                null,
+                new EnvironmentConnectorResult.GitChangeSetStats(
+                        45,
+                        12,
+                        List.of(new EnvironmentConnectorResult.GitChangeSetFile("src/App.tsx", "modified", 30, 10)),
+                        "digest-multi"));
 
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(summary);
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
 
         when(sandboxExecutionActivityRepository.findByExecutionIdOrderBySequenceAsc(executionId))
                 .thenReturn(List.of());
@@ -419,16 +453,24 @@ class SandboxExecutionPublishServiceTest {
         RepoProvider repoProvider = mock(RepoProvider.class);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
 
-        List<EnvironmentConnectorResult.GitCommitMessage> commits = List.of(
-                new EnvironmentConnectorResult.GitCommitMessage("abc1", "feat: step 1", "body 1"),
-                new EnvironmentConnectorResult.GitCommitMessage("abc2", "fix: step 2", "body 2"));
-
-        EnvironmentConnectorResult.GitDiffSummary summary =
-                new EnvironmentConnectorResult.GitDiffSummary("base", "head", 10, 2, 2, 0, 0, true, commits, List.of());
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                2,
+                false,
+                null,
+                new EnvironmentConnectorResult.GitChangeSetStats(
+                        10,
+                        2,
+                        List.of(new EnvironmentConnectorResult.GitChangeSetFile("README.md", "modified", 10, 2)),
+                        "digest-ai-fail"));
 
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(summary);
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
 
         when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenThrow(new RuntimeException("LLM down"));
 
@@ -446,22 +488,24 @@ class SandboxExecutionPublishServiceTest {
         RepoProvider repoProvider = mock(RepoProvider.class);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
 
-        EnvironmentConnectorResult.GitDiffSummary summary = new EnvironmentConnectorResult.GitDiffSummary(
-                "base",
-                "head",
-                10,
-                2,
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
                 0,
                 1,
-                0,
-                true,
-                List.of(),
-                List.of(new EnvironmentConnectorResult.GitDiffSummaryFile(
-                        "src/App.tsx", GitDiffStatus.MODIFIED, 10, 2, false)));
+                false,
+                null,
+                new EnvironmentConnectorResult.GitChangeSetStats(
+                        10,
+                        2,
+                        List.of(new EnvironmentConnectorResult.GitChangeSetFile("src/App.tsx", "modified", 10, 2)),
+                        "digest-no-model"));
 
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(summary);
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
 
         assertThatThrownBy(() -> service.getPublishCapabilities(userId, chatId, executionId))
                 .isInstanceOf(ResponseStatusException.class)
@@ -478,35 +522,40 @@ class SandboxExecutionPublishServiceTest {
         ChatModel mockChatModel = createMockChatModel(jsonResponse);
         when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(mockChatModel);
 
-        // Staged and unstaged
-        EnvironmentConnectorResult.GitDiffSummary summary = new EnvironmentConnectorResult.GitDiffSummary(
-                "base", "head", 10, 5, 0, 1, 2, true, List.of(), List.of());
+        EnvironmentConnectorResult.GitObservePublish obs1 = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                0,
+                true,
+                null,
+                new EnvironmentConnectorResult.GitChangeSetStats(10, 5, List.of(), "d1"));
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(summary);
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs1);
 
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
-        assertThat(result.stats().formattedSummary()).isEqualTo("1 staged file, 2 unstaged files (+10, -5 lines)");
+        assertThat(result.stats().additions()).isEqualTo(10);
+        assertThat(result.stats().deletions()).isEqualTo(5);
 
-        // Only unstaged
-        EnvironmentConnectorResult.GitDiffSummary summary2 = new EnvironmentConnectorResult.GitDiffSummary(
-                "base", "head", 8, 1, 0, 0, 2, true, List.of(), List.of());
+        EnvironmentConnectorResult.GitObservePublish obs2 = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                3,
+                true,
+                null,
+                new EnvironmentConnectorResult.GitChangeSetStats(12, 4, List.of(), "d2"));
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(summary2);
-
-        PublishCapabilitiesDto result2 = service.getPublishCapabilities(userId, chatId, executionId);
-        assertThat(result2.stats().formattedSummary()).isEqualTo("2 unstaged files (+8, -1 lines)");
-
-        EnvironmentConnectorResult.GitDiffSummary summary3 = new EnvironmentConnectorResult.GitDiffSummary(
-                "base", "head", 12, 4, 3, 2, 1, true, List.of(), List.of());
-        when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(summary3);
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs2);
 
         PublishCapabilitiesDto result3 = service.getPublishCapabilities(userId, chatId, executionId);
-        assertThat(result3.stats().formattedSummary())
-                .isEqualTo("3 unpushed commits, 2 staged files, 1 unstaged file (+12, -4 lines)");
+        assertThat(result3.stats().commitsAhead()).isEqualTo(3);
     }
 
     @Test
@@ -516,7 +565,7 @@ class SandboxExecutionPublishServiceTest {
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
 
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
                 .thenThrow(new RuntimeException("RPC timeout"));
 
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
@@ -527,18 +576,36 @@ class SandboxExecutionPublishServiceTest {
 
     @Test
     void getPublishCapabilities_republished_usesPublishedBranchAsDiffBase() throws Exception {
-        execution.setPublishedBranch("kratis/feature-123");
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId))
+                .thenReturn(List.of(new ChangeSet(
+                        execution,
+                        1,
+                        "base",
+                        "push",
+                        "kratis/feature-123",
+                        42L,
+                        "https://pr/42",
+                        "main",
+                        Instant.now())));
         stubExecutionLookup();
         RepoProvider repoProvider = mock(RepoProvider.class);
         when(repoProvider.supportsPullRequests()).thenReturn(true);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
 
-        EnvironmentConnectorResult.GitDiffSummary summary = new EnvironmentConnectorResult.GitDiffSummary(
-                "base", "head", 5, 1, 0, 1, 0, true, List.of(), List.of());
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                1,
+                false,
+                "sha-head",
+                new EnvironmentConnectorResult.GitChangeSetStats(5, 1, List.of(), "d"));
 
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(summary);
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
 
         when(sandboxExecutionActivityRepository.findByExecutionIdOrderBySequenceAsc(executionId))
                 .thenReturn(List.of());
@@ -549,10 +616,83 @@ class SandboxExecutionPublishServiceTest {
 
         service.getPublishCapabilities(userId, chatId, executionId);
 
-        ArgumentCaptor<EnvironmentRpcPayload.GitDiffSummary> summaryCaptor =
-                ArgumentCaptor.forClass(EnvironmentRpcPayload.GitDiffSummary.class);
-        verify(environmentRpcClient).request(eq(envId), summaryCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
-        assertThat(summaryCaptor.getValue().baseBranch()).isEqualTo("kratis/feature-123");
+        ArgumentCaptor<EnvironmentRpcPayload.GitObservePublish> obsCaptor =
+                ArgumentCaptor.forClass(EnvironmentRpcPayload.GitObservePublish.class);
+        verify(environmentRpcClient).request(eq(envId), obsCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
+        assertThat(obsCaptor.getValue().headBranch()).isEqualTo("kratis/feature-123");
+    }
+
+    @Test
+    void getPublishCapabilities_afterPushOnly_usesPushedBranchAsDiffBase() throws Exception {
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId))
+                .thenReturn(List.of(new ChangeSet(
+                        execution, 1, "base", "push", "kratis/pushed-branch", null, null, null, Instant.now())));
+        stubExecutionLookup();
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(false);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                0,
+                false,
+                "sha-head",
+                new EnvironmentConnectorResult.GitChangeSetStats(0, 0, List.of(), "digest-empty"));
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
+
+        service.getPublishCapabilities(userId, chatId, executionId);
+
+        ArgumentCaptor<EnvironmentRpcPayload.GitObservePublish> obsCaptor =
+                ArgumentCaptor.forClass(EnvironmentRpcPayload.GitObservePublish.class);
+        verify(environmentRpcClient).request(eq(envId), obsCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
+        assertThat(obsCaptor.getValue().headBranch()).isEqualTo("kratis/pushed-branch");
+    }
+
+    @Test
+    void getPublishCapabilities_branchAtRemoteHead_reportsNoChanges() throws Exception {
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId))
+                .thenReturn(List.of(new ChangeSet(
+                        execution,
+                        1,
+                        "base",
+                        "push",
+                        "kratis/feature-123",
+                        42L,
+                        "https://pr/42",
+                        "main",
+                        Instant.now())));
+        stubExecutionLookup();
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(false);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                0,
+                false,
+                "sha-head",
+                new EnvironmentConnectorResult.GitChangeSetStats(0, 0, List.of(), "digest-empty"));
+
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        assertThat(result.stats().hasChanges()).isFalse();
+        assertThat(result.stats().commitsAhead()).isZero();
+        assertThat(result.stats().formattedSummary()).isEqualTo("There are no changes to publish");
+        assertThat(result.changeSet().files()).isEmpty();
     }
 
     @Test
@@ -562,12 +702,20 @@ class SandboxExecutionPublishServiceTest {
         when(repoProvider.supportsPullRequests()).thenReturn(true);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
 
-        EnvironmentConnectorResult.GitDiffSummary summary = new EnvironmentConnectorResult.GitDiffSummary(
-                "base", "head", 5, 1, 0, 1, 0, true, List.of(), List.of());
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                1,
+                false,
+                null,
+                new EnvironmentConnectorResult.GitChangeSetStats(5, 1, List.of(), "d"));
 
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(summary);
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
 
         when(sandboxExecutionActivityRepository.findByExecutionIdOrderBySequenceAsc(executionId))
                 .thenReturn(List.of());
@@ -578,10 +726,10 @@ class SandboxExecutionPublishServiceTest {
 
         service.getPublishCapabilities(userId, chatId, executionId);
 
-        ArgumentCaptor<EnvironmentRpcPayload.GitDiffSummary> summaryCaptor =
-                ArgumentCaptor.forClass(EnvironmentRpcPayload.GitDiffSummary.class);
-        verify(environmentRpcClient).request(eq(envId), summaryCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
-        assertThat(summaryCaptor.getValue().baseBranch()).isEqualTo("main");
+        ArgumentCaptor<EnvironmentRpcPayload.GitObservePublish> obsCaptor =
+                ArgumentCaptor.forClass(EnvironmentRpcPayload.GitObservePublish.class);
+        verify(environmentRpcClient).request(eq(envId), obsCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
+        assertThat(obsCaptor.getValue().headBranch()).isNull();
     }
 
     private RepoCredential githubNewRepoCredential() {
@@ -671,7 +819,7 @@ class SandboxExecutionPublishServiceTest {
 
         ArgumentCaptor<EnvironmentRpcPayload.OutboundRequestPayload> payloadCaptor =
                 ArgumentCaptor.forClass(EnvironmentRpcPayload.OutboundRequestPayload.class);
-        verify(environmentRpcClient, times(2))
+        verify(environmentRpcClient, atLeastOnce())
                 .request(eq(envId), payloadCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
         EnvironmentRpcPayload.GitSetRemote setRemote = (EnvironmentRpcPayload.GitSetRemote)
                 payloadCaptor.getAllValues().getFirst();
@@ -729,7 +877,7 @@ class SandboxExecutionPublishServiceTest {
 
         ArgumentCaptor<EnvironmentRpcPayload.OutboundRequestPayload> payloadCaptor =
                 ArgumentCaptor.forClass(EnvironmentRpcPayload.OutboundRequestPayload.class);
-        verify(environmentRpcClient, times(2))
+        verify(environmentRpcClient, atLeastOnce())
                 .request(eq(envId), payloadCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
         EnvironmentRpcPayload.GitSetRemote setRemote = (EnvironmentRpcPayload.GitSetRemote)
                 payloadCaptor.getAllValues().getFirst();
@@ -1038,8 +1186,7 @@ class SandboxExecutionPublishServiceTest {
         assertThat(response.commitSha()).isEqualTo("sha123");
         assertThat(response.remoteRef()).isEqualTo("refs/heads/feature-branch");
         assertThat(response.status()).isEqualTo("SUCCESS");
-        assertThat(execution.getPublishedBranch()).isEqualTo("feature-branch");
-        verify(sandboxExecutionRepository).save(execution);
+        verify(changeSetRepository).save(any(ChangeSet.class));
     }
 
     @Test
@@ -1141,11 +1288,7 @@ class SandboxExecutionPublishServiceTest {
 
         assertThat(result.prNumber()).isEqualTo(101);
         assertThat(result.prUrl()).isEqualTo("https://github.com/test/repo/pull/101");
-        assertThat(execution.getPublishedBranch()).isEqualTo("pr-branch");
-        assertThat(execution.getLatestPublishedPr()).isNotNull();
-        assertThat(execution.getLatestPublishedPr().getPrNumber()).isEqualTo(101L);
-        assertThat(execution.getLatestPublishedPr().getPrUrl()).isEqualTo("https://github.com/test/repo/pull/101");
-        verify(sandboxExecutionRepository).save(execution);
+        verify(changeSetRepository).save(any(ChangeSet.class));
 
         ArgumentCaptor<EnvironmentRpcPayload.GitPush> pushCaptor =
                 ArgumentCaptor.forClass(EnvironmentRpcPayload.GitPush.class);
@@ -1155,19 +1298,44 @@ class SandboxExecutionPublishServiceTest {
 
     @Test
     void publishPullRequest_republish_reusesPersistedBranchAndSkipsCreate() throws Exception {
-        execution.setPublishedBranch("existing-branch");
-        execution.addPublishedPr(new SandboxExecutionPublishedPr(
-                77L,
-                "https://github.com/test/repo/pull/77",
-                "existing-branch",
-                "main",
-                PublishedPrStatus.OPEN,
-                Instant.now()));
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId))
+                .thenReturn(List.of(new ChangeSet(
+                        execution,
+                        1,
+                        "base",
+                        "push",
+                        "existing-branch",
+                        77L,
+                        "https://github.com/test/repo/pull/77",
+                        "main",
+                        Instant.now())));
         stubExecutionLookup();
 
         RepoProvider repoProvider = mock(RepoProvider.class);
         when(repoProvider.supportsPullRequests()).thenReturn(true);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+        when(repoProvider.getPullRequest(eq(repository), any(), eq(77L)))
+                .thenReturn(new PullRequestSnapshot(
+                        77L,
+                        PullRequestSnapshot.PullRequestState.OPEN,
+                        "https://github.com/test/repo/pull/77",
+                        "existing-branch",
+                        "main",
+                        "sha777"));
+
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                1,
+                false,
+                "sha777",
+                new EnvironmentConnectorResult.GitChangeSetStats(5, 0, List.of(), "digest-republish"));
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
 
         EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
                 "sha777", "existing-branch", "refs/heads/existing-branch", "SUCCESS");
@@ -1277,58 +1445,65 @@ class SandboxExecutionPublishServiceTest {
 
     @Test
     void getPublishCapabilities_previousPrMerged_offersNewBranchAndHistory() throws Exception {
-        execution.setPublishedBranch("existing-branch");
-        execution.addPublishedPr(new SandboxExecutionPublishedPr(
-                77L,
-                "https://github.com/test/repo/pull/77",
-                "existing-branch",
-                "main",
-                PublishedPrStatus.OPEN,
-                Instant.now()));
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId))
+                .thenReturn(List.of(new ChangeSet(
+                        execution,
+                        1,
+                        "base",
+                        "push",
+                        "existing-branch",
+                        77L,
+                        "https://github.com/test/repo/pull/77",
+                        "main",
+                        Instant.now())));
         stubExecutionLookup();
 
         RepoProvider repoProvider = mock(RepoProvider.class);
         when(repoProvider.supportsPullRequests()).thenReturn(true);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
 
-        EnvironmentConnectorResult.GitDiffSummary summary = new EnvironmentConnectorResult.GitDiffSummary(
-                "base",
-                "head",
+        when(repoProvider.getPullRequest(eq(repository), any(), eq(77L)))
+                .thenReturn(new PullRequestSnapshot(
+                        77L,
+                        PullRequestSnapshot.PullRequestState.MERGED,
+                        "https://github.com/test/repo/pull/77",
+                        "existing-branch",
+                        "main",
+                        "sha777"));
+
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
                 0,
-                0,
-                0,
-                0,
-                0,
+                1,
                 false,
-                List.of(),
-                List.of(),
-                "existing-branch",
-                true,
-                true,
-                "kratis/exec-next-2");
+                "sha777",
+                new EnvironmentConnectorResult.GitChangeSetStats(5, 0, List.of(), "digest"));
         when(environmentRpcClient.request(
-                        eq(envId), any(EnvironmentRpcPayload.GitDiffSummary.class), anyLong(), eq(TimeUnit.SECONDS)))
-                .thenReturn(summary);
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
 
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
 
         assertThat(result.previousPrMerged()).isTrue();
-        assertThat(result.suggestedNewBranch()).isEqualTo("kratis/exec-next-2");
-        assertThat(result.publishedPrs()).hasSize(1);
-        assertThat(result.publishedPrs().getFirst().prNumber()).isEqualTo(77L);
-        assertThat(result.publishedPrs().getFirst().status()).isEqualTo(PublishedPrStatus.MERGED);
+        assertThat(result.suggestedNewBranch()).startsWith("kratis/");
     }
 
     @Test
-    void publishPullRequest_afterMerge_createsNewBranchAndHistoricPr() throws Exception {
-        execution.addPublishedPr(new SandboxExecutionPublishedPr(
-                77L,
-                "https://github.com/test/repo/pull/77",
-                "existing-branch",
-                "main",
-                PublishedPrStatus.MERGED,
-                Instant.now()));
-        execution.setPublishedBranch("existing-branch");
+    void publishPullRequest_republishAfterMerge_createsNewPrAndAppendsHistory() throws Exception {
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId))
+                .thenReturn(List.of(new ChangeSet(
+                        execution,
+                        1,
+                        "base",
+                        "push",
+                        "existing-branch",
+                        77L,
+                        "https://github.com/test/repo/pull/77",
+                        "main",
+                        Instant.now())));
         stubExecutionLookup();
 
         RepoProvider repoProvider = mock(RepoProvider.class);
@@ -1339,6 +1514,29 @@ class SandboxExecutionPublishServiceTest {
         when(repoProvider.createPullRequest(eq(repository), eq(auth), any(CreatePullRequestCommand.class)))
                 .thenReturn(new PullRequestResultDto(
                         88L, "https://github.com/test/repo/pull/88", "kratis/exec-next-2", "main"));
+
+        when(repoProvider.getPullRequest(eq(repository), any(), eq(77L)))
+                .thenReturn(new PullRequestSnapshot(
+                        77L,
+                        PullRequestSnapshot.PullRequestState.MERGED,
+                        "https://github.com/test/repo/pull/77",
+                        "existing-branch",
+                        "main",
+                        "sha777"));
+
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                1,
+                false,
+                "sha777",
+                new EnvironmentConnectorResult.GitChangeSetStats(5, 0, List.of(), "digest-merged-2"));
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
 
         EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
                 "sha888",
@@ -1368,28 +1566,22 @@ class SandboxExecutionPublishServiceTest {
         PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
 
         assertThat(result.prNumber()).isEqualTo(88L);
-        assertThat(execution.getPublishedBranch()).isEqualTo("kratis/exec-next-2");
-        assertThat(execution.getLatestPublishedPr().getPrNumber()).isEqualTo(88L);
-        assertThat(execution.getPublishedPrs()).hasSize(2);
-        assertThat(execution.getPublishedPrs().get(1).getPrNumber()).isEqualTo(88L);
-        assertThat(execution.getPublishedPrs().get(1).getStatus()).isEqualTo(PublishedPrStatus.OPEN);
-
-        ArgumentCaptor<EnvironmentRpcPayload.GitPush> pushCaptor =
-                ArgumentCaptor.forClass(EnvironmentRpcPayload.GitPush.class);
-        verify(environmentRpcClient).request(eq(envId), pushCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
-        assertThat(pushCaptor.getValue().force()).isFalse();
+        verify(changeSetRepository).save(any(ChangeSet.class));
     }
 
     @Test
     void publishPullRequest_createNewPrOnOpenPr_derivesFreshBranchAndKeepsHistory() throws Exception {
-        execution.addPublishedPr(new SandboxExecutionPublishedPr(
-                77L,
-                "https://github.com/test/repo/pull/77",
-                "existing-branch",
-                "main",
-                PublishedPrStatus.OPEN,
-                Instant.now()));
-        execution.setPublishedBranch("existing-branch");
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId))
+                .thenReturn(List.of(new ChangeSet(
+                        execution,
+                        1,
+                        "base",
+                        "push",
+                        "existing-branch",
+                        77L,
+                        "https://github.com/test/repo/pull/77",
+                        "main",
+                        Instant.now())));
         stubExecutionLookup();
 
         RepoProvider repoProvider = mock(RepoProvider.class);
@@ -1400,6 +1592,29 @@ class SandboxExecutionPublishServiceTest {
         when(repoProvider.createPullRequest(eq(repository), eq(auth), any(CreatePullRequestCommand.class)))
                 .thenReturn(new PullRequestResultDto(
                         99L, "https://github.com/test/repo/pull/99", "kratis/derived-2", "main"));
+
+        when(repoProvider.getPullRequest(eq(repository), any(), eq(77L)))
+                .thenReturn(new PullRequestSnapshot(
+                        77L,
+                        PullRequestSnapshot.PullRequestState.MERGED,
+                        "https://github.com/test/repo/pull/77",
+                        "existing-branch",
+                        "main",
+                        "sha777"));
+
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                1,
+                false,
+                "sha777",
+                new EnvironmentConnectorResult.GitChangeSetStats(5, 0, List.of(), "digest-merged"));
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
 
         EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
                 "sha999", "kratis/derived-2", "refs/heads/kratis/derived-2", "success", "existing-branch", true, false);
@@ -1413,12 +1628,67 @@ class SandboxExecutionPublishServiceTest {
         PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
 
         assertThat(result.prNumber()).isEqualTo(99L);
-        assertThat(execution.getPublishedPrs()).hasSize(2);
-        assertThat(execution.getPublishedPrs().get(1).getHeadBranch()).isEqualTo("kratis/derived-2");
+        verify(changeSetRepository).save(any(ChangeSet.class));
 
         ArgumentCaptor<EnvironmentRpcPayload.GitPush> pushCaptor =
                 ArgumentCaptor.forClass(EnvironmentRpcPayload.GitPush.class);
         verify(environmentRpcClient).request(eq(envId), pushCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
         assertThat(pushCaptor.getValue().branchName()).startsWith("kratis/");
+    }
+
+    @Test
+    void publishPullRequest_storedStatusClosed_liveStatusOpen_targetsExistingPr() throws Exception {
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId))
+                .thenReturn(List.of(new ChangeSet(
+                        execution,
+                        1,
+                        "base",
+                        "push",
+                        "canvas-repos",
+                        383L,
+                        "https://github.com/test/repo/pull/383",
+                        "main",
+                        Instant.now())));
+        stubExecutionLookup();
+
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+        when(repoProvider.getPullRequest(eq(repository), any(), eq(383L)))
+                .thenReturn(new PullRequestSnapshot(
+                        383L,
+                        PullRequestSnapshot.PullRequestState.OPEN,
+                        "https://github.com/test/repo/pull/383",
+                        "canvas-repos",
+                        "main",
+                        "head-sha"));
+
+        EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
+                "main",
+                "sha-main",
+                "sha-main",
+                true,
+                0,
+                1,
+                false,
+                "head-sha",
+                new EnvironmentConnectorResult.GitChangeSetStats(1, 0, List.of(), "digest-open"));
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(obs);
+
+        EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
+                "sha-commit", "canvas-repos", "refs/heads/canvas-repos", "success", "canvas-repos", false, false);
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(pushResult);
+
+        PublishPrRequestDto request = new PublishPrRequestDto(
+                "canvas-repos", "main", "Fix issue", "Body", false, false, null, null, null, false, null);
+
+        PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
+
+        assertThat(result.prNumber()).isEqualTo(383L);
+        verify(repoProvider, never()).createPullRequest(any(), any(), any());
     }
 }

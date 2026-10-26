@@ -15,21 +15,24 @@ import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.git.provider.CreatePullRequestCommand;
 import com.kratisai.controlplane.git.provider.CreateRepositoryCommand;
+import com.kratisai.controlplane.git.provider.PullRequestSnapshot;
 import com.kratisai.controlplane.git.provider.RemoteRepositoryExistsException;
 import com.kratisai.controlplane.git.provider.RepoProvider;
 import com.kratisai.controlplane.git.provider.RepoProviderRegistry;
+import com.kratisai.controlplane.model.ChangeSet;
 import com.kratisai.controlplane.model.ChatEntity;
+import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ModelProvider;
-import com.kratisai.controlplane.model.PublishedPrStatus;
 import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
 import com.kratisai.controlplane.model.RepositoryVisibility;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
-import com.kratisai.controlplane.model.SandboxExecutionPublishedPr;
+import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
+import com.kratisai.controlplane.repository.ChangeSetRepository;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.RepoCredentialRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
@@ -63,6 +66,7 @@ public class SandboxExecutionPublishService {
     private static final long GIT_DIFF_TIMEOUT_SECONDS = 15;
 
     private final SandboxExecutionRepository sandboxExecutionRepository;
+    private final ChangeSetRepository changeSetRepository;
     private final ChatRepository chatRepository;
     private final SandboxExecutionActivityRepository activityRepository;
     private final RepositoryRepository repositoryRepository;
@@ -77,6 +81,7 @@ public class SandboxExecutionPublishService {
 
     public SandboxExecutionPublishService(
             SandboxExecutionRepository sandboxExecutionRepository,
+            ChangeSetRepository changeSetRepository,
             ChatRepository chatRepository,
             SandboxExecutionActivityRepository activityRepository,
             RepositoryRepository repositoryRepository,
@@ -89,6 +94,7 @@ public class SandboxExecutionPublishService {
             SandboxProvisioningService sandboxProvisioningService,
             PlatformTransactionManager transactionManager) {
         this.sandboxExecutionRepository = sandboxExecutionRepository;
+        this.changeSetRepository = changeSetRepository;
         this.chatRepository = chatRepository;
         this.activityRepository = activityRepository;
         this.repositoryRepository = repositoryRepository;
@@ -103,9 +109,14 @@ public class SandboxExecutionPublishService {
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    @Transactional
+    @Transactional(readOnly = true)
     public PublishCapabilitiesDto getPublishCapabilities(UUID userId, UUID chatId, UUID executionId) {
         SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
+        return buildPublishCapabilities(execution);
+    }
+
+    private PublishCapabilitiesDto buildPublishCapabilities(SandboxExecution execution) {
+        UUID executionId = execution.getId();
         Repository repo = resolveRepository(execution);
         boolean newRepo = repo == null && execution.getNewRepoName() != null;
 
@@ -137,77 +148,123 @@ public class SandboxExecutionPublishService {
                 }
             }
         }
-        logger.debug(
-                "Publish capabilities: canCreateRepository={}, supportsPr={}, repoType={}, defaultBranch={}, visibilityOptions={}",
-                canCreateRepository,
-                supportsPr,
-                repoType,
-                defaultBranch,
-                visibilityOptions);
 
-        List<SandboxExecutionPublishedPr> history = effectivePublishedPrs(execution);
-        SandboxExecutionPublishedPr latestPr = history.isEmpty() ? null : history.get(history.size() - 1);
+        List<ChangeSet> changeSets = changeSetRepository.findByExecutionIdOrderBySeqAsc(execution.getId());
+        ChangeSet latestChangeSet = changeSets.stream()
+                .filter(cs -> cs.getPrNumber() != null)
+                .reduce((first, second) -> second)
+                .orElse(null);
+        ChangeSet latestBranchChangeSet = changeSets.isEmpty() ? null : changeSets.getLast();
 
         ExecutionEnvironment env = execution.getEnvironment();
-        if (env == null) {
-            PublishCapabilitiesDto.PublishStatsDto zeroStats =
-                    new PublishCapabilitiesDto.PublishStatsDto(0, 0, 0, 0, 0, false, "There are no changes to publish");
-            return buildCapabilities(
+        if (env == null || env.getStatus() != EnvironmentStatus.CONNECTED) {
+            return zeroPublishCapabilities(
+                    execution,
+                    newRepo,
                     supportsPr,
                     repoType,
                     defaultBranch,
-                    zeroStats,
-                    "",
-                    "",
-                    execution,
-                    history,
-                    latestPr,
-                    false,
-                    newRepo,
                     canCreateRepository,
                     visibilityOptions,
-                    null);
+                    changeSets);
         }
 
-        String diffBase = execution.getPublishedBranch() != null ? execution.getPublishedBranch() : defaultBranch;
-        EnvironmentConnectorResult.GitDiffSummary summary =
-                fetchGitDiffSummary(env.getId(), executionId, diffBase, execution.getPublishedBranch());
-        boolean previousPrMerged = latestPr != null && isPreviousPrUnavailable(latestPr, summary);
-        if (previousPrMerged) {
-            latestPr.setStatus(
-                    Boolean.FALSE.equals(summary.branchExists()) ? PublishedPrStatus.CLOSED : PublishedPrStatus.MERGED);
+        String targetHeadBranch = execution.getPublishedBranch();
+        if (latestChangeSet != null) {
+            targetHeadBranch = latestChangeSet.getBranchName();
+        } else if (latestBranchChangeSet != null) {
+            targetHeadBranch = latestBranchChangeSet.getBranchName();
         }
-        logger.debug(
-                "Git diff summary: commitsAhead={}, stagedFiles={}, unstagedFiles={}, additions={}, deletions={}, hasChanges={}",
-                summary.commitsAhead(),
-                summary.stagedFiles(),
-                summary.unstagedFiles(),
-                summary.totalAdditions(),
-                summary.totalDeletions(),
-                summary.hasChanges());
+        EnvironmentConnectorResult.GitObservePublish obsResult;
+        try {
+            obsResult = environmentRpcClient.request(
+                    env.getId(),
+                    new EnvironmentRpcPayload.GitObservePublish(executionId.toString(), targetHeadBranch),
+                    GIT_DIFF_TIMEOUT_SECONDS,
+                    TimeUnit.SECONDS);
+        } catch (Exception e) {
+            logger.warn("Failed to observe git state for execution {}: {}", executionId, e.getMessage());
+            obsResult = null;
+        }
 
-        int commitsAhead = summary.commitsAhead() != null ? summary.commitsAhead() : 0;
-        int stagedFiles = summary.stagedFiles() != null ? summary.stagedFiles() : 0;
-        int unstagedFiles = summary.unstagedFiles() != null ? summary.unstagedFiles() : 0;
-        int additions = summary.totalAdditions();
-        int deletions = summary.totalDeletions();
-        boolean hasChanges = Boolean.TRUE.equals(summary.hasChanges())
-                || commitsAhead > 0
-                || stagedFiles > 0
-                || unstagedFiles > 0
-                || !summary.files().isEmpty();
+        if (obsResult == null) {
+            return zeroPublishCapabilities(
+                    execution,
+                    newRepo,
+                    supportsPr,
+                    repoType,
+                    defaultBranch,
+                    canCreateRepository,
+                    visibilityOptions,
+                    changeSets);
+        }
+
+        PullRequestSnapshot prSnapshot = null;
+        if (latestChangeSet != null && supportsPr && repo != null) {
+            RepoProvider provider = providerRegistry.getProvider(repo);
+            try {
+                GitAuthMaterial auth = credentialResolver.resolve(repo);
+                prSnapshot = provider.getPullRequest(repo, auth, latestChangeSet.getPrNumber());
+            } catch (Exception e) {
+                logger.warn(
+                        "Failed to fetch live PR snapshot for PR #{}: {}",
+                        latestChangeSet.getPrNumber(),
+                        e.getMessage());
+            }
+        }
+
+        PublishCapabilitiesDto.PublishStatus publishStatus = obsResult.incomingCommitCount() > 0
+                ? PublishCapabilitiesDto.PublishStatus.REBASE_REQUIRED
+                : PublishCapabilitiesDto.PublishStatus.UP_TO_DATE;
+
+        PublishCapabilitiesDto.TargetDto target;
+        String suggestedNewBranch = null;
+
+        if (latestChangeSet == null || prSnapshot == null) {
+            target = PublishCapabilitiesDto.TargetDto.openPr(
+                    targetHeadBranch != null ? targetHeadBranch : defaultBranch);
+        } else if (prSnapshot.state() == PullRequestSnapshot.PullRequestState.OPEN) {
+            target = PublishCapabilitiesDto.TargetDto.updatePr(prSnapshot.number(), prSnapshot.headBranch());
+        } else if (prSnapshot.state() == PullRequestSnapshot.PullRequestState.MERGED) {
+            suggestedNewBranch = deriveSuggestedBranch(execution, changeSets.size() + 1);
+            target = PublishCapabilitiesDto.TargetDto.openPrNewBranch(suggestedNewBranch);
+        } else { // CLOSED
+            target = PublishCapabilitiesDto.TargetDto.openPr(prSnapshot.headBranch());
+        }
+
+        List<PublishCapabilitiesDto.ChangeSetFileDto> files = obsResult.changeSet().files().stream()
+                .map(f ->
+                        new PublishCapabilitiesDto.ChangeSetFileDto(f.path(), f.status(), f.additions(), f.deletions()))
+                .toList();
+        PublishCapabilitiesDto.ChangeSetSummaryDto csSummary = new PublishCapabilitiesDto.ChangeSetSummaryDto(
+                obsResult.changeSet().additions(),
+                obsResult.changeSet().deletions(),
+                files,
+                obsResult.changeSet().digest());
+
+        boolean hasChanges = obsResult.commitCount() > 0
+                || obsResult.hasUncommittedChanges()
+                || !obsResult.changeSet().files().isEmpty();
+
+        int commitsAhead = obsResult.commitCount();
+        int additions = obsResult.changeSet().additions();
+        int deletions = obsResult.changeSet().deletions();
+        int modifiedCount = (int) obsResult.changeSet().files().stream()
+                .filter(f -> !"added".equalsIgnoreCase(f.status()) && !"deleted".equalsIgnoreCase(f.status()))
+                .count();
+        int stagedFiles = (int) obsResult.changeSet().files().stream()
+                .filter(f -> "added".equalsIgnoreCase(f.status()))
+                .count();
 
         String formattedSummary =
-                formatStatsSummary(commitsAhead, stagedFiles, unstagedFiles, additions, deletions, hasChanges);
+                formatStatsSummary(commitsAhead, stagedFiles, modifiedCount, additions, deletions, hasChanges);
 
         PublishCapabilitiesDto.PublishStatsDto stats = new PublishCapabilitiesDto.PublishStatsDto(
-                commitsAhead, stagedFiles, unstagedFiles, additions, deletions, hasChanges, formattedSummary);
+                commitsAhead, stagedFiles, modifiedCount, additions, deletions, hasChanges, formattedSummary);
 
         String suggestedTitle = "";
         String suggestedBody = "";
-
         if (hasChanges) {
-            List<EnvironmentConnectorResult.GitCommitMessage> commits = summary.commitMessages();
             List<SandboxExecutionActivity> activities =
                     activityRepository.findByExecutionIdOrderBySequenceAsc(executionId);
             List<String> agentMessages = activities.stream()
@@ -215,61 +272,21 @@ public class SandboxExecutionPublishService {
                     .map(SandboxExecutionActivity::getDescription)
                     .filter(d -> d != null && !d.isBlank())
                     .toList();
-
-            SuggestedMessage msg = generatePublishSummary(execution, summary, commits, agentMessages);
+            SuggestedMessage msg =
+                    generatePublishSummary(execution, obsResult.changeSet().files(), List.of(), agentMessages);
             suggestedTitle = msg.title();
             suggestedBody = msg.body();
         }
-        logger.debug("Suggested publish summary: title={}, body={}", suggestedTitle, suggestedBody);
 
-        return buildCapabilities(
-                supportsPr,
-                repoType,
-                defaultBranch,
-                stats,
-                suggestedTitle,
-                suggestedBody,
-                execution,
-                history,
-                latestPr,
-                previousPrMerged,
-                newRepo,
-                canCreateRepository,
-                visibilityOptions,
-                summary.suggestedBranchName());
-    }
-
-    private PublishCapabilitiesDto buildCapabilities(
-            boolean supportsPr,
-            RepositoryType repoType,
-            String defaultBranch,
-            PublishCapabilitiesDto.PublishStatsDto stats,
-            String suggestedTitle,
-            String suggestedBody,
-            SandboxExecution execution,
-            List<SandboxExecutionPublishedPr> history,
-            SandboxExecutionPublishedPr latestPr,
-            boolean previousPrMerged,
-            boolean newRepo,
-            boolean canCreateRepository,
-            List<RepositoryVisibility> visibilityOptions,
-            String sidecarSuggestedBranch) {
-        List<PublishCapabilitiesDto.PublishedPrDto> publishedPrs = history.stream()
-                .map(pr -> new PublishCapabilitiesDto.PublishedPrDto(
-                        pr.getPrNumber(),
-                        pr.getPrUrl(),
-                        pr.getHeadBranch(),
-                        pr.getBaseBranch(),
-                        pr.getStatus(),
-                        pr.getCreatedAt()))
-                .toList();
-
-        String suggestedNewBranch = null;
-        if (supportsPr && (latestPr == null || previousPrMerged)) {
-            suggestedNewBranch = sidecarSuggestedBranch != null && !sidecarSuggestedBranch.isBlank()
-                    ? sidecarSuggestedBranch
-                    : deriveSuggestedBranch(execution, history.size() + 1);
-        }
+        String digestInputs = String.format(
+                "%s:%s:%s:%s:%s:%s",
+                obsResult.defaultSha(),
+                obsResult.executionBaseSha(),
+                target.kind(),
+                target.branchName(),
+                target.prNumber(),
+                obsResult.changeSet().digest());
+        String digest = hexDigest(digestInputs);
 
         return new PublishCapabilitiesDto(
                 supportsPr,
@@ -283,20 +300,51 @@ public class SandboxExecutionPublishService {
                 canCreateRepository,
                 newRepo ? execution.getNewRepoName() : null,
                 visibilityOptions,
-                publishedPrs,
-                previousPrMerged,
-                suggestedNewBranch);
+                List.of(),
+                suggestedNewBranch != null,
+                suggestedNewBranch,
+                publishStatus,
+                obsResult.incomingCommitCount(),
+                obsResult.commitCount(),
+                obsResult.hasUncommittedChanges(),
+                csSummary,
+                target,
+                digest);
     }
 
-    private boolean isPreviousPrUnavailable(
-            SandboxExecutionPublishedPr latestPr, EnvironmentConnectorResult.GitDiffSummary summary) {
-        if (summary.branchName() == null || !summary.branchName().equals(latestPr.getHeadBranch())) {
-            return false;
-        }
-        if (Boolean.FALSE.equals(summary.branchExists())) {
-            return true;
-        }
-        return Boolean.TRUE.equals(summary.branchMerged());
+    private PublishCapabilitiesDto zeroPublishCapabilities(
+            SandboxExecution execution,
+            boolean newRepo,
+            boolean supportsPr,
+            RepositoryType repoType,
+            String defaultBranch,
+            boolean canCreateRepository,
+            List<RepositoryVisibility> visibilityOptions,
+            List<ChangeSet> changeSets) {
+        PublishCapabilitiesDto.PublishStatsDto zeroStats =
+                new PublishCapabilitiesDto.PublishStatsDto(0, 0, 0, 0, 0, false, "There are no changes to publish");
+        return new PublishCapabilitiesDto(
+                supportsPr,
+                repoType,
+                defaultBranch,
+                zeroStats,
+                "",
+                "",
+                execution.getPublishedBranch(),
+                newRepo,
+                canCreateRepository,
+                newRepo ? execution.getNewRepoName() : null,
+                visibilityOptions,
+                List.of(),
+                false,
+                deriveSuggestedBranch(execution, changeSets.size() + 1),
+                PublishCapabilitiesDto.PublishStatus.UP_TO_DATE,
+                0,
+                0,
+                false,
+                new PublishCapabilitiesDto.ChangeSetSummaryDto(0, 0, List.of(), ""),
+                PublishCapabilitiesDto.TargetDto.openPr(defaultBranch),
+                "");
     }
 
     private String deriveSuggestedBranch(SandboxExecution execution, int iteration) {
@@ -304,8 +352,52 @@ public class SandboxExecutionPublishService {
         return "kratis/" + suffix + "-" + iteration;
     }
 
-    private List<SandboxExecutionPublishedPr> effectivePublishedPrs(SandboxExecution execution) {
-        return execution.getPublishedPrs();
+    private String hexDigest(String input) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] bytes = md.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : bytes) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(input.hashCode());
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public PublishCapabilitiesDto rebase(UUID userId, UUID chatId, UUID executionId) {
+        SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
+        ExecutionEnvironment env = execution.getEnvironment();
+        if (env == null || env.getStatus() != EnvironmentStatus.CONNECTED) {
+            throw new PublishException(
+                    PublishException.ErrorCode.ENVIRONMENT_NOT_RUNNING, "Environment is not running");
+        }
+        if (execution.getStatus() == SandboxExecutionStatus.RUNNING) {
+            throw new PublishException(PublishException.ErrorCode.EXECUTION_RUNNING, "Execution is actively running");
+        }
+
+        String defaultBranch = resolveTargetBranch(execution);
+        try {
+            environmentRpcClient.request(
+                    env.getId(),
+                    new EnvironmentRpcPayload.GitRebase(executionId.toString(), defaultBranch, ""),
+                    GIT_PUSH_TIMEOUT_SECONDS,
+                    TimeUnit.SECONDS);
+        } catch (EnvironmentRpcClient.EnvironmentRpcException e) {
+            if (e.getMessage() != null && e.getMessage().contains("REBASE_CONFLICT")) {
+                throw new PublishException(
+                        PublishException.ErrorCode.REBASE_CONFLICT, "Rebase conflict: " + e.getMessage(), e);
+            }
+            throw new PublishException(
+                    PublishException.ErrorCode.GIT_REMOTE_UNAVAILABLE, "Rebase failed: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new PublishException(
+                    PublishException.ErrorCode.GIT_REMOTE_UNAVAILABLE, "Rebase failed: " + e.getMessage(), e);
+        }
+
+        return buildPublishCapabilities(execution);
     }
 
     @Transactional
@@ -320,6 +412,12 @@ public class SandboxExecutionPublishService {
         applyNewRepoCredential(execution, request.credentialId());
         ensureRemoteRepository(execution, null, null, request.credentialId());
 
+        // Check capabilities to see if rebase is required
+        PublishCapabilitiesDto currentCaps = buildPublishCapabilities(execution);
+        if (currentCaps.status() == PublishCapabilitiesDto.PublishStatus.REBASE_REQUIRED) {
+            throw new PublishException(PublishException.ErrorCode.REBASE_REQUIRED, "Rebase required before push");
+        }
+
         boolean squash = Boolean.TRUE.equals(request.squash());
         EnvironmentConnectorResult.GitPush pushResult = executeGitPush(
                 env.getId(),
@@ -330,8 +428,19 @@ public class SandboxExecutionPublishService {
                 squash,
                 resolveTargetBranch(execution));
 
-        execution.setPublishedBranch(pushResult.branchName());
-        sandboxExecutionRepository.save(execution);
+        int nextSeq =
+                changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId).size() + 1;
+        ChangeSet changeSet = new ChangeSet(
+                execution,
+                nextSeq,
+                currentCaps.changeSet().digest(),
+                pushResult.commitSha() != null ? pushResult.commitSha() : "unknown",
+                pushResult.branchName(),
+                null,
+                null,
+                null,
+                Instant.now());
+        changeSetRepository.save(changeSet);
 
         return new PushBranchResponseDto(
                 pushResult.branchName(), pushResult.commitSha(), pushResult.remoteRef(), pushResult.status());
@@ -345,6 +454,13 @@ public class SandboxExecutionPublishService {
         ExecutionEnvironment env = execution.getEnvironment();
         if (env == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution has no associated environment");
+        }
+        if (env.getStatus() != EnvironmentStatus.CONNECTED) {
+            throw new PublishException(
+                    PublishException.ErrorCode.ENVIRONMENT_NOT_RUNNING, "Environment is not running");
+        }
+        if (execution.getStatus() == SandboxExecutionStatus.RUNNING) {
+            throw new PublishException(PublishException.ErrorCode.EXECUTION_RUNNING, "Execution is actively running");
         }
 
         Repository repo = ensureRemoteRepository(
@@ -362,84 +478,92 @@ public class SandboxExecutionPublishService {
                             + " does not support Pull Request creation via REST API");
         }
 
-        boolean squash = Boolean.TRUE.equals(request.squash());
-        String baseBranch =
-                request.baseBranch() != null && !request.baseBranch().isBlank()
-                        ? request.baseBranch()
-                        : resolveTargetBranch(execution);
-        List<SandboxExecutionPublishedPr> history = effectivePublishedPrs(execution);
-        SandboxExecutionPublishedPr latestPr = history.isEmpty() ? null : history.get(history.size() - 1);
-        boolean createNewPr = Boolean.TRUE.equals(request.createNewPr())
-                || (latestPr != null && latestPr.getStatus() != PublishedPrStatus.OPEN);
-        boolean republish = latestPr != null && !createNewPr;
-
-        String branchName;
-        if (republish) {
-            branchName = latestPr.getHeadBranch();
-        } else if (createNewPr) {
-            branchName = firstNonBlank(request.newBranchName(), request.branchName());
-            if (latestPr != null && branchName.equals(latestPr.getHeadBranch())) {
-                branchName = deriveSuggestedBranch(execution, history.size() + 1);
-            }
-        } else {
-            branchName = request.branchName();
+        // Fresh observe check
+        PublishCapabilitiesDto currentCaps = buildPublishCapabilities(execution);
+        if (request.digest() != null && !request.digest().equals(currentCaps.digest())) {
+            throw new PublishException(
+                    PublishException.ErrorCode.PLAN_CHANGED, "Publish plan has changed since last check");
         }
+        if (currentCaps.status() == PublishCapabilitiesDto.PublishStatus.REBASE_REQUIRED) {
+            throw new PublishException(PublishException.ErrorCode.REBASE_REQUIRED, "Rebase required before publish");
+        }
+
+        boolean squash = Boolean.TRUE.equals(request.squash());
+        String baseBranch = resolveTargetBranch(execution);
+        PublishCapabilitiesDto.TargetDto target = currentCaps.target();
+        boolean isUpdate = target.kind() == PublishCapabilitiesDto.TargetDto.TargetKind.UPDATE_PR;
+        boolean createNewPr = Boolean.TRUE.equals(request.createNewPr()) || !isUpdate;
+        if (createNewPr) {
+            isUpdate = false;
+        }
+        String branchName;
+        if (Boolean.TRUE.equals(request.createNewPr())) {
+            branchName = deriveSuggestedBranch(
+                    execution,
+                    changeSetRepository
+                                    .findByExecutionIdOrderBySeqAsc(executionId)
+                                    .size()
+                            + 1);
+        } else {
+            branchName = request.branchName() != null && !request.branchName().isBlank()
+                    ? request.branchName()
+                    : target.branchName();
+        }
+
+        List<ChangeSet> changeSets = changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId);
+        ChangeSet latestChangeSet = changeSets.stream()
+                .filter(cs -> cs.getPrNumber() != null)
+                .reduce((first, second) -> second)
+                .orElse(null);
 
         EnvironmentConnectorResult.GitPush pushResult =
-                executeGitPush(env.getId(), executionId, branchName, request.title(), republish, squash, baseBranch);
+                executeGitPush(env.getId(), executionId, branchName, request.title(), isUpdate, squash, baseBranch);
         String pushedBranch = pushResult.branchName();
         String headBranch = pushedBranch != null && !pushedBranch.isBlank() ? pushedBranch : branchName;
-        boolean previousBranchMerged = Boolean.TRUE.equals(pushResult.previousBranchMerged());
 
-        if (latestPr != null && previousBranchMerged && latestPr.getStatus() == PublishedPrStatus.OPEN) {
-            latestPr.setStatus(PublishedPrStatus.MERGED);
+        String pushedCommitSha = pushResult.commitSha() != null ? pushResult.commitSha() : "unknown";
+        if (isUpdate) {
+            int nextSeq = changeSetRepository
+                            .findByExecutionIdOrderBySeqAsc(executionId)
+                            .size()
+                    + 1;
+            String prUrl = latestChangeSet != null ? latestChangeSet.getPrUrl() : "";
+            ChangeSet changeSet = new ChangeSet(
+                    execution,
+                    nextSeq,
+                    currentCaps.changeSet().digest(),
+                    pushedCommitSha,
+                    headBranch,
+                    target.prNumber(),
+                    prUrl,
+                    baseBranch,
+                    Instant.now());
+            changeSetRepository.save(changeSet);
+            return new PullRequestResultDto(target.prNumber(), prUrl, headBranch, baseBranch);
         }
 
-        if (republish) {
-            return new PullRequestResultDto(latestPr.getPrNumber(), latestPr.getPrUrl(), headBranch, baseBranch);
-        }
-
+        // Create new PR
         GitAuthMaterial auth = credentialResolver.resolve(repo);
         CreatePullRequestCommand command = new CreatePullRequestCommand(
                 headBranch, baseBranch, request.title(), request.body(), Boolean.TRUE.equals(request.draft()));
 
         PullRequestResultDto result = provider.createPullRequest(repo, auth, command);
 
-        execution.addPublishedPr(new SandboxExecutionPublishedPr(
+        int nextSeq =
+                changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId).size() + 1;
+        ChangeSet changeSet = new ChangeSet(
+                execution,
+                nextSeq,
+                currentCaps.changeSet().digest(),
+                pushedCommitSha,
+                result.headBranch(),
                 result.prNumber(),
                 result.prUrl(),
-                result.headBranch(),
                 result.baseBranch(),
-                PublishedPrStatus.OPEN,
-                Instant.now()));
-        execution.setPublishedBranch(result.headBranch());
-        sandboxExecutionRepository.save(execution);
+                Instant.now());
+        changeSetRepository.save(changeSet);
 
         return result;
-    }
-
-    private static String firstNonBlank(String first, String second) {
-        if (first != null && !first.isBlank()) {
-            return first;
-        }
-        return second;
-    }
-
-    private EnvironmentConnectorResult.GitDiffSummary fetchGitDiffSummary(
-            UUID envId, UUID executionId, String baseBranch, String branchName) {
-        try {
-            EnvironmentConnectorResult.GitDiffSummary result = environmentRpcClient.request(
-                    envId,
-                    new EnvironmentRpcPayload.GitDiffSummary(baseBranch, executionId.toString(), branchName),
-                    GIT_DIFF_TIMEOUT_SECONDS,
-                    TimeUnit.SECONDS);
-            if (result != null) {
-                return result;
-            }
-        } catch (Exception e) {
-            logger.warn("Failed to fetch git diff summary for execution {}: {}", executionId, e.getMessage());
-        }
-        return new EnvironmentConnectorResult.GitDiffSummary("", "", 0, 0, List.of());
     }
 
     private String formatStatsSummary(
@@ -464,7 +588,7 @@ public class SandboxExecutionPublishService {
 
     private SuggestedMessage generatePublishSummary(
             SandboxExecution execution,
-            EnvironmentConnectorResult.GitDiffSummary summary,
+            List<EnvironmentConnectorResult.GitChangeSetFile> files,
             List<EnvironmentConnectorResult.GitCommitMessage> commits,
             List<String> agentMessages) {
         Team team = execution.getChat().getTeam();
@@ -506,9 +630,9 @@ public class SandboxExecutionPublishService {
                 promptBuilder.append("\n");
             }
 
-            if (summary.files() != null && !summary.files().isEmpty()) {
+            if (files != null && !files.isEmpty()) {
                 promptBuilder.append("Changed files:\n");
-                for (EnvironmentConnectorResult.GitDiffSummaryFile f : summary.files()) {
+                for (EnvironmentConnectorResult.GitChangeSetFile f : files) {
                     promptBuilder
                             .append("- ")
                             .append(f.status())
@@ -535,7 +659,7 @@ public class SandboxExecutionPublishService {
                     prompt.length(),
                     agentMessages == null ? 0 : agentMessages.size(),
                     commits == null ? 0 : commits.size(),
-                    summary.files() == null ? 0 : summary.files().size());
+                    files == null ? 0 : files.size());
             ChatResponse chatResponse =
                     ChatClient.builder(model).build().prompt(prompt).call().chatResponse();
             String response = ChatResponseAssembler.answerText(chatResponse);
@@ -581,7 +705,17 @@ public class SandboxExecutionPublishService {
             EnvironmentConnectorResult.GitPush result = environmentRpcClient.request(
                     envId,
                     new EnvironmentRpcPayload.GitPush(
-                            branchName, commitMessage, force, squash, targetBranch, executionId.toString()),
+                            branchName,
+                            !force,
+                            null,
+                            targetBranch,
+                            null,
+                            null,
+                            commitMessage,
+                            force,
+                            squash,
+                            targetBranch,
+                            executionId.toString()),
                     GIT_PUSH_TIMEOUT_SECONDS,
                     TimeUnit.SECONDS);
 

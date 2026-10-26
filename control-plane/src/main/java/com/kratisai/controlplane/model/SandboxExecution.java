@@ -1,6 +1,22 @@
 package com.kratisai.controlplane.model;
 
-import jakarta.persistence.*;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -94,20 +110,12 @@ public class SandboxExecution {
     @Column(name = "model_name", nullable = true)
     private String modelName;
 
-    @Column(name = "published_branch", length = 255)
-    private String publishedBranch;
-
     @Column(name = "target_branch", length = 255)
     private String targetBranch;
 
-    /**
-     * Every pull request published from this execution. The latest row mirrors the legacy
-     * {@code published*} fields above for older clients and queries.
-     */
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "sandbox_execution_published_prs", joinColumns = @JoinColumn(name = "execution_id"))
-    @OrderBy("createdAt ASC")
-    private List<SandboxExecutionPublishedPr> publishedPrs = new ArrayList<>();
+    @OneToMany(mappedBy = "execution", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    @OrderBy("seq ASC")
+    private List<ChangeSet> changeSets = new ArrayList<>();
 
     @PrePersist
     protected void onCreate() {
@@ -347,14 +355,6 @@ public class SandboxExecution {
         this.modelName = modelName;
     }
 
-    public String getPublishedBranch() {
-        return publishedBranch;
-    }
-
-    public void setPublishedBranch(String publishedBranch) {
-        this.publishedBranch = publishedBranch;
-    }
-
     public String getTargetBranch() {
         return targetBranch;
     }
@@ -363,15 +363,20 @@ public class SandboxExecution {
         this.targetBranch = targetBranch;
     }
 
-    public List<SandboxExecutionPublishedPr> getPublishedPrs() {
-        return publishedPrs;
+    public String getPublishedBranch() {
+        ChangeSet latest = getLatestChangeSet();
+        return latest != null ? latest.getBranchName() : null;
     }
 
-    public SandboxExecutionPublishedPr getLatestPublishedPr() {
-        return publishedPrs.isEmpty() ? null : publishedPrs.get(publishedPrs.size() - 1);
+    public List<ChangeSet> getChangeSets() {
+        return changeSets;
     }
 
-    public void addPublishedPr(SandboxExecutionPublishedPr publishedPr) {
-        publishedPrs.add(publishedPr);
+    public ChangeSet getLatestChangeSet() {
+        return changeSets.isEmpty() ? null : changeSets.getLast();
+    }
+
+    public void addChangeSet(ChangeSet changeSet) {
+        changeSets.add(changeSet);
     }
 }
