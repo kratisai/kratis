@@ -163,7 +163,7 @@ class CanvasToolTest extends AgentTestHarness {
     }
 
     @Test
-    void writeCanvas_withExistingRepoName_createsSpecCanvasWithRepository() {
+    void writeCanvas_specWithExistingRepoName_createsSpecCanvasWithRepository() {
         Repository repo = saveRepository("backend", team);
 
         String writeResult = canvasTool.writeCanvas(
@@ -176,6 +176,17 @@ class CanvasToolTest extends AgentTestHarness {
         assertThat(canvas.getNewRepoName()).isNull();
         assertThat(canvas.getRepoLabel()).isEqualTo("backend");
         assertThat(canvas.isNewRepo()).isFalse();
+    }
+
+    @Test
+    void writeCanvas_specExplicitlyValidatesRepoNameVsNewRepoNameConstraints() {
+        saveRepository("backend", team);
+
+        // Verify that providing both repoName and newRepoName throws ambiguity error
+        assertThatThrownBy(() -> canvasTool.writeCanvas(
+                        "plan-ambig", "Plan", "# Plan", CanvasType.SPEC, "backend", "other", toolContext))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ambiguous");
     }
 
     @Test

@@ -88,12 +88,16 @@ public class CanvasTool {
                     CanvasType canvasType,
             @ToolParam(
                             description =
-                                    "Name of an existing repository to associate with a SPEC canvas (from list_repositories)",
+                                    "Name of an existing repository to associate with a SPEC canvas (from list_repositories). "
+                                            + "CRITICAL: You MUST use repoName for ANY task, feature, bugfix, or refactoring involving an existing codebase/repository. "
+                                            + "Always call list_repositories first to find the correct repository name, and strongly prefer repoName over newRepoName.",
                             required = false)
                     String repoName,
             @ToolParam(
-                            description =
-                                    "Name of a new repository to create for a SPEC canvas.  Confirm your choice with the user. Required if this spec should create a new repository - Omit if we are enhancing an existing repository.",
+                            description = "Name of a new repository to create for a SPEC canvas. "
+                                    + "CRITICAL: Do NOT use this for tasks on existing repositories, codebases, bugfixes, or features! "
+                                    + "newRepoName is reserved strictly for greenfield/brand-new projects where no repository exists yet. "
+                                    + "Confirm your choice with the user.",
                             required = false)
                     String newRepoName,
             ToolContext toolContext) {

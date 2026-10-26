@@ -164,6 +164,10 @@ public class PlanningAgentLoop {
                         2. The plan should be structured markdown with: goal summary, step-by-step approach, key considerations, expected outcomes and verification.
                         3. After writing the plan, tell the user they can review it in the canvas panel, discuss refinements, or click 'Run' to authorize execution.
                         4. When the user requests changes, use 'patch_canvas' to update the existing plan document.
+                        5. **Repository Selection Rules for SPEC Canvases (`write_canvas`):**
+                           - For ANY task involving an existing codebase, bugfix, refactoring, or feature addition, you MUST use `repoName` (after calling `list_repositories` to discover existing repositories).
+                           - NEVER use `newRepoName` when working on an existing repository or codebase.
+                           - `newRepoName` is strictly reserved for brand-new greenfield projects where no repository exists yet.
 
                         When writing Mermaid diagrams, follow these syntax rules (the renderer parses strictly):
                         - Always quote edge labels if they contain spaces, parentheses, colons, slashes, or special characters, e.g. -->|"Generate Virtual Key (TTL + Budget)"| or -->|"POST /key/generate"|.
