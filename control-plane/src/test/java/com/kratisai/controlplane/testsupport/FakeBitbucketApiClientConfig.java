@@ -88,6 +88,29 @@ public class FakeBitbucketApiClientConfig {
         }
 
         @Override
+        public ResponseEntity<String> getPullRequest(String workspace, String repo, long id, String authorization) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
+            }
+            return ResponseEntity.ok(
+                    "{\"id\": " + id + ", \"links\": {\"html\": {\"href\": \"https://bitbucket.org/" + workspace + "/"
+                            + repo + "/pull-requests/" + id
+                            + "\"}}, \"source\": {\"branch\": {\"name\": \"feature\"}, \"commit\": {\"hash\": \"sha1\"}}, \"destination\": {\"branch\": {\"name\": \"main\"}}, \"state\": \"OPEN\"}");
+        }
+
+        @Override
+        public ResponseEntity<String> listPullRequests(
+                String workspace, String repo, String query, String authorization) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
+            }
+            return ResponseEntity.ok(
+                    "{\"values\": [{\"id\": 5, \"links\": {\"html\": {\"href\": \"https://bitbucket.org/" + workspace
+                            + "/" + repo
+                            + "/pull-requests/5\"}}, \"source\": {\"branch\": {\"name\": \"feature\"}, \"commit\": {\"hash\": \"sha1\"}}, \"destination\": {\"branch\": {\"name\": \"main\"}}, \"state\": \"OPEN\"}]}");
+        }
+
+        @Override
         public ResponseEntity<String> createPullRequest(
                 String workspace, String repo, java.util.Map<String, Object> body, String authorization) {
             if (shouldThrow) {

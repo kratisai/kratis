@@ -293,4 +293,75 @@ public class AzureDevOpsApiService {
         }
         return new RemoteRepositoryDto(displayName, cloneUrl, sshUrl, branch);
     }
+
+    public PullRequestSnapshot getPullRequest(Coordinates coords, long pullRequestId, String token) {
+        requireToken(token);
+        try {
+            UriBuilderFactory uriFactory = baseUriFactory(coords.apiBaseUrl());
+            ResponseEntity<String> response = azureDevOpsApiClient.getPullRequest(
+                    uriFactory, coords.project(), coords.repository(), pullRequestId, API_VERSION, basic(token));
+            return toPullRequestSnapshot(parseBody(response));
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return null;
+            }
+            throw new ProviderUnavailableException("Azure DevOps getPullRequest failed: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new ProviderUnavailableException("Azure DevOps getPullRequest failed: " + e.getMessage(), e);
+        }
+    }
+
+    public Optional<PullRequestSnapshot> findOpenPullRequestForHead(
+            Coordinates coords, String headBranch, String token) {
+        requireToken(token);
+        try {
+            UriBuilderFactory uriFactory = baseUriFactory(coords.apiBaseUrl());
+            String sourceRef = headBranch.startsWith("refs/heads/") ? headBranch : "refs/heads/" + headBranch;
+            ResponseEntity<String> response = azureDevOpsApiClient.listPullRequests(
+                    uriFactory, coords.project(), coords.repository(), sourceRef, "active", API_VERSION, basic(token));
+            JsonNode root = parseBody(response);
+            JsonNode values = root.path("value");
+            if (values.isArray() && !values.isEmpty()) {
+                return Optional.of(toPullRequestSnapshot(values.get(0)));
+            }
+            return Optional.empty();
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw new ProviderUnavailableException(
+                    "Azure DevOps findOpenPullRequestForHead failed: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new ProviderUnavailableException(
+                    "Azure DevOps findOpenPullRequestForHead failed: " + e.getMessage(), e);
+        }
+    }
+
+    private PullRequestSnapshot toPullRequestSnapshot(JsonNode node) {
+        long number = node.path("pullRequestId").asLong();
+        String statusStr = node.path("status").asText("");
+        PullRequestSnapshot.PullRequestState state;
+        if ("completed".equalsIgnoreCase(statusStr)) {
+            state = PullRequestSnapshot.PullRequestState.MERGED;
+        } else if ("abandoned".equalsIgnoreCase(statusStr)) {
+            state = PullRequestSnapshot.PullRequestState.CLOSED;
+        } else {
+            state = PullRequestSnapshot.PullRequestState.OPEN;
+        }
+        String url = node.path("url").asText("");
+        JsonNode links = node.path("_links").path("web");
+        if (!links.isMissingNode() && links.has("href")) {
+            url = links.path("href").asText();
+        }
+        String headBranch = node.path("sourceRefName").asText("");
+        if (headBranch.startsWith("refs/heads/")) {
+            headBranch = headBranch.substring("refs/heads/".length());
+        }
+        String baseBranch = node.path("targetRefName").asText("");
+        if (baseBranch.startsWith("refs/heads/")) {
+            baseBranch = baseBranch.substring("refs/heads/".length());
+        }
+        String headSha = node.path("lastMergeSourceCommit").path("commitId").asText("");
+        return new PullRequestSnapshot(number, state, url, headBranch, baseBranch, headSha);
+    }
 }

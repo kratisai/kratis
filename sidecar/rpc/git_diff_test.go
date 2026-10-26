@@ -51,49 +51,6 @@ func setupTestGitRepo(t *testing.T) string {
 	return dir
 }
 
-func TestResolveBaseRef_RequiresExplicitBranch(t *testing.T) {
-	dir := setupTestGitRepo(t)
-	defer func() { _ = os.RemoveAll(dir) }()
-
-	if _, err := resolveBaseRef(dir, ""); err == nil {
-		t.Fatal("expected error when base branch is empty")
-	}
-	if _, err := resolveBaseRef(dir, "   "); err == nil {
-		t.Fatal("expected error when base branch is blank")
-	}
-	if _, err := resolveBaseRef(dir, "does-not-exist"); err == nil {
-		t.Fatal("expected error when base branch is missing")
-	}
-}
-
-func TestResolveBaseRef_PrefersOriginThenLocal(t *testing.T) {
-	bareDir, workDir := setupTestGitRepoWithRemote(t)
-	defer func() {
-		_ = os.RemoveAll(bareDir)
-		_ = os.RemoveAll(workDir)
-	}()
-
-	ref, err := resolveBaseRef(workDir, "main")
-	if err != nil {
-		t.Fatalf("expected origin/main to resolve, got %v", err)
-	}
-	if ref != "origin/main" {
-		t.Errorf("expected origin/main, got %s", ref)
-	}
-
-	localOnly := setupTestGitRepo(t)
-	defer func() { _ = os.RemoveAll(localOnly) }()
-	runGitCmd(t, localOnly, "checkout", "-B", "main")
-
-	localRef, err := resolveBaseRef(localOnly, "main")
-	if err != nil {
-		t.Fatalf("expected local main to resolve, got %v", err)
-	}
-	if localRef != "main" {
-		t.Errorf("expected main, got %s", localRef)
-	}
-}
-
 func TestExecuteReadFileSlice(t *testing.T) {
 	dir := setupTestGitRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
@@ -147,7 +104,7 @@ func TestExecuteReadFileSlice(t *testing.T) {
 	}
 }
 
-func TestExecuteGitDiffSummaryAndFileDiff(t *testing.T) {
+func TestBuildGitDiffSummaryAndFileDiff(t *testing.T) {
 	dir := setupTestGitRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
 
@@ -168,7 +125,7 @@ func TestExecuteGitDiffSummaryAndFileDiff(t *testing.T) {
 		t.Fatalf("Failed to write task file: %v", err)
 	}
 
-	summary := captureGitDiffSummary(t, client, GitDiffSummaryParams{})
+	summary := captureGitDiffSummary(t, client, "")
 	if len(summary.Files) != 2 {
 		t.Fatalf("Expected 2 modified/added files in summary, got %d", len(summary.Files))
 	}
@@ -222,21 +179,15 @@ func setupTestNewRepo(t *testing.T) (string, string) {
 	return dir, rootSHA
 }
 
-func TestExecuteGitDiffSummary_NewRepoDiffsAgainstRootCommit(t *testing.T) {
+func TestBuildGitDiffSummary_NewRepoDiffsAgainstRootCommit(t *testing.T) {
 	dir, rootSHA := setupTestNewRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	client, received := connectedGitClient(t, dir)
-	client.ExecuteGitDiffSummary(
-		GitDiffSummaryParams{BaseBranch: "main", ExecutionID: "exec-new"}, "req-new")
-
-	var envelope struct {
-		Result GitDiffSummaryResult `json:"result"`
+	client := &Client{workspace: dir}
+	result, err := client.buildGitDiffSummary("main")
+	if err != nil {
+		t.Fatalf("Failed to build diff summary: %v", err)
 	}
-	if err := json.Unmarshal(captureNextResponse(t, received), &envelope); err != nil {
-		t.Fatalf("Failed to unmarshal diff summary: %v", err)
-	}
-	result := envelope.Result
 
 	if result.BaseCommit != rootSHA {
 		t.Errorf("Expected baseCommit to be the root commit %s, got %s", rootSHA, result.BaseCommit)
@@ -253,7 +204,7 @@ func TestExecuteGitDiffSummary_NewRepoDiffsAgainstRootCommit(t *testing.T) {
 	}
 }
 
-func TestExecuteGitDiffSummary_NewRepoWithOriginButNoUpstreamBranchDiffsAgainstRootCommit(t *testing.T) {
+func TestBuildGitDiffSummary_NewRepoWithOriginButNoUpstreamBranchDiffsAgainstRootCommit(t *testing.T) {
 	dir, rootSHA := setupTestNewRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
 
@@ -261,26 +212,17 @@ func TestExecuteGitDiffSummary_NewRepoWithOriginButNoUpstreamBranchDiffsAgainstR
 	runGitCmd(t, dir, "remote", "add", "origin", "https://github.com/example/new-repo.git")
 	runGitCmd(t, dir, "checkout", "-B", "main")
 
-	client, received := connectedGitClient(t, dir)
-	client.ExecuteGitDiffSummary(
-		GitDiffSummaryParams{BaseBranch: "main", ExecutionID: "exec-new-origin"}, "req-new-origin")
-
-	var envelope struct {
-		Result GitDiffSummaryResult `json:"result"`
+	client := &Client{workspace: dir}
+	result, err := client.buildGitDiffSummary("main")
+	if err != nil {
+		t.Fatalf("Failed to build diff summary: %v", err)
 	}
-	if err := json.Unmarshal(captureNextResponse(t, received), &envelope); err != nil {
-		t.Fatalf("Failed to unmarshal diff summary: %v", err)
-	}
-	result := envelope.Result
 
 	if result.BaseCommit != rootSHA {
 		t.Errorf("Expected baseCommit to be the root commit %s, got %s", rootSHA, result.BaseCommit)
 	}
-	if result.CommitsAhead != 1 {
-		t.Errorf("Expected 1 unpushed commit, got %d", result.CommitsAhead)
-	}
-	if !result.HasChanges {
-		t.Error("Expected hasChanges true for unpublished commits")
+	if len(result.Files) == 0 {
+		t.Error("Expected unpublished commits and uncommitted changes in the diff")
 	}
 }
 
@@ -607,18 +549,13 @@ func captureReadFileSliceError(t *testing.T, _ *Client, params ReadFileSlicePara
 	return nil
 }
 
-func captureGitDiffSummary(t *testing.T, c *Client, _ GitDiffSummaryParams) GitDiffSummaryResult {
+func captureGitDiffSummary(t *testing.T, c *Client, baseBranch string) GitDiffSummaryResult {
 	t.Helper()
-	client, received := connectedGitClientWith(t, c.workspace)
-	client.ExecuteGitDiffSummary(GitDiffSummaryParams{}, "req-capture")
-
-	var envelope struct {
-		Result GitDiffSummaryResult `json:"result"`
+	result, err := c.buildGitDiffSummary(baseBranch)
+	if err != nil {
+		t.Fatalf("Failed to build diff summary: %v", err)
 	}
-	if err := json.Unmarshal(captureNextResponse(t, received), &envelope); err != nil {
-		t.Fatalf("Failed to unmarshal diff summary: %v", err)
-	}
-	return envelope.Result
+	return result
 }
 
 func TestTriggerDiffCheck_PushesDiffManifest(t *testing.T) {

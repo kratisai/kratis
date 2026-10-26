@@ -337,6 +337,8 @@ func (c *Client) ExecuteCheckout(params CheckoutParams, _ interface{}) {
 	commitHash := strings.TrimSpace(string(commitHashBytes))
 	if err != nil {
 		commitHash = "unknown"
+	} else if commitHash != "" {
+		c.persistExecutionBaseSha(commitHash)
 	}
 
 	// Success!
@@ -459,31 +461,6 @@ func (c *Client) resolveWorkspace() string {
 	return "/kratis/workspace"
 }
 
-// resolveBaseRef resolves the ref to diff against. baseBranch is required and
-// must exist as origin/<branch> or <branch> in the workspace; otherwise an
-// error is returned so callers fail loudly instead of silently diffing against
-// HEAD.
-func resolveBaseRef(workspace string, baseBranch string) (string, error) {
-	baseBranch = strings.TrimSpace(baseBranch)
-	if baseBranch == "" {
-		return "", fmt.Errorf("base branch is required")
-	}
-
-	checkRemote := exec.Command("git", "rev-parse", "--verify", "origin/"+baseBranch) //nolint:gosec
-	checkRemote.Dir = workspace
-	if err := checkRemote.Run(); err == nil {
-		return "origin/" + baseBranch, nil
-	}
-
-	checkLocal := exec.Command("git", "rev-parse", "--verify", baseBranch) //nolint:gosec
-	checkLocal.Dir = workspace
-	if err := checkLocal.Run(); err == nil {
-		return baseBranch, nil
-	}
-
-	return "", fmt.Errorf("base branch %q does not exist as origin/%s or %s in the workspace", baseBranch, baseBranch, baseBranch)
-}
-
 // mergeBaseWithHead resolves the merge-base of ref and HEAD. Diffing against
 // the merge-base (three-dot semantics) shows the consolidated branch changes
 // without including (or reversing) changes that were merged into the base
@@ -586,53 +563,6 @@ func isGeneratedOrLarge(path string, additions, deletions int) bool {
 		}
 	}
 	return false
-}
-
-// ExecuteGitDiffSummary produces a high-level summary manifest of all modified/added/deleted files.
-func (c *Client) ExecuteGitDiffSummary(params GitDiffSummaryParams, reqID interface{}) {
-	res, err := c.buildGitDiffSummary(params.BaseBranch)
-	if err != nil {
-		if reqID != nil {
-			c.sendErrorResponse(reqID, -32000, "Unable to resolve diff base", err.Error())
-		}
-		return
-	}
-	c.inspectPublishedBranch(&res, params)
-	if reqID != nil {
-		c.sendSuccessResponse(reqID, res)
-	}
-}
-
-// inspectPublishedBranch fills the remote branch state used by the publish
-// dialog to decide between updating an existing pull request and opening a new
-// one. It is best-effort: a repository without an origin keeps the zero values.
-func (c *Client) inspectPublishedBranch(res *GitDiffSummaryResult, params GitDiffSummaryParams) {
-	branchName := strings.TrimSpace(params.BranchName)
-	if branchName == "" {
-		return
-	}
-	workspace := c.resolveWorkspace()
-	if !hasOriginRemote(workspace) {
-		return
-	}
-	cmdEnv := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	fetchCmd := exec.Command("git", "fetch", "origin") //nolint:gosec
-	fetchCmd.Dir = workspace
-	fetchCmd.Env = cmdEnv
-	if out, err := fetchCmd.CombinedOutput(); err != nil {
-		log.Printf("git fetch origin during branch inspection failed (continuing): %v, output: %s", err, string(out))
-	}
-
-	res.BranchName = branchName
-	res.BranchExists = c.remoteBranchExists(workspace, cmdEnv, branchName)
-	if res.BranchExists {
-		if targetRef, err := resolveBaseRef(workspace, params.BaseBranch); err == nil {
-			res.BranchMerged = c.branchMergedInto(workspace, cmdEnv, branchName, targetRef)
-		}
-	}
-	if !res.BranchExists || res.BranchMerged {
-		res.SuggestedBranchName = c.deriveNewBranchName(workspace, cmdEnv, params.ExecutionID, branchName)
-	}
 }
 
 // buildGitDiffSummary produces a high-level summary manifest of all modified/added/deleted files.
@@ -765,90 +695,11 @@ func (c *Client) buildGitDiffSummary(baseBranch string) (GitDiffSummaryResult, e
 		fileList = append(fileList, f)
 	}
 
-	// Compute commits ahead and commit messages (commits reachable from HEAD but
-	// not from the base branch tip).
-	commitsAhead := 0
-	var commitMessages []GitCommitMessage
-	revRange := fmt.Sprintf("%s..HEAD", baseCommit)
-	countCmd := exec.Command("git", "rev-list", "--count", revRange) //nolint:gosec
-	countCmd.Dir = workspace
-	if cOut, err := countCmd.Output(); err == nil {
-		if cCount, cErr := strconv.Atoi(strings.TrimSpace(string(cOut))); cErr == nil {
-			commitsAhead = cCount
-		}
-	}
-
-	if commitsAhead > 0 {
-		logCmd := exec.Command("git", "log", "-n", "50", "--format=%H%x1f%s%x1f%b%x1e", revRange) //nolint:gosec
-		logCmd.Dir = workspace
-		if logOut, err := logCmd.Output(); err == nil {
-			for _, entry := range strings.Split(string(logOut), "\x1e") {
-				entry = strings.TrimSpace(entry)
-				if entry == "" {
-					continue
-				}
-				fields := strings.Split(entry, "\x1f")
-				if len(fields) >= 2 {
-					body := ""
-					if len(fields) >= 3 {
-						body = strings.TrimSpace(fields[2])
-					}
-					commitMessages = append(commitMessages, GitCommitMessage{
-						Sha:     strings.TrimSpace(fields[0]),
-						Subject: strings.TrimSpace(fields[1]),
-						Body:    body,
-					})
-				}
-			}
-		}
-	}
-
-	stagedFiles := 0
-	unstagedFiles := 0
-	cachedCmd := exec.Command("git", "diff", "--cached", "--name-only") //nolint:gosec
-	cachedCmd.Dir = workspace
-	if cOut, err := cachedCmd.Output(); err == nil {
-		for _, l := range strings.Split(strings.TrimSpace(string(cOut)), "\n") {
-			if trimmed := strings.TrimSpace(l); trimmed != "" && !isKratisPlatformPath(trimmed) {
-				stagedFiles++
-			}
-		}
-	}
-
-	unstagedCmd := exec.Command("git", "diff", "--name-only") //nolint:gosec
-	unstagedCmd.Dir = workspace
-	if uOut, err := unstagedCmd.Output(); err == nil {
-		for _, l := range strings.Split(strings.TrimSpace(string(uOut)), "\n") {
-			if trimmed := strings.TrimSpace(l); trimmed != "" && !isKratisPlatformPath(trimmed) {
-				unstagedFiles++
-			}
-		}
-	}
-
-	// Count untracked files in unstaged count
-	if pOut, err := porcelainCmd.Output(); err == nil {
-		for _, line := range strings.Split(string(pOut), "\n") {
-			if strings.HasPrefix(line, "??") {
-				filePath := strings.TrimSpace(line[2:])
-				if !isKratisPlatformPath(filePath) {
-					unstagedFiles++
-				}
-			}
-		}
-	}
-
-	hasChanges := commitsAhead > 0 || len(fileList) > 0 || stagedFiles > 0 || unstagedFiles > 0
-
 	return GitDiffSummaryResult{
 		BaseCommit:     baseCommit,
 		HeadCommit:     headCommit,
 		TotalAdditions: totalAdds,
 		TotalDeletions: totalDels,
-		CommitsAhead:   commitsAhead,
-		StagedFiles:    stagedFiles,
-		UnstagedFiles:  unstagedFiles,
-		HasChanges:     hasChanges,
-		CommitMessages: commitMessages,
 		Files:          fileList,
 	}, nil
 }
@@ -1347,164 +1198,9 @@ func (c *Client) ExecuteReadFileSlice(params ReadFileSliceParams, reqID interfac
 // Rebases replay the delta commit as a regular commit. On conflict the rebase
 // is aborted, the branch is left at its pre-rebase state, and a REBASE_CONFLICT
 // error is sent so the control plane can escalate to the agent.
+// ExecuteGitPush forwards to ExecuteGitPublish for the updated publish flow.
 func (c *Client) ExecuteGitPush(params GitPushParams, reqID interface{}) {
-	branchName := strings.TrimSpace(params.BranchName)
-	if branchName == "" {
-		if reqID != nil {
-			c.sendErrorResponse(reqID, -32602, "Invalid parameters", "branchName is required")
-		}
-		return
-	}
-
-	commitMessage := strings.TrimSpace(params.CommitMessage)
-	if commitMessage == "" {
-		commitMessage = "Kratis execution updates"
-	}
-
-	targetBranch := strings.TrimSpace(params.TargetBranch)
-	if targetBranch == "" {
-		if reqID != nil {
-			c.sendErrorResponse(reqID, -32602, "Invalid parameters", "targetBranch is required")
-		}
-		return
-	}
-
-	cmdEnv := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	workspace := c.resolveWorkspace()
-
-	// Re-assert the credential config so a deleted/lost file can never break
-	// the publish commit.
-	c.reassertCredentialConfig()
-
-	// 1. Refresh remote refs so rebases operate on the latest origin state.
-	fetchCmd := exec.Command("git", "fetch", "origin") //nolint:gosec
-	fetchCmd.Dir = workspace
-	fetchCmd.Env = cmdEnv
-	if out, err := fetchCmd.CombinedOutput(); err != nil {
-		log.Printf("git fetch origin failed (continuing without fresh refs): %v, output: %s", err, string(out))
-	}
-
-	// 2. Resolve the target branch ref; the rebase target is required.
-	targetRef, err := resolveBaseRef(workspace, targetBranch)
-	if err != nil {
-		if reqID != nil {
-			c.sendErrorResponse(reqID, -32000, "Unable to resolve target branch", err.Error())
-		}
-		return
-	}
-
-	// 3. Determine whether the branch already exists remotely (republish) and
-	// whether it was merged into the target. The remote is authoritative: a
-	// deleted or merged branch must not block a later publish.
-	requestedBranch := branchName
-	remoteBranchExists := c.remoteBranchExists(workspace, cmdEnv, branchName)
-	previousBranchMerged := false
-	if remoteBranchExists {
-		previousBranchMerged = c.branchMergedInto(workspace, cmdEnv, branchName, targetRef)
-	}
-	branchCreated := false
-	if previousBranchMerged {
-		branchName = c.deriveNewBranchName(workspace, cmdEnv, params.ExecutionID, branchName)
-		branchCreated = true
-		remoteBranchExists = false
-	}
-	republished := remoteBranchExists
-
-	// 4. Stage and create the delta commit on top of the current branch.
-	if !c.stageAll(workspace, cmdEnv, reqID) {
-		return
-	}
-	if params.Squash {
-		candidateBase := targetRef
-		if republished {
-			candidateBase = "origin/" + branchName
-		}
-		// Squash onto the merge-base: the squashed commit then contains only this
-		// branch's changes, so upstream changes merged into the target branch (or
-		// pushed to the branch externally) are never reverted. The rebase below
-		// replays the delta on top of the current tips.
-		squashBase, mbErr := mergeBaseWithHead(workspace, candidateBase)
-		if mbErr != nil {
-			if reqID != nil {
-				c.sendErrorResponse(reqID, -32000, "Failed to squash changes", mbErr.Error())
-			}
-			return
-		}
-		resetCmd := exec.Command("git", "reset", "--soft", squashBase) //nolint:gosec
-		resetCmd.Dir = workspace
-		resetCmd.Env = cmdEnv
-		if out, err := resetCmd.CombinedOutput(); err != nil {
-			log.Printf("git reset --soft failed: %v, output: %s", err, string(out))
-			if reqID != nil {
-				c.sendErrorResponse(reqID, -32000, "Failed to squash changes", string(out))
-			}
-			return
-		}
-		c.commitWithMessage(workspace, cmdEnv, commitMessage, reqID)
-	} else if c.hasStagedChanges(workspace, cmdEnv) {
-		c.commitWithMessage(workspace, cmdEnv, commitMessage, reqID)
-	}
-
-	// 5. Create/reset the local feature branch to the current HEAD.
-	checkoutCmd := exec.Command("git", "checkout", "-B", branchName) //nolint:gosec
-	checkoutCmd.Dir = workspace
-	checkoutCmd.Env = cmdEnv
-	if out, err := checkoutCmd.CombinedOutput(); err != nil {
-		log.Printf("git checkout -B failed: %v, output: %s", err, string(out))
-		if reqID != nil {
-			c.sendErrorResponse(reqID, -32000, "Failed to create/switch branch", string(out))
-		}
-		return
-	}
-
-	// 6. Rebase onto the remote feature branch when it advanced (preserves external pushes).
-	if republished && !c.rebaseOnto(workspace, cmdEnv, "origin/"+branchName, reqID) {
-		return
-	}
-
-	// 7. Rebase onto the refreshed target branch when it is not an ancestor.
-	if targetRef != "" && !c.rebaseOnto(workspace, cmdEnv, targetRef, reqID) {
-		return
-	}
-
-	// 8. Push to remote origin using registered credentials and environment.
-	pushArgs := []string{"push", "-u", "origin", branchName}
-	if params.Force {
-		pushArgs = append(pushArgs, "--force-with-lease")
-	}
-	pushCmd := exec.Command("git", pushArgs...) //nolint:gosec
-	pushCmd.Dir = workspace
-	pushCmd.Env = cmdEnv
-	if pushOut, pushErr := pushCmd.CombinedOutput(); pushErr != nil {
-		log.Printf("git push failed: %v, output: %s", pushErr, string(pushOut))
-		if reqID != nil {
-			c.sendErrorResponse(reqID, -32000, "Failed to push branch to remote", string(pushOut))
-		}
-		return
-	}
-
-	// 9. Resolve head commit SHA
-	revCmd := exec.Command("git", "rev-parse", "HEAD") //nolint:gosec
-	revCmd.Dir = workspace
-	revCmd.Env = cmdEnv
-	revOut, revErr := revCmd.Output()
-	commitSha := ""
-	if revErr == nil {
-		commitSha = strings.TrimSpace(string(revOut))
-	}
-
-	remoteRef := fmt.Sprintf("refs/heads/%s", branchName)
-	if reqID != nil {
-		c.sendSuccessResponse(reqID, GitPushResult{
-			CommitSha:            commitSha,
-			BranchName:           branchName,
-			RemoteRef:            remoteRef,
-			Status:               "success",
-			RequestedBranch:      requestedBranch,
-			BranchCreated:        branchCreated,
-			PreviousBranchMerged: previousBranchMerged,
-		})
-	}
+	c.ExecuteGitPublish(params, reqID)
 }
 
 // ExecuteGitSetRemote attaches a newly created remote repository as origin and
@@ -1597,60 +1293,6 @@ func (c *Client) ExecuteGitSetRemote(params GitSetRemoteParams, reqID interface{
 	}
 }
 
-// remoteBranchExists asks origin directly instead of trusting a possibly stale
-// remote-tracking ref, so a branch deleted remotely is not treated as republish.
-func (c *Client) remoteBranchExists(workspace string, cmdEnv []string, branchName string) bool {
-	cmd := exec.Command("git", "ls-remote", "--exit-code", "--heads", "origin", "refs/heads/"+branchName) //nolint:gosec
-	cmd.Dir = workspace
-	cmd.Env = cmdEnv
-	return cmd.Run() == nil
-}
-
-// branchMergedInto reports whether origin/<branchName> is reachable from ref.
-func (c *Client) branchMergedInto(workspace string, cmdEnv []string, branchName string, ref string) bool {
-	if strings.TrimSpace(ref) == "" {
-		return false
-	}
-	cmd := exec.Command("git", "merge-base", "--is-ancestor", "origin/"+branchName, ref) //nolint:gosec
-	cmd.Dir = workspace
-	cmd.Env = cmdEnv
-	return cmd.Run() == nil
-}
-
-// deriveNewBranchName picks the next free iteration branch. It prefers
-// kratis/<executionId>-<n> so successive publishes stay grouped, and falls back
-// to <requestedBranch>-<n> when no execution id is available.
-func (c *Client) deriveNewBranchName(workspace string, cmdEnv []string, executionID string, requestedBranch string) string {
-	prefix := "kratis/" + strings.TrimSpace(executionID)
-	if strings.TrimSpace(executionID) == "" {
-		prefix = strings.TrimSpace(requestedBranch)
-		if prefix == "" {
-			prefix = "kratis/feature"
-		}
-	}
-
-	used := map[string]bool{}
-	listCmd := exec.Command("git", "ls-remote", "--heads", "origin", "refs/heads/"+prefix+"-*") //nolint:gosec
-	listCmd.Dir = workspace
-	listCmd.Env = cmdEnv
-	if out, err := listCmd.Output(); err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) < 2 {
-				continue
-			}
-			used[strings.TrimPrefix(fields[1], "refs/heads/")] = true
-		}
-	}
-
-	for iteration := 2; ; iteration++ {
-		candidate := fmt.Sprintf("%s-%d", prefix, iteration)
-		if !used[candidate] {
-			return candidate
-		}
-	}
-}
-
 func (c *Client) stageAll(workspace string, cmdEnv []string, reqID interface{}) bool {
 	addCmd := exec.Command("git", "add", "-A") //nolint:gosec
 	addCmd.Dir = workspace
@@ -1703,7 +1345,7 @@ func (c *Client) commitWithMessage(workspace string, cmdEnv []string, commitMess
 // an ancestor. On conflict the rebase is aborted (restoring the pre-rebase
 // branch state) and a REBASE_CONFLICT error is sent so the control plane can
 // escalate to the agent for a rebase & retest cycle.
-func (c *Client) rebaseOnto(workspace string, cmdEnv []string, ref string, reqID interface{}) bool {
+func (c *Client) rebaseOnto(workspace string, cmdEnv []string, ref string, reqID interface{}) bool { //nolint:unused
 	isAncestor := exec.Command("git", "merge-base", "--is-ancestor", ref, "HEAD") //nolint:gosec
 	isAncestor.Dir = workspace
 	isAncestor.Env = cmdEnv

@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.git_rebase",
+  "params": {
+    "executionId": "exec-123",
+    "defaultBranch": "main",
+    "expectedDefaultSha": "abcdef1234567890abcdef1234567890abcdef12"
+  },
+  "id": 102
+}

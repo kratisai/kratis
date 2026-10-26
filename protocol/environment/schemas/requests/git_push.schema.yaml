@@ -6,6 +6,16 @@ required:
 properties:
   branchName:
     type: string
+  createBranch:
+    type: boolean
+  expectedHeadSha:
+    type: string
+  defaultBranch:
+    type: string
+  expectedDefaultSha:
+    type: string
+  expectedChangeSetDigest:
+    type: string
   commitMessage:
     type: string
   force:

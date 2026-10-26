@@ -21,12 +21,58 @@ public record PublishCapabilitiesDto(
         List<RepositoryVisibility> visibilityOptions,
         List<PublishedPrDto> publishedPrs,
         boolean previousPrMerged,
-        String suggestedNewBranch) {
+        String suggestedNewBranch,
+        PublishStatus status,
+        int incomingCommits,
+        int commitCount,
+        boolean hasUncommittedChanges,
+        ChangeSetSummaryDto changeSet,
+        TargetDto target,
+        String digest) {
+
+    public enum PublishStatus {
+        UP_TO_DATE,
+        REBASE_REQUIRED
+    }
+
+    public record ChangeSetFileDto(String path, String status, int additions, int deletions) {
+        public ChangeSetFileDto {
+            Objects.requireNonNull(path, "path is required");
+            Objects.requireNonNull(status, "status is required");
+        }
+    }
+
+    public record ChangeSetSummaryDto(int additions, int deletions, List<ChangeSetFileDto> files, String digest) {
+        public ChangeSetSummaryDto {
+            files = files != null ? List.copyOf(files) : List.of();
+            Objects.requireNonNull(digest, "digest is required");
+        }
+    }
+
+    public record TargetDto(TargetKind kind, Long prNumber, String branchName) {
+        public enum TargetKind {
+            OPEN_PR,
+            UPDATE_PR,
+            OPEN_PR_NEW_BRANCH
+        }
+
+        public static TargetDto openPr(String branchName) {
+            return new TargetDto(TargetKind.OPEN_PR, null, branchName);
+        }
+
+        public static TargetDto updatePr(long prNumber, String branchName) {
+            return new TargetDto(TargetKind.UPDATE_PR, prNumber, branchName);
+        }
+
+        public static TargetDto openPrNewBranch(String newBranchName) {
+            return new TargetDto(TargetKind.OPEN_PR_NEW_BRANCH, null, newBranchName);
+        }
+    }
 
     public PublishCapabilitiesDto {
         Objects.requireNonNull(repositoryType, "repositoryType is required");
         Objects.requireNonNull(defaultBaseBranch, "defaultBaseBranch is required");
-        Objects.requireNonNull(stats, "stats is required");
+        stats = stats != null ? stats : new PublishStatsDto(0, 0, 0, 0, 0, false, "No changes");
         visibilityOptions = visibilityOptions != null ? List.copyOf(visibilityOptions) : List.of();
         publishedPrs = publishedPrs != null ? List.copyOf(publishedPrs) : List.of();
     }

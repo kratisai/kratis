@@ -578,7 +578,12 @@ class ProtocolConformanceTest {
             case "number" -> DoubleNode.valueOf(1.5);
             case "boolean" -> BooleanNode.TRUE;
             case "array" -> MAPPER.createArrayNode();
-            case "object" -> MAPPER.createObjectNode();
+            case "object" -> {
+                if (propertySchema.has("properties")) {
+                    yield buildSample(propertySchema);
+                }
+                yield MAPPER.createObjectNode();
+            }
             default -> NullNode.getInstance();
         };
     }
@@ -830,11 +835,12 @@ class ProtocolConformanceTest {
             case "env.cancel_agent" -> EnvironmentConnectorResult.CancelAgent.class;
             case "env.registerGitAuth" -> EnvironmentConnectorResult.RegisterGitAuth.class;
             case "env.registerGitIdentity" -> EnvironmentConnectorResult.RegisterGitIdentity.class;
-            case "env.git_diff_summary" -> EnvironmentConnectorResult.GitDiffSummary.class;
             case "env.read_file_slice" -> EnvironmentConnectorResult.ReadFileSlice.class;
             case "env.get_logs" -> EnvironmentConnectorResult.GetLogs.class;
             case "env.git_push" -> EnvironmentConnectorResult.GitPush.class;
             case "env.git_set_remote" -> EnvironmentConnectorResult.GitSetRemote.class;
+            case "env.git_observe_publish" -> EnvironmentConnectorResult.GitObservePublish.class;
+            case "env.git_rebase" -> EnvironmentConnectorResult.GitRebase.class;
             default -> null;
         };
     }
@@ -853,11 +859,12 @@ class ProtocolConformanceTest {
             case "cancel_agent" -> EnvironmentConnectorResult.CancelAgent.class;
             case "register_git_auth" -> EnvironmentConnectorResult.RegisterGitAuth.class;
             case "register_git_identity" -> EnvironmentConnectorResult.RegisterGitIdentity.class;
-            case "git_diff_summary" -> EnvironmentConnectorResult.GitDiffSummary.class;
             case "read_file_slice" -> EnvironmentConnectorResult.ReadFileSlice.class;
             case "get_logs" -> EnvironmentConnectorResult.GetLogs.class;
             case "git_push" -> EnvironmentConnectorResult.GitPush.class;
             case "git_set_remote" -> EnvironmentConnectorResult.GitSetRemote.class;
+            case "git_observe_publish" -> EnvironmentConnectorResult.GitObservePublish.class;
+            case "git_rebase" -> EnvironmentConnectorResult.GitRebase.class;
             default -> throw new AssertionError("Unexpected environment result fixture: " + name);
         };
     }

@@ -1,0 +1,14 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: GitRebaseParams
+type: object
+required:
+- defaultBranch
+- expectedDefaultSha
+properties:
+  executionId:
+    type: string
+  defaultBranch:
+    type: string
+  expectedDefaultSha:
+    type: string
+additionalProperties: false

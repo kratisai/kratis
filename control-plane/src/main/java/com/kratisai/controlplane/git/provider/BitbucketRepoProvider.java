@@ -62,6 +62,27 @@ public class BitbucketRepoProvider implements RepoProvider {
     }
 
     @Override
+    public PullRequestSnapshot getPullRequest(Repository repo, GitAuthMaterial auth, long number) {
+        String token = auth.maybeToken()
+                .orElseThrow(
+                        () -> new IllegalStateException("Bitbucket PR status requires a token, but none resolved"));
+        String workspace = BitbucketApiService.extractWorkspace(repo.getUrl());
+        String repoSlug = BitbucketApiService.extractRepoSlug(repo.getUrl());
+        return bitbucketApiService.getPullRequest(workspace, repoSlug, number, token);
+    }
+
+    @Override
+    public Optional<PullRequestSnapshot> findOpenPullRequestForHead(
+            Repository repo, GitAuthMaterial auth, String headBranch) {
+        String token = auth.maybeToken()
+                .orElseThrow(
+                        () -> new IllegalStateException("Bitbucket PR search requires a token, but none resolved"));
+        String workspace = BitbucketApiService.extractWorkspace(repo.getUrl());
+        String repoSlug = BitbucketApiService.extractRepoSlug(repo.getUrl());
+        return bitbucketApiService.findOpenPullRequestForHead(workspace, repoSlug, headBranch, token);
+    }
+
+    @Override
     public boolean supportsRepositoryCreation() {
         return true;
     }

@@ -147,6 +147,28 @@ public class FakeGitHubApiClientConfig {
         }
 
         @Override
+        public ResponseEntity<String> getPullRequest(String owner, String repo, long pullNumber, String authorization) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
+            }
+            return ResponseEntity.ok(
+                    "{\"number\": " + pullNumber + ", \"html_url\": \"https://github.com/" + owner + "/" + repo
+                            + "/pull/" + pullNumber
+                            + "\", \"head\": {\"ref\": \"feat\", \"sha\": \"sha1\"}, \"base\": {\"ref\": \"main\"}, \"state\": \"open\"}");
+        }
+
+        @Override
+        public ResponseEntity<String> listPullRequests(
+                String owner, String repo, String head, String state, String authorization) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
+            }
+            return ResponseEntity.ok(
+                    "[{\"number\": 42, \"html_url\": \"https://github.com/" + owner + "/" + repo
+                            + "/pull/42\", \"head\": {\"ref\": \"feat\", \"sha\": \"sha1\"}, \"base\": {\"ref\": \"main\"}, \"state\": \"open\"}]");
+        }
+
+        @Override
         public ResponseEntity<String> createPullRequest(
                 String owner, String repo, java.util.Map<String, Object> body, String authorization) {
             if (shouldThrow) {

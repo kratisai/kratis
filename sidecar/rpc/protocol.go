@@ -405,7 +405,7 @@ const (
 	GitDiffRenamed  GitDiffStatus = "RENAMED"
 )
 
-// GitDiffSummaryFile represents one changed file in env.git_diff_summary result.
+// GitDiffSummaryFile represents one changed file in a diff summary.
 type GitDiffSummaryFile struct {
 	Path                 string        `json:"path"`
 	Status               GitDiffStatus `json:"status"`
@@ -414,36 +414,13 @@ type GitDiffSummaryFile struct {
 	IsCollapsedByDefault bool          `json:"isCollapsedByDefault"`
 }
 
-// GitDiffSummaryParams is the parameters payload for env.git_diff_summary.
-type GitDiffSummaryParams struct {
-	BaseBranch  string `json:"baseBranch,omitempty"`
-	ExecutionID string `json:"executionId,omitempty"`
-	BranchName  string `json:"branchName,omitempty"`
-}
-
-// GitCommitMessage represents one commit in the unpushed log.
-type GitCommitMessage struct {
-	Sha     string `json:"sha"`
-	Subject string `json:"subject"`
-	Body    string `json:"body"`
-}
-
-// GitDiffSummaryResult is the success response payload for env.git_diff_summary.
+// GitDiffSummaryResult is the internal summary used to build diff manifests.
 type GitDiffSummaryResult struct {
-	BaseCommit          string               `json:"baseCommit"`
-	HeadCommit          string               `json:"headCommit"`
-	TotalAdditions      int                  `json:"totalAdditions"`
-	TotalDeletions      int                  `json:"totalDeletions"`
-	CommitsAhead        int                  `json:"commitsAhead"`
-	StagedFiles         int                  `json:"stagedFiles"`
-	UnstagedFiles       int                  `json:"unstagedFiles"`
-	HasChanges          bool                 `json:"hasChanges"`
-	CommitMessages      []GitCommitMessage   `json:"commitMessages,omitempty"`
-	Files               []GitDiffSummaryFile `json:"files"`
-	BranchName          string               `json:"branchName,omitempty"`
-	BranchExists        bool                 `json:"branchExists"`
-	BranchMerged        bool                 `json:"branchMerged"`
-	SuggestedBranchName string               `json:"suggestedBranchName,omitempty"`
+	BaseCommit     string               `json:"baseCommit"`
+	HeadCommit     string               `json:"headCommit"`
+	TotalAdditions int                  `json:"totalAdditions"`
+	TotalDeletions int                  `json:"totalDeletions"`
+	Files          []GitDiffSummaryFile `json:"files"`
 }
 
 // GitDiffManifestFile represents one file's summary and its diff section digest.
@@ -541,12 +518,17 @@ type GetLogsResult struct {
 
 // GitPushParams is the parameters payload for env.git_push.
 type GitPushParams struct {
-	BranchName    string `json:"branchName"`
-	CommitMessage string `json:"commitMessage,omitempty"`
-	Force         bool   `json:"force,omitempty"`
-	Squash        bool   `json:"squash,omitempty"`
-	TargetBranch  string `json:"targetBranch,omitempty"`
-	ExecutionID   string `json:"executionId,omitempty"`
+	BranchName              string `json:"branchName"`
+	CreateBranch            bool   `json:"createBranch,omitempty"`
+	ExpectedHeadSha         string `json:"expectedHeadSha,omitempty"`
+	DefaultBranch           string `json:"defaultBranch,omitempty"`
+	TargetBranch            string `json:"targetBranch,omitempty"`
+	ExpectedDefaultSha      string `json:"expectedDefaultSha,omitempty"`
+	ExpectedChangeSetDigest string `json:"expectedChangeSetDigest,omitempty"`
+	Squash                  bool   `json:"squash,omitempty"`
+	Force                   bool   `json:"force,omitempty"`
+	CommitMessage           string `json:"commitMessage,omitempty"`
+	ExecutionID             string `json:"executionId,omitempty"`
 }
 
 // GitPushResult is the success response payload for env.git_push.
@@ -556,8 +538,56 @@ type GitPushResult struct {
 	RemoteRef            string `json:"remoteRef,omitempty"`
 	Status               string `json:"status"`
 	RequestedBranch      string `json:"requestedBranch,omitempty"`
-	BranchCreated        bool   `json:"branchCreated"`
-	PreviousBranchMerged bool   `json:"previousBranchMerged"`
+	BranchCreated        bool   `json:"branchCreated,omitempty"`
+	PreviousBranchMerged bool   `json:"previousBranchMerged,omitempty"`
+}
+
+// GitObservePublishParams is the parameters payload for env.git_observe_publish.
+type GitObservePublishParams struct {
+	ExecutionID string `json:"executionId,omitempty"`
+	HeadBranch  string `json:"headBranch,omitempty"`
+}
+
+// GitChangeSetFile represents a single modified/added/deleted file in a change set.
+type GitChangeSetFile struct {
+	Path      string        `json:"path"`
+	Status    GitDiffStatus `json:"status"`
+	Additions int           `json:"additions"`
+	Deletions int           `json:"deletions"`
+}
+
+// GitChangeSetStats holds the overall additions, deletions, file list, and content digest.
+type GitChangeSetStats struct {
+	Additions int                `json:"additions"`
+	Deletions int                `json:"deletions"`
+	Files     []GitChangeSetFile `json:"files"`
+	Digest    string             `json:"digest"`
+}
+
+// GitObservePublishResult is the success response payload for env.git_observe_publish.
+type GitObservePublishResult struct {
+	DefaultBranch           string            `json:"defaultBranch"`
+	DefaultSha              string            `json:"defaultSha"`
+	ExecutionBaseSha        string            `json:"executionBaseSha"`
+	DefaultIsAncestorOfHead bool              `json:"defaultIsAncestorOfHead"`
+	IncomingCommitCount     int               `json:"incomingCommitCount"`
+	CommitCount             int               `json:"commitCount"`
+	HasUncommittedChanges   bool              `json:"hasUncommittedChanges"`
+	HeadSha                 string            `json:"headSha,omitempty"`
+	ChangeSet               GitChangeSetStats `json:"changeSet"`
+}
+
+// GitRebaseParams is the parameters payload for env.git_rebase.
+type GitRebaseParams struct {
+	ExecutionID        string `json:"executionId,omitempty"`
+	DefaultBranch      string `json:"defaultBranch"`
+	ExpectedDefaultSha string `json:"expectedDefaultSha"`
+}
+
+// GitRebaseResult is the success response payload for env.git_rebase.
+type GitRebaseResult struct {
+	NewBaseSha string            `json:"newBaseSha"`
+	ChangeSet  GitChangeSetStats `json:"changeSet"`
 }
 
 // GitSetRemoteParams is the parameters payload for env.git_set_remote.

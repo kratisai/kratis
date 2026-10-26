@@ -6,11 +6,10 @@ import static org.mockito.Mockito.*;
 import com.kratisai.controlplane.api.restdto.ChatDto;
 import com.kratisai.controlplane.api.restdto.TopicStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
+import com.kratisai.controlplane.model.ChangeSet;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ChatUsageSession;
-import com.kratisai.controlplane.model.PublishedPrStatus;
 import com.kratisai.controlplane.model.SandboxExecution;
-import com.kratisai.controlplane.model.SandboxExecutionPublishedPr;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
@@ -155,8 +154,16 @@ class ChatServiceTest {
     void listChatsForTeam_publishedPullRequest_returnsMrPushed() {
         ChatEntity chat = persistedChat(Instant.parse("2026-05-01T10:00:00Z"));
         SandboxExecution execution = execution(chat, SandboxExecutionStatus.IDLE);
-        execution.addPublishedPr(new SandboxExecutionPublishedPr(
-                42L, "https://github.com/test/repo/pull/42", "feature", "main", PublishedPrStatus.OPEN, Instant.now()));
+        execution.addChangeSet(new ChangeSet(
+                execution,
+                1,
+                "base",
+                "push",
+                "feature",
+                42L,
+                "https://github.com/test/repo/pull/42",
+                "main",
+                Instant.now()));
         when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
                 .thenReturn(Optional.of(execution));
 

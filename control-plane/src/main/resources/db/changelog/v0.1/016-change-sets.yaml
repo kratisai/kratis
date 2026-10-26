@@ -1,0 +1,90 @@
+databaseChangeLog:
+- changeSet:
+    id: 016-change-sets-001
+    author: kratis
+    changes:
+    - createTable:
+        tableName: change_sets
+        columns:
+        - column:
+            name: id
+            type: UUID
+            constraints:
+              primaryKey: true
+              primaryKeyName: pk_change_sets
+              nullable: false
+        - column:
+            name: execution_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: seq
+            type: INT
+            constraints:
+              nullable: false
+        - column:
+            name: base_commit_sha
+            type: VARCHAR(64)
+            constraints:
+              nullable: false
+        - column:
+            name: pushed_commit_sha
+            type: VARCHAR(64)
+            constraints:
+              nullable: false
+        - column:
+            name: branch_name
+            type: VARCHAR(255)
+            constraints:
+              nullable: false
+        - column:
+            name: pr_number
+            type: BIGINT
+        - column:
+            name: pr_url
+            type: VARCHAR(1024)
+        - column:
+            name: base_branch
+            type: VARCHAR(255)
+        - column:
+            name: created_at
+            type: TIMESTAMP WITH TIME ZONE
+            constraints:
+              nullable: false
+    - addForeignKeyConstraint:
+        baseTableName: change_sets
+        baseColumnNames: execution_id
+        constraintName: fk_change_sets_execution
+        referencedTableName: sandbox_executions
+        referencedColumnNames: id
+        onDelete: CASCADE
+    - createIndex:
+        tableName: change_sets
+        indexName: idx_change_sets_execution_seq
+        columns:
+        - column:
+            name: execution_id
+        - column:
+            name: seq
+    - sql:
+        dbms: postgresql
+        splitStatements: false
+        stripComments: true
+        sql: >-
+          INSERT INTO change_sets
+            (id, execution_id, seq, base_commit_sha, pushed_commit_sha, branch_name, pr_number, pr_url, base_branch, created_at)
+          SELECT
+            gen_random_uuid(),
+            execution_id,
+            ROW_NUMBER() OVER (PARTITION BY execution_id ORDER BY created_at ASC),
+            'unknown',
+            'unknown',
+            head_branch,
+            pr_number,
+            pr_url,
+            base_branch,
+            created_at
+          FROM sandbox_execution_published_prs;
+    - dropTable:
+        tableName: sandbox_execution_published_prs

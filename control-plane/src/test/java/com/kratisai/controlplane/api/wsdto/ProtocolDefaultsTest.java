@@ -56,12 +56,7 @@ class ProtocolDefaultsTest {
     }
 
     @Test
-    void environmentRpcPayload_gitDiffDefaults() {
-        EnvironmentRpcPayload payloadSummary = new EnvironmentRpcPayload.GitDiffSummary("main", "exec-1");
-        assertThat(payloadSummary.messageKind()).isEqualTo(MessageKind.REQUEST);
-        assertThat(payloadSummary.direction()).isEqualTo(Direction.CONTROL_PLANE_TO_CONNECTOR);
-        assertThat(payloadSummary.method()).isEqualTo(EnvironmentRpcPayload.GitDiffSummary.METHOD);
-
+    void environmentRpcPayload_readFileSliceDefaults() {
         EnvironmentRpcPayload payloadSlice = new EnvironmentRpcPayload.ReadFileSlice("src/A.java", 1, 10, "exec-1");
         assertThat(payloadSlice.messageKind()).isEqualTo(MessageKind.REQUEST);
         assertThat(payloadSlice.direction()).isEqualTo(Direction.CONTROL_PLANE_TO_CONNECTOR);

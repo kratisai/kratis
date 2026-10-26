@@ -39,18 +39,25 @@ export interface DiffSummaryFileDto {
 
 export interface PublishCapabilities {
   canCreateRepository: boolean
+  changeSet?: ChangeSetSummaryDto
+  commitCount?: number
   defaultBaseBranch: string
+  digest?: string
+  hasUncommittedChanges?: boolean
+  incomingCommits?: number
   newRepo: boolean
   previousPrMerged?: boolean
   publishedBranch?: string
   publishedPrs?: PublishedPr[]
   repositoryType: string
   stats: PublishStats
+  status?: PublishStatus
   suggestedBody: string
   suggestedNewBranch?: string
   suggestedRepositoryName?: string
   suggestedTitle: string
   supportsPullRequests: boolean
+  target?: TargetDto
   visibilityOptions: RepositoryVisibility[]
 }
 
@@ -60,6 +67,7 @@ export interface PublishPrRequest {
   branchName: string
   createNewPr?: boolean
   credentialId?: string
+  digest?: string
   draft?: boolean
   newBranchName?: string
   repositoryName?: string
@@ -102,6 +110,20 @@ export interface SteerExecutionRequest {
   prompt?: string
 }
 
+interface ChangeSetFileDto {
+  additions: number
+  deletions: number
+  path: string
+  status: string
+}
+
+interface ChangeSetSummaryDto {
+  additions: number
+  deletions: number
+  digest: string
+  files: ChangeSetFileDto[]
+}
+
 type GitDiffStatus = 'ADDED' | 'DELETED' | 'MODIFIED' | 'RENAMED'
 
 interface PublishedPr {
@@ -125,9 +147,19 @@ interface PublishStats {
   unstagedFiles: number
 }
 
+type PublishStatus = 'REBASE_REQUIRED' | 'UP_TO_DATE'
+
 interface SteerCommentDto {
   codeSnippet?: string
   comment: string
   line?: number
   path: string
 }
+
+interface TargetDto {
+  branchName?: string
+  kind: TargetKind
+  prNumber?: number
+}
+
+type TargetKind = 'OPEN_PR' | 'OPEN_PR_NEW_BRANCH' | 'UPDATE_PR'

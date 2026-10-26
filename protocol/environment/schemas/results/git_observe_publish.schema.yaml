@@ -1,0 +1,69 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: GitObservePublishResult
+type: object
+required:
+- defaultBranch
+- defaultSha
+- executionBaseSha
+- defaultIsAncestorOfHead
+- incomingCommitCount
+- commitCount
+- hasUncommittedChanges
+- changeSet
+properties:
+  defaultBranch:
+    type: string
+  defaultSha:
+    type: string
+  executionBaseSha:
+    type: string
+  defaultIsAncestorOfHead:
+    type: boolean
+  incomingCommitCount:
+    type: integer
+  commitCount:
+    type: integer
+  hasUncommittedChanges:
+    type: boolean
+  headSha:
+    type: string
+  changeSet:
+    type: object
+    required:
+    - additions
+    - deletions
+    - files
+    - digest
+    properties:
+      additions:
+        type: integer
+      deletions:
+        type: integer
+      digest:
+        type: string
+      files:
+        type: array
+        items:
+          type: object
+          required:
+          - path
+          - status
+          - additions
+          - deletions
+          properties:
+            path:
+              type: string
+            status:
+              type: string
+              enum:
+              - added
+              - modified
+              - deleted
+              - renamed
+            additions:
+              type: integer
+            deletions:
+              type: integer
+          additionalProperties: false
+    additionalProperties: false
+additionalProperties: false

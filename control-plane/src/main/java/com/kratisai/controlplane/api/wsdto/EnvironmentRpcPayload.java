@@ -73,11 +73,12 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
                         case CancelAgent ignored -> EnvironmentConnectorResult.CancelAgent.class;
                         case RegisterGitAuth ignored -> EnvironmentConnectorResult.RegisterGitAuth.class;
                         case RegisterGitIdentity ignored -> EnvironmentConnectorResult.RegisterGitIdentity.class;
-                        case GitDiffSummary ignored -> EnvironmentConnectorResult.GitDiffSummary.class;
                         case ReadFileSlice ignored -> EnvironmentConnectorResult.ReadFileSlice.class;
                         case GetLogs ignored -> EnvironmentConnectorResult.GetLogs.class;
                         case GitPush ignored -> EnvironmentConnectorResult.GitPush.class;
                         case GitSetRemote ignored -> EnvironmentConnectorResult.GitSetRemote.class;
+                        case GitObservePublish ignored -> EnvironmentConnectorResult.GitObservePublish.class;
+                        case GitRebase ignored -> EnvironmentConnectorResult.GitRebase.class;
                     };
         }
     }
@@ -583,24 +584,6 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         }
     }
 
-    /** Retrieve git diff summary manifest for working tree / commits. */
-    record GitDiffSummary(
-            @JsonProperty("baseBranch") String baseBranch,
-            @JsonProperty("executionId") String executionId,
-            @JsonProperty("branchName") String branchName)
-            implements OutboundRequestPayload<EnvironmentConnectorResult.GitDiffSummary> {
-        public static final String METHOD = "env.git_diff_summary";
-
-        @Override
-        public String method() {
-            return METHOD;
-        }
-
-        public GitDiffSummary(String baseBranch, String executionId) {
-            this(baseBranch, executionId, null);
-        }
-    }
-
     /** Read slice of lines from a workspace file for hunk expansion. */
     record ReadFileSlice(
             @JsonProperty("path") String path,
@@ -640,6 +623,11 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
     /** Stage, commit, rebase, and push branch to remote origin. */
     record GitPush(
             @JsonProperty("branchName") String branchName,
+            @JsonProperty("createBranch") Boolean createBranch,
+            @JsonProperty("expectedHeadSha") String expectedHeadSha,
+            @JsonProperty("defaultBranch") String defaultBranch,
+            @JsonProperty("expectedDefaultSha") String expectedDefaultSha,
+            @JsonProperty("expectedChangeSetDigest") String expectedChangeSetDigest,
             @JsonProperty("commitMessage") String commitMessage,
             @JsonProperty("force") Boolean force,
             @JsonProperty("squash") Boolean squash,
@@ -674,6 +662,38 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         public GitSetRemote {
             Objects.requireNonNull(remoteUrl, "remoteUrl is required");
             Objects.requireNonNull(defaultBranch, "defaultBranch is required");
+        }
+    }
+
+    /** Observe origin and local git state for publish preview. */
+    record GitObservePublish(
+            @JsonProperty("executionId") String executionId,
+            @JsonProperty("headBranch") String headBranch)
+            implements OutboundRequestPayload<EnvironmentConnectorResult.GitObservePublish> {
+        public static final String METHOD = "env.git_observe_publish";
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+    }
+
+    /** Rebase workspace history onto repository default branch. */
+    record GitRebase(
+            @JsonProperty("executionId") String executionId,
+            @JsonProperty("defaultBranch") String defaultBranch,
+            @JsonProperty("expectedDefaultSha") String expectedDefaultSha)
+            implements OutboundRequestPayload<EnvironmentConnectorResult.GitRebase> {
+        public static final String METHOD = "env.git_rebase";
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+
+        public GitRebase {
+            Objects.requireNonNull(defaultBranch, "defaultBranch is required");
+            Objects.requireNonNull(expectedDefaultSha, "expectedDefaultSha is required");
         }
     }
 }

@@ -57,6 +57,21 @@ public interface GitLabApiClient {
             @RequestParam("ref") String ref,
             @RequestHeader("PRIVATE-TOKEN") String privateToken);
 
+    @GetExchange("/api/v4/projects/{project}/merge_requests/{iid}")
+    ResponseEntity<String> getMergeRequest(
+            UriBuilderFactory baseUri,
+            @PathVariable("project") String project,
+            @PathVariable("iid") long iid,
+            @RequestHeader("PRIVATE-TOKEN") String privateToken);
+
+    @GetExchange("/api/v4/projects/{project}/merge_requests")
+    ResponseEntity<String> listMergeRequests(
+            UriBuilderFactory baseUri,
+            @PathVariable("project") String project,
+            @RequestParam("source_branch") String sourceBranch,
+            @RequestParam("state") String state,
+            @RequestHeader("PRIVATE-TOKEN") String privateToken);
+
     @PostExchange("/api/v4/projects/{project}/merge_requests")
     ResponseEntity<String> createMergeRequest(
             UriBuilderFactory baseUri,

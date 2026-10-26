@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.PullRequestResultDto;
 import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.client.GitLabApiClient;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -243,6 +244,62 @@ public class GitLabApiService {
                 ? project.get("default_branch").asText()
                 : "main";
         return new RemoteRepositoryDto(name, httpUrl, sshUrl, branch);
+    }
+
+    public PullRequestSnapshot getMergeRequest(String projectPath, long iid, String token, String baseUrl) {
+        try {
+            UriBuilderFactory uriFactory = new DefaultUriBuilderFactory(baseUrl);
+            String encodedProject = URLEncoder.encode(projectPath, StandardCharsets.UTF_8);
+            ResponseEntity<String> response = gitLabApiClient.getMergeRequest(uriFactory, encodedProject, iid, token);
+            return toPullRequestSnapshot(parse(response));
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return null;
+            }
+            throw new ProviderUnavailableException("GitLab getMergeRequest failed: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new ProviderUnavailableException("GitLab getMergeRequest failed: " + e.getMessage(), e);
+        }
+    }
+
+    public Optional<PullRequestSnapshot> findOpenMergeRequestForHead(
+            String projectPath, String headBranch, String token, String baseUrl) {
+        try {
+            UriBuilderFactory uriFactory = new DefaultUriBuilderFactory(baseUrl);
+            String encodedProject = URLEncoder.encode(projectPath, StandardCharsets.UTF_8);
+            ResponseEntity<String> response =
+                    gitLabApiClient.listMergeRequests(uriFactory, encodedProject, headBranch, "opened", token);
+            JsonNode root = parse(response);
+            if (root.isArray() && !root.isEmpty()) {
+                return Optional.of(toPullRequestSnapshot(root.get(0)));
+            }
+            return Optional.empty();
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw new ProviderUnavailableException("GitLab findOpenMergeRequestForHead failed: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new ProviderUnavailableException("GitLab findOpenMergeRequestForHead failed: " + e.getMessage(), e);
+        }
+    }
+
+    private PullRequestSnapshot toPullRequestSnapshot(JsonNode node) {
+        long number = node.path("iid").asLong();
+        String stateStr = node.path("state").asText("");
+        PullRequestSnapshot.PullRequestState state;
+        if ("merged".equalsIgnoreCase(stateStr)) {
+            state = PullRequestSnapshot.PullRequestState.MERGED;
+        } else if ("closed".equalsIgnoreCase(stateStr)) {
+            state = PullRequestSnapshot.PullRequestState.CLOSED;
+        } else {
+            state = PullRequestSnapshot.PullRequestState.OPEN;
+        }
+        String url = node.path("web_url").asText("");
+        String headBranch = node.path("source_branch").asText("");
+        String baseBranch = node.path("target_branch").asText("");
+        String headSha = node.path("sha").asText("");
+        return new PullRequestSnapshot(number, state, url, headBranch, baseBranch, headSha);
     }
 
     private JsonNode parse(ResponseEntity<String> response) {

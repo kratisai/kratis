@@ -108,6 +108,41 @@ public class FakeAzureDevOpsApiClientConfig {
         }
 
         @Override
+        public ResponseEntity<String> getPullRequest(
+                UriBuilderFactory baseUri,
+                String project,
+                String repository,
+                long pullRequestId,
+                String apiVersion,
+                String authorization) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
+            }
+            return ResponseEntity.ok(
+                    "{\"pullRequestId\": " + pullRequestId + ", \"url\": \"https://dev.azure.com/kratisai/project/_git/"
+                            + repository + "/pullrequest/" + pullRequestId
+                            + "\", \"sourceRefName\": \"refs/heads/feat\", \"targetRefName\": \"refs/heads/main\", \"status\": \"active\", \"lastMergeSourceCommit\": {\"commitId\": \"sha1\"}}");
+        }
+
+        @Override
+        public ResponseEntity<String> listPullRequests(
+                UriBuilderFactory baseUri,
+                String project,
+                String repository,
+                String sourceRefName,
+                String status,
+                String apiVersion,
+                String authorization) {
+            if (shouldThrow) {
+                return ResponseEntity.internalServerError().build();
+            }
+            return ResponseEntity.ok(
+                    "{\"value\": [{\"pullRequestId\": 99, \"url\": \"https://dev.azure.com/kratisai/project/_git/"
+                            + repository + "/pullrequest/99\", \"sourceRefName\": \"" + sourceRefName
+                            + "\", \"targetRefName\": \"refs/heads/main\", \"status\": \"active\", \"lastMergeSourceCommit\": {\"commitId\": \"sha1\"}}]}");
+        }
+
+        @Override
         public ResponseEntity<String> createPullRequest(
                 UriBuilderFactory baseUri,
                 String project,

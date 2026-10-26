@@ -1,10 +1,9 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   CheckCircle2,
   Download,
   ExternalLink,
-  GitBranch,
   GitPullRequest,
   Loader2,
   RefreshCw,
@@ -14,6 +13,7 @@ import { toast } from 'sonner'
 
 import type { ExecutionStatus } from '@/lib/execution-api'
 import type {
+  PublishCapabilities,
   PublishPrRequest,
   PullRequestResult,
   PushBranchResponse,
@@ -48,6 +48,7 @@ import {
   fetchPublishCapabilities,
   publishPullRequest,
   pushBranch,
+  rebaseExecution,
 } from '@/lib/publish-api'
 
 export interface PublishModalProps {
@@ -59,7 +60,9 @@ export interface PublishModalProps {
 }
 
 interface PublishActionError {
-  isRebaseConflict: boolean
+  isPlanChanged?: boolean
+  isProviderUnavailable?: boolean
+  isRebaseConflict?: boolean
   message: string
 }
 
@@ -75,47 +78,98 @@ export function PublishModal({
   const [body, setBody] = useState('')
   const [isDraft, setIsDraft] = useState(false)
   const [isSquash, setIsSquash] = useState(true)
+  const [actionError, setActionError] = useState<null | PublishActionError>(null)
+  const [prResult, setPrResult] = useState<null | PullRequestResult>(null)
+  const [pushResult, setPushResult] = useState<null | PushBranchResponse>(null)
+  const [isRefreshingAfterRebase, setIsRefreshingAfterRebase] = useState(false)
+
   const [repositoryName, setRepositoryName] = useState('')
   const [visibility, setVisibility] = useState<RepositoryVisibility>('PRIVATE')
   const [credentialId, setCredentialId] = useState('')
-  const [publishMode, setPublishMode] = useState<'new' | 'update'>('update')
-  const [prResult, setPrResult] = useState<null | PullRequestResult>(null)
-  const [pushResult, setPushResult] = useState<null | PushBranchResponse>(null)
-  const [actionError, setActionError] = useState<null | PublishActionError>(null)
+
+  const queryClient = useQueryClient()
+  const capabilitiesQueryKey = ['publish-capabilities', chatId, executionId] as const
+
+  const markPublishedInCache = () => {
+    queryClient.setQueryData<PublishCapabilities>(capabilitiesQueryKey, (old) => {
+      if (!old) return old
+      return {
+        ...old,
+        changeSet: { additions: 0, deletions: 0, digest: old.changeSet?.digest ?? '', files: [] },
+        commitCount: 0,
+        hasUncommittedChanges: false,
+        stats: {
+          ...old.stats,
+          additions: 0,
+          commitsAhead: 0,
+          deletions: 0,
+          formattedSummary: 'There are no changes to publish',
+          hasChanges: false,
+          stagedFiles: 0,
+          unstagedFiles: 0,
+        },
+        suggestedBody: '',
+        suggestedTitle: '',
+      }
+    })
+  }
 
   const capabilitiesQuery = useQuery({
     enabled: open,
     queryFn: () => fetchPublishCapabilities(chatId, executionId),
-    queryKey: ['publish-capabilities', chatId, executionId],
+    queryKey: capabilitiesQueryKey,
   })
   const { data: credentials } = useCredentials()
 
   const capabilities = capabilitiesQuery.data
   const stats = capabilities?.stats
   const supportsPr = capabilities?.supportsPullRequests ?? false
-  const publishedPrs = capabilities?.publishedPrs ?? []
-  const latestPublishedPr = publishedPrs.length > 0 ? publishedPrs[publishedPrs.length - 1] : null
-  const previousPrMerged =
-    capabilities?.previousPrMerged ??
-    (latestPublishedPr != null && latestPublishedPr.status !== 'OPEN')
-  const existingPrOpen = latestPublishedPr != null && !previousPrMerged
-  const updatingExisting = existingPrOpen && publishMode === 'update'
-  const branchLocked = supportsPr ? updatingExisting : capabilities?.publishedBranch != null
+  const target = capabilities?.target
+  const isRebaseRequired = capabilities?.status === 'REBASE_REQUIRED'
+  const isUpToDate = capabilities?.status === 'UP_TO_DATE'
+  const incomingCommits = capabilities?.incomingCommits ?? 0
+  const commitCount = capabilities?.commitCount ?? 0
+  const hasUncommittedChanges = capabilities?.hasUncommittedChanges ?? false
+  const changeSet = capabilities?.changeSet
+  const defaultBaseBranch = capabilities?.defaultBaseBranch || 'main'
+
+  const updatingExisting = target?.kind === 'UPDATE_PR'
   const creatingPr = supportsPr && !updatingExisting
-  const suggestedNewBranch =
-    capabilities?.suggestedNewBranch || `kratis/feature-${executionId.slice(0, 8)}`
-  const baseBranch = capabilities?.defaultBaseBranch || ''
   const hasChanges = stats?.hasChanges ?? true
   const canEscalateToAgent = executionStatus === 'RUNNING' || executionStatus === 'IDLE'
   const isNewRepo = capabilities?.newRepo ?? false
   const canCreateRemote = capabilities?.canCreateRepository ?? false
   const visibilityOptions = capabilities?.visibilityOptions ?? []
   const patchOnlyNewRepo = isNewRepo && !canCreateRemote
+  const showSquashCheckbox = commitCount > 1 || hasUncommittedChanges
+
+  const rebaseMutation = useMutation({
+    mutationFn: () => rebaseExecution(chatId, executionId),
+    onError: (err: Error) => {
+      setIsRefreshingAfterRebase(false)
+      setActionError(toActionError(err, 'Failed to rebase workspace onto default branch'))
+      toast.error('Rebase failed')
+    },
+    onSuccess: async () => {
+      setActionError(null)
+      setIsRefreshingAfterRebase(true)
+      try {
+        const result = await capabilitiesQuery.refetch()
+        if (result.error) {
+          toast.error('Rebased, but failed to refresh the repository status')
+          return
+        }
+        toast.success(`Successfully rebased workspace onto ${defaultBaseBranch}`)
+      } finally {
+        setIsRefreshingAfterRebase(false)
+      }
+    },
+  })
 
   const escalateMutation = useMutation({
     mutationFn: () =>
       steerExecution(chatId, executionId, {
-        prompt: `The publish to the remote repository failed because your changes conflict with the latest commits on ${baseBranch || 'the target branch'}. Rebase your branch onto origin/${baseBranch || 'the target branch'}, resolve the conflicts, re-run the tests, and make sure everything passes before the changes are pushed again.`,
+        prompt: `The publish to the remote repository failed because your changes conflict with the latest commits on ${defaultBaseBranch}. Rebase your branch onto origin/${defaultBaseBranch}, resolve the conflicts, re-run the tests, and make sure everything passes before the changes are pushed again.`,
       }),
     onError: (err: Error) => {
       toast.error(err.message || 'Failed to dispatch rebase & retest to the agent')
@@ -134,6 +188,7 @@ export function PublishModal({
       setIsDraft(false)
       setIsSquash(true)
       setCredentialId('')
+      setIsRefreshingAfterRebase(false)
     }
   }, [open, executionId])
 
@@ -146,23 +201,16 @@ export function PublishModal({
   useEffect(() => {
     if (!open || !capabilitiesQuery.data) return
     const data = capabilitiesQuery.data
-    const prs = data.publishedPrs ?? []
-    const latest = prs.length > 0 ? prs[prs.length - 1] : null
-    const merged = data.previousPrMerged ?? false
-    const existingOpen = latest != null && !merged
-    setPublishMode(existingOpen ? 'update' : 'new')
-    if (existingOpen) {
-      setBranchName(latest.headBranch)
-    } else if (merged) {
-      setBranchName(data.suggestedNewBranch || `kratis/feature-${executionId.slice(0, 8)}`)
-    } else {
-      setBranchName(data.publishedBranch || `kratis/feature-${executionId.slice(0, 8)}`)
-    }
+    setBranchName(
+      data.target?.branchName ||
+        data.publishedBranch ||
+        `kratis/feature-${executionId.slice(0, 8)}`,
+    )
     setCommitMessage(data.suggestedTitle)
     setBody(data.suggestedBody)
     setRepositoryName(data.suggestedRepositoryName || '')
     setVisibility(data.visibilityOptions[0] ?? 'PRIVATE')
-    if (data.stats.commitsAhead > 1) {
+    if (data.commitCount && data.commitCount > 1) {
       setIsSquash(true)
     }
   }, [open, capabilitiesQuery.data, executionId])
@@ -180,6 +228,7 @@ export function PublishModal({
       toast.error('Failed to push branch')
     },
     onSuccess: (data) => {
+      markPublishedInCache()
       setPushResult(data)
       setActionError(null)
       toast.success(`Successfully pushed to branch ${data.branchName}`)
@@ -190,6 +239,7 @@ export function PublishModal({
     mutationFn: () => {
       const request: PublishPrRequest = {
         branchName: branchName.trim(),
+        digest: capabilities?.digest,
         squash: isSquash,
         title: commitMessage.trim(),
       }
@@ -203,18 +253,19 @@ export function PublishModal({
       if (creatingPr) {
         request.body = body.trim()
         request.draft = isDraft
-        if (latestPublishedPr) {
-          request.createNewPr = true
-          request.newBranchName = branchName.trim()
-        }
       }
       return publishPullRequest(chatId, executionId, request)
     },
     onError: (err: Error) => {
-      setActionError(toActionError(err, 'Failed to publish changes to remote repository'))
+      const parsed = toActionError(err, 'Failed to publish changes to remote repository')
+      setActionError(parsed)
+      if (parsed.isPlanChanged) {
+        void capabilitiesQuery.refetch()
+      }
       toast.error(updatingExisting ? 'Failed to push changes' : 'Failed to create Pull Request')
     },
     onSuccess: (data) => {
+      markPublishedInCache()
       setPrResult(data)
       setActionError(null)
       toast.success(
@@ -225,7 +276,8 @@ export function PublishModal({
     },
   })
 
-  const isPending = pushMutation.isPending || publishPrMutation.isPending
+  const isPending =
+    pushMutation.isPending || publishPrMutation.isPending || rebaseMutation.isPending
 
   const handleExportPatch = async () => {
     try {
@@ -239,6 +291,10 @@ export function PublishModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (patchOnlyNewRepo) {
+      return
+    }
+    if (isRebaseRequired) {
+      rebaseMutation.mutate()
       return
     }
     if (!branchName.trim()) {
@@ -262,7 +318,6 @@ export function PublishModal({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      {/* Full-screen on mobile; h-dvh tracks the visual viewport so the dialog shrinks above the keyboard */}
       <DialogContent className="fixed inset-0 top-0 left-0 z-50 flex h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-none border-none p-4 sm:top-[50%] sm:left-[50%] sm:h-auto sm:max-h-[90vh] sm:w-full sm:max-w-[720px] sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:border sm:p-6 sm:shadow-lg md:max-w-[800px]">
         <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
@@ -301,12 +356,61 @@ export function PublishModal({
           </div>
         ) : (
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-2">
-            {/* Live Git Stats Banner */}
-            {stats && hasChanges && (
-              <div className="border-border/60 bg-muted/40 text-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium">
-                <GitBranch className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-                <span>{stats.formattedSummary}</span>
+            {/* Status & Target Bar */}
+            {rebaseMutation.isPending ? (
+              <div className="flex items-start gap-2 rounded-md border border-sky-500/40 bg-sky-500/10 p-3 text-xs text-sky-700 dark:text-sky-400">
+                <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+                <div>
+                  <span className="font-semibold">
+                    {isRefreshingAfterRebase
+                      ? 'Rebase complete. Refreshing repository status...'
+                      : `Rebasing onto ${defaultBaseBranch}...`}
+                  </span>
+                  <p className="text-muted-foreground mt-0.5">
+                    {isRefreshingAfterRebase
+                      ? 'Reading the updated commit and pull request state from the sandbox.'
+                      : 'The sandbox is replaying your commits onto the latest default branch commits.'}
+                  </p>
+                </div>
               </div>
+            ) : (
+              isRebaseRequired && (
+                <div className="flex items-start justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+                  <div className="flex items-start gap-2">
+                    <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <div>
+                      <span className="font-semibold">
+                        {defaultBaseBranch} has {incomingCommits} new commit
+                        {incomingCommits === 1 ? '' : 's'}. Rebase required before publish.
+                      </span>
+                      <p className="text-muted-foreground mt-0.5">
+                        Your changes will be rebased onto origin/{defaultBaseBranch} before
+                        publishing.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    className="h-7 shrink-0 gap-1.5 text-xs"
+                    disabled={isPending}
+                    onClick={() => rebaseMutation.mutate()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    Rebase onto {defaultBaseBranch}
+                  </Button>
+                </div>
+              )
+            )}
+
+            {isUpToDate && hasChanges && target && (
+              <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                <GitPullRequest className="h-3.5 w-3.5" />
+                {target.kind === 'UPDATE_PR'
+                  ? `Updates PR #${target.prNumber}`
+                  : target.kind === 'OPEN_PR_NEW_BRANCH'
+                    ? `Opens a new PR on ${target.branchName}`
+                    : 'Opens a new PR'}
+              </p>
             )}
 
             {/* Zero Changes Notice */}
@@ -316,7 +420,7 @@ export function PublishModal({
                 <div>
                   <span className="font-semibold">There are no changes to publish.</span>
                   <p className="text-muted-foreground mt-0.5">
-                    The working tree is clean and no new commits are ahead of the base branch.
+                    The workspace matches the branch and has no unpushed commits.
                   </p>
                 </div>
               </div>
@@ -333,6 +437,31 @@ export function PublishModal({
                     Creating a remote repository requires a personal access token or app credential.
                     Use Download Patch to apply the agent&apos;s changes to a repository you create.
                   </p>
+                </div>
+              </div>
+            )}
+
+            {/* ChangeSet Summary */}
+            {changeSet && changeSet.files.length > 0 && (
+              <div className="border-border/60 bg-muted/20 rounded-md border p-3">
+                <div className="mb-2 flex items-center justify-between text-xs font-semibold">
+                  <span>Changed files ({changeSet.files.length})</span>
+                  <span className="text-muted-foreground">
+                    +{changeSet.additions} / -{changeSet.deletions} lines
+                  </span>
+                </div>
+                <div className="max-h-36 space-y-1 overflow-y-auto text-xs">
+                  {changeSet.files.map((file) => (
+                    <div
+                      className="text-muted-foreground hover:text-foreground flex items-center justify-between py-0.5 font-mono"
+                      key={file.path}
+                    >
+                      <span className="truncate">{file.path}</span>
+                      <span className="bg-muted shrink-0 rounded px-1 text-[10px] uppercase">
+                        {file.status}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -374,7 +503,7 @@ export function PublishModal({
               </div>
             )}
 
-            {/* Success State: Branch Pushed (Generic / Push only) */}
+            {/* Success State: Branch Pushed */}
             {pushResult && !prResult && (
               <div className="space-y-2 rounded-lg border border-blue-500/30 bg-blue-500/10 p-4">
                 <div className="flex items-center gap-2 text-sm font-medium text-blue-600 dark:text-blue-400">
@@ -420,385 +549,182 @@ export function PublishModal({
               </div>
             )}
 
-            {publishedPrs.length > 0 && (
-              <div
-                className="border-border/60 bg-muted/20 rounded-md border px-3 py-2"
-                data-testid="pr-history"
-              >
-                <p className="text-muted-foreground mb-1.5 text-[11px] font-semibold tracking-wide uppercase">
-                  Pull request history
-                </p>
-                <ul className="space-y-1">
-                  {publishedPrs.map((pr) => (
-                    <li
-                      className="flex items-center justify-between gap-2 text-xs"
-                      key={`${pr.prNumber}-${pr.headBranch}`}
-                    >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span
-                          className={
-                            pr.status === 'MERGED'
-                              ? 'rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400'
-                              : pr.status === 'CLOSED'
-                                ? 'bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px] font-semibold'
-                                : 'rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400'
-                          }
+            {/* Publish Form */}
+            {!prResult && !pushResult && hasChanges && (
+              <form className="space-y-4" onSubmit={handleSubmit}>
+                {isNewRepo && canCreateRemote && (
+                  <div className="border-border/60 bg-muted/20 space-y-3 rounded-lg border p-3">
+                    <div className="flex items-center gap-2">
+                      <GitPullRequest className="text-primary h-4 w-4" />
+                      <span className="text-xs font-semibold">Remote Repository</span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="repo-name">Repository Name</Label>
+                      <Input
+                        disabled={isPending}
+                        id="repo-name"
+                        onChange={(e) => setRepositoryName(e.target.value)}
+                        placeholder="repository-name"
+                        value={repositoryName}
+                      />
+                    </div>
+
+                    {visibilityOptions.length > 1 && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="repo-visibility">Visibility</Label>
+                        <Select
+                          disabled={isPending}
+                          onValueChange={(val) => setVisibility(val as RepositoryVisibility)}
+                          value={visibility}
                         >
-                          {pr.status}
-                        </span>
-                        <a
-                          className="text-primary truncate underline"
-                          href={pr.prUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          #{pr.prNumber} {pr.headBranch}
-                        </a>
-                      </span>
-                      <span className="text-muted-foreground shrink-0">→ {pr.baseBranch}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {latestPublishedPr && previousPrMerged && !prResult && (
-              <div
-                className="flex items-start gap-2 rounded-md border border-violet-500/30 bg-violet-500/10 p-3 text-xs text-violet-700 dark:text-violet-300"
-                data-testid="previous-pr-merged"
-              >
-                <GitPullRequest className="mt-0.5 h-4 w-4 shrink-0" />
-                <div>
-                  <span className="font-semibold">
-                    Pull request #{latestPublishedPr.prNumber} was merged or closed.
-                  </span>
-                  <p className="text-muted-foreground mt-0.5">
-                    Publishing now creates a new feature branch and a new pull request, keeping the
-                    earlier one in history.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {existingPrOpen && !prResult && !pushResult && (
-              <div className="border-border/60 flex flex-col gap-2 rounded-md border p-2 sm:flex-row">
-                <button
-                  aria-pressed={publishMode === 'update'}
-                  className={`flex-1 rounded px-2 py-1.5 text-left text-xs ${
-                    publishMode === 'update'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:bg-muted'
-                  }`}
-                  disabled={isPending}
-                  onClick={() => setPublishMode('update')}
-                  type="button"
-                >
-                  Update existing PR #{latestPublishedPr.prNumber}
-                </button>
-                <button
-                  aria-pressed={publishMode === 'new'}
-                  className={`flex-1 rounded px-2 py-1.5 text-left text-xs ${
-                    publishMode === 'new'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:bg-muted'
-                  }`}
-                  disabled={isPending}
-                  onClick={() => {
-                    setPublishMode('new')
-                    setBranchName(suggestedNewBranch)
-                  }}
-                  type="button"
-                >
-                  Create a new Pull Request
-                </button>
-              </div>
-            )}
-
-            {!prResult && !pushResult && (
-              <>
-                {capabilities && !patchOnlyNewRepo && (
-                  <div
-                    className="border-border/60 bg-muted/40 text-foreground flex items-start gap-2 rounded-md border px-3 py-2 text-xs"
-                    data-testid="publish-plan"
-                  >
-                    {supportsPr ? (
-                      <GitPullRequest className="text-muted-foreground mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    ) : (
-                      <GitBranch className="text-muted-foreground mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <SelectTrigger id="repo-visibility">
+                            <SelectValue placeholder="Select visibility" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {visibilityOptions.map((opt) => (
+                              <SelectItem key={opt} value={opt}>
+                                {opt.charAt(0) + opt.slice(1).toLowerCase()}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     )}
-                    <span>
-                      {creatingPr && (
-                        <>
-                          {isNewRepo ? (
-                            <>
-                              Creates repository{' '}
-                              <code className="font-mono">
-                                {repositoryName || 'new repository'}
-                              </code>
-                              , pushes <code className="font-mono">{branchName}</code>, and opens a
-                              pull request against <code className="font-mono">{baseBranch}</code>.
-                            </>
-                          ) : (
-                            <>
-                              Pushes <code className="font-mono">{branchName}</code> and opens a
-                              pull request against <code className="font-mono">{baseBranch}</code>.
-                            </>
-                          )}
-                        </>
-                      )}
-                      {updatingExisting && (
-                        <>
-                          Pushes new commits to <code className="font-mono">{branchName}</code> and
-                          updates pull request{' '}
-                          <a
-                            className="text-primary underline"
-                            href={latestPublishedPr.prUrl}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            #{latestPublishedPr.prNumber}
-                          </a>
-                          .
-                        </>
-                      )}
-                      {!supportsPr && (
-                        <>
-                          {branchLocked ? (
-                            <>
-                              Pushes new commits to <code className="font-mono">{branchName}</code>.
-                            </>
-                          ) : (
-                            <>
-                              Pushes <code className="font-mono">{branchName}</code> to the remote
-                              repository.
-                            </>
-                          )}
-                          <span className="text-muted-foreground mt-0.5 block">
-                            Automated pull requests are not supported for{' '}
-                            {capabilities.repositoryType} repositories.
-                          </span>
-                        </>
-                      )}
-                    </span>
+
+                    {credentials && credentials.length > 0 && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="repo-credential">Git Credential</Label>
+                        <Select
+                          disabled={isPending}
+                          onValueChange={setCredentialId}
+                          value={credentialId}
+                        >
+                          <SelectTrigger id="repo-credential">
+                            <SelectValue placeholder="Select credential" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {credentials.map((cred) => (
+                              <SelectItem key={cred.id} value={cred.id}>
+                                {cred.name} ({cred.type})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                <form className="space-y-4" onSubmit={handleSubmit}>
+                <div className="space-y-1.5">
+                  <Label htmlFor="branch-name">Branch name</Label>
+                  <Input
+                    disabled={isPending}
+                    id="branch-name"
+                    onChange={(e) => setBranchName(e.target.value)}
+                    value={branchName}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="commit-message">
+                    {creatingPr ? 'Pull request title' : 'Commit message'}
+                  </Label>
+                  <Input
+                    disabled={isPending}
+                    id="commit-message"
+                    onChange={(e) => setCommitMessage(e.target.value)}
+                    value={commitMessage}
+                  />
+                </div>
+
+                {creatingPr && (
                   <div className="space-y-1.5">
-                    <Label className="text-xs" htmlFor="branch-name">
-                      Feature Branch <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                      className="font-mono text-xs"
-                      disabled={isPending || branchLocked}
-                      id="branch-name"
-                      onChange={(e) => setBranchName(e.target.value)}
-                      placeholder="kratis/feature-branch"
-                      required
-                      value={branchName}
-                    />
-                    {branchLocked && (
-                      <p className="text-muted-foreground text-[11px]">
-                        Locked after the first publish — new commits are pushed to this branch.
-                      </p>
-                    )}
-                  </div>
-
-                  {isNewRepo && canCreateRemote && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs" htmlFor="repository-name">
-                        Repository Name <span className="text-destructive">*</span>
-                      </Label>
-                      <Input
-                        className="font-mono text-xs"
-                        disabled={isPending}
-                        id="repository-name"
-                        onChange={(e) => setRepositoryName(e.target.value)}
-                        placeholder="my-new-repository"
-                        required
-                        value={repositoryName}
-                      />
-                      <p className="text-muted-foreground text-[11px]">
-                        Created in your {capabilities?.repositoryType} account when you publish.
-                      </p>
-                    </div>
-                  )}
-
-                  {isNewRepo && canCreateRemote && visibilityOptions.length > 0 && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs" htmlFor="repository-visibility">
-                        Visibility
-                      </Label>
-                      <Select
-                        disabled={isPending}
-                        onValueChange={(value) => setVisibility(value as RepositoryVisibility)}
-                        value={visibility}
-                      >
-                        <SelectTrigger className="text-xs" id="repository-visibility">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {visibilityOptions.map((option) => (
-                            <SelectItem key={option} value={option}>
-                              {option.charAt(0) + option.slice(1).toLowerCase()}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-
-                  {isNewRepo && (credentials?.length ?? 0) > 0 && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs" htmlFor="repository-credential">
-                        Credential
-                      </Label>
-                      <Select
-                        disabled={isPending}
-                        onValueChange={(value) => setCredentialId(value)}
-                        value={credentialId}
-                      >
-                        <SelectTrigger className="text-xs" id="repository-credential">
-                          <SelectValue placeholder="Select a credential" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(credentials ?? []).map((credential) => (
-                            <SelectItem key={credential.id} value={credential.id}>
-                              {credential.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs" htmlFor="commit-message">
-                      Commit Message <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
+                    <Label htmlFor="pr-body">Pull request description</Label>
+                    <Textarea
+                      className="min-h-[100px] resize-y"
                       disabled={isPending}
-                      id="commit-message"
-                      onChange={(e) => setCommitMessage(e.target.value)}
-                      placeholder="feat: implement feature"
-                      required
-                      value={commitMessage}
+                      id="pr-body"
+                      onChange={(e) => setBody(e.target.value)}
+                      value={body}
                     />
-                    <p className="text-muted-foreground text-[11px]">
-                      {creatingPr
-                        ? 'Also used as the pull request title when a new pull request is opened.'
-                        : 'Used as the commit message for the pushed changes.'}
-                    </p>
                   </div>
+                )}
 
-                  {creatingPr && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs" htmlFor="pr-body">
-                        Description / Summary
-                      </Label>
-                      <Textarea
-                        className="min-h-[90px] resize-y font-mono text-xs"
-                        disabled={isPending}
-                        id="pr-body"
-                        onChange={(e) => setBody(e.target.value)}
-                        placeholder="Explain the changes..."
-                        rows={4}
-                        value={body}
-                      />
-                    </div>
+                {showSquashCheckbox && (
+                  <div className="flex items-center space-x-2 pt-1">
+                    <Checkbox
+                      checked={isSquash}
+                      disabled={isPending}
+                      id="squash-commits"
+                      onCheckedChange={(checked) => setIsSquash(Boolean(checked))}
+                    />
+                    <Label
+                      className="text-muted-foreground cursor-pointer text-xs font-normal"
+                      htmlFor="squash-commits"
+                    >
+                      Squash commits into a single commit before push
+                    </Label>
+                  </div>
+                )}
+
+                <DialogFooter className="border-border/50 bg-card sticky bottom-0 flex flex-col-reverse gap-2 border-t pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-between">
+                  {!patchOnlyNewRepo && (
+                    <Button
+                      className="text-muted-foreground hover:text-foreground gap-1.5 text-xs"
+                      disabled={isPending}
+                      onClick={() => void handleExportPatch()}
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Download Patch (.patch)
+                    </Button>
                   )}
 
-                  {creatingPr && (
-                    <div className="flex items-center space-x-2 pt-1">
-                      <Checkbox
-                        checked={isDraft}
-                        disabled={isPending}
-                        id="pr-draft"
-                        onCheckedChange={(checked) => setIsDraft(Boolean(checked))}
-                      />
-                      <Label
-                        className="text-muted-foreground cursor-pointer text-xs font-normal"
-                        htmlFor="pr-draft"
-                      >
-                        Create pull request as draft
-                      </Label>
-                    </div>
-                  )}
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      disabled={isPending}
+                      onClick={() => onOpenChange(false)}
+                      type="button"
+                      variant="outline"
+                    >
+                      Cancel
+                    </Button>
 
-                  {stats && stats.commitsAhead > 1 && (
-                    <div className="flex items-center space-x-2 pt-1">
-                      <Checkbox
-                        checked={isSquash}
-                        disabled={isPending}
-                        id="squash-commits"
-                        onCheckedChange={(checked) => setIsSquash(Boolean(checked))}
-                      />
-                      <Label
-                        className="text-muted-foreground cursor-pointer text-xs font-normal"
-                        htmlFor="squash-commits"
-                      >
-                        Squash {stats.commitsAhead} commits into a single commit before push
-                      </Label>
-                    </div>
-                  )}
-
-                  <DialogFooter className="border-border/50 bg-card sticky bottom-0 flex flex-col-reverse gap-2 border-t pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-between">
-                    {!patchOnlyNewRepo && (
+                    {isRebaseRequired ? (
                       <Button
-                        className="text-muted-foreground hover:text-foreground gap-1.5 text-xs"
+                        className="gap-1.5"
                         disabled={isPending}
-                        onClick={() => void handleExportPatch()}
+                        onClick={() => rebaseMutation.mutate()}
                         type="button"
-                        variant="ghost"
+                        variant="default"
                       >
-                        <Download className="h-3.5 w-3.5" />
-                        Download Patch (.patch)
+                        {rebaseMutation.isPending && (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        )}
+                        {isRefreshingAfterRebase
+                          ? 'Refreshing status...'
+                          : rebaseMutation.isPending
+                            ? 'Rebasing...'
+                            : `Rebase onto ${defaultBaseBranch}`}
+                      </Button>
+                    ) : (
+                      <Button className="gap-1.5" disabled={isPending || !hasChanges} type="submit">
+                        {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        {creatingPr
+                          ? 'Create Pull Request'
+                          : updatingExisting
+                            ? 'Update PR'
+                            : 'Publish'}
                       </Button>
                     )}
-
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        disabled={isPending}
-                        onClick={() => onOpenChange(false)}
-                        type="button"
-                        variant="outline"
-                      >
-                        Cancel
-                      </Button>
-
-                      {patchOnlyNewRepo ? (
-                        <Button
-                          className="gap-1.5"
-                          disabled={isPending || !hasChanges}
-                          onClick={() => void handleExportPatch()}
-                          type="button"
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          Download Patch
-                        </Button>
-                      ) : (
-                        <Button
-                          className="gap-1.5"
-                          disabled={isPending || !hasChanges}
-                          type="submit"
-                        >
-                          {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                          {creatingPr
-                            ? isNewRepo
-                              ? 'Create Repository & Pull Request'
-                              : 'Create Pull Request'
-                            : updatingExisting
-                              ? `Push to PR #${latestPublishedPr.prNumber}`
-                              : 'Push Branch'}
-                        </Button>
-                      )}
-                    </div>
-                  </DialogFooter>
-                </form>
-              </>
+                  </div>
+                </DialogFooter>
+              </form>
             )}
 
-            {(prResult || pushResult) && (
+            {(prResult || pushResult || !hasChanges) && (
               <DialogFooter className="pt-2">
                 <Button onClick={() => onOpenChange(false)} type="button">
                   Close
@@ -813,8 +739,13 @@ export function PublishModal({
 }
 
 function toActionError(err: Error, fallback: string): PublishActionError {
+  const is409 = err instanceof ApiError && err.status === 409
+  const is503 = err instanceof ApiError && err.status === 503
+  const msg = err.message || fallback
   return {
-    isRebaseConflict: err instanceof ApiError && err.status === 409,
-    message: err.message || fallback,
+    isPlanChanged: is409 && msg.includes('changed'),
+    isProviderUnavailable: is503,
+    isRebaseConflict: is409 && msg.includes('conflict'),
+    message: msg,
   }
 }

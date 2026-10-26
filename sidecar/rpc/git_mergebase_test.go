@@ -77,14 +77,14 @@ func connectedGitClientWith(t *testing.T, workspace string) (*Client, chan []byt
 	return client, received
 }
 
-func TestExecuteGitDiffSummary_DiffsAgainstMergeBase(t *testing.T) {
+func TestBuildGitDiffSummary_DiffsAgainstMergeBase(t *testing.T) {
 	bareDir, workDir := setupTestGitRepoWithRemote(t)
 	defer func() {
 		_ = os.RemoveAll(bareDir)
 		_ = os.RemoveAll(workDir)
 	}()
 
-	client, received := connectedGitClient(t, workDir)
+	client := &Client{workspace: workDir}
 
 	// Agent changes: modify README.md and add a new untracked file.
 	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Agent change\n"), 0600); err != nil {
@@ -100,15 +100,10 @@ func TestExecuteGitDiffSummary_DiffsAgainstMergeBase(t *testing.T) {
 	commitToBareMain(t, bareDir, "upstream.txt", "upstream\n")
 	runGitCmd(t, workDir, "fetch", "origin")
 
-	client.ExecuteGitDiffSummary(GitDiffSummaryParams{BaseBranch: "main", ExecutionID: "exec-1"}, "req-diff")
-
-	var envelope struct {
-		Result GitDiffSummaryResult `json:"result"`
+	result, err := client.buildGitDiffSummary("main")
+	if err != nil {
+		t.Fatalf("Failed to build diff summary: %v", err)
 	}
-	if err := json.Unmarshal(captureNextResponse(t, received), &envelope); err != nil {
-		t.Fatalf("Failed to unmarshal diff summary: %v", err)
-	}
-	result := envelope.Result
 
 	paths := map[string]bool{}
 	for _, f := range result.Files {
@@ -183,11 +178,17 @@ func TestExecuteGitPush_FirstPublishSquashPreservesUpstreamChanges(t *testing.T)
 	commitToBareMain(t, bareDir, "upstream.txt", "upstream\n")
 	runGitCmd(t, workDir, "fetch", "origin")
 
-	client.ExecuteGitPush(GitPushParams{
+	// Under new publish flow, rebase onto origin/main applies upstream changes first
+	client.ExecuteGitRebase(GitRebaseParams{
+		DefaultBranch: "main",
+	}, "req-rebase-1")
+
+	client.ExecuteGitPublish(GitPushParams{
 		BranchName:    "kratis/feature",
 		CommitMessage: "feat: agent feature",
 		Squash:        true,
-		TargetBranch:  "main",
+		DefaultBranch: "main",
+		CreateBranch:  true,
 	}, "req-push-1")
 
 	// The pushed branch must include the upstream change, not revert it.

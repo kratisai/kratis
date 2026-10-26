@@ -215,6 +215,62 @@ public class BitbucketApiService {
         return toRemoteRepositoryDto(parse(response));
     }
 
+    public PullRequestSnapshot getPullRequest(String workspace, String repoSlug, long id, String token) {
+        requireToken(token);
+        try {
+            ResponseEntity<String> response = bitbucketApiClient.getPullRequest(workspace, repoSlug, id, bearer(token));
+            return toPullRequestSnapshot(parse(response));
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return null;
+            }
+            throw new ProviderUnavailableException("Bitbucket getPullRequest failed: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new ProviderUnavailableException("Bitbucket getPullRequest failed: " + e.getMessage(), e);
+        }
+    }
+
+    public Optional<PullRequestSnapshot> findOpenPullRequestForHead(
+            String workspace, String repoSlug, String headBranch, String token) {
+        requireToken(token);
+        try {
+            String query = String.format("source.branch.name = \"%s\" AND state = \"OPEN\"", headBranch);
+            ResponseEntity<String> response =
+                    bitbucketApiClient.listPullRequests(workspace, repoSlug, query, bearer(token));
+            JsonNode root = parse(response);
+            JsonNode values = root.path("values");
+            if (values.isArray() && !values.isEmpty()) {
+                return Optional.of(toPullRequestSnapshot(values.get(0)));
+            }
+            return Optional.empty();
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw new ProviderUnavailableException("Bitbucket findOpenPullRequestForHead failed: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new ProviderUnavailableException("Bitbucket findOpenPullRequestForHead failed: " + e.getMessage(), e);
+        }
+    }
+
+    private PullRequestSnapshot toPullRequestSnapshot(JsonNode node) {
+        long number = node.path("id").asLong();
+        String stateStr = node.path("state").asText("");
+        PullRequestSnapshot.PullRequestState state;
+        if ("MERGED".equalsIgnoreCase(stateStr)) {
+            state = PullRequestSnapshot.PullRequestState.MERGED;
+        } else if ("DECLINED".equalsIgnoreCase(stateStr) || "SUPERSEDED".equalsIgnoreCase(stateStr)) {
+            state = PullRequestSnapshot.PullRequestState.CLOSED;
+        } else {
+            state = PullRequestSnapshot.PullRequestState.OPEN;
+        }
+        String url = node.path("links").path("html").path("href").asText("");
+        String headBranch = node.path("source").path("branch").path("name").asText("");
+        String baseBranch = node.path("destination").path("branch").path("name").asText("");
+        String headSha = node.path("source").path("commit").path("hash").asText("");
+        return new PullRequestSnapshot(number, state, url, headBranch, baseBranch, headSha);
+    }
+
     private Integer extractPageNumber(String url) {
         String query = URI.create(url).getQuery();
         if (query == null) {
