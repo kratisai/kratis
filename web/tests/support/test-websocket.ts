@@ -313,3 +313,24 @@ export function triggerMockTelemetry(
     }),
   })
 }
+
+/** Emit a `telemetry` tool-complete frame for a task that already started. */
+export function triggerMockToolComplete(
+  ws: MockWebSocket,
+  chatId: string,
+  taskId: string,
+  attempt = 1,
+  status = 'COMPLETED',
+) {
+  ws.onmessage?.({
+    data: JSON.stringify({
+      jsonrpc: '2.0',
+      result: {
+        attempt,
+        chatId,
+        event: { status, taskId },
+        type: 'telemetry',
+      },
+    }),
+  })
+}

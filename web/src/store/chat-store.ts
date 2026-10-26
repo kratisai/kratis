@@ -116,6 +116,11 @@ function applyTelemetryEvent(
   attempt: number,
 ): WorkingItem[] {
   if (isToolStartEvent(event)) {
+    const existingIndex = items.findIndex(
+      (item) => item.type === 'tool' && item.taskId === event.taskId && item.attempt === attempt,
+    )
+    if (existingIndex !== -1) return items
+
     const newTool: WorkingItem = {
       attempt,
       status: 'running',
@@ -386,8 +391,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
       pendingMessageIds.delete(messageId)
     }
 
-    if (chatId) {
-      // Chat load complete marker (history replay from chat.subscribe)
+    if (chatId && !messageId) {
+      // Chat load complete marker (history replay from chat.subscribe). The working
+      // block kept in memory across a disconnect is stale: reconcile it against the
+      // replayed history so a completed turn does not leave a permanent spinner.
+      set((state) => {
+        const chatMessages = state.messages[chatId] ?? []
+        const openIndex = chatMessages.findIndex((m) => m.role === 'working' && m.isStreaming)
+        const lastMessage = chatMessages.at(-1)
+
+        let updatedMessages = chatMessages
+        let sendingChatIds = state.sendingChatIds
+
+        if (lastMessage?.role === 'user') {
+          // The turn is still running on the server. Drop the partial block so the
+          // replayed telemetry from ChatFluxRegistry builds a clean, authoritative one.
+          updatedMessages = chatMessages.filter((m) => !(m.role === 'working' && m.isStreaming))
+          if (!sendingChatIds.has(chatId)) {
+            sendingChatIds = new Set(sendingChatIds).add(chatId)
+          }
+        } else if (
+          openIndex !== -1 &&
+          lastMessage &&
+          (lastMessage.role === 'assistant' || lastMessage.role === 'system')
+        ) {
+          // The turn completed while disconnected: close the open block here because
+          // the replay marker carries no messageId for the normal completion path.
+          const existing = updatedMessages[openIndex]
+          if (existing.role === 'working') {
+            updatedMessages = [...updatedMessages]
+            updatedMessages[openIndex] = {
+              ...existing,
+              endTime: existing.endTime ?? Date.now(),
+              isStreaming: false,
+            }
+          }
+          sendingChatIds = withoutChatId(sendingChatIds, chatId)
+        }
+
+        return {
+          currentChatId: chatId,
+          messages: {
+            ...state.messages,
+            [chatId]: updatedMessages,
+          },
+          sendingChatIds,
+        }
+      })
+    } else if (chatId) {
       set((state) => ({
         currentChatId: chatId,
         messages: {
