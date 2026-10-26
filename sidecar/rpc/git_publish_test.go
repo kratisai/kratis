@@ -19,10 +19,7 @@ func TestGitObservePublish_CleanAndRebase(t *testing.T) {
 		_ = os.RemoveAll(workDir)
 	}()
 
-	client := &Client{
-		workspace: workDir,
-		envFile:   filepath.Join(bareDir, ".test-env"),
-	}
+	client := newTestClient(t, workDir)
 
 	// 1. Initial checkout state: base SHA should be recorded
 	headCmd := exec.Command("git", "rev-parse", "HEAD")
@@ -275,5 +272,90 @@ func TestGitObservePublish_CleanAndRebase(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("Timeout waiting for delta observe response")
+	}
+}
+
+func TestGitObservePublish_RepairsInvalidPersistedBase(t *testing.T) {
+	bareDir, workDir := setupTestGitRepoWithRemote(t)
+	defer func() {
+		_ = os.RemoveAll(bareDir)
+		_ = os.RemoveAll(workDir)
+	}()
+
+	base := gitOutput(t, workDir, "rev-parse", "HEAD")
+	client := newTestClient(t, workDir)
+	client.persistExecutionBaseSha(base)
+
+	if err := os.WriteFile(filepath.Join(workDir, "agent.txt"), []byte("agent work\n"), 0600); err != nil {
+		t.Fatalf("Failed to write agent file: %v", err)
+	}
+	runGitCmd(t, workDir, "add", "agent.txt")
+	runGitCmd(t, workDir, "commit", "-m", "feat: agent work")
+
+	const corruptBase = "fc645f37dadbb7812fed2699ea0197126adbb164"
+	if err := os.WriteFile(client.executionBaseShaPath(), []byte(corruptBase), 0600); err != nil {
+		t.Fatalf("Failed to corrupt execution base: %v", err)
+	}
+
+	received := make(chan []byte, 10)
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			received <- msg
+		}
+	})
+	defer srv.Close()
+
+	client.serverURL = wsURL(srv)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(srv), nil)
+	if err != nil {
+		t.Fatalf("Dial error: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	client.wsConn = conn
+
+	client.ExecuteGitObservePublish(GitObservePublishParams{
+		ExecutionID: "exec-corrupt-base",
+	}, "req-obs-corrupt")
+
+	select {
+	case data := <-received:
+		var resp jsonRpcSuccessEnvelope[GitObservePublishResult]
+		if err := json.Unmarshal(data, &resp); err != nil {
+			t.Fatalf("Failed to parse observe response: %v, raw: %s", err, string(data))
+		}
+		if resp.Result.ExecutionBaseSha != base {
+			t.Errorf("Expected repaired execution base %s, got %s", base, resp.Result.ExecutionBaseSha)
+		}
+		if resp.Result.CommitCount != 1 {
+			t.Errorf("Expected one unpushed commit, got %d", resp.Result.CommitCount)
+		}
+		if len(resp.Result.ChangeSet.Files) == 0 {
+			t.Error("Expected changes after repairing the base, got none")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Timeout waiting for observe response")
+	}
+
+	if got := client.readPersistedExecutionBaseSha(); got != base {
+		t.Errorf("Expected persisted base to be repaired to %s, got %s", base, got)
+	}
+}
+
+func TestComputeChangeSetStats_InvalidBaseReturnsError(t *testing.T) {
+	bareDir, workDir := setupTestGitRepoWithRemote(t)
+	defer func() {
+		_ = os.RemoveAll(bareDir)
+		_ = os.RemoveAll(workDir)
+	}()
+
+	client := newTestClient(t, workDir)
+	_, err := client.computeChangeSetStats(workDir, os.Environ(), "fc645f37dadbb7812fed2699ea0197126adbb164")
+	if err == nil {
+		t.Fatal("Expected an error for an invalid base commit, got nil")
 	}
 }

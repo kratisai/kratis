@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,23 +13,30 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// TestMain redirects the default credentials dir (production: /kratis) to a
-// temp dir. The sidecar test-suite is regularly run INSIDE a live sandbox
+// TestMain redirects the default state root (production: /kratis) to a temp
+// dir. The sidecar test-suite is regularly run INSIDE a live sandbox
 // (self-hosting development), where /kratis is the running daemon's real state.
-// Without this redirect, any test creating a Client via NewClient — or a future
-// test that forgets c.credentialsDir = t.TempDir() — would overwrite/delete the
-// live daemon's gitconfig and credential helper.
+// Without this redirect, any test creating a Client via NewClient would write
+// into the live daemon's state. Clients built directly in tests must also set
+// stateDir; stateRoot/statePath and resolveWorkspace panic otherwise.
 func TestMain(m *testing.M) {
-	credentialsDir, err := os.MkdirTemp("", "kratis-test-credentials-*")
+	stateDir, err := os.MkdirTemp("", "kratis-test-state-*")
 	if err != nil {
-		panic("failed to create temp credentials dir: " + err.Error())
+		panic("failed to create temp state dir: " + err.Error())
 	}
-	defaultCredentialsDir = credentialsDir
-	defaultTerminalLogFile = filepath.Join(credentialsDir, "logs", "terminal.log")
+	defaultStateDir = stateDir
 
 	code := m.Run()
-	_ = os.RemoveAll(credentialsDir)
+	_ = os.RemoveAll(stateDir)
 	os.Exit(code)
+}
+
+// newTestClient returns a Client whose workspace and persistent state are both
+// isolated under t.TempDir(). Tests must never construct a Client that points
+// at /kratis or /kratis/workspace.
+func newTestClient(t *testing.T, workspace string) *Client {
+	t.Helper()
+	return &Client{workspace: workspace, stateDir: t.TempDir()}
 }
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
@@ -86,7 +92,7 @@ func wsURL(srv *httptest.Server) string {
 // client with an active wsConn (waiting up to 500 ms).
 func connectClient(t *testing.T, url, token string) *Client {
 	t.Helper()
-	c := NewClient(url, token, "")
+	c := NewClient(url, token, t.TempDir())
 	setTestClientTimeouts(c)
 	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
@@ -94,8 +100,7 @@ func connectClient(t *testing.T, url, token string) *Client {
 	}
 	c.mu.Lock()
 	c.wsConn = conn
-	c.envFile = filepath.Join(t.TempDir(), ".kratis-env")
-	c.credentialsDir = t.TempDir()
+	c.stateDir = t.TempDir()
 	c.mu.Unlock()
 	return c
 }

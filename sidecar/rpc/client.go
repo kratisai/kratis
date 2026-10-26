@@ -29,8 +29,13 @@ const (
 	DefaultPermissionTimeout = 15 * time.Minute
 
 	DefaultPromptQuietPeriod = 10 * time.Second
-	defaultEnvFile           = "/kratis/.kratis-env"
+
+	// productionStateDir is the root of the running sidecar's persistent state.
+	// Everything the sidecar must keep across restarts lives below it.
+	productionStateDir = "/kratis"
 )
+
+var defaultStateDir = productionStateDir
 
 // maxOutboundFrameBytes bounds every JSON-RPC frame sent to the control plane.
 // Tomcat rejects inbound text messages above its maxTextMessageBufferSize
@@ -61,11 +66,6 @@ type disconnectReport struct {
 	reason string
 }
 
-// defaultCredentialsDir is where the sidecar persists its generated gitconfig
-// and credential helper. It is a variable (not a const) so tests can redirect
-// it to a temp dir and never clobber a live sandbox's /kratis state.
-var defaultCredentialsDir = "/kratis"
-
 type ClientTimeouts struct {
 	ReconnectDelay        time.Duration
 	HeartbeatInterval     time.Duration
@@ -92,9 +92,7 @@ type Client struct {
 	serverURL        string
 	token            string
 	workspace        string
-	envFile          string
-	credentialsDir   string
-	terminalLogFile  string
+	stateDir         string
 	terminalLogMu    sync.Mutex
 	executor         *runner.Executor
 	sshAgentPID      string
@@ -178,13 +176,14 @@ type Client struct {
 }
 
 func NewClient(serverURL, token, workspace string) *Client {
+	if workspace == "" {
+		panic("rpc: NewClient requires an explicit workspace")
+	}
 	c := &Client{
 		serverURL:          serverURL,
 		token:              token,
 		workspace:          workspace,
-		envFile:            defaultEnvFile,
-		credentialsDir:     defaultCredentialsDir,
-		terminalLogFile:    defaultTerminalLogFile,
+		stateDir:           defaultStateDir,
 		executor:           runner.NewExecutor(),
 		pending:            make(map[interface{}]chan *JsonRpcResponse),
 		pendingHitl:        make(map[string]chan HitlActivityResult),
@@ -241,21 +240,55 @@ func (c *Client) SetDebug(debug bool) {
 	c.debug = debug
 }
 
+// stateRoot returns this client's persistent state root. A Client is invalid
+// until its dependencies are set, so a zero-value Client fails instead of
+// silently falling back to the live sandbox's /kratis state. NewClient sets the
+// root for the daemon; tests must inject a t.TempDir() root.
+func (c *Client) stateRoot() string {
+	if c.stateDir == "" {
+		panic("rpc: Client has no stateDir; construct it with NewClient")
+	}
+	return c.stateDir
+}
+
+// statePath joins name onto the state root and rejects any escape from it.
+func (c *Client) statePath(name ...string) string {
+	root := c.stateRoot()
+	path := filepath.Join(append([]string{root}, name...)...)
+	if !pathWithin(root, path) {
+		panic(fmt.Sprintf("rpc: state path %q escapes state root %q", path, root))
+	}
+	return path
+}
+
+func pathWithin(root, path string) bool {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	pathAbs, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(rootAbs, pathAbs)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
+}
+
 // envFilePath returns the location of the persisted environment file. It is
 // kept outside the workspace so it never pollutes the git working tree.
 func (c *Client) envFilePath() string {
-	if c.envFile != "" {
-		return c.envFile
-	}
-	return defaultEnvFile
+	return c.statePath(".kratis-env")
 }
 
 // acpSessionIDPath returns the location of the persisted ACP session id. It sits
-// beside the environment file (outside the workspace) so it survives a sandbox
-// suspend snapshot and is never part of the git working tree. The sandbox is the
-// single owner of this id: the control plane never sees it.
+// in the state root (outside the workspace) so it survives a sandbox suspend
+// snapshot and is never part of the git working tree. The sandbox is the single
+// owner of this id: the control plane never sees it.
 func (c *Client) acpSessionIDPath() string {
-	return filepath.Join(filepath.Dir(c.envFilePath()), "acp_session_id")
+	return c.statePath("acp_session_id")
 }
 
 // readPersistedSessionID returns the stored ACP session id, or "" when none has
@@ -285,17 +318,17 @@ func (c *Client) persistSessionID(sessionID string) {
 }
 
 // diffBaseBranchPath returns the location of the persisted diff base branch. It
-// sits beside the environment file (outside the workspace) so it survives a
-// sandbox suspend snapshot and is never part of the git working tree.
+// sits in the state root (outside the workspace) so it survives a sandbox
+// suspend snapshot and is never part of the git working tree.
 func (c *Client) diffBaseBranchPath() string {
-	return filepath.Join(filepath.Dir(c.envFilePath()), "diff_base_branch")
+	return c.statePath("diff_base_branch")
 }
 
 // executionBaseShaPath returns the location of the persisted execution base SHA.
-// It sits beside the environment file (outside the workspace) so it survives a
-// sandbox suspend snapshot and is never part of the git working tree.
+// It sits in the state root (outside the workspace) so it survives a sandbox
+// suspend snapshot and is never part of the git working tree.
 func (c *Client) executionBaseShaPath() string {
-	return filepath.Join(filepath.Dir(c.envFilePath()), "execution_base_sha")
+	return c.statePath("execution_base_sha")
 }
 
 // readPersistedExecutionBaseSha returns the base commit SHA recorded at checkout or updated after rebase.

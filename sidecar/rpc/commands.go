@@ -36,6 +36,7 @@ func (c *Client) ExecuteExec(params ExecParams, reqID interface{}) {
 	}
 
 	envFile := c.envFilePath()
+	workspace := c.resolveWorkspace()
 
 	cmdStr := params.Command
 	if params.PersistEnv {
@@ -43,7 +44,7 @@ func (c *Client) ExecuteExec(params ExecParams, reqID interface{}) {
 		if _, err := os.Stat(envFile); os.IsNotExist(err) {
 			initEnvCmd := fmt.Sprintf("mkdir -p %s && export -p > %s", filepath.Dir(envFile), envFile)
 			c.mu.Lock()
-			c.executor.Dir = c.workspace
+			c.executor.Dir = workspace
 			c.executor.Env = os.Environ()
 			c.mu.Unlock()
 			_, _ = c.executor.Execute(context.Background(), initEnvCmd, nil)
@@ -66,7 +67,7 @@ func (c *Client) ExecuteExec(params ExecParams, reqID interface{}) {
 	}
 
 	c.mu.Lock()
-	c.executor.Dir = c.workspace
+	c.executor.Dir = workspace
 	c.executor.Env = os.Environ()
 	c.mu.Unlock()
 

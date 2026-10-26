@@ -66,7 +66,7 @@ func TestExecuteGitPush_SuccessWithUncommittedChanges(t *testing.T) {
 		_ = os.RemoveAll(workDir)
 	}()
 
-	client := &Client{workspace: workDir}
+	client := newTestClient(t, workDir)
 
 	// Create uncommitted modifications
 	modFile := filepath.Join(workDir, "README.md")
@@ -122,7 +122,7 @@ func TestExecuteGitPush_PreservesConfiguredUserIdentity(t *testing.T) {
 	_ = exec.Command("git", "-C", workDir, "config", "user.name", "Alice Engineer").Run()
 	_ = exec.Command("git", "-C", workDir, "config", "user.email", "alice@enterprise.com").Run()
 
-	client := &Client{workspace: workDir}
+	client := newTestClient(t, workDir)
 
 	// Add uncommitted file
 	file := filepath.Join(workDir, "alice_work.txt")
@@ -157,7 +157,7 @@ func TestExecuteGitPush_Squash(t *testing.T) {
 		_ = os.RemoveAll(workDir)
 	}()
 
-	client := &Client{workspace: workDir}
+	client := newTestClient(t, workDir)
 
 	// Create 2 intermediate commits
 	f1 := filepath.Join(workDir, "f1.txt")
@@ -198,7 +198,7 @@ func TestExecuteGitPush_Validation(t *testing.T) {
 		_ = os.RemoveAll(workDir)
 	}()
 
-	client := &Client{workspace: workDir}
+	client := newTestClient(t, workDir)
 
 	// Empty branch name should not panic
 	client.ExecuteGitPush(GitPushParams{
@@ -307,7 +307,6 @@ func TestExecuteGitPush_PreservesMultipleCommitsWithoutSquash(t *testing.T) {
 	}()
 
 	client, received := connectedGitClient(t, workDir)
-	client.envFile = filepath.Join(bareDir, ".test-env")
 
 	// Commit 1
 	_ = os.WriteFile(filepath.Join(workDir, "f1.txt"), []byte("f1\n"), 0600)
@@ -496,7 +495,7 @@ func TestRemoteBranchHeadSha_ErrorIsNotTreatedAsAbsent(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
-	client := &Client{workspace: tempDir}
+	client := newTestClient(t, tempDir)
 	// In a directory that is not a git repo or remote doesn't exist, git ls-remote fails with exit 128.
 	_, err = client.remoteBranchHeadSha(tempDir, os.Environ(), "some-branch")
 	if err == nil {

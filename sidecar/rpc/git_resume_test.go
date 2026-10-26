@@ -81,7 +81,7 @@ func TestResumedConnector_ManifestListsOnlyLocalChanges(t *testing.T) {
 	first.ExecuteCheckout(CheckoutParams{URL: f.bareDir, Branch: "develop", ExecutionID: "exec-1"}, "req-co")
 
 	resumed, received := connectedGitClient(t, f.workDir)
-	resumed.envFile = first.envFile
+	resumed.stateDir = first.stateDir
 	resumed.mu.Lock()
 	resumed.currentExecutionID = "exec-1"
 	resumed.mu.Unlock()
@@ -140,7 +140,7 @@ func TestResolveDiffBase_Matrix(t *testing.T) {
 }
 
 func TestDiffBaseBranch_PersistedValueIsTrimmedAndBlankIsIgnored(t *testing.T) {
-	client := &Client{envFile: filepath.Join(t.TempDir(), ".kratis-env")}
+	client := &Client{stateDir: t.TempDir()}
 
 	if got := client.diffBaseBranch(); got != "" {
 		t.Errorf("Expected no base branch before any checkout, got %q", got)
@@ -162,7 +162,7 @@ func TestDiffBaseBranch_PersistedValueIsTrimmedAndBlankIsIgnored(t *testing.T) {
 }
 
 func TestPersistBaseBranch_BlankKeepsExistingValue(t *testing.T) {
-	client := &Client{envFile: filepath.Join(t.TempDir(), ".kratis-env")}
+	client := &Client{stateDir: t.TempDir()}
 	client.persistBaseBranch("develop")
 	client.persistBaseBranch("  ")
 

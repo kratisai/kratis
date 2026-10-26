@@ -19,10 +19,7 @@ func TestGitPublish_RebaseConflictRestoresWorkspace(t *testing.T) {
 		_ = os.RemoveAll(workDir)
 	}()
 
-	client := &Client{
-		workspace: workDir,
-		envFile:   filepath.Join(bareDir, ".test-env"),
-	}
+	client := newTestClient(t, workDir)
 
 	// Make local modification to README.md
 	readmePath := filepath.Join(workDir, "README.md")
@@ -94,10 +91,7 @@ func TestGitPublish_LeaseMismatchRejected(t *testing.T) {
 		_ = os.RemoveAll(workDir)
 	}()
 
-	client := &Client{
-		workspace: workDir,
-		envFile:   filepath.Join(bareDir, ".test-env"),
-	}
+	client := newTestClient(t, workDir)
 
 	received := make(chan []byte, 10)
 	srv := newTestServer(t, func(conn *websocket.Conn) {

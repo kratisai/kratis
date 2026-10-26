@@ -104,7 +104,7 @@ func (c *Client) ExecuteRegisterGitAuth(params RegisterGitAuthParams, reqID inte
 
 // credentialHelperScript returns the stable path of the token credential helper.
 func (c *Client) credentialHelperScript() string {
-	return filepath.Join(c.credentialsDir, "git-credentials-helper.sh")
+	return c.statePath("git-credentials-helper.sh")
 }
 
 // writeCredentialHelper writes the nc-based credential helper that forwards git
@@ -179,7 +179,7 @@ func (c *Client) setupTokenHelper() {
 // visible while credentials are active.
 func (c *Client) writeGlobalGitConfig(helperScript string) {
 	c.mu.Lock()
-	gitConfigGlobal := filepath.Join(c.credentialsDir, "gitconfig")
+	gitConfigGlobal := c.statePath("gitconfig")
 	c.gitConfigGlobal = gitConfigGlobal
 	c.mu.Unlock()
 
@@ -214,10 +214,7 @@ func (c *Client) ExecuteCheckout(params CheckoutParams, _ interface{}) {
 	}
 
 	// Prepare workspace directory
-	workspace := c.workspace
-	if workspace == "" {
-		workspace = "workspace"
-	}
+	workspace := c.resolveWorkspace()
 
 	isGitRepo := false
 	if _, err := os.Stat(filepath.Join(workspace, ".git")); err == nil {
@@ -455,10 +452,10 @@ func urlsMatch(urlA, urlB string) bool {
 }
 
 func (c *Client) resolveWorkspace() string {
-	if c.workspace != "" {
-		return c.workspace
+	if c.workspace == "" {
+		panic("rpc: Client has no workspace; construct it with an explicit workspace")
 	}
-	return "/kratis/workspace"
+	return c.workspace
 }
 
 // mergeBaseWithHead resolves the merge-base of ref and HEAD. Diffing against

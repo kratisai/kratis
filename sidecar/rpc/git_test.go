@@ -124,7 +124,7 @@ func TestExecuteCheckout_Failed(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "/invalid/workspace/dir/that/does/not/exist/nonexistent-workspace")
+	c := NewClient(wsURL(srv), "tok", filepath.Join(t.TempDir(), "nonexistent-workspace"))
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 
 	params := CheckoutParams{
@@ -445,14 +445,14 @@ func TestGitUtilities(t *testing.T) {
 }
 
 func TestExecuteRegisterGitAuth(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
-	c.credentialsDir = t.TempDir()
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
+	c.stateDir = t.TempDir()
 	paramsPAT := RegisterGitAuthParams{
 		CredentialType: "GIT_PAT",
 	}
 	c.ExecuteRegisterGitAuth(paramsPAT, nil)
 
-	helperScript := filepath.Join(c.credentialsDir, "git-credentials-helper.sh")
+	helperScript := c.credentialHelperScript()
 	if _, err := os.Stat(helperScript); err != nil {
 		t.Errorf("expected helper script to be created at %s", helperScript)
 	}
@@ -473,8 +473,8 @@ func TestExecuteRegisterGitIdentity_PersistsAcrossRestart(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	_ = os.Unsetenv("GIT_CONFIG_GLOBAL")
 
-	c := NewClient("ws://localhost:12345", "tok", "")
-	c.credentialsDir = t.TempDir()
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
+	c.stateDir = t.TempDir()
 	c.ExecuteRegisterGitIdentity(RegisterGitIdentityParams{
 		UserName:  "Kratis",
 		UserEmail: "kratis@control-plane-host",
@@ -561,8 +561,8 @@ func TestExecuteRegisterGitAuth_ProcessWideEnv(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	_ = os.Unsetenv("GIT_CONFIG_GLOBAL")
 
-	c := NewClient("ws://localhost:12345", "tok", "")
-	c.credentialsDir = t.TempDir()
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
+	c.stateDir = t.TempDir()
 	defer c.Close()
 
 	cleanupEnv := func() {
@@ -650,20 +650,20 @@ func generateSSHTestKey(t *testing.T) (string, error) {
 // GIT_PAT / GITHUB values.
 func TestExecuteRegisterGitAuth_ControlPlaneVocabulary(t *testing.T) {
 	for _, credentialType := range []CredentialType{CredentialTypePAT, CredentialTypeGitHubApp} {
-		c := NewClient("ws://localhost:12345", "tok", "")
-		c.credentialsDir = t.TempDir()
+		c := NewClient("ws://localhost:12345", "tok", t.TempDir())
+		c.stateDir = t.TempDir()
 		params := RegisterGitAuthParams{
 			CredentialType: credentialType,
 		}
 		c.ExecuteRegisterGitAuth(params, nil)
-		helperScript := filepath.Join(c.credentialsDir, "git-credentials-helper.sh")
+		helperScript := c.credentialHelperScript()
 		if _, err := os.Stat(helperScript); err != nil {
 			t.Errorf("credentialType %s: expected helper script to be created at %s", credentialType, helperScript)
 		}
 	}
 
-	c := NewClient("ws://localhost:12345", "tok", "")
-	c.credentialsDir = t.TempDir()
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
+	c.stateDir = t.TempDir()
 	c.ExecuteRegisterGitAuth(RegisterGitAuthParams{
 		CredentialType: CredentialTypeSSHKey,
 		PrivateKey:     "invalid-private-key",
@@ -1022,8 +1022,8 @@ func TestCleanGitURL_EdgeCases(t *testing.T) {
 // TestExecuteRegisterGitAuth_CleanupPrevious tests that ExecuteRegisterGitAuth
 // cleans up previous SSH agent and helper script before setting new credentials.
 func TestExecuteRegisterGitAuth_CleanupPrevious(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
-	c.credentialsDir = t.TempDir()
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
+	c.stateDir = t.TempDir()
 	defer c.Close()
 
 	// Set up a fake previous SSH agent PID (a real process we can verify gets killed)
@@ -1140,7 +1140,7 @@ func TestExecuteCheckout_WithPAT(t *testing.T) {
 	})
 
 	c := NewClient(wsURL(srv), "tok", destDir)
-	c.credentialsDir = t.TempDir()
+	c.stateDir = t.TempDir()
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 	errChan := make(chan error, 1)
 	go c.readLoop(errChan)
@@ -1234,7 +1234,7 @@ func TestExecuteCheckout_ExistingGitRepo_WithPAT(t *testing.T) {
 	})
 
 	c := NewClient(wsURL(srv), "tok", destDir)
-	c.credentialsDir = t.TempDir()
+	c.stateDir = t.TempDir()
 	c.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 	errChan := make(chan error, 1)
 	go c.readLoop(errChan)
