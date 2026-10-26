@@ -685,6 +685,11 @@ class ProtocolConformanceTest {
             if (hasNoParams(payload)) {
                 continue;
             }
+            if ("env.hitl_activity".equals(request.method())) {
+                // env.hitl_activity requires options when kind=approval, enforced by EnvironmentHitlActivityRpcHandler
+                // so an activity warning can be persisted for the execution before returning -32602.
+                continue;
+            }
             assertThatThrownBy(() -> MAPPER.treeToValue(request.params(), payload))
                     .as("Invalid fixture %s must be rejected by %s", file.getName(), payload.getSimpleName())
                     .isInstanceOf(Exception.class);

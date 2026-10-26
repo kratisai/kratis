@@ -273,6 +273,48 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
+    void recordActivity_preservesExistingHitlResolutionOnMerge() throws Exception {
+        UUID executionId = UUID.randomUUID();
+        SandboxExecutionActivity existing =
+                row(executionId, 1, "tc-1", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "chmod +x file");
+        ActivityHitl existingHitl = new ActivityHitl(
+                HitlKind.APPROVAL,
+                HitlState.RESOLVED,
+                "Approve chmod",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                HitlResponse.APPROVED,
+                "allow",
+                null,
+                new HitlResolver(HitlResolverKind.USER, UUID.randomUUID(), "Alice"));
+        ActivityDetail existingDetail =
+                new ActivityDetail(null, "chmod +x file", null, null, null, null, null, null, null, null, existingHitl);
+        existing.setDetail(objectMapper.writeValueAsString(existingDetail));
+
+        when(repository.findByExecutionIdAndActionId(executionId, "tc-1")).thenReturn(Optional.of(existing));
+
+        ActivityDetail incomingDetail =
+                new ActivityDetail(null, null, null, "done", null, 0, false, null, null, null, null);
+        service.recordActivity(
+                executionId, ActivityType.COMMAND, "chmod +x file", "tc-1", ActivityStatus.COMPLETED, incomingDetail);
+
+        verify(repository).save(existing);
+        ActivityDetail mergedDetail = service.detailOf(existing);
+        assertThat(mergedDetail).isNotNull();
+        assertThat(mergedDetail.hitl()).isNotNull();
+        assertThat(mergedDetail.hitl().state()).isEqualTo(HitlState.RESOLVED);
+        assertThat(mergedDetail.hitl().response()).isEqualTo(HitlResponse.APPROVED);
+        assertThat(mergedDetail.hitl().optionId()).isEqualTo("allow");
+        assertThat(mergedDetail.output()).isEqualTo("done");
+        assertThat(existing.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+    }
+
+    @Test
     void detailOf_returnsNullForEmptyDetail() {
         SandboxExecutionActivity activity =
                 row(UUID.randomUUID(), 1, "tc-1", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "ls");
@@ -513,6 +555,54 @@ class ExecutionActivityPersistenceServiceTest {
 
         service.cancelPendingActivities(executionId, "execution terminated", HitlResolver.system());
 
+        verify(repository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void cancelPendingActivities_skipsActivitiesWithoutAwaitingHumanHitl() throws Exception {
+        UUID executionId = UUID.randomUUID();
+        // Standard tool call pending without HITL
+        SandboxExecutionActivity toolCall =
+                row(executionId, 1, "tool-1", ActivityType.COMMAND, ActivityStatus.PENDING, "ls");
+        // Pending approval already resolved
+        SandboxExecutionActivity resolved =
+                row(executionId, 2, "tool-2", ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
+        ActivityDetail resolvedDetail = new ActivityDetail(
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                new ActivityHitl(
+                        HitlKind.APPROVAL,
+                        HitlState.RESOLVED,
+                        "Approve",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        HitlResponse.APPROVED,
+                        "allow",
+                        null,
+                        null));
+        resolved.setDetail(objectMapper.writeValueAsString(resolvedDetail));
+
+        when(repository.findByExecutionIdAndStatus(executionId, ActivityStatus.PENDING))
+                .thenReturn(List.of(toolCall, resolved));
+
+        service.cancelPendingActivities(executionId, "execution terminated", HitlResolver.system());
+
+        assertThat(toolCall.getStatus()).isEqualTo(ActivityStatus.PENDING);
+        assertThat(resolved.getStatus()).isEqualTo(ActivityStatus.PENDING);
         verify(repository, never()).save(any());
         verify(eventPublisher, never()).publishEvent(any());
     }
@@ -1198,6 +1288,48 @@ class ExecutionActivityPersistenceServiceTest {
 
         verify(repository, never()).save(any());
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void recordExecutionWarning_recordsWarningAndPublishesEvent() {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+
+        Team team = new Team();
+        team.setId(teamId);
+        ChatEntity chat = new ChatEntity();
+        chat.setId(UUID.randomUUID());
+        chat.setTeam(team);
+
+        SandboxExecution execution = new SandboxExecution();
+        execution.setId(executionId);
+        execution.setChat(chat);
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+        when(repository.findByExecutionIdAndActionId(executionId, "tool-warn")).thenReturn(Optional.empty());
+        when(repository.nextSequence(executionId)).thenReturn(1L);
+
+        service.recordExecutionWarning(
+                executionId, "Invalid approval request from agent/sidecar: options must not be empty", "tool-warn");
+
+        assertInsertedRow(
+                capturedSave(),
+                executionId,
+                1,
+                "tool-warn",
+                ActivityType.WARNING,
+                ActivityStatus.COMPLETED,
+                "Invalid approval request from agent/sidecar: options must not be empty");
+
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        SandboxExecutionActivityEvent event = (SandboxExecutionActivityEvent) eventCaptor.getValue();
+        assertThat(event.teamId()).isEqualTo(teamId);
+        assertThat(event.executionId()).isEqualTo(executionId);
+        assertThat(event.activityType()).isEqualTo(ActivityType.WARNING);
+        assertThat(event.actionId()).isEqualTo("tool-warn");
+        assertThat(event.status()).isEqualTo(ActivityStatus.COMPLETED);
+        assertThat(event.description())
+                .isEqualTo("Invalid approval request from agent/sidecar: options must not be empty");
     }
 
     private static HitlRequestSnapshot commandApprovalRequest(UUID executionId, String actionId) {

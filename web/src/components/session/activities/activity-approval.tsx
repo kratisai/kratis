@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock,
+  Loader2,
   ShieldCheck,
   ShieldX,
   X,
@@ -135,34 +136,58 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
   }
 
   if (isResolved) {
-    const resolution: HitlResponse =
-      activity.hitlResponse ?? (activity.approved === true ? 'approved' : 'declined')
+    const resolution: HitlResponse | undefined =
+      activity.hitlResponse ??
+      (activity.approved === true
+        ? 'approved'
+        : activity.approved === false
+          ? 'declined'
+          : undefined)
     const timedOut = resolution === 'cancelled' && activity.resolvedBy?.kind === 'timeout'
     const autoApproved = resolution === 'approved' && activity.resolvedBy?.kind === 'policy'
     return (
       <Card className="border-border/50 bg-muted/30 min-w-0 p-0">
-        <CardContent className="flex min-w-0 items-center gap-2">
-          {resolution === 'approved' ? (
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
-          ) : timedOut ? (
-            <Clock className="h-4 w-4 shrink-0 text-amber-500" />
-          ) : resolution === 'cancelled' ? (
-            <Ban className="text-muted-foreground h-4 w-4 shrink-0" />
-          ) : (
-            <XCircle className="h-4 w-4 shrink-0 text-red-500" />
+        <CardContent className="min-w-0 space-y-2 p-3">
+          <div className="flex min-w-0 items-center gap-2">
+            {resolution === 'approved' ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+            ) : timedOut ? (
+              <Clock className="h-4 w-4 shrink-0 text-amber-500" />
+            ) : resolution === 'cancelled' ? (
+              <Ban className="text-muted-foreground h-4 w-4 shrink-0" />
+            ) : resolution === 'declined' ? (
+              <XCircle className="h-4 w-4 shrink-0 text-red-500" />
+            ) : activity.state === 'error' ? (
+              <XCircle className="h-4 w-4 shrink-0 text-red-500" />
+            ) : activity.state === 'active' ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-500" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+            )}
+            <span className="min-w-0 flex-1 truncate text-sm">
+              {autoApproved
+                ? 'Auto-approved:'
+                : resolution === 'approved'
+                  ? 'Permission approved:'
+                  : timedOut
+                    ? 'Permission request timed out — no response:'
+                    : resolution === 'cancelled'
+                      ? 'Permission request cancelled:'
+                      : resolution === 'declined'
+                        ? 'Permission rejected:'
+                        : activity.state === 'error'
+                          ? 'Command failed:'
+                          : activity.state === 'active'
+                            ? 'Running command:'
+                            : 'Command executed:'}{' '}
+              <code className="bg-muted rounded px-1 font-mono text-xs">{command}</code>
+            </span>
+          </div>
+          {activity.detail?.output && (
+            <div className="overflow-x-auto rounded bg-zinc-950 p-2 font-mono text-xs whitespace-pre text-zinc-100">
+              {activity.detail.output}
+            </div>
           )}
-          <span className="min-w-0 flex-1 truncate text-sm">
-            {autoApproved
-              ? 'Auto-approved:'
-              : resolution === 'approved'
-                ? 'Permission approved:'
-                : timedOut
-                  ? 'Permission request timed out — no response:'
-                  : resolution === 'cancelled'
-                    ? 'Permission request cancelled:'
-                    : 'Permission rejected:'}{' '}
-            <code className="bg-muted rounded px-1 font-mono text-xs">{command}</code>
-          </span>
         </CardContent>
       </Card>
     )

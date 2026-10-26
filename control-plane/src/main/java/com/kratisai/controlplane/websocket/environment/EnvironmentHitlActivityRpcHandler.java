@@ -126,6 +126,15 @@ public class EnvironmentHitlActivityRpcHandler
         executionGuard.verifyExecutionInEnvironment(execution, envId);
         rejectDuplicateApproval(execution.getId(), params.actionId());
 
+        if (!isValidApprovalOptions(params.options())) {
+            activityPersistenceService.recordExecutionWarning(
+                    execution.getId(),
+                    "Invalid approval request from agent/sidecar: options must not be empty",
+                    params.actionId());
+            throw new RpcErrorException(JsonRpcError.InvalidParams(
+                    "Invalid approval request from agent/sidecar: options must not be empty"));
+        }
+
         List<HitlRule> rules = ruleRepository.findByTeamId(teamId);
 
         String parseWarning = null;
@@ -155,12 +164,6 @@ public class EnvironmentHitlActivityRpcHandler
         // pending requests are untouched: this reads the flag only when a request first arrives.
         if (execution.getChat().isAllowAllPermissions()) {
             String allowOptionId = selectAllowOptionId(params.options());
-            if (allowOptionId == null) {
-                logger.warn(
-                        "Topic allow-all is enabled but command '{}' offered no allow option — treating as cancelled",
-                        command);
-                return Flux.just(HitlActivityResult.cancelled());
-            }
             logger.info(
                     "Auto-approved command '{}' for execution {} via topic allow-all (optionId={})",
                     command,
@@ -176,11 +179,6 @@ public class EnvironmentHitlActivityRpcHandler
         String allowOptionId = null;
         if (autoResolution.isPresent() && autoResolution.get() != HitlResponse.DECLINED) {
             allowOptionId = selectAllowOptionId(params.options());
-            if (allowOptionId == null) {
-                logger.warn(
-                        "Auto-approved command '{}' but no allow option was offered — treating as cancelled", command);
-                return Flux.just(HitlActivityResult.cancelled());
-            }
         }
 
         if (autoResolution.isPresent()) {
@@ -378,5 +376,17 @@ public class EnvironmentHitlActivityRpcHandler
             return firstAllowAlways;
         }
         return first;
+    }
+
+    private static boolean isValidApprovalOptions(List<PermissionOption> options) {
+        if (options == null || options.isEmpty()) {
+            return false;
+        }
+        for (PermissionOption option : options) {
+            if (option == null || option.optionId() == null || option.optionId().isBlank() || option.kind() == null) {
+                return false;
+            }
+        }
+        return true;
     }
 }

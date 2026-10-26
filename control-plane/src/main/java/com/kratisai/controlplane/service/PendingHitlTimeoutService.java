@@ -7,6 +7,7 @@ import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResolution;
 import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
+import com.kratisai.controlplane.api.wsdto.HitlState;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
@@ -57,6 +58,11 @@ public class PendingHitlTimeoutService {
                 activityRepository.findByStatusAndCreatedAtBefore(ActivityStatus.PENDING, cutoff);
 
         for (SandboxExecutionActivity activity : expired) {
+            ActivityDetail detail = activityPersistenceService.detailOf(activity);
+            if (detail == null || detail.hitl() == null || detail.hitl().state() != HitlState.AWAITING_HUMAN) {
+                continue;
+            }
+
             UUID executionId = activity.getExecutionId();
             UUID teamId = executionRepository
                     .findById(executionId)
@@ -67,8 +73,7 @@ public class PendingHitlTimeoutService {
                 continue;
             }
 
-            ActivityDetail detail = activityPersistenceService.detailOf(activity);
-            ActivityHitl hitl = detail != null ? detail.hitl() : null;
+            ActivityHitl hitl = detail.hitl();
             HitlKind kind = hitl != null && hitl.kind() != null ? hitl.kind() : HitlKind.APPROVAL;
             String message = hitl != null && hitl.message() != null ? hitl.message() : activity.getDescription();
 

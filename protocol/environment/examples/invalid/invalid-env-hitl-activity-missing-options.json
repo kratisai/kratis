@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.hitl_activity",
+  "params": {
+    "actionId": "tool-call-1",
+    "message": "Remove build directory",
+    "kind": "approval",
+    "executionId": "123e4567-e89b-12d3-a456-426614174000",
+    "command": "rm -rf /tmp/build"
+  },
+  "id": 99
+}

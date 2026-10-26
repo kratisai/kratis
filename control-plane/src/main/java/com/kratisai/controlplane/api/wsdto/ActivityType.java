@@ -11,7 +11,8 @@ public enum ActivityType {
     MESSAGE("MESSAGE"),
     ELICITATION("ELICITATION"),
     PLAN("PLAN"),
-    ERROR("ERROR");
+    ERROR("ERROR"),
+    WARNING("WARNING");
 
     private final String value;
 

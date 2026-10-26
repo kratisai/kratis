@@ -219,7 +219,8 @@ class ExecutionSubscribeReplayIntegrationTest {
                                     "message", "Approve rm -rf /",
                                     "kind", "approval",
                                     "executionId", executionId.toString(),
-                                    "command", "rm -rf /")),
+                                    "command", "rm -rf /",
+                                    "options", SidecarWebSocketFixture.defaultPermissionOptions())),
                             100);
                     session.sendMessage(new TextMessage(objectMapper.writeValueAsString(permRequest)));
                 });

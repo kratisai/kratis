@@ -182,6 +182,7 @@ export const CLIENT_RESULTS = {
         'ELICITATION',
         'PLAN',
         'ERROR',
+        'WARNING',
       ]),
       createdAt: z.string(),
       description: z.string(),

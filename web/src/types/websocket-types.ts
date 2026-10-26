@@ -408,5 +408,6 @@ export type WireActivityType =
   | 'PLAN'
   | 'RESEARCH'
   | 'THINKING'
+  | 'WARNING'
 
 export type WireOutputStream = 'agent' | 'stderr' | 'stdout'

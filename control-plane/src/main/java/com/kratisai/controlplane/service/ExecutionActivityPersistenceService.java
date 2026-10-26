@@ -128,13 +128,20 @@ public class ExecutionActivityPersistenceService {
         }
         Optional<UUID> teamId = teamIdFor(executionId);
         for (SandboxExecutionActivity activity : pending) {
-            cancelActivity(activity, reason, resolver, teamId.orElse(null));
+            ActivityDetail detail = detailOf(activity);
+            if (detail != null && detail.hitl() != null && detail.hitl().state() == HitlState.AWAITING_HUMAN) {
+                cancelActivity(activity, reason, resolver, teamId.orElse(null));
+            }
         }
     }
 
     @Transactional
     public void cancelActivity(SandboxExecutionActivity activity, String reason, HitlResolver resolver) {
         if (activity.getStatus() != ActivityStatus.PENDING) {
+            return;
+        }
+        ActivityDetail detail = detailOf(activity);
+        if (detail == null || detail.hitl() == null || detail.hitl().state() != HitlState.AWAITING_HUMAN) {
             return;
         }
         cancelActivity(
@@ -144,15 +151,14 @@ public class ExecutionActivityPersistenceService {
     private void cancelActivity(SandboxExecutionActivity activity, String reason, HitlResolver resolver, UUID teamId) {
         ActivityDetail detail = detailOf(activity);
         ActivityHitl hitl = detail != null ? detail.hitl() : null;
-        HitlKind kind = hitl != null && hitl.kind() != null ? hitl.kind() : HitlKind.APPROVAL;
+        if (hitl == null || hitl.state() != HitlState.AWAITING_HUMAN) {
+            return;
+        }
+        HitlKind kind = hitl.kind() != null ? hitl.kind() : HitlKind.APPROVAL;
         HitlResolution resolution = new HitlResolution(
                 activity.getExecutionId(), activity.getActionId(), kind, HitlResponse.CANCELLED, null, null, resolver);
         activity.setStatus(ActivityStatus.FAILED);
-        if (hitl != null) {
-            activity.setDetail(toJson(detail.withHitl(hitl.withResolution(resolution))));
-        } else if (detail != null) {
-            activity.setDetail(toJson(detail.withHitl(ActivityHitl.from(resolution))));
-        }
+        activity.setDetail(toJson(detail.withHitl(hitl.withResolution(resolution))));
         repository.save(activity);
         logger.info(
                 "Cancelled pending HITL activity {} for execution {}: {}",
@@ -377,6 +383,18 @@ public class ExecutionActivityPersistenceService {
         teamId.ifPresent(uuid -> publishActivity(uuid, row));
     }
 
+    @Transactional
+    public void recordExecutionWarning(UUID executionId, String reason, String actionId) {
+        String description = reason != null && !reason.isBlank() ? truncate(reason) : "Execution warning";
+        SandboxExecutionActivity row = recordActivity(
+                executionId, ActivityType.WARNING, description, actionId, ActivityStatus.COMPLETED, null);
+
+        Optional<UUID> teamId = executionRepository
+                .findById(executionId)
+                .map(execution -> execution.getChat().getTeam().getId());
+        teamId.ifPresent(uuid -> publishActivity(uuid, row));
+    }
+
     private static String truncate(String value) {
         String trimmed = value.strip();
         return trimmed.length() <= MAX_ERROR_DESCRIPTION ? trimmed : trimmed.substring(0, MAX_ERROR_DESCRIPTION);
@@ -432,6 +450,8 @@ public class ExecutionActivityPersistenceService {
         if (detail != null) {
             boolean keepApproval = current != null && current.hitl() != null;
             existing.setDetail(toJson(keepApproval ? detail.withHitl(current.hitl()) : detail));
+        } else if (current != null && current.hitl() != null) {
+            existing.setDetail(toJson(emptyDetail().withHitl(current.hitl())));
         }
         repository.save(existing);
         return existing;

@@ -11,6 +11,7 @@ const (
 	ActivityTypeMessage     ActivityType = "MESSAGE"
 	ActivityTypeElicitation ActivityType = "ELICITATION"
 	ActivityTypePlan        ActivityType = "PLAN"
+	ActivityTypeWarning     ActivityType = "WARNING"
 )
 
 // ActivityStatus is the closed set of env.activity status values, mirroring the

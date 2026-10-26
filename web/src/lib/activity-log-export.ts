@@ -7,6 +7,7 @@ import type {
   PlanActivity,
   ThinkingActivity,
   ToolExecutionActivity,
+  WarningActivity,
 } from '@/types/execution-activity-types'
 
 export function downloadActivityLog(activities: Activity[], executionId: string): void {
@@ -52,6 +53,8 @@ function formatActivity(activity: Activity): string[] {
       return formatThinking(activity)
     case 'tool_execution':
       return formatToolExecution(activity)
+    case 'warning':
+      return formatWarning(activity)
   }
 }
 
@@ -136,6 +139,12 @@ function formatToolExecution(activity: ToolExecutionActivity): string[] {
   if (activity.error) {
     lines.push(`Error: ${activity.error}`)
   }
+  return lines
+}
+
+function formatWarning(activity: WarningActivity): string[] {
+  const lines = [`[Warning] ${activity.message}`]
+  formatCommon(lines, activity)
   return lines
 }
 

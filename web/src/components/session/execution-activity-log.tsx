@@ -19,11 +19,13 @@ import type {
   PlanActivity,
   ThinkingActivity,
   ToolExecutionActivity,
+  WarningActivity,
 } from '@/types/execution-activity-types'
 
 import { ActivityApproval } from '@/components/session/activities/activity-approval'
 import { ActivityElicitation } from '@/components/session/activities/activity-elicitation'
 import { PlanEntriesList, planSummaryLabel } from '@/components/session/plan-entries'
+import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { activityTitle, useActivityStore } from '@/store/activity-store'
 
@@ -149,6 +151,8 @@ const ActivityItem = memo(function ActivityItem({ activity, executionId }: Activ
       return <ThinkingActivityItem activity={activity} executionId={executionId} />
     case 'tool_execution':
       return <ToolExecutionActivityItem activity={activity} executionId={executionId} />
+    case 'warning':
+      return <WarningActivityItem activity={activity} />
   }
 })
 
@@ -273,11 +277,7 @@ function CommandExecutionActivityItem({
   activity: CommandExecutionActivity
   executionId: string
 }) {
-  if (activity.state === 'pending_approval') {
-    return <ActivityApproval activity={activity} executionId={executionId} />
-  }
-
-  if (activity.approvalRequired && (activity.state === 'active' || activity.state === 'error')) {
+  if (activity.state === 'pending_approval' || activity.hitlResponse !== undefined) {
     return <ActivityApproval activity={activity} executionId={executionId} />
   }
 
@@ -448,11 +448,7 @@ function ToolExecutionActivityItem({
   activity: ToolExecutionActivity
   executionId: string
 }) {
-  if (activity.state === 'pending_approval') {
-    return <ActivityApproval activity={activity} executionId={executionId} />
-  }
-
-  if (activity.approvalRequired && (activity.state === 'active' || activity.state === 'error')) {
+  if (activity.state === 'pending_approval' || activity.hitlResponse !== undefined) {
     return <ActivityApproval activity={activity} executionId={executionId} />
   }
 
@@ -505,6 +501,32 @@ function ToolExecutionActivityItem({
       executionId={executionId}
       icon={statusIcon(activity)}
       title={activityTitle(activity)}
+    />
+  )
+}
+
+function WarningActivityItem({ activity }: { activity: WarningActivity }) {
+  return (
+    <ActivityItemShell
+      activity={activity}
+      content={
+        <div className="mt-1 space-y-1 pl-5">
+          <p className="text-xs break-words whitespace-pre-wrap text-amber-600 dark:text-amber-400">
+            {activity.message}
+          </p>
+        </div>
+      }
+      executionId=""
+      icon={<AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" />}
+      title={activityTitle(activity)}
+      trailing={
+        <Badge
+          className="shrink-0 border-amber-500/30 bg-amber-500/15 text-xs text-amber-600 dark:text-amber-400"
+          variant="outline"
+        >
+          Warning
+        </Badge>
+      }
     />
   )
 }

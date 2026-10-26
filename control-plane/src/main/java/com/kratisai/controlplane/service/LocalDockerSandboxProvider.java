@@ -18,6 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -475,11 +476,16 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         }
     }
 
+    private static final AtomicInteger NETWORK_COUNTER = new AtomicInteger(1);
+
     private void createSandboxNetwork(String envId, String networkName) {
+        int idx = (NETWORK_COUNTER.getAndIncrement() & 0x7FFF) % 250 + 1;
         List<String> command = List.of(
                 "docker",
                 "network",
                 "create",
+                "--subnet",
+                "10.210." + idx + ".0/24",
                 "--label",
                 "kratis.instance.id=" + instanceId,
                 "--label",

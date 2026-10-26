@@ -15,6 +15,7 @@ import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.HitlKind;
 import com.kratisai.controlplane.api.wsdto.HitlResolverKind;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
+import com.kratisai.controlplane.api.wsdto.HitlState;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
@@ -82,8 +83,21 @@ class PendingHitlTimeoutServiceTest {
     }
 
     private ActivityDetail detail(HitlKind kind, String message) {
-        ActivityHitl hitl =
-                new ActivityHitl(kind, null, message, null, null, null, null, null, null, null, null, null, null, null);
+        ActivityHitl hitl = new ActivityHitl(
+                kind,
+                HitlState.AWAITING_HUMAN,
+                message,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
         return new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null).withHitl(hitl);
     }
 
@@ -162,6 +176,40 @@ class PendingHitlTimeoutServiceTest {
                 .thenReturn(List.of());
         service.cleanupExpiredHitl();
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void cleanupExpiredHitl_skipsActivitiesWithoutAwaitingHumanHitl() {
+        UUID executionId = UUID.randomUUID();
+        SandboxExecutionActivity nonHitl = activity(executionId, "tool-1", "ls");
+        SandboxExecutionActivity resolvedHitl = activity(executionId, "tool-2", "rm -rf /");
+        ActivityHitl resolved = new ActivityHitl(
+                HitlKind.APPROVAL,
+                HitlState.RESOLVED,
+                "msg",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+        ActivityDetail resolvedDetail =
+                new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null).withHitl(resolved);
+
+        when(activityRepository.findByStatusAndCreatedAtBefore(eq(ActivityStatus.PENDING), any(Instant.class)))
+                .thenReturn(List.of(nonHitl, resolvedHitl));
+        when(activityPersistenceService.detailOf(nonHitl)).thenReturn(null);
+        when(activityPersistenceService.detailOf(resolvedHitl)).thenReturn(resolvedDetail);
+
+        service.cleanupExpiredHitl();
+
+        verify(eventPublisher, never()).publishEvent(any());
+        verify(executionRepository, never()).findById(any());
     }
 
     @Test
