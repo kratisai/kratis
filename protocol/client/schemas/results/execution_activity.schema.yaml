@@ -28,6 +28,7 @@ properties:
     - "ELICITATION"
     - "PLAN"
     - "ERROR"
+    - "WARNING"
   description:
     type: string
   actionId:

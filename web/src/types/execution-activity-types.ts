@@ -38,6 +38,7 @@ export type Activity =
   | PlanActivity
   | ThinkingActivity
   | ToolExecutionActivity
+  | WarningActivity
 
 export type ActivityState = 'active' | 'completed' | 'error' | 'pending_approval'
 
@@ -49,6 +50,7 @@ export type ActivityType =
   | 'plan'
   | 'thinking'
   | 'tool_execution'
+  | 'warning'
 
 export interface BaseActivity {
   actionId?: string
@@ -123,4 +125,10 @@ export interface ToolExecutionActivity extends BaseActivity {
   thought: string
   toolName: string
   type: 'tool_execution'
+}
+
+export interface WarningActivity extends BaseActivity {
+  detail?: ActivityDetail
+  message: string
+  type: 'warning'
 }

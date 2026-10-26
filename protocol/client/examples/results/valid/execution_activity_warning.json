@@ -1,0 +1,9 @@
+{
+  "type": "execution_activity",
+  "executionId": "00000000-0000-0000-0000-000000000006",
+  "activityType": "WARNING",
+  "description": "Invalid approval request from agent/sidecar: options must not be empty",
+  "actionId": "tool-call-1",
+  "status": "completed",
+  "createdAt": "2026-10-20T17:32:12.672Z"
+}

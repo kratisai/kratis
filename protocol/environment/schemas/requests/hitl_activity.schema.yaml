@@ -75,4 +75,12 @@ properties:
   form:
     type: object
     description: JSON Schema for the expected answer (kind=question).
+allOf:
+  - if:
+      properties:
+        kind:
+          const: "approval"
+    then:
+      required:
+      - options
 additionalProperties: false

@@ -559,4 +559,49 @@ describe('Execution Activity Log', () => {
     })
     expect(screen.queryByText(/Permission rejected/)).not.toBeInTheDocument()
   })
+
+  it('renders warning activity with warning badge and message', async () => {
+    const ws = setupConnected()
+    triggerMockExecutionActivity(
+      ws,
+      EXECUTION_ID,
+      'WARNING',
+      'Invalid approval request from agent/sidecar: options must not be empty',
+    )
+
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Warning').length).toBeGreaterThanOrEqual(1)
+      expect(
+        screen.getByText('Invalid approval request from agent/sidecar: options must not be empty'),
+      ).toBeInTheDocument()
+    })
+  })
+
+  it('does not show Permission rejected for active command with approvalRequired but no hitlResponse', () => {
+    useActivityStore.setState({
+      activitiesByExecution: {
+        [EXECUTION_ID]: [
+          {
+            actionId: 'tc-cmd',
+            approvalRequired: true,
+            collapsed: false,
+            command: 'go test ./...',
+            executionId: EXECUTION_ID,
+            id: 'act-cmd',
+            startedAt: '2026-01-01T00:00:00Z',
+            state: 'active',
+            type: 'command_execution',
+          },
+        ],
+      },
+    })
+
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    expect(screen.getByText('go test ./...')).toBeInTheDocument()
+    expect(screen.queryByText(/Permission rejected/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Permission Required')).not.toBeInTheDocument()
+  })
 })

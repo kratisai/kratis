@@ -692,6 +692,22 @@ describe('ActivityApproval', () => {
     expect(screen.getByText(/Permission rejected/)).toBeInTheDocument()
   })
 
+  it('does not default undefined hitlResponse to declined for completed command with output', () => {
+    render(
+      <ActivityApproval
+        activity={pendingActivity({
+          detail: { output: 'build succeeded\n' },
+          state: 'completed',
+        })}
+        executionId="exec-1"
+      />,
+    )
+
+    expect(screen.getByText(/Command executed:/)).toBeInTheDocument()
+    expect(screen.getByText('build succeeded')).toBeInTheDocument()
+    expect(screen.queryByText(/Permission rejected/)).not.toBeInTheDocument()
+  })
+
   it('shows feedback and refreshes activity state when resolution fails', async () => {
     const user = userEvent.setup()
     resolveHitl.mockRejectedValueOnce(new Error('409 conflict'))

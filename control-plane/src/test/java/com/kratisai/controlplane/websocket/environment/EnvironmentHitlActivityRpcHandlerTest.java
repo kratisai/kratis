@@ -294,10 +294,8 @@ class EnvironmentHitlActivityRpcHandlerTest {
     }
 
     @Test
-    void handle_approvalWithTopicAllowAll_noAllowOption_cancelled() {
+    void handle_approvalWithTopicAllowAll_emptyOptions_throwsAndRecordsWarning() {
         stubSessionAndEnvironment();
-        when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of());
-
         SandboxExecution execution = createAllowAllExecutionInEnvironment(envId);
         when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
@@ -315,23 +313,25 @@ class EnvironmentHitlActivityRpcHandlerTest {
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
                 EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
-        EnvironmentResponsePayload response =
-                handler.handle(sessionId, request, params).blockLast();
-
-        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.CANCELLED);
+        assertThatThrownBy(() -> handler.handle(sessionId, request, params))
+                .isInstanceOf(RpcErrorException.class)
+                .satisfies(error -> {
+                    RpcErrorException rpcError = (RpcErrorException) error;
+                    assertThat(rpcError.error().code()).isEqualTo(-32602);
+                });
+        verify(activityPersistenceService)
+                .recordExecutionWarning(
+                        execution.getId(),
+                        "Invalid approval request from agent/sidecar: options must not be empty",
+                        "tool-call-1");
         verify(activityPersistenceService, never()).recordAutoResolved(any(), any(), any());
     }
 
     @Test
-    void handle_approvalWithRuleButNoAllowOption_cancelled() {
+    void handle_approvalWithRuleButEmptyOptions_throwsAndRecordsWarning() {
         stubSessionAndEnvironment();
         SandboxExecution execution = createExecutionInEnvironment(envId);
         when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
-
-        HitlRule rule = new HitlRule();
-        rule.setCommandRoot("rm");
-        rule.setRuleType(HitlRuleType.PREFIX_WILD);
-        when(ruleRepository.findByTeamId(teamId)).thenReturn(List.of(rule));
 
         EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
                 "tool-call-1",
@@ -347,11 +347,17 @@ class EnvironmentHitlActivityRpcHandlerTest {
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
                 EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-1");
 
-        EnvironmentResponsePayload response =
-                handler.handle(sessionId, request, params).blockLast();
-
-        assertThat(response).isInstanceOf(HitlActivityResult.class);
-        assertThat(((HitlActivityResult) response).response()).isEqualTo(HitlResponse.CANCELLED);
+        assertThatThrownBy(() -> handler.handle(sessionId, request, params))
+                .isInstanceOf(RpcErrorException.class)
+                .satisfies(error -> {
+                    RpcErrorException rpcError = (RpcErrorException) error;
+                    assertThat(rpcError.error().code()).isEqualTo(-32602);
+                });
+        verify(activityPersistenceService)
+                .recordExecutionWarning(
+                        execution.getId(),
+                        "Invalid approval request from agent/sidecar: options must not be empty",
+                        "tool-call-1");
     }
 
     @Test
@@ -950,6 +956,111 @@ class EnvironmentHitlActivityRpcHandlerTest {
         assertThat(snapshot.commandSegments())
                 .containsExactly(new CommandSegment("ls -la", "ls -la", HitlRuleType.PREFIX_WILD));
         assertThat(snapshot.parseWarning()).isNull();
+    }
+
+    @Test
+    void handle_approvalNullOptions_recordsWarningAndThrowsInvalidParams() {
+        stubSessionAndEnvironment();
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
+                "tool-call-invalid",
+                "Approve rm -rf /",
+                HitlKind.APPROVAL,
+                execution.getId().toString(),
+                "rm -rf /",
+                "Remove root",
+                "execute",
+                null,
+                null,
+                null);
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-err");
+
+        assertThatThrownBy(() -> handler.handle(sessionId, request, params))
+                .isInstanceOf(RpcErrorException.class)
+                .satisfies(error -> {
+                    RpcErrorException rpcError = (RpcErrorException) error;
+                    assertThat(rpcError.error().code()).isEqualTo(-32602);
+                });
+
+        verify(activityPersistenceService)
+                .recordExecutionWarning(
+                        execution.getId(),
+                        "Invalid approval request from agent/sidecar: options must not be empty",
+                        "tool-call-invalid");
+        verify(eventPublisher, never()).publishEvent(any(SandboxExecutionHitlRequiredEvent.class));
+    }
+
+    @Test
+    void handle_approvalEmptyOptions_recordsWarningAndThrowsInvalidParams() {
+        stubSessionAndEnvironment();
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
+                "tool-call-empty",
+                "Approve rm -rf /",
+                HitlKind.APPROVAL,
+                execution.getId().toString(),
+                "rm -rf /",
+                "Remove root",
+                "execute",
+                List.of(),
+                null,
+                null);
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-err");
+
+        assertThatThrownBy(() -> handler.handle(sessionId, request, params))
+                .isInstanceOf(RpcErrorException.class)
+                .satisfies(error -> {
+                    RpcErrorException rpcError = (RpcErrorException) error;
+                    assertThat(rpcError.error().code()).isEqualTo(-32602);
+                });
+
+        verify(activityPersistenceService)
+                .recordExecutionWarning(
+                        execution.getId(),
+                        "Invalid approval request from agent/sidecar: options must not be empty",
+                        "tool-call-empty");
+        verify(eventPublisher, never()).publishEvent(any(SandboxExecutionHitlRequiredEvent.class));
+    }
+
+    @Test
+    void handle_approvalBlankOptionId_recordsWarningAndThrowsInvalidParams() {
+        stubSessionAndEnvironment();
+        SandboxExecution execution = createExecutionInEnvironment(envId);
+        when(executionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.HitlActivity params = new EnvironmentRpcPayload.HitlActivity(
+                "tool-call-blank-id",
+                "Approve rm -rf /",
+                HitlKind.APPROVAL,
+                execution.getId().toString(),
+                "rm -rf /",
+                "Remove root",
+                "execute",
+                List.of(new PermissionOption("", "Allow", ApprovalOptionKind.ALLOW_ONCE)),
+                null,
+                null);
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.HitlActivity.METHOD, objectMapper.valueToTree(params), "req-err");
+
+        assertThatThrownBy(() -> handler.handle(sessionId, request, params))
+                .isInstanceOf(RpcErrorException.class)
+                .satisfies(error -> {
+                    RpcErrorException rpcError = (RpcErrorException) error;
+                    assertThat(rpcError.error().code()).isEqualTo(-32602);
+                });
+
+        verify(activityPersistenceService)
+                .recordExecutionWarning(
+                        execution.getId(),
+                        "Invalid approval request from agent/sidecar: options must not be empty",
+                        "tool-call-blank-id");
+        verify(eventPublisher, never()).publishEvent(any(SandboxExecutionHitlRequiredEvent.class));
     }
 
     @Test

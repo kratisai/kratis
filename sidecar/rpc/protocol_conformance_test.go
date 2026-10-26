@@ -11,6 +11,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type jsonSchemaRule struct {
+	If struct {
+		Properties map[string]struct {
+			Const any `json:"const" yaml:"const"`
+		} `json:"properties" yaml:"properties"`
+	} `json:"if" yaml:"if"`
+	Then struct {
+		Required []string `json:"required" yaml:"required"`
+	} `json:"then" yaml:"then"`
+}
+
 type jsonSchema struct {
 	Ref        string                `json:"$ref" yaml:"$ref"`
 	Type       any                   `json:"type" yaml:"type"`
@@ -18,6 +29,7 @@ type jsonSchema struct {
 	Properties map[string]jsonSchema `json:"properties" yaml:"properties"`
 	Enum       []any                 `json:"enum" yaml:"enum"`
 	Items      *jsonSchema           `json:"items" yaml:"items"`
+	AllOf      []jsonSchemaRule      `json:"allOf" yaml:"allOf"`
 }
 
 // openRpcMethod mirrors protocol/environment/openrpc.yaml method entries.
@@ -506,6 +518,31 @@ func validateParamsAgainstSchema(t *testing.T, _ string, schema jsonSchema, data
 	for _, required := range schema.Required {
 		if _, ok := raw[required]; !ok {
 			return errMissingRequired(required)
+		}
+	}
+
+	for _, rule := range schema.AllOf {
+		matches := true
+		for propName, propCond := range rule.If.Properties {
+			if propCond.Const != nil {
+				rawVal, ok := raw[propName]
+				if !ok {
+					matches = false
+					break
+				}
+				var val any
+				if err := json.Unmarshal(rawVal, &val); err != nil || val != propCond.Const {
+					matches = false
+					break
+				}
+			}
+		}
+		if matches {
+			for _, req := range rule.Then.Required {
+				if _, ok := raw[req]; !ok {
+					return errMissingRequired(req)
+				}
+			}
 		}
 	}
 

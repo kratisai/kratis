@@ -12,6 +12,7 @@ import type {
   PlanActivity,
   ThinkingActivity,
   ToolExecutionActivity,
+  WarningActivity,
 } from '@/types/execution-activity-types'
 import type { CreateHitlRuleRequest } from '@/types/hitl-rule-types'
 import type {
@@ -84,6 +85,8 @@ export function activityTitle(activity: Activity): string {
       }
       return detail?.title ?? activity.toolName
     }
+    case 'warning':
+      return 'Warning'
   }
 }
 
@@ -546,6 +549,36 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
           startedAt: idx >= 0 ? existing[idx].startedAt : result.createdAt,
           state: 'error',
           type: 'error',
+        }
+        const updated =
+          idx >= 0
+            ? existing.map((a, i) => (i === idx ? activity : a))
+            : appendActivity(existing, activity)
+        return {
+          activitiesByExecution: {
+            ...state.activitiesByExecution,
+            [executionId]: updated,
+          },
+        }
+      })
+    } else if (activityType === 'WARNING') {
+      set((state) => {
+        const existing = state.activitiesByExecution[executionId] ?? []
+        const idx = actionId
+          ? existing.findIndex((a) => a.type === 'warning' && a.actionId === actionId)
+          : -1
+        const now = new Date().toISOString()
+        const activity: WarningActivity = {
+          actionId,
+          collapsed: false,
+          detail,
+          endedAt: now,
+          executionId,
+          id: idx >= 0 ? existing[idx].id : nextActivityId(),
+          message: description,
+          startedAt: idx >= 0 ? existing[idx].startedAt : result.createdAt,
+          state: 'completed',
+          type: 'warning',
         }
         const updated =
           idx >= 0
