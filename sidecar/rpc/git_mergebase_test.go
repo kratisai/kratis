@@ -84,7 +84,7 @@ func TestBuildGitDiffSummary_DiffsAgainstMergeBase(t *testing.T) {
 		_ = os.RemoveAll(workDir)
 	}()
 
-	client := &Client{workspace: workDir}
+	client := newTestClient(t, workDir)
 
 	// Agent changes: modify README.md and add a new untracked file.
 	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Agent change\n"), 0600); err != nil {
@@ -135,7 +135,7 @@ func TestBuildDiffSections_ExcludesUpstreamChanges(t *testing.T) {
 		_ = os.RemoveAll(workDir)
 	}()
 
-	client := &Client{workspace: workDir}
+	client := newTestClient(t, workDir)
 
 	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Agent change\n"), 0600); err != nil {
 		t.Fatalf("Failed to write README: %v", err)
@@ -167,7 +167,7 @@ func TestExecuteGitPush_FirstPublishSquashPreservesUpstreamChanges(t *testing.T)
 		_ = os.RemoveAll(workDir)
 	}()
 
-	client := &Client{workspace: workDir}
+	client := newTestClient(t, workDir)
 
 	// Agent change to README.md.
 	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("# Agent change\n"), 0600); err != nil {

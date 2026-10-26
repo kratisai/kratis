@@ -58,7 +58,7 @@ func TestClient_RegistrationAndHeartbeat(t *testing.T) {
 		}
 	})
 
-	client := NewClient(wsURL(srv), "valid-token", "")
+	client := NewClient(wsURL(srv), "valid-token", t.TempDir())
 	setTestClientTimeouts(client)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -91,7 +91,7 @@ func TestReadLoop_Float64IDCoercion(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "")
+	c := NewClient(wsURL(srv), "tok", t.TempDir())
 	// Manually dial so we control the timing.
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL(srv), nil)
 	if err != nil {
@@ -188,7 +188,7 @@ func TestReadLoop_UnknownIDDropped(t *testing.T) {
 }
 
 func TestReadLoop_NilConnection(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 	// wsConn is nil by default
 	errChan := make(chan error, 1)
 	go c.readLoop(errChan)
@@ -286,7 +286,7 @@ func TestReadLoop_ServerRequestDispatched(t *testing.T) {
 
 func TestSendRequest_WriteError(t *testing.T) {
 	// Build a client whose wsConn is already nil — simulates post-Close state.
-	c := NewClient("ws://localhost:0", "tok", "")
+	c := NewClient("ws://localhost:0", "tok", t.TempDir())
 	// wsConn is nil by default; do not set it.
 
 	_, err := c.sendRequest("env.heartbeat", HeartbeatParams{})
@@ -304,7 +304,7 @@ func TestSendRequest_WriteError(t *testing.T) {
 }
 
 func TestWriteJSON_ClosedConnection(t *testing.T) {
-	c := NewClient("ws://localhost:0", "tok", "")
+	c := NewClient("ws://localhost:0", "tok", t.TempDir())
 	// wsConn is already nil — simulate closed state.
 	err := c.writeJSON(map[string]string{"ping": "pong"})
 	if err == nil {
@@ -637,7 +637,7 @@ func TestClient_ConnectionErrors(t *testing.T) {
 		}
 	})
 
-	cRegisterFail := NewClient(wsURL(srv), "tok", "")
+	cRegisterFail := NewClient(wsURL(srv), "tok", t.TempDir())
 	cRegisterFail.wsConn = connectClient(t, wsURL(srv), "tok").wsConn
 	errChan := make(chan error, 1)
 	go cRegisterFail.readLoop(errChan)
@@ -650,7 +650,7 @@ func TestClient_ConnectionErrors(t *testing.T) {
 }
 
 func TestClient_CloseWithSSHAgent(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 	cmd := exec.Command("sleep", "10")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start dummy process: %v", err)
@@ -668,14 +668,14 @@ func TestClient_CloseWithSSHAgent(t *testing.T) {
 	}
 }
 
-func TestClient_SendSuccessResponse_MarshalError(_ *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+func TestClient_SendSuccessResponse_MarshalError(t *testing.T) {
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 	ch := make(chan int)
 	c.sendSuccessResponse(uint64(123), ch)
 }
 
 func TestClient_Start_ErrorPaths(t *testing.T) {
-	cDialFail := NewClient("ws://127.0.0.1:9999", "tok", "")
+	cDialFail := NewClient("ws://127.0.0.1:9999", "tok", t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	cDialFail.Start(ctx)
@@ -699,7 +699,7 @@ func TestClient_Start_ErrorPaths(t *testing.T) {
 		}
 	})
 
-	cRegFail := NewClient(wsURL(srv), "tok", "")
+	cRegFail := NewClient(wsURL(srv), "tok", t.TempDir())
 	setTestClientTimeouts(cRegFail)
 	ctxReg, cancelReg := context.WithCancel(context.Background())
 	go func() {
@@ -845,8 +845,8 @@ func TestFetchGitToken_OnDemand(t *testing.T) {
 	}
 }
 
-func TestClient_HandleServerRequest_NilID_Errors(_ *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+func TestClient_HandleServerRequest_NilID_Errors(t *testing.T) {
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 	defer c.Close()
 
 	c.handleServerRequest(JsonRpcRequest{
@@ -868,7 +868,7 @@ func TestClient_HandleServerRequest_NilID_Errors(_ *testing.T) {
 }
 
 func TestClient_CloseHelperScript(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 
 	// Create a dummy helper script file
 	tempFile, err := os.CreateTemp("", "kratis-git-credentials-helper-test-*.sh")
@@ -935,7 +935,7 @@ func TestClient_Start_ReconnectAfterConnectionError(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "")
+	c := NewClient(wsURL(srv), "tok", t.TempDir())
 	setTestClientTimeouts(c)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -959,7 +959,7 @@ func TestClient_Start_ReconnectAfterConnectionError(t *testing.T) {
 
 // TestClient_CloseWithAcpSession tests that Close cleans up an active ACP session.
 func TestClient_CloseWithAcpSession(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 
 	// Create a dummy process for the ACP session in its own process group
 	cmd := exec.Command("sleep", "30")
@@ -1049,7 +1049,7 @@ func TestHandleServerRequest_CheckoutDispatch(t *testing.T) {
 	})
 
 	c := connectClient(t, wsURL(srv), "tok")
-	c.workspace = "/nonexistent-test-path-for-clone"
+	c.workspace = filepath.Join(t.TempDir(), "nonexistent-clone")
 	errChan := make(chan error, 1)
 	go c.readLoop(errChan)
 
@@ -1188,7 +1188,6 @@ func TestHandleServerRequest_RegisterGitIdentityDispatch(t *testing.T) {
 	})
 
 	c := connectClient(t, wsURL(srv), "tok")
-	c.credentialsDir = t.TempDir()
 	t.Setenv("HOME", t.TempDir())
 	// Earlier tests may leave GIT_CONFIG_GLOBAL pointing at a removed file;
 	// identity must resolve through the default global config.
@@ -1424,7 +1423,7 @@ func TestClient_Start_HeartbeatErrorResponse(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "")
+	c := NewClient(wsURL(srv), "tok", t.TempDir())
 	setTestClientTimeouts(c)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -1485,7 +1484,7 @@ func TestClient_Start_HeartbeatErrorReconnect(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "")
+	c := NewClient(wsURL(srv), "tok", t.TempDir())
 	setTestClientTimeouts(c)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -1622,7 +1621,7 @@ func TestRequestPermission_Cancellation(t *testing.T) {
 }
 
 func TestCancelPendingPermissions_ReinitializesContext(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 	defer c.Close()
 
 	// Create a supervisor for testing
@@ -1653,7 +1652,7 @@ func TestCancelPendingPermissions_ReinitializesContext(t *testing.T) {
 }
 
 func TestClient_CloseConnection_PreservesAcpSession(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 
 	// Create a dummy process for the ACP session in its own process group
 	cmd := exec.Command("sleep", "30")
@@ -1710,7 +1709,7 @@ func TestClient_CloseConnection_PreservesAcpSession(t *testing.T) {
 }
 
 func TestClient_CloseAll_DestroyAcpSession(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 
 	// Create a dummy process for the ACP session in its own process group
 	cmd := exec.Command("sleep", "30")
@@ -1759,7 +1758,7 @@ func TestClient_CloseAll_DestroyAcpSession(t *testing.T) {
 }
 
 func TestClient_CloseAll_HandlesSupervisorWithoutProcess(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 	c.supervisor = runner.NewAgentSupervisor(c.workspace, nil, nil)
 
 	c.closeAll()
@@ -1929,7 +1928,7 @@ func TestClient_Start_ReconnectPreservesAcpSession(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "")
+	c := NewClient(wsURL(srv), "tok", t.TempDir())
 	setTestClientTimeouts(c)
 
 	// Create a dummy ACP session before starting
@@ -2022,7 +2021,7 @@ func TestClient_Start_NoTickerLeak(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "")
+	c := NewClient(wsURL(srv), "tok", t.TempDir())
 	setTestClientTimeouts(c)
 	ctx, cancel := context.WithCancel(context.Background())
 

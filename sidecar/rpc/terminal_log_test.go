@@ -4,14 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func newLogClient(t *testing.T) *Client {
 	t.Helper()
-	return &Client{terminalLogFile: filepath.Join(t.TempDir(), "logs", "terminal.log")}
+	return &Client{stateDir: t.TempDir()}
 }
 
 func TestAppendTerminalLogPersistsStdoutAndStderrOnly(t *testing.T) {
@@ -20,7 +19,7 @@ func TestAppendTerminalLogPersistsStdoutAndStderrOnly(t *testing.T) {
 	c.appendTerminalLog("stderr", "two")
 	c.appendTerminalLog("agent", "ignored")
 
-	data, err := os.ReadFile(c.terminalLogFile)
+	data, err := os.ReadFile(c.terminalLogPath())
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
@@ -59,7 +58,7 @@ func TestCompactTerminalLogKeepsNewestLines(t *testing.T) {
 		c.appendTerminalLog("stdout", big)
 	}
 	c.appendTerminalLog("stdout", "newest")
-	info, err := os.Stat(c.terminalLogFile)
+	info, err := os.Stat(c.terminalLogPath())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +73,6 @@ func TestCompactTerminalLogKeepsNewestLines(t *testing.T) {
 
 func TestExecuteGetLogsRespondsWithTail(t *testing.T) {
 	client, received := connectedGitClientWith(t, t.TempDir())
-	client.terminalLogFile = filepath.Join(t.TempDir(), "terminal.log")
 	client.appendTerminalLog("stdout", "a")
 	client.appendTerminalLog("stderr", "b")
 	client.appendTerminalLog("stdout", "c")
@@ -109,7 +107,6 @@ func TestExecuteGetLogsRejectsNonPositiveTail(t *testing.T) {
 
 func TestExecuteExecAppendsToTerminalLog(t *testing.T) {
 	client, _ := connectedGitClientWith(t, t.TempDir())
-	client.terminalLogFile = filepath.Join(t.TempDir(), "terminal.log")
 	client.ExecuteExec(ExecParams{Command: "echo hello; echo oops 1>&2"}, "req-exec")
 
 	lines, err := client.readTerminalTail(10)
@@ -124,7 +121,6 @@ func TestExecuteExecAppendsToTerminalLog(t *testing.T) {
 
 func TestSendOutputAppendsToTerminalLog(t *testing.T) {
 	client, _ := connectedGitClientWith(t, t.TempDir())
-	client.terminalLogFile = filepath.Join(t.TempDir(), "terminal.log")
 	client.SendOutput("from acp", "stdout")
 
 	lines, _ := client.readTerminalTail(5)

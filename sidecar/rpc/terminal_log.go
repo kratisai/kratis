@@ -19,10 +19,6 @@ const (
 	maxTerminalLogBytes = 16 * 1024 * 1024
 )
 
-// defaultTerminalLogFile is a variable so tests can redirect it away from a
-// live sandbox's /kratis/logs.
-var defaultTerminalLogFile = "/kratis/logs/terminal.log"
-
 // appendTerminalLog persists one console line. Failures are logged and
 // swallowed: live streaming must never depend on the catch-up log.
 func (c *Client) appendTerminalLog(stream, line string) {
@@ -56,10 +52,7 @@ func (c *Client) appendTerminalLog(stream, line string) {
 }
 
 func (c *Client) terminalLogPath() string {
-	if c.terminalLogFile != "" {
-		return c.terminalLogFile
-	}
-	return defaultTerminalLogFile
+	return c.statePath("logs", "terminal.log")
 }
 
 // compactTerminalLog keeps roughly the newest half of the file, starting at a

@@ -59,19 +59,20 @@ func (c *Client) ExecuteLaunchAcpAgent(params LaunchAcpAgentParams, reqID interf
 // agent subprocess for the given command, and performs the ACP handshake.
 func (c *Client) launchAcpAgentProcess(agentCommand string, logFiles []string, resumeSessionID string) error {
 	envFile := c.envFilePath()
+	workspace := c.resolveWorkspace()
 
 	// Ensure env file exists so sourcing is a no-op when no prior env.exec ran
 	if _, err := os.Stat(envFile); os.IsNotExist(err) {
 		initEnvCmd := fmt.Sprintf("mkdir -p %s && export -p > %s", filepath.Dir(envFile), envFile)
 		c.mu.Lock()
-		c.executor.Dir = c.workspace
+		c.executor.Dir = workspace
 		c.executor.Env = os.Environ()
 		c.mu.Unlock()
 		_, _ = c.executor.Execute(context.Background(), initEnvCmd, nil)
 	}
 
 	c.SendOutput(fmt.Sprintf("[ACP] Starting agent: %s", agentCommand), "stdout")
-	c.SendOutput(fmt.Sprintf("[ACP] Working directory: %s", c.workspace), "stdout")
+	c.SendOutput(fmt.Sprintf("[ACP] Working directory: %s", workspace), "stdout")
 
 	if len(logFiles) > 0 {
 		c.SendOutput(fmt.Sprintf("[ACP] Tailing agent logs: %s", strings.Join(logFiles, ", ")), "stdout")
@@ -81,14 +82,14 @@ func (c *Client) launchAcpAgentProcess(agentCommand string, logFiles []string, r
 	agentCmd := fmt.Sprintf("set -a && . %s 2>/dev/null; set +a; %s", envFile, agentCommand)
 	cmd := exec.CommandContext(context.Background(), "sh", "-c", agentCmd) //nolint:gosec // G204: launches the ACP agent binary via shell
 	c.mu.Lock()
-	cmd.Dir = c.workspace
+	cmd.Dir = workspace
 	c.mu.Unlock()
 	cmd.Env = os.Environ()
 	// Start in its own process group so we can signal the entire group (including child processes)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	// Create supervisor with client as event sink
-	sup := runner.NewAgentSupervisor(c.workspace, c.terminalManager, c)
+	sup := runner.NewAgentSupervisor(workspace, c.terminalManager, c)
 	sup.SetDebug(c.debug)
 	sup.Timeouts = c.supervisorTimeouts
 	sup.SetAgentLogFiles(logFiles)

@@ -119,7 +119,7 @@ func TestRegister_ReportsConnectorVersion(t *testing.T) {
 		}
 	})
 
-	client := NewClient(wsURL(srv), "valid-token", "")
+	client := NewClient(wsURL(srv), "valid-token", t.TempDir())
 	setTestClientTimeouts(client)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

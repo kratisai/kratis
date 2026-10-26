@@ -8,7 +8,7 @@ import (
 func TestPersistAndReadSessionID(t *testing.T) {
 	dir := t.TempDir()
 	c := NewClient("ws://example", "token", dir)
-	c.envFile = filepath.Join(dir, ".kratis-env")
+	c.stateDir = dir
 
 	if got := c.readPersistedSessionID(); got != "" {
 		t.Fatalf("expected empty session id before any persist, got %q", got)
@@ -27,7 +27,7 @@ func TestPersistAndReadSessionID(t *testing.T) {
 func TestPersistSessionIDIgnoresEmpty(t *testing.T) {
 	dir := t.TempDir()
 	c := NewClient("ws://example", "token", dir)
-	c.envFile = filepath.Join(dir, ".kratis-env")
+	c.stateDir = dir
 
 	c.persistSessionID("")
 	if got := c.readPersistedSessionID(); got != "" {

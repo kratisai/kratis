@@ -55,7 +55,7 @@ func TestExecuteReadFileSlice(t *testing.T) {
 	dir := setupTestGitRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	client := &Client{workspace: dir}
+	client := newTestClient(t, dir)
 
 	mockID := "req-123"
 
@@ -108,7 +108,7 @@ func TestBuildGitDiffSummaryAndFileDiff(t *testing.T) {
 	dir := setupTestGitRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	client := &Client{workspace: dir}
+	client := newTestClient(t, dir)
 
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Kratis Test Repo (Modified)\nLine 2\nLine 3 Extra\nLine 4\nLine 5\nLine 6\n"), 0600); err != nil {
 		t.Fatalf("Failed to modify README: %v", err)
@@ -183,7 +183,7 @@ func TestBuildGitDiffSummary_NewRepoDiffsAgainstRootCommit(t *testing.T) {
 	dir, rootSHA := setupTestNewRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	client := &Client{workspace: dir}
+	client := newTestClient(t, dir)
 	result, err := client.buildGitDiffSummary("main")
 	if err != nil {
 		t.Fatalf("Failed to build diff summary: %v", err)
@@ -212,7 +212,7 @@ func TestBuildGitDiffSummary_NewRepoWithOriginButNoUpstreamBranchDiffsAgainstRoo
 	runGitCmd(t, dir, "remote", "add", "origin", "https://github.com/example/new-repo.git")
 	runGitCmd(t, dir, "checkout", "-B", "main")
 
-	client := &Client{workspace: dir}
+	client := newTestClient(t, dir)
 	result, err := client.buildGitDiffSummary("main")
 	if err != nil {
 		t.Fatalf("Failed to build diff summary: %v", err)
@@ -232,7 +232,7 @@ func TestBuildDiffSections_SynthesizesUntrackedFiles(t *testing.T) {
 	dir := setupTestGitRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	client := &Client{workspace: dir}
+	client := newTestClient(t, dir)
 
 	if err := os.WriteFile(filepath.Join(dir, "new_file.txt"), []byte("Hello World\nNew Line 2\n"), 0600); err != nil {
 		t.Fatalf("Failed to write new file: %v", err)
@@ -263,7 +263,7 @@ func TestBuildDiffSections_ManifestAndSections(t *testing.T) {
 	dir := setupTestGitRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	client := &Client{workspace: dir}
+	client := newTestClient(t, dir)
 
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Updated README\n"), 0600); err != nil {
 		t.Fatalf("Failed to write README: %v", err)
@@ -720,7 +720,7 @@ func TestExecuteCheckout_PersistsDiffBaseBranchForRestart(t *testing.T) {
 	client, _ := connectedGitClient(t, workDir)
 	client.ExecuteCheckout(CheckoutParams{URL: bareDir, Branch: "main", ExecutionID: "exec-persist"}, "req-co")
 
-	restarted := &Client{workspace: workDir, envFile: client.envFilePath()}
+	restarted := &Client{workspace: workDir, stateDir: client.stateRoot()}
 	if got := restarted.diffBaseBranch(); got != "main" {
 		t.Errorf("Expected persisted diff base branch 'main' after restart, got %q", got)
 	}

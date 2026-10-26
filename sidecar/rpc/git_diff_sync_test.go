@@ -122,7 +122,7 @@ func TestManifestDigestChangesOnContentEdit(t *testing.T) {
 	dir := setupTestGitRepo(t)
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	client := &Client{workspace: dir}
+	client := newTestClient(t, dir)
 
 	filePath := filepath.Join(dir, "README.md")
 	if err := os.WriteFile(filePath, []byte("# Edit 1\n"), 0600); err != nil {

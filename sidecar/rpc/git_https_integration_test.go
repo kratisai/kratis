@@ -184,7 +184,7 @@ func TestExecuteCheckout_RealHttpsClone_WithCredentialHelper(t *testing.T) {
 	}
 	c.mu.Lock()
 	c.wsConn = wsConn
-	c.credentialsDir = t.TempDir()
+	c.stateDir = t.TempDir()
 	c.mu.Unlock()
 	errChan := make(chan error, 1)
 	go c.readLoop(errChan)
@@ -311,7 +311,7 @@ func TestExecuteGitPush_RealHttpsPush_WithCredentialHelper(t *testing.T) {
 	}
 	c.mu.Lock()
 	c.wsConn = wsConn
-	c.credentialsDir = t.TempDir()
+	c.stateDir = t.TempDir()
 	c.mu.Unlock()
 	errChan := make(chan error, 1)
 	go c.readLoop(errChan)

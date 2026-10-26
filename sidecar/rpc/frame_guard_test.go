@@ -239,7 +239,7 @@ func TestClient_Start_ReportsDisconnectAfterReconnect(t *testing.T) {
 		}
 	})
 
-	c := NewClient(wsURL(srv), "tok", "")
+	c := NewClient(wsURL(srv), "tok", t.TempDir())
 	setTestClientTimeouts(c)
 	ctx, cancel := context.WithCancel(context.Background())
 	go c.Start(ctx)

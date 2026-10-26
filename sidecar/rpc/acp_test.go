@@ -1569,7 +1569,7 @@ func TestRequestPermission_ErrorResponse(t *testing.T) {
 
 // TestRequestPermission_WriteError tests RequestPermission when the write fails.
 func TestRequestPermission_WriteError(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 	// wsConn is nil, so writeJSON will fail
 
 	selectedOptionID, err := c.RequestPermission(acp.PermissionRequest{Command: "some-command"})
@@ -1736,7 +1736,7 @@ func TestCreateElicitation_ErrorResponse(t *testing.T) {
 
 // TestCreateElicitation_WriteError tests CreateElicitation when the write fails.
 func TestCreateElicitation_WriteError(t *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 
 	result, err := c.CreateElicitation(acp.ElicitationRequest{ElicitationID: "el-1", Message: "q", Mode: "form"})
 	if err == nil {
@@ -1755,8 +1755,8 @@ func TestCreateElicitation_WriteError(t *testing.T) {
 }
 
 // TestSendSuccessResponse_NilID tests that sendSuccessResponse is a no-op for nil ID.
-func TestSendSuccessResponse_NilID(_ *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+func TestSendSuccessResponse_NilID(t *testing.T) {
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 	defer c.Close()
 
 	// Should not panic or attempt to write
@@ -1764,8 +1764,8 @@ func TestSendSuccessResponse_NilID(_ *testing.T) {
 }
 
 // TestSendErrorResponse_NilID tests that sendErrorResponse is a no-op for nil ID.
-func TestSendErrorResponse_NilID(_ *testing.T) {
-	c := NewClient("ws://localhost:12345", "tok", "")
+func TestSendErrorResponse_NilID(t *testing.T) {
+	c := NewClient("ws://localhost:12345", "tok", t.TempDir())
 	defer c.Close()
 
 	// Should not panic or attempt to write

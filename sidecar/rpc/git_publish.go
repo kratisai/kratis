@@ -61,6 +61,50 @@ func resolvePublishStatsBase(workspace string, cmdEnv []string, execBaseSha, hea
 	return headSha
 }
 
+// gitCommitExists reports whether sha resolves to a commit in the workspace.
+func gitCommitExists(workspace string, cmdEnv []string, sha string) bool {
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return false
+	}
+	cmd := exec.Command("git", "cat-file", "-e", sha+"^{commit}") //nolint:gosec
+	cmd.Dir = workspace
+	cmd.Env = cmdEnv
+	return cmd.Run() == nil
+}
+
+// gitIsAncestor reports whether ancestor is reachable from descendant.
+func gitIsAncestor(workspace string, cmdEnv []string, ancestor, descendant string) bool {
+	if strings.TrimSpace(ancestor) == "" || strings.TrimSpace(descendant) == "" {
+		return false
+	}
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestor, descendant) //nolint:gosec
+	cmd.Dir = workspace
+	cmd.Env = cmdEnv
+	return cmd.Run() == nil
+}
+
+// resolveExecutionBaseSha returns a base commit that is valid and reachable from
+// HEAD. It repairs stale or corrupt persisted state instead of letting git
+// failures masquerade as "no changes": a missing object (for example after a
+// force-push) or a rewritten history falls back to the merge-base with the
+// default branch.
+func (c *Client) resolveExecutionBaseSha(
+	workspace string, cmdEnv []string, defaultRef, defaultSha string) string {
+	persisted := c.readPersistedExecutionBaseSha()
+	if persisted != "" &&
+		gitCommitExists(workspace, cmdEnv, persisted) &&
+		gitIsAncestor(workspace, cmdEnv, persisted, "HEAD") {
+		return persisted
+	}
+	if mergeBase, err := mergeBaseWithHead(workspace, defaultRef); err == nil {
+		c.persistExecutionBaseSha(mergeBase)
+		return mergeBase
+	}
+	c.persistExecutionBaseSha(defaultSha)
+	return defaultSha
+}
+
 // computeChangeSetStats computes the files modified/added/deleted between baseCommit and the working tree,
 // including untracked files and ignoring .kratis.
 func (c *Client) computeChangeSetStats(workspace string, cmdEnv []string, baseCommit string) (GitChangeSetStats, error) {
@@ -73,29 +117,31 @@ func (c *Client) computeChangeSetStats(workspace string, cmdEnv []string, baseCo
 	nameStatusCmd := exec.Command("git", "diff", "--name-status", baseCommit) //nolint:gosec
 	nameStatusCmd.Dir = workspace
 	nameStatusCmd.Env = cmdEnv
-	if nsOut, err := nameStatusCmd.Output(); err == nil {
-		for _, line := range strings.Split(string(nsOut), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
+	nsOut, err := nameStatusCmd.Output()
+	if err != nil {
+		return GitChangeSetStats{}, fmt.Errorf("git diff --name-status %s failed: %w", baseCommit, err)
+	}
+	for _, line := range strings.Split(string(nsOut), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			statusChar := parts[0]
+			filePath := parts[len(parts)-1]
+			if isKratisPlatformPath(filePath) {
 				continue
 			}
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				statusChar := parts[0]
-				filePath := parts[len(parts)-1]
-				if isKratisPlatformPath(filePath) {
-					continue
-				}
-				switch {
-				case strings.HasPrefix(statusChar, "A"):
-					statusMap[filePath] = GitDiffAdded
-				case strings.HasPrefix(statusChar, "D"):
-					statusMap[filePath] = GitDiffDeleted
-				case strings.HasPrefix(statusChar, "R"):
-					statusMap[filePath] = GitDiffRenamed
-				default:
-					statusMap[filePath] = GitDiffModified
-				}
+			switch {
+			case strings.HasPrefix(statusChar, "A"):
+				statusMap[filePath] = GitDiffAdded
+			case strings.HasPrefix(statusChar, "D"):
+				statusMap[filePath] = GitDiffDeleted
+			case strings.HasPrefix(statusChar, "R"):
+				statusMap[filePath] = GitDiffRenamed
+			default:
+				statusMap[filePath] = GitDiffModified
 			}
 		}
 	}
@@ -107,32 +153,34 @@ func (c *Client) computeChangeSetStats(workspace string, cmdEnv []string, baseCo
 	numstatCmd := exec.Command("git", "diff", "--numstat", baseCommit) //nolint:gosec
 	numstatCmd.Dir = workspace
 	numstatCmd.Env = cmdEnv
-	if numOut, err := numstatCmd.Output(); err == nil {
-		for _, line := range strings.Split(string(numOut), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
+	numOut, err := numstatCmd.Output()
+	if err != nil {
+		return GitChangeSetStats{}, fmt.Errorf("git diff --numstat %s failed: %w", baseCommit, err)
+	}
+	for _, line := range strings.Split(string(numOut), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) >= 3 {
+			adds, _ := strconv.Atoi(parts[0])
+			dels, _ := strconv.Atoi(parts[1])
+			filePath := parts[2]
+			if isKratisPlatformPath(filePath) {
 				continue
 			}
-			parts := strings.Split(line, "\t")
-			if len(parts) >= 3 {
-				adds, _ := strconv.Atoi(parts[0])
-				dels, _ := strconv.Atoi(parts[1])
-				filePath := parts[2]
-				if isKratisPlatformPath(filePath) {
-					continue
-				}
-				status := GitDiffModified
-				if s, ok := statusMap[filePath]; ok {
-					status = s
-				}
-				totalAdds += adds
-				totalDels += dels
-				filesMap[filePath] = GitChangeSetFile{
-					Path:      filePath,
-					Status:    status,
-					Additions: adds,
-					Deletions: dels,
-				}
+			status := GitDiffModified
+			if s, ok := statusMap[filePath]; ok {
+				status = s
+			}
+			totalAdds += adds
+			totalDels += dels
+			filesMap[filePath] = GitChangeSetFile{
+				Path:      filePath,
+				Status:    status,
+				Additions: adds,
+				Deletions: dels,
 			}
 		}
 	}
@@ -141,28 +189,30 @@ func (c *Client) computeChangeSetStats(workspace string, cmdEnv []string, baseCo
 	untrackedCmd := exec.Command("git", "ls-files", "--others", "--exclude-standard") //nolint:gosec
 	untrackedCmd.Dir = workspace
 	untrackedCmd.Env = cmdEnv
-	if uOut, err := untrackedCmd.Output(); err == nil {
-		for _, line := range strings.Split(string(uOut), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || isKratisPlatformPath(line) {
-				continue
+	uOut, err := untrackedCmd.Output()
+	if err != nil {
+		return GitChangeSetStats{}, fmt.Errorf("git ls-files --others failed: %w", err)
+	}
+	for _, line := range strings.Split(string(uOut), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || isKratisPlatformPath(line) {
+			continue
+		}
+		fullPath := filepath.Join(workspace, line)
+		lineCount := 0
+		//nolint:gosec // G304: reading workspace file discovered via git ls-files
+		if data, err := os.ReadFile(fullPath); err == nil {
+			trimmed := strings.TrimRight(string(data), "\r\n")
+			if trimmed != "" {
+				lineCount = len(strings.Split(trimmed, "\n"))
 			}
-			fullPath := filepath.Join(workspace, line)
-			lineCount := 0
-			//nolint:gosec // G304: reading workspace file discovered via git ls-files
-			if data, err := os.ReadFile(fullPath); err == nil {
-				trimmed := strings.TrimRight(string(data), "\r\n")
-				if trimmed != "" {
-					lineCount = len(strings.Split(trimmed, "\n"))
-				}
-			}
-			totalAdds += lineCount
-			filesMap[line] = GitChangeSetFile{
-				Path:      line,
-				Status:    GitDiffAdded,
-				Additions: lineCount,
-				Deletions: 0,
-			}
+		}
+		totalAdds += lineCount
+		filesMap[line] = GitChangeSetFile{
+			Path:      line,
+			Status:    GitDiffAdded,
+			Additions: lineCount,
+			Deletions: 0,
 		}
 	}
 
@@ -213,19 +263,22 @@ func (c *Client) hasWorkspaceUncommittedChanges(workspace string, cmdEnv []strin
 }
 
 // countCommitsBetween returns the number of commits in range from..to.
-func countCommitsBetween(workspace string, cmdEnv []string, fromCommit, toCommit string) int {
+func countCommitsBetween(workspace string, cmdEnv []string, fromCommit, toCommit string) (int, error) {
 	if strings.TrimSpace(fromCommit) == "" || strings.TrimSpace(toCommit) == "" {
-		return 0
+		return 0, nil
 	}
 	cmd := exec.Command("git", "rev-list", "--count", fmt.Sprintf("%s..%s", fromCommit, toCommit)) //nolint:gosec
 	cmd.Dir = workspace
 	cmd.Env = cmdEnv
 	out, err := cmd.Output()
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("git rev-list --count %s..%s failed: %w", fromCommit, toCommit, err)
 	}
-	count, _ := strconv.Atoi(strings.TrimSpace(string(out)))
-	return count
+	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("parse git rev-list count %q: %w", strings.TrimSpace(string(out)), err)
+	}
+	return count, nil
 }
 
 // ExecuteGitObservePublish inspects origin and local git state.
@@ -264,17 +317,11 @@ func (c *Client) ExecuteGitObservePublish(params GitObservePublishParams, reqID 
 	}
 	defaultSha := strings.TrimSpace(string(defaultShaBytes))
 
-	// 3. Execution base SHA
-	execBaseSha := c.readPersistedExecutionBaseSha()
-	if execBaseSha == "" {
-		// Fallback to merge-base with default branch or root commit
-		if mb, mbErr := mergeBaseWithHead(workspace, defaultRef); mbErr == nil {
-			execBaseSha = mb
-			c.persistExecutionBaseSha(mb)
-		} else {
-			execBaseSha = defaultSha
-		}
-	}
+	// 3. Execution base SHA. Persisted state is repaired when it no longer
+	// resolves to a commit reachable from HEAD (for example, corrupt state from
+	// a test or a force-push). Invalid git ranges must never look like "no
+	// changes".
+	execBaseSha := c.resolveExecutionBaseSha(workspace, cmdEnv, defaultRef, defaultSha)
 
 	// 4. Default is ancestor of HEAD
 	ancCmd := exec.Command("git", "merge-base", "--is-ancestor", defaultSha, "HEAD") //nolint:gosec
@@ -283,7 +330,13 @@ func (c *Client) ExecuteGitObservePublish(params GitObservePublishParams, reqID 
 	defaultIsAncestorOfHead := ancCmd.Run() == nil
 
 	// 5. Incoming commits on the default branch
-	incomingCommitCount := countCommitsBetween(workspace, cmdEnv, execBaseSha, defaultSha)
+	incomingCommitCount, err := countCommitsBetween(workspace, cmdEnv, execBaseSha, defaultSha)
+	if err != nil {
+		if reqID != nil {
+			c.sendErrorResponse(reqID, -32000, "Failed to count incoming commits", err.Error())
+		}
+		return
+	}
 
 	// 6. Head branch SHA on remote
 	headSha, headErr := c.remoteBranchHeadSha(workspace, cmdEnv, params.HeadBranch)
@@ -297,7 +350,13 @@ func (c *Client) ExecuteGitObservePublish(params GitObservePublishParams, reqID 
 	// 7. Publish delta: workspace relative to the target branch when it exists, otherwise the
 	// execution base. The main diff view keeps using the execution base.
 	publishBase := resolvePublishStatsBase(workspace, cmdEnv, execBaseSha, headSha)
-	commitCount := countCommitsBetween(workspace, cmdEnv, publishBase, "HEAD")
+	commitCount, err := countCommitsBetween(workspace, cmdEnv, publishBase, "HEAD")
+	if err != nil {
+		if reqID != nil {
+			c.sendErrorResponse(reqID, -32000, "Failed to count workspace commits", err.Error())
+		}
+		return
+	}
 	hasUncommittedChanges := c.hasWorkspaceUncommittedChanges(workspace, cmdEnv)
 	stats, statsErr := c.computeChangeSetStats(workspace, cmdEnv, publishBase)
 	if statsErr != nil {
@@ -434,7 +493,11 @@ func (c *Client) ExecuteGitRebase(params GitRebaseParams, reqID interface{}) {
 	c.persistExecutionBaseSha(actualDefaultSha)
 
 	// 7. Compute updated stats
-	stats, _ := c.computeChangeSetStats(workspace, cmdEnv, actualDefaultSha)
+	stats, statsErr := c.computeChangeSetStats(workspace, cmdEnv, actualDefaultSha)
+	if statsErr != nil {
+		log.Printf("failed to compute changeset stats after rebase: %v", statsErr)
+		stats = GitChangeSetStats{Files: []GitChangeSetFile{}}
+	}
 
 	if reqID != nil {
 		c.sendSuccessResponse(reqID, GitRebaseResult{
@@ -513,12 +576,19 @@ func (c *Client) ExecuteGitPublish(params GitPushParams, reqID interface{}) {
 		return
 	}
 
+	// A missing persisted base (legacy/resumed sandboxes) is unknown, not stale:
+	// keep the legacy behaviour and let the push flow decide from origin. A
+	// non-empty base is validated and repaired so corruption cannot silently
+	// disable the rebase gate.
 	execBaseSha := c.readPersistedExecutionBaseSha()
-	if execBaseSha != "" && execBaseSha != actualDefaultSha {
-		if reqID != nil {
-			c.sendErrorResponse(reqID, -32001, "REBASE_REQUIRED", fmt.Sprintf("execution base %s is behind default %s", execBaseSha, actualDefaultSha))
+	if execBaseSha != "" {
+		execBaseSha = c.resolveExecutionBaseSha(workspace, cmdEnv, defaultRef, actualDefaultSha)
+		if execBaseSha != actualDefaultSha {
+			if reqID != nil {
+				c.sendErrorResponse(reqID, -32001, "REBASE_REQUIRED", fmt.Sprintf("execution base %s is behind default %s", execBaseSha, actualDefaultSha))
+			}
+			return
 		}
-		return
 	}
 
 	// 3. Verify remote head lease if updating existing branch
@@ -547,8 +617,14 @@ func (c *Client) ExecuteGitPublish(params GitPushParams, reqID interface{}) {
 		if remoteHeadSha, headErr := c.remoteBranchHeadSha(workspace, cmdEnv, branchName); headErr == nil {
 			baseForStats = resolvePublishStatsBase(workspace, cmdEnv, baseForStats, remoteHeadSha)
 		}
-		stats, err := c.computeChangeSetStats(workspace, cmdEnv, baseForStats)
-		if err == nil && stats.Digest != params.ExpectedChangeSetDigest {
+		stats, statsErr := c.computeChangeSetStats(workspace, cmdEnv, baseForStats)
+		if statsErr != nil {
+			if reqID != nil {
+				c.sendErrorResponse(reqID, -32000, "Failed to compute changeset digest", statsErr.Error())
+			}
+			return
+		}
+		if stats.Digest != params.ExpectedChangeSetDigest {
 			if reqID != nil {
 				c.sendErrorResponse(reqID, -32001, "CHANGESET_CHANGED", fmt.Sprintf("expected digest %s, found %s", params.ExpectedChangeSetDigest, stats.Digest))
 			}
