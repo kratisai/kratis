@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 public class PlanningProperties {
 
     private int maxIterations = 25;
-    private Duration llmTimeout = Duration.ofSeconds(60);
+    private Duration llmTimeout = Duration.ofMinutes(2);
 
     public int getMaxIterations() {
         return maxIterations;

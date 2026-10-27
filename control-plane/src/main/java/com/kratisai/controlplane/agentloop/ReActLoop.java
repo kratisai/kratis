@@ -35,6 +35,8 @@ public final class ReActLoop<T> {
     private static final int MAX_TRANSIENT_ATTEMPTS = 4;
     private static final long TRANSIENT_RETRY_INITIAL_BACKOFF_MILLIS = 500;
     private static final long TRANSIENT_RETRY_MAX_BACKOFF_MILLIS = 8000;
+    private static final String FINAL_TURN_TOOL_CALL_CORRECTION =
+            "\n**IMPORTANT** Tools are disabled on the final turn. Do not request tools. Return your final answer as plain text now.";
 
     public enum ToolPhase {
         START,
@@ -168,6 +170,14 @@ public final class ReActLoop<T> {
                     return null;
                 }
                 AssistantMessage assistantMessage = llmTurn.message();
+
+                if (finalTurn && assistantMessage.hasToolCalls()) {
+                    abortAttempt(llmTurn.attempt());
+                    feedback = FINAL_TURN_TOOL_CALL_CORRECTION;
+                    lastValidationError = "Final turn returned tool calls; a text-only answer was required.";
+                    continue;
+                }
+
                 history.add(assistantMessage);
 
                 if (!assistantMessage.hasToolCalls()) {
