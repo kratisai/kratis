@@ -25,6 +25,8 @@ import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ChatUsageSessionService;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ScratchpadService;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
+import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -35,8 +37,15 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import reactor.core.Disposable;
@@ -290,5 +299,71 @@ class PlanningAgentServiceTest {
 
         verify(chatService).saveInterstitialMessage(eq(chatId), eq("paused"), eq("max_iterations"), any());
         verify(chatService, never()).saveAssistantErrorMessage(any(), anyString(), anyInt());
+    }
+
+    @Test
+    void evaluateContinuationDirective_sendsToolResultsInPlainTranscript() {
+        FakeChatModel model = new FakeChatModel();
+        model.addMatcher(PromptMatcher.builder()
+                .response("Use the AuthService finding and finish the plan.")
+                .build());
+        ChatClient chatClient = ChatClient.builder(model).build();
+
+        List<Message> history = List.of(
+                new SystemMessage("planning system prompt"),
+                new UserMessage("Find the authentication bug"),
+                AssistantMessage.builder()
+                        .content("Searching the repository.")
+                        .toolCalls(List.of(new AssistantMessage.ToolCall(
+                                "call-1", "function", "search_repository", "{\"query\":\"authentication\"}")))
+                        .build(),
+                ToolResponseMessage.builder()
+                        .responses(List.of(new ToolResponseMessage.ToolResponse(
+                                "call-1", "search_repository", "AuthService.java:42 drops the token")))
+                        .build());
+
+        String directive = planningAgentService.evaluateContinuationDirective(chatClient, history);
+
+        assertThat(directive).isEqualTo("Use the AuthService finding and finish the plan.");
+        Prompt prompt = model.getInvocations().getLast().prompt();
+        assertThat(prompt.getInstructions()).hasSize(2);
+        assertThat(prompt.getInstructions().get(0)).isInstanceOf(SystemMessage.class);
+        Message transcriptMessage = prompt.getInstructions().get(1);
+        assertThat(transcriptMessage).isInstanceOf(UserMessage.class);
+        assertThat(transcriptMessage.getText())
+                .contains("Find the authentication bug")
+                .contains("search_repository")
+                .contains("AuthService.java:42 drops the token");
+        assertThat(prompt.getInstructions()).noneMatch(AssistantMessage.class::isInstance);
+        assertThat(prompt.getInstructions()).noneMatch(ToolResponseMessage.class::isInstance);
+    }
+
+    @Test
+    void evaluateContinuationDirective_blankLlmResponseFallsBackToDefault() {
+        FakeChatModel model = new FakeChatModel();
+        model.addMatcher(PromptMatcher.builder().response("   ").build());
+        ChatClient chatClient = ChatClient.builder(model).build();
+
+        String directive = planningAgentService.evaluateContinuationDirective(
+                chatClient, List.of(new UserMessage("Find the authentication bug")));
+
+        assertThat(directive).isEqualTo(PlanningAgentService.DEFAULT_CONTINUATION_DIRECTIVE);
+    }
+
+    @Test
+    void formatContinuationTranscript_keepsRecentWorkAndStaysWithinLimits() {
+        List<Message> history = new ArrayList<>();
+        history.add(new UserMessage("Investigate the bug"));
+        for (int i = 0; i < 100; i++) {
+            history.add(new AssistantMessage("step-" + i));
+        }
+
+        String transcript = PlanningAgentService.formatContinuationTranscript(history);
+
+        assertThat(transcript).contains("TURN REQUEST:\nInvestigate the bug");
+        assertThat(transcript).doesNotContain("step-59");
+        assertThat(transcript).contains("step-60").contains("step-99");
+        assertThat(PlanningAgentService.formatContinuationTranscript(null)).isEmpty();
+        assertThat(PlanningAgentService.formatContinuationTranscript(List.of())).isEmpty();
     }
 }
