@@ -8,7 +8,8 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { DiffCommentDraft } from '@/types/diff-types'
 
 import { Button } from '@/components/ui/button'
-import { useEnvironments, useResumeEnvironment } from '@/hooks/use-environments'
+import { useResumeEnvironment } from '@/hooks/use-environments'
+import { useExecutionEnvironment } from '@/hooks/use-executions'
 import { useIsMobile } from '@/hooks/use-is-mobile'
 import { fetchFileSlice } from '@/lib/diff-api'
 import { useDiffReviewStore } from '@/store/diff-review-store'
@@ -98,10 +99,8 @@ export function DiffHunkViewer({
   const [isResumeDrawerOpen, setIsResumeDrawerOpen] = useState(false)
   const [resumeDrawerTarget, setResumeDrawerTarget] = useState<ExpanderTarget>({ kind: 'top' })
 
-  const { data: environments } = useEnvironments()
+  const { environmentId, isSleeping } = useExecutionEnvironment(chatId, executionId)
   const resumeEnvironment = useResumeEnvironment()
-  const sleepingEnvironment = environments?.find((env) => env.status === 'SLEEPING')
-  const isSleeping = sleepingEnvironment !== undefined
 
   // Reset expanded slices when file path or base patch changes
   useEffect(() => {
@@ -222,9 +221,9 @@ export function DiffHunkViewer({
   }
 
   const handleResumeEnvironment = async () => {
-    if (!sleepingEnvironment) return
+    if (!environmentId) return
     try {
-      await resumeEnvironment.mutateAsync(sleepingEnvironment.id)
+      await resumeEnvironment.mutateAsync(environmentId)
       setIsResumeDrawerOpen(false)
     } catch {
       // The mutation hook surfaces the failure via toast.
@@ -244,7 +243,7 @@ export function DiffHunkViewer({
         </span>
         <Button
           className="h-6 shrink-0 text-[11px]"
-          disabled={resumeEnvironment.isPending || !sleepingEnvironment}
+          disabled={resumeEnvironment.isPending || !environmentId}
           onClick={() => void handleResumeEnvironment()}
           size="sm"
           variant="secondary"
