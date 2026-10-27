@@ -27,6 +27,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -47,6 +48,10 @@ public class PlanningAgentService {
 
     public static final String DEFAULT_CONTINUATION_DIRECTIVE =
             "Resume planning by utilizing existing findings and completing remaining tasks without repeating completed research.";
+
+    private static final int DIRECTIVE_TRANSCRIPT_MAX_MESSAGES = 40;
+    private static final int DIRECTIVE_TRANSCRIPT_MAX_MESSAGE_CHARS = 4000;
+    private static final int DIRECTIVE_TRANSCRIPT_MAX_CHARS = 24000;
 
     private final ModelProviderRepository modelProviderRepository;
     private final ChatModelFactory chatModelFactory;
@@ -116,6 +121,8 @@ public class PlanningAgentService {
     /** Continue a paused planning execution; the directive is injected into history, not persisted. */
     public Flux<ClientPayload.ChatStreamPayload> continuePlanning(
             UUID teamId, UUID providerId, String modelName, UUID sessionId, String directive) {
+        logger.debug(
+                "Continuing planning execution for team {}, session {}, directive {}", teamId, sessionId, directive);
         return startTurn(
                 teamId, providerId, modelName, PlanningContext.continuation(teamId, sessionId, directive), null);
     }
@@ -177,26 +184,21 @@ public class PlanningAgentService {
 
     public String evaluateContinuationDirective(ChatClient chatClient, List<Message> history) {
         String directivePrompt = """
-                You are summarizing the current progress of an autonomous planning agent that reached its iteration limit.
-                Analyze the completed research, findings, and remaining tasks from the conversation history.
-                Generate a concise, focused continuation directive instruction for the next agent turn.
-                The directive must instruct the agent to build upon existing findings, avoid duplicate tool queries or redundant research, and synthesize the final plan or complete remaining work.
-                Be direct and concise.
+                You are summarizing the progress of an autonomous planning agent that reached its iteration limit.
+                Analyze the transcript for completed research, key findings, tools that were already queried, and remaining tasks.
+                Write a concise continuation directive for the next agent turn.
+                The directive must state the key findings and completed steps so the next turn does not repeat them.
+                It must name the remaining work and instruct the agent to synthesize the final plan or finish that work.
+                Do not copy raw tool output. Be direct and concise.
                 """;
         try {
-            List<Message> excerpt = history != null
-                    ? history.stream()
-                            .filter(m -> m instanceof UserMessage || m instanceof AssistantMessage)
-                            .toList()
-                    : List.of();
-            if (excerpt.size() > 10) {
-                excerpt = excerpt.subList(excerpt.size() - 10, excerpt.size());
-            }
-            if (!excerpt.isEmpty()) {
+            String transcript = formatContinuationTranscript(history);
+            if (!transcript.isBlank()) {
                 ChatResponse response = chatClient
                         .prompt()
                         .system(directivePrompt)
-                        .messages(excerpt)
+                        .user("Transcript of the interrupted turn:\n\n" + transcript
+                                + "\n\nWrite the continuation directive now.")
                         .call()
                         .chatResponse();
                 String directive = ChatResponseAssembler.answerText(response);
@@ -208,6 +210,122 @@ public class PlanningAgentService {
             logger.warn("Failed to evaluate continuation directive using LLM", e);
         }
         return DEFAULT_CONTINUATION_DIRECTIVE;
+    }
+
+    /**
+     * Render the aborted turn as plain text. Raw assistant tool calls cannot be replayed without
+     * their tool responses, and the provider rejects that message sequence.
+     */
+    static String formatContinuationTranscript(@Nullable List<Message> history) {
+        if (history == null || history.isEmpty()) {
+            return "";
+        }
+        int lastUserIndex = lastUserMessageIndex(history);
+        String request = lastUserIndex >= 0
+                ? textOrEmpty(history.get(lastUserIndex).getText()).strip()
+                : "";
+        List<String> entries = history.subList(lastUserIndex + 1, history.size()).stream()
+                .filter(PlanningAgentService::hasDigestContent)
+                .map(PlanningAgentService::formatDigestMessage)
+                .map(entry -> truncate(entry.strip(), DIRECTIVE_TRANSCRIPT_MAX_MESSAGE_CHARS))
+                .filter(entry -> !entry.isEmpty())
+                .toList();
+
+        StringBuilder transcript = new StringBuilder();
+        if (!request.isBlank()) {
+            transcript.append("TURN REQUEST:\n").append(truncate(request, DIRECTIVE_TRANSCRIPT_MAX_MESSAGE_CHARS));
+        }
+        appendRecentEntries(transcript, entries);
+        return transcript.toString();
+    }
+
+    private static void appendRecentEntries(StringBuilder transcript, List<String> entries) {
+        int start = Math.max(0, entries.size() - DIRECTIVE_TRANSCRIPT_MAX_MESSAGES);
+        StringBuilder body = new StringBuilder();
+        for (int i = entries.size() - 1; i >= start; i--) {
+            String entry = entries.get(i);
+            int separator = body.isEmpty() ? 0 : 2;
+            if (transcript.length() + body.length() + entry.length() + separator > DIRECTIVE_TRANSCRIPT_MAX_CHARS) {
+                break;
+            }
+            if (!body.isEmpty()) {
+                body.insert(0, "\n\n");
+            }
+            body.insert(0, entry);
+        }
+        if (!body.isEmpty()) {
+            if (!transcript.isEmpty()) {
+                transcript.append("\n\n");
+            }
+            transcript.append(body);
+        }
+    }
+
+    private static int lastUserMessageIndex(List<Message> history) {
+        for (int i = history.size() - 1; i >= 0; i--) {
+            if (history.get(i) instanceof UserMessage user
+                    && !textOrEmpty(user.getText()).isBlank()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean hasDigestContent(Message message) {
+        return switch (message.getMessageType()) {
+            case USER -> !textOrEmpty(message.getText()).isBlank();
+            case ASSISTANT -> {
+                AssistantMessage assistant = (AssistantMessage) message;
+                yield !textOrEmpty(assistant.getText()).isBlank()
+                        || !assistant.getToolCalls().isEmpty();
+            }
+            case TOOL -> !((ToolResponseMessage) message).getResponses().isEmpty();
+            case SYSTEM -> false;
+        };
+    }
+
+    private static String formatDigestMessage(Message message) {
+        return switch (message.getMessageType()) {
+            case USER -> "USER:\n" + textOrEmpty(message.getText()).strip();
+            case ASSISTANT -> formatAssistantMessage((AssistantMessage) message);
+            case TOOL -> formatToolResponseMessage((ToolResponseMessage) message);
+            case SYSTEM -> "";
+        };
+    }
+
+    private static String formatAssistantMessage(AssistantMessage message) {
+        StringBuilder entry = new StringBuilder("ASSISTANT:");
+        String text = textOrEmpty(message.getText()).strip();
+        if (!text.isEmpty()) {
+            entry.append('\n').append(text);
+        }
+        for (AssistantMessage.ToolCall toolCall : message.getToolCalls()) {
+            entry.append("\nTOOL CALL: ").append(toolCall.name());
+            String arguments = textOrEmpty(toolCall.arguments()).strip();
+            if (!arguments.isEmpty()) {
+                entry.append(' ').append(arguments);
+            }
+        }
+        return entry.toString();
+    }
+
+    private static String formatToolResponseMessage(ToolResponseMessage message) {
+        StringBuilder entry = new StringBuilder("TOOL RESULTS:");
+        for (ToolResponseMessage.ToolResponse response : message.getResponses()) {
+            entry.append("\n- ")
+                    .append(response.name().isBlank() ? "tool" : response.name())
+                    .append(": ")
+                    .append(textOrEmpty(response.responseData()).strip());
+        }
+        return entry.toString();
+    }
+
+    private static String textOrEmpty(@Nullable String text) {
+        return text != null ? text : "";
+    }
+
+    private static String truncate(String text, int maxChars) {
+        return text.length() <= maxChars ? text : text.substring(0, maxChars) + "\n[truncated]";
     }
 
     public void evaluateInitialTitleAsync(
