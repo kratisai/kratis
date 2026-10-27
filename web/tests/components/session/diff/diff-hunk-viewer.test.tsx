@@ -4,12 +4,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DiffCommentDraft } from '@/types/diff-types'
 
 import { buildCommentExtendData, DiffHunkViewer } from '@/components/session/diff/diff-hunk-viewer'
-import { useEnvironments, useResumeEnvironment } from '@/hooks/use-environments'
+import { useResumeEnvironment } from '@/hooks/use-environments'
+import { useExecutionEnvironment } from '@/hooks/use-executions'
 import * as diffApi from '@/lib/diff-api'
 import { useDiffReviewStore } from '@/store/diff-review-store'
 
+vi.mock('@/hooks/use-executions', () => ({
+  useExecutionEnvironment: vi.fn(),
+}))
+
 vi.mock('@/hooks/use-environments', () => ({
-  useEnvironments: vi.fn(),
   useResumeEnvironment: vi.fn(),
 }))
 
@@ -42,9 +46,13 @@ describe('DiffHunkViewer', () => {
     // restoreAllMocks (not clearAllMocks) so a mockResolvedValueOnce left in the
     // queue by an earlier test cannot leak into the next one
     vi.restoreAllMocks()
-    vi.mocked(useEnvironments).mockReturnValue({
-      data: [],
-    } as unknown as ReturnType<typeof useEnvironments>)
+    vi.mocked(useExecutionEnvironment).mockReturnValue({
+      environmentId: 'env-awake',
+      environmentStatus: 'CONNECTED',
+      isAwake: true,
+      isLoading: false,
+      isSleeping: false,
+    })
     vi.mocked(useResumeEnvironment).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
@@ -444,8 +452,12 @@ index 191f8cb..45e4ba8 100644
     })
 
     // Gap lines 24..29 remain, so both between-hunks buttons stay
-    expect(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^show$/i })).toBeInTheDocument()
-    expect(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^more$/i })).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^show$/i }),
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^more$/i }),
+    ).toBeInTheDocument()
   })
 
   it('adds lines to the next hunk when expanding up between hunks', async () => {
@@ -475,8 +487,12 @@ index 191f8cb..45e4ba8 100644
     })
 
     // Gap lines 14..19 remain, so both between-hunks buttons stay
-    expect(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^show$/i })).toBeInTheDocument()
-    expect(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^more$/i })).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^show$/i }),
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^more$/i }),
+    ).toBeInTheDocument()
   })
 
   it('hides the between-hunks buttons once the gap is fully expanded', async () => {
@@ -504,10 +520,14 @@ index 191f8cb..45e4ba8 100644
     )
 
     // Expand down first (lines 14..23), then up (lines 24..29)
-    fireEvent.click(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^more$/i }))
+    fireEvent.click(
+      within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^more$/i }),
+    )
     await screen.findByText('// gap line 1')
 
-    fireEvent.click(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^show$/i }))
+    fireEvent.click(
+      within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^show$/i }),
+    )
     expect(sliceSpy).toHaveBeenLastCalledWith('chat-1', 'exec-1', 'src/multi.ts', 24, 29)
 
     await waitFor(() => {
@@ -563,18 +583,53 @@ index 191f8cb..45e4ba8 100644
       />,
     )
 
-    fireEvent.click(within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^more$/i }))
+    fireEvent.click(
+      within(screen.getByTestId('diff-expand-gap-0')).getByRole('button', { name: /^more$/i }),
+    )
 
     await waitFor(() => {
       expect(screen.queryByTestId('diff-expand-gap-0')).not.toBeInTheDocument()
     })
   })
 
+  it('expands the hunk without showing the drawer when the sandbox is awake, even if another team environment is sleeping', async () => {
+    const sliceSpy = vi.spyOn(diffApi, 'fetchFileSlice').mockResolvedValue({
+      lines: ['// expanded context line'],
+      path: 'src/calc.ts',
+      startLine: 1,
+    })
+
+    render(
+      <DiffHunkViewer
+        chatId="chat-1"
+        comments={[]}
+        executionId="exec-1"
+        patch={SAMPLE_PATCH}
+        path="src/calc.ts"
+      />,
+    )
+
+    fireEvent.click(
+      within(screen.getByTestId('diff-expand-top')).getByRole('button', { name: /^show$/i }),
+    )
+
+    expect(sliceSpy).toHaveBeenCalledWith('chat-1', 'exec-1', 'src/calc.ts', 1, 9)
+    expect(screen.queryByTestId('resume-environment-drawer')).not.toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(screen.getByText('// expanded context line')).toBeInTheDocument()
+    })
+  })
+
   it('shows the resume drawer instead of expanding when the environment is sleeping', () => {
     const mutateAsync = vi.fn().mockResolvedValue({})
-    vi.mocked(useEnvironments).mockReturnValue({
-      data: [{ id: 'env-sleeping', status: 'SLEEPING' }],
-    } as unknown as ReturnType<typeof useEnvironments>)
+    vi.mocked(useExecutionEnvironment).mockReturnValue({
+      environmentId: 'env-sleeping',
+      environmentStatus: 'SLEEPING',
+      isAwake: false,
+      isLoading: false,
+      isSleeping: true,
+    })
     vi.mocked(useResumeEnvironment).mockReturnValue({
       isPending: false,
       mutateAsync,
@@ -606,9 +661,13 @@ index 191f8cb..45e4ba8 100644
 
   it('shows the resume drawer for between-hunks expansion when the environment is sleeping', () => {
     const mutateAsync = vi.fn().mockResolvedValue({})
-    vi.mocked(useEnvironments).mockReturnValue({
-      data: [{ id: 'env-sleeping', status: 'SLEEPING' }],
-    } as unknown as ReturnType<typeof useEnvironments>)
+    vi.mocked(useExecutionEnvironment).mockReturnValue({
+      environmentId: 'env-sleeping',
+      environmentStatus: 'SLEEPING',
+      isAwake: false,
+      isLoading: false,
+      isSleeping: true,
+    })
     vi.mocked(useResumeEnvironment).mockReturnValue({
       isPending: false,
       mutateAsync,
@@ -639,9 +698,13 @@ index 191f8cb..45e4ba8 100644
   })
 
   it('toggles the resume drawer closed when clicking the same expander twice', () => {
-    vi.mocked(useEnvironments).mockReturnValue({
-      data: [{ id: 'env-sleeping', status: 'SLEEPING' }],
-    } as unknown as ReturnType<typeof useEnvironments>)
+    vi.mocked(useExecutionEnvironment).mockReturnValue({
+      environmentId: 'env-sleeping',
+      environmentStatus: 'SLEEPING',
+      isAwake: false,
+      isLoading: false,
+      isSleeping: true,
+    })
 
     render(
       <DiffHunkViewer
