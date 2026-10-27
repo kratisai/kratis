@@ -87,6 +87,100 @@ class ReActLoopTest {
     }
 
     @Test
+    void finalTurn_toolCallWithoutText_retriesWithCorrectionAndDoesNotExecuteTool() {
+        List<String> executed = new ArrayList<>();
+        ToolCallback echo = capturingTool("echo", executed);
+        FakeChatModel model = new FakeChatModel();
+        model.addMatcher(PromptMatcher.builder()
+                .contains("Tools are disabled on the final turn")
+                .response("final answer")
+                .maxMatches(1)
+                .build());
+        model.addMatcher(PromptMatcher.builder()
+                .contains("This is your final turn")
+                .response(assistantWithTools(toolCall("final", "echo", "{}")))
+                .maxMatches(1)
+                .build());
+        model.addMatcher(PromptMatcher.builder()
+                .response(assistantWithTools(toolCall("first", "echo", "{}")))
+                .maxMatches(1)
+                .build());
+        List<Integer> abortedAttempts = new ArrayList<>();
+
+        String result = ReActLoop.text(client(model), new ToolCallback[] {echo})
+                .executor(Runnable::run)
+                .maxIterations(2)
+                .onAttemptAborted(abortedAttempts::add)
+                .run(List.of(new UserMessage("go")), TOOL_CONTEXT);
+
+        assertThat(result).isEqualTo("final answer");
+        assertThat(executed).containsExactly("echo");
+        assertThat(abortedAttempts).containsExactly(2);
+        assertThat(model.getInvocations()).hasSize(3);
+    }
+
+    @Test
+    void finalTurn_toolCallWithText_isRetractedAndRetriedWithCorrection() {
+        List<String> executed = new ArrayList<>();
+        ToolCallback echo = capturingTool("echo", executed);
+        FakeChatModel model = new FakeChatModel();
+        model.addMatcher(PromptMatcher.builder()
+                .contains("Tools are disabled on the final turn")
+                .response("Here is the plan.")
+                .maxMatches(1)
+                .build());
+        model.addMatcher(PromptMatcher.builder()
+                .contains("This is your final turn")
+                .response(AssistantMessage.builder()
+                        .content("Still working...")
+                        .toolCalls(List.of(toolCall("final", "echo", "{}")))
+                        .build())
+                .maxMatches(1)
+                .build());
+        model.addMatcher(PromptMatcher.builder()
+                .response(assistantWithTools(toolCall("first", "echo", "{}")))
+                .maxMatches(1)
+                .build());
+        List<Integer> abortedAttempts = new ArrayList<>();
+
+        String result = ReActLoop.text(client(model), new ToolCallback[] {echo})
+                .executor(Runnable::run)
+                .maxIterations(2)
+                .onAttemptAborted(abortedAttempts::add)
+                .run(List.of(new UserMessage("go")), TOOL_CONTEXT);
+
+        assertThat(result).isEqualTo("Here is the plan.");
+        assertThat(executed).containsExactly("echo");
+        assertThat(abortedAttempts).containsExactly(2);
+        assertThat(model.getInvocations()).hasSize(3);
+    }
+
+    @Test
+    void finalTurn_repeatedToolCallsWithoutText_exhaustsWithoutExecutingFinalTurnTools() {
+        List<String> executed = new ArrayList<>();
+        ToolCallback echo = capturingTool("echo", executed);
+        FakeChatModel model = new FakeChatModel();
+        model.addMatcher(PromptMatcher.builder()
+                .contains("This is your final turn")
+                .response(assistantWithTools(toolCall("final", "echo", "{}")))
+                .build());
+        model.addMatcher(PromptMatcher.builder()
+                .response(assistantWithTools(toolCall("first", "echo", "{}")))
+                .maxMatches(1)
+                .build());
+
+        assertThatThrownBy(() -> ReActLoop.text(client(model), new ToolCallback[] {echo})
+                        .executor(Runnable::run)
+                        .maxIterations(2)
+                        .run(List.of(new UserMessage("go")), TOOL_CONTEXT))
+                .isInstanceOf(ReActLoopExhaustedException.class)
+                .satisfies(e -> assertThat(((ReActLoopExhaustedException) e).lastValidationError())
+                        .contains("tool calls"));
+
+        assertThat(executed).containsExactly("echo");
+    }
+
+    @Test
     void parallelToolExecution_executesAllToolCalls() {
         List<String> executed = new ArrayList<>();
         ToolCallback a = capturingTool("a", executed);
