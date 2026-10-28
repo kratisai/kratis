@@ -32,6 +32,8 @@ interface ExecutionActivityState {
   activitiesByExecution: Record<string, Activity[]>
   cancelHitl: (executionId: string, actionId: string) => Promise<void>
   clearActivities: (executionId: string) => void
+  collapseAll: (executionId: string) => void
+  expandAll: (executionId: string) => void
   handleActivityEvent: (result: ExecutionActivityResult) => void
   handleExecutionComplete: (result: ExecutionCompleteResult) => void
   resolveHitl: (
@@ -297,6 +299,40 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [executionId]: _removed, ...rest } = state.activitiesByExecution
       return { activitiesByExecution: rest }
+    })
+  },
+
+  collapseAll: (executionId: string) => {
+    set((state) => {
+      const existing = state.activitiesByExecution[executionId] ?? []
+      if (existing.length === 0) return state
+      if (!existing.some((activity) => activity.collapsed !== true)) return state
+      const updated = existing.map((activity) =>
+        activity.collapsed !== true ? { ...activity, collapsed: true } : activity,
+      )
+      return {
+        activitiesByExecution: {
+          ...state.activitiesByExecution,
+          [executionId]: updated,
+        },
+      }
+    })
+  },
+
+  expandAll: (executionId: string) => {
+    set((state) => {
+      const existing = state.activitiesByExecution[executionId] ?? []
+      if (existing.length === 0) return state
+      if (!existing.some((activity) => activity.collapsed === true)) return state
+      const updated = existing.map((activity) =>
+        activity.collapsed === true ? { ...activity, collapsed: false } : activity,
+      )
+      return {
+        activitiesByExecution: {
+          ...state.activitiesByExecution,
+          [executionId]: updated,
+        },
+      }
     })
   },
 

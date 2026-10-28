@@ -3,6 +3,8 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   HelpCircle,
   ListTodo,
   Loader2,
@@ -27,6 +29,7 @@ import { ActivityApproval } from '@/components/session/activities/activity-appro
 import { ActivityElicitation } from '@/components/session/activities/activity-elicitation'
 import { PlanEntriesList, planSummaryLabel } from '@/components/session/plan-entries'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { activityCommand, activityTitle, useActivityStore } from '@/store/activity-store'
 
@@ -58,6 +61,8 @@ export function ExecutionActivityLog({ executionId }: ExecutionActivityLogProps)
   const activities = useActivityStore(
     (state) => state.activitiesByExecution[executionId] ?? EMPTY_ACTIVITIES,
   )
+  const collapseAll = useActivityStore((state) => state.collapseAll)
+  const expandAll = useActivityStore((state) => state.expandAll)
   const logRef = useRef<HTMLDivElement>(null)
   const logEndRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
@@ -115,6 +120,30 @@ export function ExecutionActivityLog({ executionId }: ExecutionActivityLogProps)
       data-testid="execution-activity-log"
       ref={logRef}
     >
+      <div className="text-muted-foreground mb-2 flex items-center justify-end gap-1 text-xs">
+        <Button
+          aria-label="Expand all activities"
+          className="text-muted-foreground hover:text-foreground h-7 gap-1 px-2 text-xs"
+          onClick={() => expandAll(executionId)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          <ChevronsUpDown className="h-3 w-3" />
+          <span>Expand all</span>
+        </Button>
+        <Button
+          aria-label="Collapse all activities"
+          className="text-muted-foreground hover:text-foreground h-7 gap-1 px-2 text-xs"
+          onClick={() => collapseAll(executionId)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          <ChevronsDownUp className="h-3 w-3" />
+          <span>Collapse all</span>
+        </Button>
+      </div>
       {activities.map((activity) => (
         <div data-activity-id={activity.id} key={activity.id}>
           <ActivityItem activity={activity} executionId={executionId} />
@@ -134,6 +163,12 @@ function getScrollParent(element: HTMLElement | null): HTMLElement | null {
     node = node.parentElement
   }
   return null
+}
+
+function isTextSelected(): boolean {
+  if (typeof window === 'undefined') return false
+  const selection = window.getSelection()
+  return Boolean(selection && selection.toString().trim().length > 0)
 }
 
 const ActivityItem = memo(function ActivityItem({ activity, executionId }: ActivityItemProps) {
@@ -174,7 +209,10 @@ function ActivityItemShell({
     <ChevronDown className="text-muted-foreground h-3 w-3 shrink-0" />
   )
 
-  const toggle = () => toggleCollapsed(executionId, activity.id)
+  const toggle = () => {
+    if (isTextSelected()) return
+    toggleCollapsed(executionId, activity.id)
+  }
 
   if (collapsed) {
     return (
@@ -237,11 +275,15 @@ function ActivityTextShell({
     <ChevronDown className="text-muted-foreground h-3 w-3 shrink-0" />
   )
 
-  const toggle = () => toggleCollapsed(executionId, activity.id)
+  const toggle = () => {
+    if (isTextSelected()) return
+    toggleCollapsed(executionId, activity.id)
+  }
 
   if (collapsed) {
     return (
       <button
+        aria-label="Expand"
         className="hover:bg-muted/50 flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left"
         onClick={toggle}
         title={summary}
@@ -256,17 +298,22 @@ function ActivityTextShell({
 
   return (
     <div className="border-border/50 min-w-0 rounded border p-2">
-      <button
-        className="flex w-full min-w-0 items-start gap-2 text-left"
-        onClick={toggle}
-        type="button"
-      >
-        <span className="mt-0.5 shrink-0">{chevron}</span>
-        {icon}
-        <span className={cn('min-w-0 flex-1 break-words whitespace-pre-wrap', className)}>
+      <div className="flex w-full min-w-0 items-start gap-2">
+        <button
+          aria-label="Collapse"
+          className="mt-0.5 flex shrink-0 items-center gap-1 hover:opacity-80"
+          onClick={toggle}
+          type="button"
+        >
+          {chevron}
+          {icon}
+        </button>
+        <div
+          className={cn('min-w-0 flex-1 break-words whitespace-pre-wrap select-text', className)}
+        >
           {children}
-        </span>
-      </button>
+        </div>
+      </div>
     </div>
   )
 }

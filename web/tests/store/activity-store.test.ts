@@ -1813,6 +1813,122 @@ describe('activity-store', () => {
       expect(activities[1].collapsed).toBe(true)
       expect(activities[2].collapsed).toBe(false)
     })
+
+    it('expandAll sets collapsed: false for all items where collapsed === true', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'a1',
+          activityType: 'RESEARCH',
+          description: 'read pom.xml',
+          status: 'completed',
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'a2',
+          activityType: 'COMMAND',
+          description: 'npm test',
+          status: 'completed',
+        }),
+      )
+
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0].collapsed).toBe(true)
+
+      store.expandAll('exec-1')
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities[0].collapsed).toBe(false)
+      expect(activities[1].collapsed).toBe(false)
+    })
+
+    it('collapseAll sets collapsed: true for all items where collapsed !== true', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'a1',
+          activityType: 'RESEARCH',
+          description: 'read pom.xml',
+          status: 'in_progress',
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'a2',
+          activityType: 'COMMAND',
+          description: 'npm test',
+          status: 'in_progress',
+        }),
+      )
+
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0].collapsed).toBe(false)
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][1].collapsed).toBe(false)
+
+      store.collapseAll('exec-1')
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities[0].collapsed).toBe(true)
+      expect(activities[1].collapsed).toBe(true)
+    })
+
+    it('expandAll and collapseAll do not mutate state if already in target state or empty', () => {
+      const store = useActivityStore.getState()
+
+      // Empty execution
+      const beforeEmptyState = useActivityStore.getState().activitiesByExecution
+      store.expandAll('empty-exec')
+      expect(useActivityStore.getState().activitiesByExecution).toBe(beforeEmptyState)
+      store.collapseAll('empty-exec')
+      expect(useActivityStore.getState().activitiesByExecution).toBe(beforeEmptyState)
+
+      // Seed already expanded
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'a1',
+          activityType: 'RESEARCH',
+          description: 'read pom.xml',
+          status: 'in_progress',
+        }),
+      )
+      const stateBeforeExpandAll = useActivityStore.getState().activitiesByExecution
+      store.expandAll('exec-1')
+      expect(useActivityStore.getState().activitiesByExecution).toBe(stateBeforeExpandAll)
+
+      // Collapse all
+      store.collapseAll('exec-1')
+      const stateAfterCollapseAll = useActivityStore.getState().activitiesByExecution
+      store.collapseAll('exec-1')
+      expect(useActivityStore.getState().activitiesByExecution).toBe(stateAfterCollapseAll)
+    })
+
+    it('expandAll and collapseAll only mutate the specified executionId', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'a1',
+          activityType: 'RESEARCH',
+          description: 'read pom.xml',
+          executionId: 'exec-1',
+          status: 'completed',
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'a2',
+          activityType: 'RESEARCH',
+          description: 'read pom.xml',
+          executionId: 'exec-2',
+          status: 'completed',
+        }),
+      )
+
+      store.collapseAll('exec-1')
+      store.collapseAll('exec-2')
+
+      store.expandAll('exec-1')
+      expect(useActivityStore.getState().activitiesByExecution['exec-1'][0].collapsed).toBe(false)
+      expect(useActivityStore.getState().activitiesByExecution['exec-2'][0].collapsed).toBe(true)
+    })
   })
 
   describe('thinking auto-collapse', () => {
