@@ -176,7 +176,7 @@ describe('Activity Log Multi-Client Sync Flow', () => {
       expect(screen.getByText(/Permission rejected/)).toBeInTheDocument()
     })
     expect(screen.queryByRole('button', { name: /Allow once/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Reject/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Reject$/ })).not.toBeInTheDocument()
   })
 
   it('applies a permission burst in order without losing the resolution', async () => {

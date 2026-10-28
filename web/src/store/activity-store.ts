@@ -109,7 +109,7 @@ function activityStateFrom(
 function appendActivity(existing: Activity[], activity: Activity): Activity[] {
   const next = [...existing]
   const last = next.at(-1)
-  // A superseded terminal activity collapses once the next one arrives. Plan /
+  // A superseded terminal activity collapses once the next one arrives. Plan
   // activities stay open so the current checklist remains visible.
   if (last && isTerminalState(last.state) && !last.collapsed && last.type !== 'plan') {
     next[next.length - 1] = { ...last, collapsed: true }
@@ -665,10 +665,10 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
           activity.type === 'command_execution' && result.status === 'FAILED'
             ? 'error'
             : 'completed'
+        // The plan stays open so the current checklist remains visible; every
+        // other terminal activity collapses like it does when the next one starts.
         const collapsed =
-          activity.type === 'message' || activity.type === 'plan'
-            ? activity.collapsed
-            : collapsedOnTransition(activity, nextState)
+          activity.type === 'plan' ? activity.collapsed : collapsedOnTransition(activity, nextState)
         const endedAt = new Date().toISOString()
         updated[i] =
           activity.type === 'command_execution'

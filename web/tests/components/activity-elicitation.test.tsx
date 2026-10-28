@@ -181,27 +181,6 @@ describe('ActivityElicitation', () => {
     expect(screen.getByText('Select an option')).toBeInTheDocument()
   })
 
-  it('renders the resolved summary for an answered elicitation', () => {
-    render(
-      <ActivityElicitation
-        activity={pendingActivity({ response: 'answered', state: 'completed' })}
-        executionId="exec-1"
-      />,
-    )
-    expect(screen.getByText(/Question answered/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /submit/i })).not.toBeInTheDocument()
-  })
-
-  it('renders the resolved summary for a declined elicitation', () => {
-    render(
-      <ActivityElicitation
-        activity={pendingActivity({ response: 'declined', state: 'error' })}
-        executionId="exec-1"
-      />,
-    )
-    expect(screen.getByText(/Question declined/)).toBeInTheDocument()
-  })
-
   it('shows feedback and refreshes activity state when resolution fails', async () => {
     const user = userEvent.setup()
     resolveHitl.mockRejectedValueOnce(new Error('404 not found'))

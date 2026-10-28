@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  HelpCircle,
   ListTodo,
   Loader2,
   Terminal,
@@ -27,7 +28,7 @@ import { ActivityElicitation } from '@/components/session/activities/activity-el
 import { PlanEntriesList, planSummaryLabel } from '@/components/session/plan-entries'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { activityTitle, useActivityStore } from '@/store/activity-store'
+import { activityCommand, activityTitle, useActivityStore } from '@/store/activity-store'
 
 const EMPTY_ACTIVITIES: Activity[] = []
 
@@ -42,7 +43,7 @@ interface ActivityItemProps {
 
 interface ActivityItemShellProps {
   activity: Activity
-  content: ReactNode
+  content?: ReactNode
   executionId: string
   icon: ReactNode
   title: string
@@ -142,7 +143,7 @@ const ActivityItem = memo(function ActivityItem({ activity, executionId }: Activ
     case 'elicitation':
       return <ElicitationActivityItem activity={activity} executionId={executionId} />
     case 'error':
-      return <ErrorActivityItem activity={activity} />
+      return <ErrorActivityItem activity={activity} executionId={executionId} />
     case 'message':
       return <MessageActivityItem activity={activity} executionId={executionId} />
     case 'plan':
@@ -152,7 +153,7 @@ const ActivityItem = memo(function ActivityItem({ activity, executionId }: Activ
     case 'tool_execution':
       return <ToolExecutionActivityItem activity={activity} executionId={executionId} />
     case 'warning':
-      return <WarningActivityItem activity={activity} />
+      return <WarningActivityItem activity={activity} executionId={executionId} />
   }
 })
 
@@ -270,6 +271,34 @@ function ActivityTextShell({
   )
 }
 
+/**
+ * A resolved approval keeps the resolution label while using the same collapsible
+ * shell as every other activity. Pending approvals render the interactive prompt.
+ */
+function approvalTitle(activity: CommandExecutionActivity | ToolExecutionActivity): string {
+  const resolution =
+    activity.hitlResponse ??
+    (activity.approved === true ? 'approved' : activity.approved === false ? 'declined' : undefined)
+  const timedOut = resolution === 'cancelled' && activity.resolvedBy?.kind === 'timeout'
+  const autoApproved = resolution === 'approved' && activity.resolvedBy?.kind === 'policy'
+  const label = autoApproved
+    ? 'Auto-approved'
+    : resolution === 'approved'
+      ? 'Permission approved'
+      : timedOut
+        ? 'Permission request timed out — no response'
+        : resolution === 'cancelled'
+          ? 'Permission request cancelled'
+          : resolution === 'declined'
+            ? 'Permission rejected'
+            : activity.state === 'error'
+              ? 'Command failed'
+              : activity.state === 'active'
+                ? 'Running command'
+                : 'Command executed'
+  return `${label}: ${activityCommand(activity)}`
+}
+
 function CommandExecutionActivityItem({
   activity,
   executionId,
@@ -277,7 +306,7 @@ function CommandExecutionActivityItem({
   activity: CommandExecutionActivity
   executionId: string
 }) {
-  if (activity.state === 'pending_approval' || activity.hitlResponse !== undefined) {
+  if (activity.state === 'pending_approval') {
     return <ActivityApproval activity={activity} executionId={executionId} />
   }
 
@@ -298,7 +327,7 @@ function CommandExecutionActivityItem({
           <Terminal className="h-3 w-3 shrink-0" />
         </>
       }
-      title={activityTitle(activity)}
+      title={hasApprovalResolution(activity) ? approvalTitle(activity) : activityTitle(activity)}
       trailing={
         activity.exitCode !== undefined && (
           <span className="text-muted-foreground shrink-0 text-xs">
@@ -317,10 +346,44 @@ function ElicitationActivityItem({
   activity: ElicitationActivity
   executionId: string
 }) {
-  return <ActivityElicitation activity={activity} executionId={executionId} />
+  if (activity.state !== 'completed' && activity.state !== 'error') {
+    return <ActivityElicitation activity={activity} executionId={executionId} />
+  }
+
+  return (
+    <ActivityItemShell
+      activity={activity}
+      executionId={executionId}
+      icon={
+        <>
+          {statusIcon(activity)}
+          <HelpCircle className="text-muted-foreground h-3 w-3 shrink-0" />
+        </>
+      }
+      title={elicitationTitle(activity)}
+    />
+  )
 }
 
-function ErrorActivityItem({ activity }: { activity: ErrorActivity }) {
+function elicitationTitle(activity: ElicitationActivity): string {
+  const label =
+    activity.response === 'answered'
+      ? 'Question answered'
+      : activity.response === 'declined'
+        ? 'Question declined'
+        : activity.response === 'cancelled'
+          ? 'Question cancelled'
+          : 'Question'
+  return `${label}: ${activity.message}`
+}
+
+function ErrorActivityItem({
+  activity,
+  executionId,
+}: {
+  activity: ErrorActivity
+  executionId: string
+}) {
   return (
     <ActivityItemShell
       activity={activity}
@@ -334,11 +397,17 @@ function ErrorActivityItem({ activity }: { activity: ErrorActivity }) {
           )}
         </div>
       }
-      executionId=""
+      executionId={executionId}
       icon={<AlertTriangle className="h-3 w-3 shrink-0 text-red-500" />}
       title={activityTitle(activity)}
     />
   )
+}
+
+function hasApprovalResolution(
+  activity: CommandExecutionActivity | ToolExecutionActivity,
+): boolean {
+  return activity.hitlResponse !== undefined || activity.approved !== undefined
 }
 
 function MessageActivityItem({
@@ -448,7 +517,7 @@ function ToolExecutionActivityItem({
   activity: ToolExecutionActivity
   executionId: string
 }) {
-  if (activity.state === 'pending_approval' || activity.hitlResponse !== undefined) {
+  if (activity.state === 'pending_approval') {
     return <ActivityApproval activity={activity} executionId={executionId} />
   }
 
@@ -500,12 +569,18 @@ function ToolExecutionActivityItem({
       }
       executionId={executionId}
       icon={statusIcon(activity)}
-      title={activityTitle(activity)}
+      title={hasApprovalResolution(activity) ? approvalTitle(activity) : activityTitle(activity)}
     />
   )
 }
 
-function WarningActivityItem({ activity }: { activity: WarningActivity }) {
+function WarningActivityItem({
+  activity,
+  executionId,
+}: {
+  activity: WarningActivity
+  executionId: string
+}) {
   return (
     <ActivityItemShell
       activity={activity}
@@ -516,7 +591,7 @@ function WarningActivityItem({ activity }: { activity: WarningActivity }) {
           </p>
         </div>
       }
-      executionId=""
+      executionId={executionId}
       icon={<AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" />}
       title={activityTitle(activity)}
       trailing={

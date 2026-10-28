@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import type {
-  CommandExecutionActivity,
-  ThinkingActivity,
-  ToolExecutionActivity,
-} from '@/types/execution-activity-types'
+import type { Activity } from '@/types/execution-activity-types'
 
 import { ExecutionActivityLog } from '@/components/session/execution-activity-log'
 import { useActivityStore } from '@/store/activity-store'
@@ -14,9 +10,7 @@ import { renderWithProviders, screen, waitFor } from '../support/test-render'
 
 const EXECUTION_ID = 'exec-expanded-1'
 
-function seedActivities(
-  activities: Array<CommandExecutionActivity | ThinkingActivity | ToolExecutionActivity>,
-) {
+function seedActivities(activities: Activity[]) {
   const store = useActivityStore.getState()
   store.clearActivities(EXECUTION_ID)
 
@@ -526,5 +520,144 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     expect(line.parentElement?.className).toContain('overflow-x-auto')
     expect(line.parentElement?.className).not.toMatch(/max-h-/)
     expect(line.parentElement?.className).not.toMatch(/overflow-y-/)
+  })
+
+  it('renders an auto-approved command in the shared collapsible row', async () => {
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        approvalRequired: true,
+        collapsed: true,
+        command: 'rm -rf /tmp/cache',
+        detail: { output: 'removed cache' },
+        executionId: EXECUTION_ID,
+        hitlResponse: 'approved',
+        id: 'cmd-auto-approved',
+        resolvedBy: { kind: 'policy' },
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'active',
+        type: 'command_execution',
+      },
+    ])
+
+    const summary = await screen.findByText('Auto-approved: rm -rf /tmp/cache')
+    expect(summary.className).toContain('truncate')
+    expect(screen.queryByText('removed cache')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-slot="card"]')).not.toBeInTheDocument()
+
+    await user.click(summary.closest('button')!)
+    expect(await screen.findByText('removed cache')).toBeInTheDocument()
+
+    await user.click(screen.getByText('Auto-approved: rm -rf /tmp/cache').closest('button')!)
+    expect(screen.queryByText('removed cache')).not.toBeInTheDocument()
+  })
+
+  it('auto-collapses a resolved approval once it completes', async () => {
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    const store = useActivityStore.getState()
+    store.handleActivityEvent({
+      actionId: 'cmd-approved',
+      activityType: 'COMMAND',
+      createdAt: '2026-10-20T17:32:12.672Z',
+      description: 'git status',
+      detail: {
+        hitl: {
+          kind: 'approval',
+          message: 'Allow git status?',
+          state: 'awaiting_human',
+        },
+      },
+      executionId: EXECUTION_ID,
+      status: 'pending',
+      type: 'execution_activity',
+    })
+    store.handleActivityEvent({
+      actionId: 'cmd-approved',
+      activityType: 'COMMAND',
+      createdAt: '2026-10-20T17:32:13.672Z',
+      description: 'git status',
+      detail: {
+        hitl: {
+          kind: 'approval',
+          message: 'Allow git status?',
+          response: 'approved',
+          state: 'resolved',
+        },
+        output: 'clean',
+      },
+      executionId: EXECUTION_ID,
+      status: 'completed',
+      type: 'execution_activity',
+    })
+
+    const summary = await screen.findByText('Permission approved: git status')
+    expect(summary.className).toContain('truncate')
+    expect(screen.queryByText('clean')).not.toBeInTheDocument()
+  })
+
+  it('toggles warning activities under their execution', async () => {
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        collapsed: false,
+        executionId: EXECUTION_ID,
+        id: 'warning-1',
+        message: 'Invalid approval request from agent',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        type: 'warning',
+      },
+    ])
+
+    expect(await screen.findByText('Invalid approval request from agent')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Warning/ }))
+    expect(screen.queryByText('Invalid approval request from agent')).not.toBeInTheDocument()
+  })
+
+  it('toggles error activities under their execution', async () => {
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        collapsed: false,
+        executionId: EXECUTION_ID,
+        id: 'error-1',
+        message: 'Execution blew up',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'error',
+        type: 'error',
+      },
+    ])
+
+    expect(await screen.findByText('Execution blew up')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Execution failed/ }))
+    expect(screen.queryByText('Execution blew up')).not.toBeInTheDocument()
+  })
+
+  it('renders a resolved elicitation in the shared collapsible row', async () => {
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        collapsed: true,
+        executionId: EXECUTION_ID,
+        id: 'elicitation-1',
+        message: 'Choose a deployment target',
+        response: 'answered',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        type: 'elicitation',
+      },
+    ])
+
+    const summary = await screen.findByText('Question answered: Choose a deployment target')
+    expect(summary.className).toContain('truncate')
+    expect(screen.queryByText('Agent Question')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Submit/ })).not.toBeInTheDocument()
   })
 })
