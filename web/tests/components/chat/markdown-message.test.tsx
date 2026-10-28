@@ -122,6 +122,44 @@ describe('MarkdownMessage', () => {
     })
   })
 
+  it('defers mermaid rendering while its fence is still streaming', async () => {
+    const partial = '```mermaid\ngraph TD;\nA-->B;'
+    const { rerender } = render(<MarkdownMessage content={partial} />)
+
+    expect(mermaid.render).not.toHaveBeenCalled()
+    expect(screen.getByText(/A-->B;/)).toBeInTheDocument()
+
+    rerender(<MarkdownMessage content={`${partial}\n\`\`\``} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Mocked Mermaid Diagram')).toBeInTheDocument()
+    })
+    expect(mermaid.render).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders completed diagrams while a later mermaid fence is still streaming', async () => {
+    const completed = '```mermaid\ngraph TD;\nA-->B;\n```'
+    const streaming = '```mermaid\ngraph TD;\nC-->D'
+    render(<MarkdownMessage content={`${completed}\n\n${streaming}`} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Mocked Mermaid Diagram')).toBeInTheDocument()
+    })
+    expect(mermaid.render).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(mermaid.render).mock.calls[0]?.[1]).toContain('A-->B;')
+    expect(screen.getByText(/C-->D/)).toBeInTheDocument()
+  })
+
+  it('renders completed diagrams while a non-mermaid fence is still streaming', async () => {
+    const content = '```mermaid\ngraph TD;\nA-->B;\n```\n\n```text\nstill streaming'
+    render(<MarkdownMessage content={content} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Mocked Mermaid Diagram')).toBeInTheDocument()
+    })
+    expect(mermaid.render).toHaveBeenCalledTimes(1)
+  })
+
   it('renders regular code blocks normally', () => {
     render(<MarkdownMessage content="```javascript\nconst x = 1;\n```" />)
     expect(screen.getByText(/const x = 1;/)).toBeInTheDocument()

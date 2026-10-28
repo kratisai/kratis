@@ -119,6 +119,8 @@ interface MarkdownMessageProps {
 }
 
 export function MarkdownMessage({ content, variant = 'chat' }: MarkdownMessageProps) {
+  const unclosedMermaid = findUnclosedMermaidFence(content)
+
   return (
     <div
       className={cn(
@@ -143,7 +145,17 @@ export function MarkdownMessage({ content, variant = 'chat' }: MarkdownMessagePr
           code({ children, className, node: _node, ...props }) {
             const match = /language-([\w+-]+)/.exec(className || '')
             if (match?.[1] === 'mermaid') {
-              return <MermaidDiagram chart={codeText(children).trim()} />
+              const chart = codeText(children).trim()
+              // Streaming output briefly exposes an unclosed fence. Rendering that
+              // partial source only produces transient parse errors.
+              if (unclosedMermaid !== null && unclosedMermaid.trim() === chart) {
+                return (
+                  <code className="language-text" {...props}>
+                    {children}
+                  </code>
+                )
+              }
+              return <MermaidDiagram chart={chart} />
             }
             return (
               <code className={className} {...props}>
@@ -234,6 +246,39 @@ function detectCallout(children: ReactNode): null | {
     return true
   })
   return { content: stripped, label: CALLOUT_LABELS[type] ?? type, type }
+}
+
+function findUnclosedMermaidFence(content: string): null | string {
+  let open: null | { language: string; marker: string; markerLength: number; source: string[] } =
+    null
+
+  for (const line of content.split('\n')) {
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line)
+    if (open === null) {
+      if (fence) {
+        open = {
+          language: fence[2].trim().split(/\s+/)[0] ?? '',
+          marker: fence[1][0],
+          markerLength: fence[1].length,
+          source: [],
+        }
+      }
+      continue
+    }
+
+    const closesFence =
+      fence !== null &&
+      fence[1][0] === open.marker &&
+      fence[1].length >= open.markerLength &&
+      fence[2].trim() === ''
+    if (closesFence) {
+      open = null
+    } else {
+      open.source.push(line)
+    }
+  }
+
+  return open?.language === 'mermaid' ? open.source.join('\n') : null
 }
 
 function MermaidDiagram({ chart }: { chart: string }) {
