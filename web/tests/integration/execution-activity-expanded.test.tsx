@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Activity } from '@/types/execution-activity-types'
 
@@ -659,5 +659,235 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     expect(summary.className).toContain('truncate')
     expect(screen.queryByText('Agent Question')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Submit/ })).not.toBeInTheDocument()
+  })
+
+  it('expands all collapsed activities when clicking "Expand all"', async () => {
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        approvalRequired: false,
+        collapsed: true,
+        command: 'npm run build',
+        detail: { output: 'Build complete' },
+        endedAt: '2024-06-15T10:31:00.000Z',
+        executionId: EXECUTION_ID,
+        exitCode: 0,
+        id: 'cmd-bulk-1',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        type: 'command_execution',
+      },
+      {
+        collapsed: true,
+        executionId: EXECUTION_ID,
+        id: 'think-bulk-1',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        thought: 'Analyzing dependencies',
+        type: 'thinking',
+      },
+      {
+        actionId: 'msg-bulk-1',
+        collapsed: true,
+        detail: { messageId: 'msg-bulk-1', role: 'agent' },
+        executionId: EXECUTION_ID,
+        id: 'msg-bulk-1',
+        role: 'agent',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        text: 'Task has been completed.',
+        type: 'message',
+      },
+    ])
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Expand all activities/i })).toBeInTheDocument()
+    })
+
+    expect(screen.queryByText('Build complete')).not.toBeInTheDocument()
+    const msgSummary = screen.getByText('Task has been completed.')
+    expect(msgSummary.className).toContain('truncate')
+
+    await user.click(screen.getByRole('button', { name: /Expand all activities/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Build complete')).toBeInTheDocument()
+    })
+    const expandedMsg = screen.getByText('Task has been completed.')
+    expect(expandedMsg.className).not.toContain('truncate')
+    expect(expandedMsg.className).toContain('whitespace-pre-wrap')
+  })
+
+  it('collapses all expanded activities when clicking "Collapse all"', async () => {
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        approvalRequired: false,
+        collapsed: false,
+        command: 'npm run test',
+        detail: { output: 'All tests passed' },
+        executionId: EXECUTION_ID,
+        id: 'cmd-bulk-open',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'active',
+        type: 'command_execution',
+      },
+      {
+        actionId: 'msg-bulk-open',
+        collapsed: false,
+        detail: { messageId: 'msg-bulk-open', role: 'agent' },
+        executionId: EXECUTION_ID,
+        id: 'msg-bulk-open',
+        role: 'agent',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        text: 'All work finished cleanly.',
+        type: 'message',
+      },
+    ])
+
+    await waitFor(() => {
+      expect(screen.getByText('All tests passed')).toBeInTheDocument()
+    })
+    expect(screen.getByText('All work finished cleanly.')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Collapse all activities/i }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('All tests passed')).not.toBeInTheDocument()
+    })
+    const summary = screen.getByText('All work finished cleanly.')
+    expect(summary.className).toContain('truncate')
+  })
+
+  it('does not collapse an expanded message when text is selected', async () => {
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        actionId: 'msg-sel-1',
+        collapsed: false,
+        detail: { messageId: 'msg-sel-1', role: 'agent' },
+        executionId: EXECUTION_ID,
+        id: 'msg-sel-1',
+        role: 'agent',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        text: 'Selectable agent output text that should remain visible',
+        type: 'message',
+      },
+    ])
+
+    const textEl = await screen.findByText('Selectable agent output text that should remain visible')
+    expect(textEl.className).toContain('select-text')
+
+    const selectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({
+      toString: () => 'agent output text',
+    } as Selection)
+
+    try {
+      await user.click(textEl)
+
+      expect(screen.getByText('Selectable agent output text that should remain visible')).toBeInTheDocument()
+      expect(textEl.className).not.toContain('truncate')
+    } finally {
+      selectionSpy.mockRestore()
+    }
+  })
+
+  it('does not collapse an expanded thinking activity when text is selected', async () => {
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        collapsed: false,
+        executionId: EXECUTION_ID,
+        id: 'think-sel-1',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        thought: 'Step-by-step thinking content to select and copy',
+        type: 'thinking',
+      },
+    ])
+
+    const thoughtEl = await screen.findByText('Thinking ... Step-by-step thinking content to select and copy')
+    expect(thoughtEl.className).toContain('select-text')
+
+    const selectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({
+      toString: () => 'thinking content',
+    } as Selection)
+
+    try {
+      const collapseButton = screen.getByRole('button', { name: 'Collapse' })
+      await user.click(collapseButton)
+
+      expect(thoughtEl.className).not.toContain('truncate')
+      expect(thoughtEl.className).toContain('whitespace-pre-wrap')
+    } finally {
+      selectionSpy.mockRestore()
+    }
+  })
+
+  it('collapses an expanded item when clicking the chevron toggle button', async () => {
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        actionId: 'msg-chevron-1',
+        collapsed: false,
+        detail: { messageId: 'msg-chevron-1', role: 'agent' },
+        executionId: EXECUTION_ID,
+        id: 'msg-chevron-1',
+        role: 'agent',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        text: 'Message that will be collapsed via chevron button',
+        type: 'message',
+      },
+    ])
+
+    await waitFor(() => {
+      expect(screen.getByText('Message that will be collapsed via chevron button')).toBeInTheDocument()
+    })
+
+    const collapseButton = screen.getByRole('button', { name: 'Collapse' })
+    await user.click(collapseButton)
+
+    await waitFor(() => {
+      const summary = screen.getByText('Message that will be collapsed via chevron button')
+      expect(summary.className).toContain('truncate')
+    })
+  })
+
+  it('expands a collapsed item when clicking its header', async () => {
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        actionId: 'msg-header-1',
+        collapsed: true,
+        detail: { messageId: 'msg-header-1', role: 'agent' },
+        executionId: EXECUTION_ID,
+        id: 'msg-header-1',
+        role: 'agent',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        text: 'Detailed message line 1\nDetailed message line 2',
+        type: 'message',
+      },
+    ])
+
+    const collapsedHeader = await screen.findByText('Detailed message line 1 Detailed message line 2')
+    expect(collapsedHeader.className).toContain('truncate')
+
+    await user.click(collapsedHeader.closest('button')!)
+
+    await waitFor(() => {
+      const expandedText = screen.getByText('Detailed message line 1 Detailed message line 2')
+      expect(expandedText.className).not.toContain('truncate')
+      expect(expandedText.className).toContain('whitespace-pre-wrap')
+    })
   })
 })
