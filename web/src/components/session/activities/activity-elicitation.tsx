@@ -1,4 +1,4 @@
-import { CheckCircle2, HelpCircle, XCircle } from 'lucide-react'
+import { HelpCircle } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
@@ -51,7 +51,6 @@ export function ActivityElicitation({ activity, executionId }: ActivityElicitati
     properties?: Record<string, SchemaProperty>
   }
   const properties = schema.properties ?? {}
-  const isResolved = activity.state === 'completed' || activity.state === 'error'
 
   const submit = async (response: 'answered' | 'cancelled' | 'declined') => {
     setIsSubmitting(true)
@@ -72,26 +71,6 @@ export function ActivityElicitation({ activity, executionId }: ActivityElicitati
     } finally {
       setIsSubmitting(false)
     }
-  }
-
-  if (isResolved) {
-    const wasAnswered = activity.response === 'answered'
-    return (
-      <Card className="border-border/50 bg-muted/30 min-w-0">
-        <CardContent className="flex min-w-0 items-center gap-2 p-3">
-          {wasAnswered ? (
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
-          ) : (
-            <XCircle className="h-4 w-4 shrink-0 text-red-500" />
-          )}
-          <span className="min-w-0 flex-1 truncate text-sm">
-            Question{' '}
-            {wasAnswered ? 'answered' : activity.response === 'declined' ? 'declined' : 'cancelled'}
-            : <code className="bg-muted rounded px-1 font-mono text-xs">{activity.message}</code>
-          </span>
-        </CardContent>
-      </Card>
-    )
   }
 
   return (

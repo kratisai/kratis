@@ -1584,8 +1584,37 @@ describe('activity-store', () => {
       })
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities[0]).toMatchObject({ state: 'completed', type: 'message' })
+      expect(activities[0]).toMatchObject({
+        collapsed: true,
+        state: 'completed',
+        type: 'message',
+      })
       expect(activities[0].endedAt).toBeDefined()
+    })
+
+    it('keeps the plan open when the execution completes', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'plan-1',
+          activityType: 'PLAN',
+          description: 'Agent plan updated',
+          detail: { plan: [{ content: 'Ship it', priority: 'high', status: 'in_progress' }] },
+        }),
+      )
+      store.handleExecutionComplete({
+        executionId: 'exec-1',
+        exitCode: 0,
+        status: 'COMPLETED',
+        type: 'execution_complete',
+      })
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities[0]).toMatchObject({
+        collapsed: false,
+        state: 'completed',
+        type: 'plan',
+      })
     })
 
     it('closes a trailing thinking stream when the execution completes', () => {
