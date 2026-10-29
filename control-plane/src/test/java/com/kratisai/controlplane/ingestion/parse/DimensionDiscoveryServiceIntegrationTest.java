@@ -50,6 +50,7 @@ class DimensionDiscoveryServiceIntegrationTest {
     private IngestionBatch batch;
     private CtxNode controllerNode;
     private CtxNode serviceNode;
+    private CtxNode untaggedNode;
 
     @BeforeEach
     void setUp() {
@@ -105,8 +106,10 @@ class DimensionDiscoveryServiceIntegrationTest {
                 batch, team.getId(), "test-repo", NodeType.FILE, "src/main/java/com/example/UserService.java");
         CtxNode utilNode = new CtxNode(
                 batch, team.getId(), "test-repo", NodeType.FILE, "src/main/java/com/example/StringUtils.java");
+        untaggedNode = new CtxNode(
+                batch, team.getId(), "test-repo", NodeType.FILE, "src/main/java/com/example/OrderRepository.java");
 
-        ctxNodeRepository.saveAll(List.of(controllerNode, serviceNode, utilNode));
+        ctxNodeRepository.saveAll(List.of(controllerNode, serviceNode, utilNode, untaggedNode));
     }
 
     @AfterEach
@@ -156,6 +159,30 @@ class DimensionDiscoveryServiceIntegrationTest {
                 serviceDims.stream().map(nd -> nd.getDimension().getId()).toList();
 
         assertThat(controllerDimIds).anyMatch(serviceDimIds::contains);
+    }
+
+    @Test
+    void happyPath_propagatesDimensionsThroughTwoHops() {
+        CtxNode sharedClass = new CtxNode(
+                batch, team.getId(), "test-repo", NodeType.CLASS, "src/main/java/com/example/UserController.java");
+        sharedClass.setSymbolName("UserController");
+        ctxNodeRepository.saveAndFlush(sharedClass);
+
+        ctxEdgeRepository.saveAllAndFlush(List.of(
+                new CtxEdge(batch, team.getId(), controllerNode, sharedClass, RelationType.DEFINES),
+                new CtxEdge(batch, team.getId(), untaggedNode, sharedClass, RelationType.IMPORTS)));
+
+        dimensionDiscoveryService.discoverDimensions(batch);
+
+        List<CtxNodeDimension> controllerDims = ctxNodeDimensionRepository.findByNodeId(controllerNode.getId());
+        List<CtxNodeDimension> untaggedDims = ctxNodeDimensionRepository.findByNodeId(untaggedNode.getId());
+
+        assertThat(untaggedDims).isNotEmpty();
+        List<UUID> controllerDimIds =
+                controllerDims.stream().map(nd -> nd.getDimension().getId()).toList();
+        List<UUID> untaggedDimIds =
+                untaggedDims.stream().map(nd -> nd.getDimension().getId()).toList();
+        assertThat(controllerDimIds).anyMatch(untaggedDimIds::contains);
     }
 
     @Test
