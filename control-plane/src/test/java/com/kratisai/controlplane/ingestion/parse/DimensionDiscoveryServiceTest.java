@@ -27,7 +27,7 @@ class DimensionDiscoveryServiceTest {
     void setUp() {
         IngestionProperties ingestionProperties = new IngestionProperties();
         ingestionProperties.setCloneDir(tempDir.toString());
-        service = new DimensionDiscoveryService(null, null, null, null, null, null, null, null, ingestionProperties);
+        service = new DimensionDiscoveryService(null, null, null, null, null, null, null, ingestionProperties);
 
         Team team = new Team();
         team.setId(UUID.randomUUID());

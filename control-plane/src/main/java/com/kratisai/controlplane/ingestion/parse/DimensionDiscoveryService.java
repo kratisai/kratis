@@ -4,20 +4,13 @@ import com.kratisai.controlplane.agentloop.ChatResponseAssembler;
 import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.model.CtxDimension;
-import com.kratisai.controlplane.model.CtxEdge;
-import com.kratisai.controlplane.model.CtxNode;
-import com.kratisai.controlplane.model.CtxNodeDimension;
 import com.kratisai.controlplane.model.DimensionCategory;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.ModelProvider;
-import com.kratisai.controlplane.model.NodeType;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.repository.CtxDimensionRepository;
-import com.kratisai.controlplane.repository.CtxEdgeRepository;
-import com.kratisai.controlplane.repository.CtxNodeDimensionRepository;
-import com.kratisai.controlplane.repository.CtxNodeRepository;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import java.io.IOException;
@@ -48,10 +41,11 @@ public class DimensionDiscoveryService {
             actual file paths shown in the tree, e.g. 'src/components/**/*.tsx'.
             """;
 
-    private final CtxNodeRepository ctxNodeRepository;
-    private final CtxEdgeRepository ctxEdgeRepository;
+    private static final int NODE_DIMENSION_INSERT_BATCH_SIZE = 1_000;
+
     private final CtxDimensionRepository ctxDimensionRepository;
-    private final CtxNodeDimensionRepository ctxNodeDimensionRepository;
+    private final GraphFrontierQuery graphFrontierQuery;
+    private final DimensionGraphPropagator dimensionGraphPropagator;
     private final ChatModelFactory chatModelFactory;
     private final LiteLLMProvisioningService litellmProvisioningService;
     private final IngestionBatchLogService ingestionBatchLogService;
@@ -59,19 +53,17 @@ public class DimensionDiscoveryService {
     private final String baseCloneDir;
 
     public DimensionDiscoveryService(
-            CtxNodeRepository ctxNodeRepository,
-            CtxEdgeRepository ctxEdgeRepository,
             CtxDimensionRepository ctxDimensionRepository,
-            CtxNodeDimensionRepository ctxNodeDimensionRepository,
+            GraphFrontierQuery graphFrontierQuery,
+            DimensionGraphPropagator dimensionGraphPropagator,
             ChatModelFactory chatModelFactory,
             LiteLLMProvisioningService litellmProvisioningService,
             IngestionBatchLogService ingestionBatchLogService,
             TreeHelper treeHelper,
             IngestionProperties ingestionProperties) {
-        this.ctxNodeRepository = ctxNodeRepository;
-        this.ctxEdgeRepository = ctxEdgeRepository;
         this.ctxDimensionRepository = ctxDimensionRepository;
-        this.ctxNodeDimensionRepository = ctxNodeDimensionRepository;
+        this.graphFrontierQuery = graphFrontierQuery;
+        this.dimensionGraphPropagator = dimensionGraphPropagator;
         this.chatModelFactory = chatModelFactory;
         this.litellmProvisioningService = litellmProvisioningService;
         this.ingestionBatchLogService = ingestionBatchLogService;
@@ -113,25 +105,70 @@ public class DimensionDiscoveryService {
             return;
         }
 
+        List<GraphFrontierQuery.FileNode> files = graphFrontierQuery.findFileNodes(batch.getId());
+
         DimensionDiscoveryResult result = executeDimensionDiscovery(batch, annotatedTree, batchLogger, null);
         requireSufficientDimensions(result, batchLogger);
+
+        List<CtxDimension> dimensions = createDimensionsFromResult(batch, result);
+        Map<UUID, Long> seedLabels = buildSeedLabels(files, dimensions);
 
         // An LLM may emit glob patterns that match no file paths. Persisting the dimensions
         // anyway silently produces empty dimension stats, so give the model one corrective
         // retry before failing the ingestion.
-        if (taggedFileCount(batch, result) == 0) {
+        if (seedLabels.isEmpty()) {
             batchLogger.info(
                     "PREPARE_DIMENSIONS",
                     "Discovered dimensions' glob patterns matched no files; retrying discovery once.");
             result = executeDimensionDiscovery(batch, annotatedTree, batchLogger, GLOB_RETRY_GUIDANCE);
             requireSufficientDimensions(result, batchLogger);
+            dimensions = createDimensionsFromResult(batch, result);
+            seedLabels = buildSeedLabels(files, dimensions);
         }
 
-        int taggedFiles = persistDimensionsAndTagNodes(batch, result, batchLogger);
+        int taggedFiles = persistDimensionsAndTagNodes(batch, dimensions, files, seedLabels, batchLogger);
         if (taggedFiles == 0) {
             throw new DimensionDiscoveryException(
                     "Discovered dimensions' glob patterns matched no files in the repository.", null);
         }
+    }
+
+    private Map<UUID, Long> buildSeedLabels(List<GraphFrontierQuery.FileNode> files, List<CtxDimension> dimensions) {
+        if (dimensions.size() > Long.SIZE) {
+            throw new DimensionDiscoveryException(
+                    "Cannot propagate more than " + Long.SIZE + " dimensions; discovered " + dimensions.size(), null);
+        }
+
+        Map<UUID, Long> seedLabels = new HashMap<>();
+        for (GraphFrontierQuery.FileNode file : files) {
+            if (file.path() == null) {
+                continue;
+            }
+
+            long labels = 0L;
+            for (int index = 0; index < dimensions.size(); index++) {
+                if (matchesAny(file.path(), dimensions.get(index))) {
+                    labels |= 1L << index;
+                }
+            }
+            if (labels != 0L) {
+                seedLabels.put(file.id(), labels);
+            }
+        }
+        return seedLabels;
+    }
+
+    private boolean matchesAny(String path, CtxDimension dimension) {
+        List<String> patterns = dimension.getGlobPatterns();
+        if (patterns == null) {
+            return false;
+        }
+        for (String pattern : patterns) {
+            if (pattern != null && matchesGlob(path, pattern)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void requireSufficientDimensions(
@@ -149,10 +186,59 @@ public class DimensionDiscoveryService {
         }
     }
 
-    private int taggedFileCount(IngestionBatch batch, DimensionDiscoveryResult result) {
-        List<CtxNode> nodes = ctxNodeRepository.findByBatchId(batch.getId());
-        List<CtxDimension> dimensions = createDimensionsFromResult(batch, result);
-        return mapNodesToDimensions(nodes, dimensions).size();
+    private int persistDimensionsAndTagNodes(
+            IngestionBatch batch,
+            List<CtxDimension> dimensionsToSave,
+            List<GraphFrontierQuery.FileNode> files,
+            Map<UUID, Long> seedLabels,
+            IngestionBatchLogService.BatchLogger batchLogger) {
+
+        ctxDimensionRepository.saveAll(dimensionsToSave);
+        // Mappings are inserted through JDBC, so the dimension rows must be visible first.
+        ctxDimensionRepository.flush();
+        logger.debug("Discovered {} dimensions", dimensionsToSave.size());
+
+        Map<UUID, Long> labelsByNode = dimensionGraphPropagator.propagate(batch.getId(), seedLabels);
+
+        int taggedFiles = 0;
+        int mappings = 0;
+        List<GraphFrontierQuery.NodeDimension> pendingMappings = new ArrayList<>(NODE_DIMENSION_INSERT_BATCH_SIZE);
+
+        for (GraphFrontierQuery.FileNode file : files) {
+            long labels = labelsByNode.getOrDefault(file.id(), 0L);
+            if (labels == 0L) {
+                continue;
+            }
+
+            taggedFiles++;
+            for (int index = 0; index < dimensionsToSave.size(); index++) {
+                if ((labels & (1L << index)) == 0L) {
+                    continue;
+                }
+
+                pendingMappings.add(new GraphFrontierQuery.NodeDimension(
+                        file.id(), dimensionsToSave.get(index).getId()));
+                mappings++;
+                if (pendingMappings.size() == NODE_DIMENSION_INSERT_BATCH_SIZE) {
+                    graphFrontierQuery.insertNodeDimensions(pendingMappings);
+                    pendingMappings.clear();
+                }
+            }
+        }
+        graphFrontierQuery.insertNodeDimensions(pendingMappings);
+
+        int propagatedFiles = Math.max(0, taggedFiles - seedLabels.size());
+        logger.debug("Tagged {} files via globs, {} via graph propagation", seedLabels.size(), propagatedFiles);
+        batchLogger.info(
+                "PREPARE_DIMENSIONS",
+                "Discovered "
+                        + dimensionsToSave.size()
+                        + " dimensions and tagged "
+                        + taggedFiles
+                        + " files across "
+                        + mappings
+                        + " mappings.");
+        return taggedFiles;
     }
 
     private DimensionDiscoveryResult executeDimensionDiscovery(
@@ -371,35 +457,6 @@ public class DimensionDiscoveryService {
         return contents.toString();
     }
 
-    private int persistDimensionsAndTagNodes(
-            IngestionBatch batch, DimensionDiscoveryResult result, IngestionBatchLogService.BatchLogger batchLogger) {
-
-        List<CtxNode> nodes = ctxNodeRepository.findByBatchId(batch.getId());
-        List<CtxDimension> dimensionsToSave = createDimensionsFromResult(batch, result);
-        ctxDimensionRepository.saveAll(dimensionsToSave);
-        logger.debug("Discovered {} dimensions", dimensionsToSave.size());
-
-        // Fast glob pass
-        Map<CtxNode, Set<CtxDimension>> nodeToDimensions = mapNodesToDimensions(nodes, dimensionsToSave);
-
-        // Constrained graph propagation for untagged files
-        int propagatedFiles = propagateDimensions(batch.getId(), nodes, dimensionsToSave, nodeToDimensions);
-
-        // Persist node-dimension mappings
-        List<CtxNodeDimension> nodeDimensionsToSave = asCtxEntities(nodeToDimensions);
-        ctxNodeDimensionRepository.saveAll(nodeDimensionsToSave);
-
-        logger.debug("Tagged {} files via globs, {} via graph propagation", nodeToDimensions.size(), propagatedFiles);
-        batchLogger.info(
-                "PREPARE_DIMENSIONS",
-                "Discovered "
-                        + dimensionsToSave.size()
-                        + " dimensions and tagged "
-                        + nodeToDimensions.size()
-                        + " files.");
-        return nodeToDimensions.size();
-    }
-
     public static @NonNull List<CtxDimension> createDimensionsFromResult(
             IngestionBatch batch, DimensionDiscoveryResult result) {
         UUID teamId = batch.getRepository().getTeam().getId();
@@ -429,31 +486,6 @@ public class DimensionDiscoveryService {
             }
         }
         return dimensionsToSave;
-    }
-
-    public @NonNull Map<CtxNode, Set<CtxDimension>> mapNodesToDimensions(
-            List<CtxNode> nodes, List<CtxDimension> dimensionsToSave) {
-        Map<CtxNode, Set<CtxDimension>> nodeToDimensions = new HashMap<>();
-
-        for (CtxNode node : nodes) {
-            if (NodeType.FILE == node.getNodeType() && node.getPath() != null) {
-                Set<CtxDimension> matchedDims = new HashSet<>();
-                for (CtxDimension dim : dimensionsToSave) {
-                    if (dim.getGlobPatterns() != null) {
-                        for (String pattern : dim.getGlobPatterns()) {
-                            if (matchesGlob(node.getPath(), pattern)) {
-                                matchedDims.add(dim);
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (!matchedDims.isEmpty()) {
-                    nodeToDimensions.put(node, matchedDims);
-                }
-            }
-        }
-        return nodeToDimensions;
     }
 
     boolean matchesGlob(String filePath, String pattern) {
@@ -510,95 +542,5 @@ public class DimensionDiscoveryService {
             }
         }
         return List.copyOf(variants);
-    }
-
-    private int propagateDimensions(
-            UUID batchId,
-            List<CtxNode> nodes,
-            List<CtxDimension> dimensions,
-            Map<CtxNode, Set<CtxDimension>> nodeToDimensions) {
-
-        // Build adjacency list for graph propagation
-        Map<UUID, List<UUID>> adjacencyList = new HashMap<>();
-        Map<UUID, CtxNode> nodeById = new HashMap<>();
-
-        for (CtxNode node : nodes) {
-            nodeById.put(node.getId(), node);
-            adjacencyList.put(node.getId(), new ArrayList<>());
-        }
-
-        List<CtxEdge> edges = ctxEdgeRepository.findByBatchIdWithNodes(batchId);
-        for (CtxEdge edge : edges) {
-            adjacencyList
-                    .get(edge.getSourceNode().getId())
-                    .add(edge.getTargetNode().getId());
-            adjacencyList
-                    .get(edge.getTargetNode().getId())
-                    .add(edge.getSourceNode().getId()); // Undirected for propagation
-        }
-
-        int propagatedCount = 0;
-        int maxHops = 2;
-
-        // Propagate per dimension
-        for (CtxDimension dim : dimensions) {
-            // Find seed nodes for this dimension
-            Set<UUID> seedNodes = new HashSet<>();
-            for (Map.Entry<CtxNode, Set<CtxDimension>> entry : nodeToDimensions.entrySet()) {
-                if (entry.getValue().contains(dim)) {
-                    seedNodes.add(entry.getKey().getId());
-                }
-            }
-
-            if (seedNodes.isEmpty()) {
-                continue;
-            }
-
-            // BFS propagation
-            Set<UUID> visited = new HashSet<>(seedNodes);
-            Queue<UUID> queue = new LinkedList<>(seedNodes);
-            Map<UUID, Integer> distances = new HashMap<>();
-            for (UUID seed : seedNodes) {
-                distances.put(seed, 0);
-            }
-
-            while (!queue.isEmpty()) {
-                UUID current = queue.poll();
-                int currentDist = distances.get(current);
-
-                if (currentDist >= maxHops) {
-                    continue;
-                }
-
-                for (UUID neighbor : adjacencyList.getOrDefault(current, Collections.emptyList())) {
-                    if (!visited.contains(neighbor)) {
-                        visited.add(neighbor);
-                        distances.put(neighbor, currentDist + 1);
-                        queue.add(neighbor);
-
-                        CtxNode neighborNode = nodeById.get(neighbor);
-                        if (neighborNode != null && NodeType.FILE == neighborNode.getNodeType()) {
-                            nodeToDimensions
-                                    .computeIfAbsent(neighborNode, k -> new HashSet<>())
-                                    .add(dim);
-                            propagatedCount++;
-                        }
-                    }
-                }
-            }
-        }
-
-        return propagatedCount;
-    }
-
-    public static @NonNull List<CtxNodeDimension> asCtxEntities(Map<CtxNode, Set<CtxDimension>> nodeToDimensions) {
-        List<CtxNodeDimension> nodeDimensionsToSave = new ArrayList<>();
-        for (Map.Entry<CtxNode, Set<CtxDimension>> entry : nodeToDimensions.entrySet()) {
-            for (CtxDimension dim : entry.getValue()) {
-                nodeDimensionsToSave.add(
-                        new CtxNodeDimension(entry.getKey(), dim, 0.0)); // Ranking will be applied later
-            }
-        }
-        return nodeDimensionsToSave;
     }
 }
