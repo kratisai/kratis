@@ -319,7 +319,7 @@ func (h *Handler) HandlePermissionRequest(transport *AcpTransport, params map[st
 
 	// Authorisation is part of the tool call's lifecycle.
 	p, _ := parseRequestPermissionParams(params)
-	info := h.beginPermission(actionID, cmdText, p.ToolCall.Title, p.ToolCall.Kind)
+	info := h.beginPermission(actionID, cmdText, p.ToolCall.Title, p.ToolCall.Kind, p.ToolCall.Meta)
 
 	// The agent owns the option set; a non-empty one is guaranteed downstream
 	// so the UI always has something to present and the control plane always
@@ -449,7 +449,7 @@ func (h *Handler) HandleElicitationRequest(transport *AcpTransport, params map[s
 }
 
 // beginPermission registers the tool call that a permission request gates.
-func (h *Handler) beginPermission(toolCallID string, command string, title string, kind string) *ToolCallInfo {
+func (h *Handler) beginPermission(toolCallID string, command string, title string, kind string, meta map[string]any) *ToolCallInfo {
 	if toolCallID == "" {
 		return nil
 	}
@@ -467,8 +467,13 @@ func (h *Handler) beginPermission(toolCallID string, command string, title strin
 	if info.Title == "" {
 		info.Title = title
 	}
-	if info.Kind == "" {
-		info.Kind = kind
+	if !isConcreteKind(info.Kind) {
+		if len(meta) == 0 {
+			meta = info.Meta
+		}
+		if resolved := resolveToolKind(coalesce(kind, info.Kind), info.Title, meta); resolved != "" {
+			info.Kind = resolved
+		}
 	}
 	return info
 }
@@ -495,6 +500,81 @@ func canonicalPermissionKind(requestKind string, info *ToolCallInfo) string {
 
 func isConcreteKind(kind string) bool {
 	return kind != "" && kind != string(KindOther)
+}
+
+// resolveToolKind returns the concrete ACP tool kind for a tool-call update.
+// ACP marks kind optional, and Goose omits it entirely: the tool identity is
+// only in the title prefix and _meta.goose.toolCall.toolName. Without this
+// fallback every Goose write is classified as a COMMAND.
+func resolveToolKind(kind, title string, meta map[string]any) string {
+	if isConcreteKind(kind) {
+		return kind
+	}
+	if name := metaToolName(meta); name != "" {
+		if mapped := toolNameToKind(name); mapped != "" {
+			return mapped
+		}
+	}
+	if name := titleToolName(title); name != "" {
+		if mapped := toolNameToKind(name); mapped != "" {
+			return mapped
+		}
+	}
+	return kind
+}
+
+func metaToolName(meta map[string]any) string {
+	if len(meta) == 0 {
+		return ""
+	}
+	if name, ok := meta["toolName"].(string); ok && name != "" {
+		return name
+	}
+	goose, ok := meta["goose"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	toolCall, ok := goose["toolCall"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	name, _ := toolCall["toolName"].(string)
+	return name
+}
+
+func titleToolName(title string) string {
+	before, _, found := strings.Cut(strings.TrimSpace(title), "·")
+	if !found {
+		return ""
+	}
+	return strings.TrimSpace(before)
+}
+
+func toolNameToKind(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "read", "view", "cat", "read_file":
+		return string(KindRead)
+	case "edit", "replace", "patch", "apply_patch":
+		return string(KindEdit)
+	case "write", "create", "write_file":
+		return string(KindWrite)
+	case "delete", "remove", "rm", "delete_file":
+		return string(KindDelete)
+	case "move", "rename", "mv":
+		return string(KindMove)
+	case "search", "grep", "glob", "find", "tree":
+		return string(KindSearch)
+	case "shell", "bash", "execute", "exec", "run", "command", "terminal":
+		return string(KindExecute)
+	case "think":
+		return string(KindThink)
+	case "fetch", "web_fetch", "http":
+		return string(KindFetch)
+	case "switch_mode":
+		return string(KindSwitchMode)
+	default:
+		return ""
+	}
 }
 
 // resolvePermission emits the tool call transition for a permission outcome:
@@ -542,7 +622,7 @@ func (h *Handler) HandleTerminalCreate(transport *AcpTransport, params map[strin
 
 	if !h.toolCallAlreadyApproved(toolCallID) {
 		h.debugf("[ACP][TERM] Requesting HITL permission for command=%q cwd=%q", command, cwd)
-		h.beginPermission(toolCallID, command, "", "")
+		h.beginPermission(toolCallID, command, "", "", nil)
 
 		req := PermissionRequest{
 			Command:  command,
@@ -974,7 +1054,7 @@ func (h *Handler) HandleFsWriteTextFile(transport *AcpTransport, params map[stri
 			diff.OldText = string(old)
 		}
 
-		h.beginPermission(toolCallID, path, path, "write")
+		h.beginPermission(toolCallID, path, path, "write", nil)
 
 		// No agent option set; synthesise the default pair for a uniform shape.
 		req := PermissionRequest{

@@ -11,6 +11,8 @@ import liquibase.change.core.AddUniqueConstraintChange;
 import liquibase.change.core.CreateIndexChange;
 import liquibase.change.core.CreateTableChange;
 import liquibase.change.core.RawSQLChange;
+import liquibase.precondition.core.ColumnExistsPrecondition;
+import liquibase.precondition.core.PreconditionContainer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.aot.hint.MemberCategory;
@@ -61,6 +63,26 @@ class LiquibaseRuntimeHintsRegistrarTest {
         assertThat(RuntimeHintsPredicates.reflection().onType(AddForeignKeyConstraintChange.class))
                 .accepts(hints);
         assertThat(RuntimeHintsPredicates.reflection().onType(AddUniqueConstraintChange.class))
+                .accepts(hints);
+    }
+
+    @Test
+    @DisplayName("registers reflection hints for preconditions parsed from YAML")
+    void registersReflectionHintsForPreconditions() {
+        RuntimeHints hints = new RuntimeHints();
+        LiquibaseRuntimeHintsRegistrar registrar = new LiquibaseRuntimeHintsRegistrar();
+
+        registrar.registerHints(hints, getClass().getClassLoader());
+
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onType(ColumnExistsPrecondition.class)
+                        .withMemberCategory(MemberCategory.ACCESS_DECLARED_FIELDS))
+                .accepts(hints);
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onType(ColumnExistsPrecondition.class)
+                        .withMemberCategory(MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS))
+                .accepts(hints);
+        assertThat(RuntimeHintsPredicates.reflection().onType(PreconditionContainer.class))
                 .accepts(hints);
     }
 
