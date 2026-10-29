@@ -11,7 +11,7 @@
     "printf 'provider: openai\\nmodel: %s\\nproviders:\\n  openai:\\n    type: openai\\n    api_key: %s\\n    base_url: %s/v1\\n' \"${LLM_MODEL}\" \"${VIRTUAL_KEY}\" \"${LLM_BASE_URL}\" > ~/.config/goose/config.yaml",
     "export GOOSE_PROVIDER=openai",
     "export GOOSE_MODEL=${LLM_MODEL}",
-    "export GOOSE_MODE=auto",
+    "export GOOSE_MODE=approve",
     "export OPENAI_API_KEY=${VIRTUAL_KEY}",
     "export OPENAI_BASE_URL=${LLM_BASE_URL}/v1"
   ],

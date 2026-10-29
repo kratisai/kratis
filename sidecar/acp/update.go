@@ -200,8 +200,12 @@ func (h *Handler) accumulateToolCallLocked(u ToolCallUpdateMsg) *ToolCallInfo {
 	}
 	info.ObservedInUpdate = true
 
-	if u.Kind != "" {
+	if isConcreteKind(u.Kind) {
 		info.Kind = u.Kind
+	} else if !isConcreteKind(info.Kind) {
+		if resolved := resolveToolKind(coalesce(u.Kind, info.Kind), u.Title, u.Meta); resolved != "" {
+			info.Kind = resolved
+		}
 	}
 	if u.Title != "" {
 		info.Title = u.Title

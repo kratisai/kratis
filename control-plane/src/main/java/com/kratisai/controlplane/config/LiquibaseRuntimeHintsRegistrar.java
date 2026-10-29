@@ -58,6 +58,28 @@ import liquibase.change.core.TagDatabaseChange;
 import liquibase.change.core.UpdateDataChange;
 import liquibase.parser.core.yaml.YamlChangeLogParser;
 import liquibase.parser.core.yaml.YamlParser;
+import liquibase.precondition.AbstractPrecondition;
+import liquibase.precondition.PreconditionLogic;
+import liquibase.precondition.core.AndPrecondition;
+import liquibase.precondition.core.ChangeLogPropertyDefinedPrecondition;
+import liquibase.precondition.core.ChangeSetExecutedPrecondition;
+import liquibase.precondition.core.ColumnExistsPrecondition;
+import liquibase.precondition.core.DBMSPrecondition;
+import liquibase.precondition.core.ForeignKeyExistsPrecondition;
+import liquibase.precondition.core.IndexExistsPrecondition;
+import liquibase.precondition.core.NotPrecondition;
+import liquibase.precondition.core.ObjectQuotingStrategyPrecondition;
+import liquibase.precondition.core.OrPrecondition;
+import liquibase.precondition.core.PreconditionContainer;
+import liquibase.precondition.core.PrimaryKeyExistsPrecondition;
+import liquibase.precondition.core.RowCountPrecondition;
+import liquibase.precondition.core.RunningAsPrecondition;
+import liquibase.precondition.core.SequenceExistsPrecondition;
+import liquibase.precondition.core.SqlPrecondition;
+import liquibase.precondition.core.TableExistsPrecondition;
+import liquibase.precondition.core.TableIsEmptyPrecondition;
+import liquibase.precondition.core.UniqueConstraintExistsPrecondition;
+import liquibase.precondition.core.ViewExistsPrecondition;
 import liquibase.statement.DatabaseFunction;
 import liquibase.statement.SequenceCurrentValueFunction;
 import liquibase.statement.SequenceNextValueFunction;
@@ -144,6 +166,31 @@ public class LiquibaseRuntimeHintsRegistrar implements RuntimeHintsRegistrar {
             LoadDataColumnConfig.class,
             ChangeMetaData.class,
             ChangeParameterMetaData.class,
+
+            // Preconditions are deserialized by Liquibase's ReflectionSerializer, so their fields
+            // must be registered or native-image returns none and leaves every property null.
+            AbstractPrecondition.class,
+            PreconditionLogic.class,
+            PreconditionContainer.class,
+            AndPrecondition.class,
+            OrPrecondition.class,
+            NotPrecondition.class,
+            ColumnExistsPrecondition.class,
+            TableExistsPrecondition.class,
+            ViewExistsPrecondition.class,
+            IndexExistsPrecondition.class,
+            ForeignKeyExistsPrecondition.class,
+            PrimaryKeyExistsPrecondition.class,
+            UniqueConstraintExistsPrecondition.class,
+            SequenceExistsPrecondition.class,
+            ChangeSetExecutedPrecondition.class,
+            ChangeLogPropertyDefinedPrecondition.class,
+            DBMSPrecondition.class,
+            SqlPrecondition.class,
+            RowCountPrecondition.class,
+            TableIsEmptyPrecondition.class,
+            RunningAsPrecondition.class,
+            ObjectQuotingStrategyPrecondition.class,
 
             // Functions & SQL structures
             DatabaseFunction.class,

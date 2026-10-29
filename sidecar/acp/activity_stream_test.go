@@ -166,6 +166,98 @@ func TestHandleSessionUpdate_LifecycleFieldsSplitAcrossMessages(t *testing.T) {
 	}
 }
 
+// TestHandleSessionUpdate_GooseMissingKindInfersToolType verifies that Goose
+// tool calls, which omit the ACP kind field, are classified from
+// _meta.goose.toolCall.toolName and the title prefix. Without this, a write is
+// reported as COMMAND and the UI/test never observes an EDITED activity.
+func TestHandleSessionUpdate_GooseMissingKindInfersToolType(t *testing.T) {
+	sink := &mockEventSink{}
+	h := NewHandler(sink, nil, "")
+
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "call_goose_write",
+			"title":         "write · /kratis/workspace/kratis_task.sh",
+			"rawInput": map[string]interface{}{
+				"path":    "/kratis/workspace/kratis_task.sh",
+				"content": "#!/bin/bash\necho hello\n",
+			},
+			"_meta": map[string]interface{}{
+				"goose": map[string]interface{}{
+					"toolCall": map[string]interface{}{"toolName": "write"},
+				},
+			},
+		},
+	})
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call_update",
+			"toolCallId":    "call_goose_write",
+			"status":        "completed",
+		},
+	})
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "call_goose_shell",
+			"title":         "shell · chmod +x /kratis/workspace/kratis_task.sh",
+			"rawInput": map[string]interface{}{
+				"command": "chmod +x /kratis/workspace/kratis_task.sh",
+			},
+		},
+	})
+	h.handleSessionUpdate(map[string]interface{}{
+		"update": map[string]interface{}{
+			"sessionUpdate": "tool_call_update",
+			"toolCallId":    "call_goose_shell",
+			"status":        "completed",
+		},
+	})
+
+	want := []ActivityType{
+		ActivityTypeEdited, ActivityTypeEdited,
+		ActivityTypeCommand, ActivityTypeCommand,
+	}
+	if len(sink.activities) != len(want) {
+		t.Fatalf("expected %d activities, got %d: %+v", len(want), len(sink.activities), sink.activities)
+	}
+	for i, activity := range sink.activities {
+		if activity.activityType != want[i] {
+			t.Errorf("activity %d: expected type %q, got %q", i, want[i], activity.activityType)
+		}
+	}
+}
+
+func TestResolveToolKind(t *testing.T) {
+	gooseWriteMeta := map[string]any{
+		"goose": map[string]any{"toolCall": map[string]any{"toolName": "write"}},
+	}
+	cases := []struct {
+		name  string
+		kind  string
+		title string
+		meta  map[string]any
+		want  string
+	}{
+		{"concrete kind wins", "edit", "shell · git status", nil, "edit"},
+		{"title prefix infers write", "", "write · /tmp/x", nil, "write"},
+		{"title prefix infers shell", "", "shell · git status", nil, "execute"},
+		{"goose meta infers write", "other", "", gooseWriteMeta, "write"},
+		{"top-level meta tool name", "", "", map[string]any{"toolName": "read"}, "read"},
+		{"command title without separator stays empty", "", "find / -name javac", nil, ""},
+		{"unknown title keeps other", "other", "mystery · x", nil, "other"},
+		{"unknown title keeps empty", "", "mystery · x", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveToolKind(tc.kind, tc.title, tc.meta); got != tc.want {
+				t.Errorf("resolveToolKind(%q, %q) = %q, want %q", tc.kind, tc.title, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestHandleSessionUpdate_OpenCodeStyleCompletionWithoutKind verifies Slice 3:
 // OpenCode's completed update omits kind — the activity type comes from the
 // accumulated kind, not the single message.

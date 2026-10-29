@@ -104,7 +104,13 @@ class EnvironmentRegisterRpcHandlerTest {
     }
 
     private List<String> loggedMessages() {
-        return logAppender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+        // Test classes run concurrently; keep only this environment's registrations so a real
+        // connector registering another environment cannot leak into the assertion.
+        String environmentId = envId.toString();
+        return logAppender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(message -> message.contains(environmentId))
+                .toList();
     }
 
     private void register(boolean reconnect, String connectorVersion) {
