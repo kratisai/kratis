@@ -20,6 +20,10 @@ public class ParserProperties {
     /** scc (command-line code counter) binary used by wiki generation. */
     private String sccBinaryPath;
 
+    private int workers = 2;
+
+    private int memBudgetMb = 256;
+
     public String getBinaryPath() {
         return binaryPath;
     }
@@ -42,5 +46,21 @@ public class ParserProperties {
 
     public void setSccBinaryPath(String sccBinaryPath) {
         this.sccBinaryPath = sccBinaryPath;
+    }
+
+    public int getWorkers() {
+        return workers;
+    }
+
+    public void setWorkers(int workers) {
+        this.workers = workers;
+    }
+
+    public int getMemBudgetMb() {
+        return memBudgetMb;
+    }
+
+    public void setMemBudgetMb(int memBudgetMb) {
+        this.memBudgetMb = memBudgetMb;
     }
 }

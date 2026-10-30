@@ -11,7 +11,7 @@ See the [root README](../README.md) for product context. Deploy: [`deploy/README
 | [`Dockerfile.control-plane`](Dockerfile.control-plane) | Multi-stage: Vite SPA, Go connector, GraalVM native image, Alpine runtime |
 | [`Dockerfile.runner-base`](Dockerfile.runner-base) | Base image for agent sandboxes |
 | [`smoke-test-image.sh`](smoke-test-image.sh) | Boots a control-plane image against a throwaway pgvector DB and fails unless it reports healthy |
-| `bin/codebase-memory-mcp` | Tree-sitter parser (DeusData v0.8.1). Path: `KRATIS_PARSER_BINARY_PATH` |
+| `bin/codebase-memory-mcp` | Tree-sitter parser (DeusData v0.12.1). Path: `KRATIS_PARSER_BINARY_PATH` |
 | `bin/scc` | Line-count metrics for wiki generation. Path: `KRATIS_SCC_BINARY_PATH` |
 
 `codebase-memory-mcp` is a parser binary, not an MCP server. The control plane shells out to it during ingestion.
@@ -24,7 +24,7 @@ Linux build links glibc 2.38+ and exits 127 under musl/gcompat.
 ```bash
 mkdir -p build/bin
 # Linux x86_64 — pick the matching asset for your OS from GitHub Releases
-wget https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.8.1/codebase-memory-mcp-linux-amd64.tar.gz -O codebase-memory-mcp.tar.gz
+wget https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.12.1/codebase-memory-mcp-linux-amd64.tar.gz -O codebase-memory-mcp.tar.gz
 tar xzf codebase-memory-mcp.tar.gz -C build/bin/
 chmod +x build/bin/codebase-memory-mcp
 rm codebase-memory-mcp.tar.gz
