@@ -25,6 +25,18 @@ fail() {
 }
 
 docker network create "$NETWORK" >/dev/null
+
+PARSER_VERSION="${PARSER_VERSION:-0.12.1}"
+docker run --rm --entrypoint sh "$IMAGE" -c "
+	set -eu
+	codebase-memory-mcp --version | grep -q '$PARSER_VERSION'
+	mkdir -p /tmp/smoke-repo
+	printf 'public class Smoke { void run() {} }\n' > /tmp/smoke-repo/Smoke.java
+	out=\$(CBM_CACHE_DIR=/tmp/smoke-cache codebase-memory-mcp cli index_repository --repo-path /tmp/smoke-repo --name smoke)
+	printf '%s' \"\$out\" | grep -q '\"status\":\"indexed\"'
+	test -f /tmp/smoke-cache/smoke.db
+" || fail "codebase-memory parser $PARSER_VERSION did not index a sample repository"
+
 docker run -d --name "$DB" --network "$NETWORK" \
 	-e POSTGRES_DB=kratis -e POSTGRES_USER=kratis -e POSTGRES_PASSWORD=kratis \
 	pgvector/pgvector:pg16 >/dev/null

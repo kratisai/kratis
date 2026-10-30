@@ -80,7 +80,8 @@ abstract @SpringIntegrationTest class BaseCodebaseMemoryParserIntegrationTest {
     protected CodebaseMemoryParserService createParserService(File binaryFile) {
         ParserProperties parserProperties = new ParserProperties();
         parserProperties.setBinaryPath(binaryFile.getAbsolutePath());
-        parserProperties.setTempDir(System.getProperty("java.io.tmpdir"));
+        parserProperties.setTempDir(
+                new File(System.getProperty("java.io.tmpdir"), "kratis-cbm-cache").getAbsolutePath());
         return new CodebaseMemoryParserService(
                 ctxNodeRepository, ctxEdgeRepository, new ProcessExecutor(), objectMapper, parserProperties);
     }

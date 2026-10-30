@@ -39,6 +39,6 @@ class CodebaseMemoryPythonParserIntegrationTest extends BaseCodebaseMemoryParser
         assertEdgeOfType(RelationType.DEFINES, 24);
         assertEdgeOfType(RelationType.CALLS, 1);
         assertEdgeOfType(RelationType.DECORATES, 2);
-        assertEdgeOfType(RelationType.IMPORTS, 8); // Maps from both USAGE and IMPORTS in codebase-memory
+        assertEdgeOfType(RelationType.IMPORTS, 6); // Maps from both USAGE and IMPORTS in codebase-memory
     }
 }

@@ -68,7 +68,7 @@ jobs:
           mkdir -p ../build/bin
           # GitHub release downloads occasionally return 503; retry with backoff.
           wget --tries=8 --waitretry=5 --retry-connrefused \
-            https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.8.1/codebase-memory-mcp-linux-amd64.tar.gz \
+            https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.12.1/codebase-memory-mcp-linux-amd64.tar.gz \
             -O codebase-memory-mcp.tar.gz
           tar xzf codebase-memory-mcp.tar.gz -C ../build/bin/
           chmod +x ../build/bin/codebase-memory-mcp
