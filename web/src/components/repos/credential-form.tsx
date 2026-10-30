@@ -16,7 +16,7 @@ const PAT_PERMISSION_HINTS: Partial<Record<ProviderType, string>> = {
   bitbucket:
     'The token needs Repositories: Read & write and Pull requests: Read & write. Add Repositories: Admin to create new repositories.',
   github:
-    'A fine-grained PAT needs Contents: Read & write, Metadata: Read-only, and Pull requests: Read & write. Add Administration: Read & write to create new repositories.',
+    'A fine-grained PAT needs Contents: Read & write, Metadata: Read-only, Pull requests: Read & write, and Workflows: Read & write to work on repos containing github-actions. Add Administration: Read & write to create new repositories.',
   gitlab:
     'The token needs the api and write_repository scopes. Creating projects in a group also needs the Developer role.',
 }
