@@ -32,7 +32,7 @@ describe('CredentialForm', () => {
   it.each([
     [
       'github',
-      /fine-grained PAT needs Contents: Read & write, Metadata: Read-only, and Pull requests: Read & write\. Add Administration: Read & write to create new repositories/i,
+      /fine-grained PAT needs Contents: Read & write, Metadata: Read-only, Pull requests: Read & write, and Workflows: Read & write to work on repos containing github-actions\. Add Administration: Read & write to create new repositories/i,
     ],
     ['gitlab', /needs the api and write_repository scopes\. Creating projects in a group also needs the Developer role/i],
     [
