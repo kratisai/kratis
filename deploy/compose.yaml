@@ -69,7 +69,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${MEM_LIMIT:-512m}
+          memory: ${MEM_LIMIT:-1g}
 
   litellm:
     # Pinned by digest: `main-stable` is a moving tag. Refresh deliberately with
