@@ -41,6 +41,17 @@ public class DimensionDiscoveryService {
             actual file paths shown in the tree, e.g. 'src/components/**/*.tsx'.
             """;
 
+    private static final String DIMENSION_RULES = """
+            Identify dimensions in three categories: business-domains, technical archetypes, and cross-cutting services.
+                - 5-12 Business Domains. What are the core business concerns of this codebase? What does it achieve?
+                - 3-8 Technical Archetypes. What are the primary architectural patterns used in this codebase?
+                - 2-5 Cross-cutting Services. Support services that span multiple domains or archetypes?
+            For each dimension, provide 3-5 glob patterns matching relevant files. Tree paths are relative to the repo
+            root:  e.g. src/**/user/*.java or **/user/*.java or **/*Controller.java etc. Avoid ** where no path segment
+            exists in the provided filenames (e.g. src/main/user/**/*.java and **/src/main/user/*.java both miss
+            src/main/user/UserController.java).
+            """;
+
     private static final int NODE_DIMENSION_INSERT_BATCH_SIZE = 1_000;
 
     private final CtxDimensionRepository ctxDimensionRepository;
@@ -173,17 +184,44 @@ public class DimensionDiscoveryService {
 
     private void requireSufficientDimensions(
             DimensionDiscoveryResult result, IngestionBatchLogService.BatchLogger batchLogger) {
-        if (result.domains().isEmpty()
-                || result.archetypes().isEmpty()
-                || result.crossCutting().isEmpty()) {
+        int domainCount = sizeOf(result.domains());
+        int archetypeCount = sizeOf(result.archetypes());
+        int crossCuttingCount = sizeOf(result.crossCutting());
+        if (domainCount == 0 || archetypeCount == 0 || crossCuttingCount == 0) {
             batchLogger.info("PREPARE_DIMENSIONS", "Insufficient dimensions discovered.");
             throw new DimensionDiscoveryException(
-                    "Insufficient dimensions discovered: " + result.domains().size()
-                            + " domains" + result.archetypes().size()
-                            + " archetypes" + result.crossCutting().size()
+                    "Insufficient dimensions discovered: " + domainCount
+                            + " domains, " + archetypeCount
+                            + " archetypes, " + crossCuttingCount
                             + " cross-cutting dimensions",
                     null);
         }
+    }
+
+    private static int sizeOf(List<?> values) {
+        return values == null ? 0 : values.size();
+    }
+
+    private static String formatDimensions(DimensionDiscoveryResult result) {
+        return """
+                Business Domains: %s
+                Technical Archetypes: %s
+                Cross-Cutting Services: %s
+                """.formatted(
+                        dimensionNames(result.domains()),
+                        dimensionNames(result.archetypes()),
+                        dimensionNames(result.crossCutting()));
+    }
+
+    private static String dimensionNames(List<DimensionDiscoveryResult.DimensionResult> dimensions) {
+        if (dimensions == null || dimensions.isEmpty()) {
+            return "(none identified)";
+        }
+        List<String> names = dimensions.stream()
+                .map(DimensionDiscoveryResult.DimensionResult::name)
+                .filter(Objects::nonNull)
+                .toList();
+        return names.isEmpty() ? "(none identified)" : String.join(", ", names);
     }
 
     private int persistDimensionsAndTagNodes(
@@ -254,14 +292,7 @@ public class DimensionDiscoveryService {
                 You are an expert software architect.
                 Based on the following annotated repository file tree, deduce the primary architectural dimensions.
                 Each line shows the file path followed by a semantic footprint: the primary symbol name, inheritance relationships, and decorators/annotations.
-                Identify dimensions in three categories: business-domains, technical archetypes, and cross-cutting services.
-                    - 5-12 Business Domains. What are the core business concerns of this codebase? What does it achieve?
-                    - 3-8 Technical Archetypes. What are the primary architectural patterns used in this codebase?
-                    - 2-5 Cross-cutting Services. Support services that span multiple domains or archetypes?
-                For each dimension, provide 3-5 glob patterns matching relevant files. Tree paths are relative to the repo
-                root:  e.g. src/**/user/*.java or **/user/*.java or **/*Controller.java etc. Avoid ** where no path segment
-                exists in the provided filenames (e.g. src/main/user/**/*.java and **/src/main/user/*.java both miss
-                src/main/user/UserController.java).
+                {rules}
 
                 If you lack sufficient context to confidently identify these dimensions, you may request additional context by populating the 'additionalContextRequest' field.
                 If you do, you MUST provide:
@@ -331,8 +362,10 @@ public class DimensionDiscoveryService {
                 {format}
                 """;
 
-        String renderedShot1Prompt =
-                shot1PromptString.replace("{tree}", annotatedTree).replace("{format}", converter.getFormat());
+        String renderedShot1Prompt = shot1PromptString
+                .replace("{tree}", annotatedTree)
+                .replace("{rules}", DIMENSION_RULES)
+                .replace("{format}", converter.getFormat());
         if (additionalGuidance != null && !additionalGuidance.isBlank()) {
             renderedShot1Prompt = renderedShot1Prompt + "\n\nAdditional guidance:\n" + additionalGuidance;
         }
@@ -374,8 +407,16 @@ public class DimensionDiscoveryService {
                         You previously requested additional context to finalize the architectural dimension discovery.
                         Here is the information you requested:
 
+                        Annotated File Tree:
+                        {tree}
+
+                        Dimension candidates from your initial analysis (the category assignments are authoritative;
+                        retain them unless the file contents below contradict them):
+                        {initialDimensions}
+
+                        {rules}
+
                         Your initial rationale: {rationale}
-                        Dimensions you are already certain of: {certainDimensions}
                         How you expected this to resolve ambiguity: {expectedResolution}
 
                         Actual file contents (first 100 lines of each requested file):
@@ -389,12 +430,10 @@ public class DimensionDiscoveryService {
                         """;
 
                 String renderedShot2Prompt = shot2PromptString
+                        .replace("{tree}", annotatedTree)
+                        .replace("{initialDimensions}", formatDimensions(result1))
+                        .replace("{rules}", DIMENSION_RULES)
                         .replace("{rationale}", contextRequest.rationale() != null ? contextRequest.rationale() : "N/A")
-                        .replace(
-                                "{certainDimensions}",
-                                contextRequest.certainDimensions() != null
-                                        ? String.join(", ", contextRequest.certainDimensions())
-                                        : "None")
                         .replace(
                                 "{expectedResolution}",
                                 contextRequest.expectedResolution() != null

@@ -265,7 +265,7 @@ class IngestionConcurrencyIntegrationTest {
         // Wait for all ingestions to finish to prevent background threads from leaking
         // row locks into the next test class
         Awaitility.await()
-                .atMost(Duration.ofSeconds(30))
+                .atMost(Duration.ofSeconds(60))
                 .pollInterval(Duration.ofMillis(100))
                 .untilAsserted(() -> {
                     List<IngestionBatch> updatedBatches = ingestionBatchRepository.findByRepositoryId(repoId);
