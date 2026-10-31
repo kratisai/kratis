@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.ingestion.research;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
@@ -80,6 +81,27 @@ class SubgraphRankingServiceTest {
     @AfterEach
     void tearDown() {
         databaseCleaner.cleanAll();
+    }
+
+    @Test
+    void dimensionRankingQueryReturnsOnlyFileToFileEdgesFromRequestedSources() {
+        CtxNode methodNode = new CtxNode(
+                batch, team.getId(), "test-repo", NodeType.METHOD, "src/main/java/com/example/Utils.java:doSomething");
+        ctxNodeRepository.saveAndFlush(methodNode);
+
+        CtxEdge fileToMethod = new CtxEdge(batch, team.getId(), hubNode, methodNode, RelationType.CALLS);
+        CtxEdge methodToFile = new CtxEdge(batch, team.getId(), methodNode, hubNode, RelationType.CALLS);
+        CtxEdge fileToFile = new CtxEdge(batch, team.getId(), businessNode1, hubNode, RelationType.IMPORTS);
+        CtxEdge outsideChunk = new CtxEdge(batch, team.getId(), businessNode2, hubNode, RelationType.CALLS);
+        ctxEdgeRepository.saveAll(List.of(fileToMethod, methodToFile, fileToFile, outsideChunk));
+
+        assertThat(ctxEdgeRepository.findFileDependenciesByBatchIdAndSourceIds(
+                        batch.getId(), List.of(businessNode1.getId())))
+                .extracting(
+                        CtxEdgeRepository.FileDependency::getSourceId,
+                        CtxEdgeRepository.FileDependency::getTargetId,
+                        CtxEdgeRepository.FileDependency::getRelationType)
+                .containsExactly(tuple(businessNode1.getId(), hubNode.getId(), RelationType.IMPORTS));
     }
 
     @Test
