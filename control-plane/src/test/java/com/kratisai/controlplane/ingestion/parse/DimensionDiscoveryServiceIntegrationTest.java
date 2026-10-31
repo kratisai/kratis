@@ -137,6 +137,26 @@ class DimensionDiscoveryServiceIntegrationTest {
     }
 
     @Test
+    void secondShotPromptRetainsTreeAndDimensionCategories() {
+        // Execute
+        dimensionDiscoveryService.discoverDimensions(batch);
+
+        List<String> prompts = fakeChatModel.getInvocations().stream()
+                .map(invocation -> invocation.prompt().getContents())
+                .toList();
+        assertThat(prompts).hasSize(2);
+
+        String secondShotPrompt = prompts.get(1);
+        assertThat(secondShotPrompt).contains("You previously requested additional context");
+        // The second shot must see the whole repository, not just the files it asked to read.
+        assertThat(secondShotPrompt).contains("src/main/java/com/example/UserController.java");
+        // Category assignments from the first shot must survive so cross-cutting dimensions are not dropped.
+        assertThat(secondShotPrompt).contains("Business Domains: User Management");
+        assertThat(secondShotPrompt).contains("Technical Archetypes: Controller, Service");
+        assertThat(secondShotPrompt).contains("Cross-Cutting Services: Utils");
+    }
+
+    @Test
     void happyPath_propagatesDimensionsViaGraphEdges() {
         // Create an edge between controller and service
         CtxEdge edge = new CtxEdge(batch, team.getId(), controllerNode, serviceNode, RelationType.CALLS);
