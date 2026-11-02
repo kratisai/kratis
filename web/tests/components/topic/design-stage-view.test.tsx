@@ -28,6 +28,13 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn() },
 }))
 
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn().mockResolvedValue({ svg: '<svg>Mocked Mermaid Diagram</svg>' }),
+  },
+}))
+
 function agentRespondedMessage(): ChatMessage {
   return {
     content: 'Here is what we could build.',
@@ -265,7 +272,8 @@ describe('DesignStageView', () => {
               timestamp: new Date(),
             },
             {
-              content: '# Plan\n\n- step one\n- step two',
+              content:
+                '# Plan\n\n- step one\n- step two\n\n```mermaid\nflowchart LR\nA["One & two"] --> B\n```',
               id: 'm2',
               role: 'assistant',
               timestamp: new Date(),
@@ -304,7 +312,7 @@ describe('DesignStageView', () => {
       expect(copyButton).toHaveClass('group-hover:opacity-100')
     })
 
-    it('copies the raw markdown content to the clipboard and shows a success toast when clicked', async () => {
+    it('copies canonical Mermaid text with the agent message and shows a success toast when clicked', async () => {
       const user = userEvent.setup()
       render(
         <QueryClientProvider client={queryClient}>
@@ -315,7 +323,9 @@ describe('DesignStageView', () => {
       const copyButton = screen.getByRole('button', { name: /copy message/i })
       await user.click(copyButton)
 
-      expect(await navigator.clipboard.readText()).toBe('# Plan\n\n- step one\n- step two')
+      expect(await navigator.clipboard.readText()).toBe(
+        '# Plan\n\n- step one\n- step two\n\n```mermaid\nflowchart LR\nA["One #38; two"] --> B\n```',
+      )
       expect(toast.success).toHaveBeenCalledWith('Copied to clipboard')
     })
 

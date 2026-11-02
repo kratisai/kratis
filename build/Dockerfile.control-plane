@@ -4,6 +4,7 @@ WORKDIR /web
 COPY web/package*.json ./
 RUN npm install --legacy-peer-deps
 COPY web/ .
+COPY protocol/mermaid-grammar /protocol/mermaid-grammar
 RUN npm run build
 
 # Stage 1.5: Build Go sidecar
@@ -31,6 +32,7 @@ RUN ./mvnw dependency:go-offline -B
 # Copy web assets into resources before native compilation
 COPY --from=web /web/dist src/main/resources/static/
 COPY control-plane/src src/
+COPY protocol/mermaid-grammar /protocol/mermaid-grammar
 
 # Build native image (web assets embedded in binary).
 #   1. Code hygiene is enforced in the dev/CI workflow, not the release build.

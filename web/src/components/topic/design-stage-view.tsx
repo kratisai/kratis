@@ -14,6 +14,7 @@ import { useIsMobile } from '@/hooks/use-is-mobile'
 import { useResetAfterDelay } from '@/hooks/use-reset-after-delay'
 import { copyToClipboard } from '@/lib/clipboard'
 import { uuid } from '@/lib/id'
+import { canonicalizeMermaidMarkdown } from '@/lib/mermaid/markdown'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth-store'
 import { useCanvasStore } from '@/store/canvas-store'
@@ -45,7 +46,9 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
   const [copiedMessageId, setCopiedMessageId] = useResetAfterDelay<null | string>(null, null, 1500)
 
   const handleCopyMessage = (messageId: string, content: string) => {
-    void copyToClipboard(content).then(() => setCopiedMessageId(messageId))
+    void copyToClipboard(canonicalizeMermaidMarkdown(content)).then(() =>
+      setCopiedMessageId(messageId),
+    )
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- messages[chatId] can be undefined at runtime despite the Record type

@@ -146,32 +146,36 @@ class WriteWikiPageToolTest {
     }
 
     @Test
-    void writeWikiPage_withUnquotedSubgraphTitleContainingParens_throwsToolException() {
+    void writeWikiPage_withUnsafeSubgraphTitle_throwsToolException() {
         String content = """
                 ```mermaid
+                flowchart LR
+                A --> B
+                ```
+                ```mermaid
                 graph TD
-                    subgraph Control Plane Tier (Spring Boot)
-                        API[REST Controllers]
-                    end
+                    style A fill:#fff
+                    A --> B
                 ```
                 """;
 
         assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("overview", "Title", content, null, toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("Invalid Mermaid diagram syntax in content")
-                .hasMessageContaining("subgraph title");
+                .hasMessageContaining("diagram #2, line 2");
+        verify(ctxWikiPageRepository, never()).saveAndFlush(any());
     }
 
     @Test
-    void writeWikiPage_withQuotedSubgraphTitle_createsPage() {
+    void writeWikiPage_withCommonFlowchartForms_preservesSource() {
         when(ingestionBatchRepository.findById(batchId)).thenReturn(Optional.of(batch));
         when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "overview"))
                 .thenReturn(Optional.empty());
         String content = """
                 ```mermaid
                 graph TD
-                    subgraph "Control Plane Tier (Spring Boot)"
-                        API[REST Controllers]
+                    subgraph External
+                        API[API Layer] --> DB[(PostgreSQL)]
                     end
                 ```
                 """;
@@ -179,6 +183,9 @@ class WriteWikiPageToolTest {
         String result = writeWikiPageTool.writeWikiPage("overview", "Title", content, null, toolContext);
 
         assertThat(result).isEqualTo("SUCCESS: Wiki page 'overview' created successfully.");
+        ArgumentCaptor<CtxWikiPage> captor = ArgumentCaptor.forClass(CtxWikiPage.class);
+        verify(ctxWikiPageRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getContent()).isEqualTo(content);
     }
 
     @Test

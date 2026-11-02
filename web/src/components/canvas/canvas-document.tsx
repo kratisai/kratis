@@ -4,6 +4,7 @@ import { MarkdownMessage } from '@/components/chat/markdown-message'
 import { Button } from '@/components/ui/button'
 import { useResetAfterDelay } from '@/hooks/use-reset-after-delay'
 import { copyToClipboard } from '@/lib/clipboard'
+import { canonicalizeMermaidMarkdown } from '@/lib/mermaid/markdown'
 import { useCanvasStore } from '@/store/canvas-store'
 import { useChatStore } from '@/store/chat-store'
 
@@ -18,7 +19,7 @@ export function CanvasDocument({ chatId, documentId }: CanvasDocumentProps) {
   const [copied, setCopied] = useResetAfterDelay(false, false, 1500)
 
   const handleCopy = (content: string) => {
-    void copyToClipboard(content).then(() => setCopied(true))
+    void copyToClipboard(canonicalizeMermaidMarkdown(content)).then(() => setCopied(true))
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- messages[chatId] can be undefined at runtime despite the Record type

@@ -35,6 +35,15 @@ import org.springframework.aot.hint.predicate.RuntimeHintsPredicates;
 class AotHintsTest {
 
     @Test
+    @DisplayName("registers the Mermaid grammar resource")
+    void registersMermaidGrammarResource() {
+        RuntimeHints hints = new RuntimeHints();
+        new AotHints().registerHints(hints, getClass().getClassLoader());
+        assertThat(RuntimeHintsPredicates.resource().forResource("mermaid-grammar/grammar.json"))
+                .accepts(hints);
+    }
+
+    @Test
     @DisplayName("registers JDK proxy for ModelDiscoveryClient")
     void registersJdkProxy() {
         RuntimeHints hints = new RuntimeHints();
