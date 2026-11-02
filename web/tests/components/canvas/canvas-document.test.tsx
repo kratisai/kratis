@@ -9,6 +9,13 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn() },
 }))
 
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn().mockResolvedValue({ svg: '<svg>Mocked Mermaid Diagram</svg>' }),
+  },
+}))
+
 describe('CanvasDocument', () => {
   beforeEach(() => {
     useCanvasStore.setState({ canvases: {} })
@@ -51,7 +58,8 @@ describe('CanvasDocument', () => {
             {
               canvasType: 'DOCUMENT',
               chatId: 'session-1',
-              content: '# Hello\n\n- one\n- two',
+              content:
+                '# Hello\n\n- one\n- two\n\n```mermaid\nflowchart LR\nA["One & two"] --> B\n```',
               documentId: 'doc-1',
               isNewRepo: false,
               title: 'Test Document',
@@ -68,14 +76,16 @@ describe('CanvasDocument', () => {
       expect(screen.getByRole('button', { name: /copy document/i })).toBeInTheDocument()
     })
 
-    it('copies the raw markdown content to the clipboard when clicked', async () => {
+    it('copies canonical Mermaid text with the markdown content when clicked', async () => {
       const user = userEvent.setup()
       render(<CanvasDocument chatId="session-1" documentId="doc-1" />)
 
       const copyButton = screen.getByRole('button', { name: /copy document/i })
       await user.click(copyButton)
 
-      expect(await navigator.clipboard.readText()).toBe('# Hello\n\n- one\n- two')
+      expect(await navigator.clipboard.readText()).toBe(
+        '# Hello\n\n- one\n- two\n\n```mermaid\nflowchart LR\nA["One #38; two"] --> B\n```',
+      )
     })
 
     it('briefly swaps the copy icon for a check icon after copying', async () => {

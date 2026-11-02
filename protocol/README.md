@@ -1,6 +1,6 @@
 # Protocol
 
-Canonical JSON-RPC 2.0 schemas and fixtures for Kratis WebSockets. Java, Go, and TypeScript extract from this directory. Drift fails the build.
+Canonical JSON-RPC 2.0 schemas and fixtures for Kratis WebSockets. Java, Go, and TypeScript extract from this directory. Drift fails the build. The [Mermaid grammar contract](mermaid-grammar/README.md) defines the shared diagram subset and conformance cases.
 
 See the [root README](../README.md) for product context.
 

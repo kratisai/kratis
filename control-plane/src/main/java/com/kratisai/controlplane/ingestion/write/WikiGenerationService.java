@@ -24,6 +24,7 @@ import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ProcessExecutor;
 import com.kratisai.controlplane.service.RepositoryIntelligenceTools;
+import com.kratisai.controlplane.validation.mermaid.MermaidGrammar;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -159,17 +160,9 @@ public class WikiGenerationService {
                 The wiki for a simple repository may not need all sections. A complex wiki may require multiple pages for each section.
 
                 After determining the structure of the wiki, you should use the write_wiki_page tool to create the initial pages.
-                Each page should be well-structured and self-contained, with a summary of the topic and all relavent information to support the summary.
+                Each page should be well-structured and self-contained, with a summary of the topic and all relevant information to support the summary.
                 Where appropriate, use at least one mermaid diagrams or sequence diagrams per page. Include tables in preference to overuse of bullet points.
-
-                Mermaid syntax rules (mandatory, the wiki renderer parses these strictly):
-                - Always quote edge labels if they contain spaces, parentheses, colons, slashes, or special characters, e.g. -->|"Generate Virtual Key (TTL + Budget)"| or -->|"POST /key/generate"|.
-                - Always quote or bracket any subgraph or node title/label that contains spaces, parentheses, colons, braces, brackets, quotes, or hashes, e.g. subgraph "Control Plane Tier (Spring Boot)" or subgraph cpt[Control Plane Tier (Spring Boot)].
-                - A subgraph without a quoted/bracketed title must contain only simple word characters and spaces, e.g. subgraph Client Tier.
-                - Always close every subgraph with "end".
-                - Never use erDiagram relationship markers (||, |o, }o, o{) in flowchart/graph diagrams; those belong to erDiagram only. Use --> or ---, or switch the diagram to erDiagram.
-                - Use the official Mermaid flowchart, sequence, and classDiagram grammars only.
-                - If a diagram would be syntactically fragile, prefer a simpler diagram over an invalid one.
+                %s
 
                 Write prose following ASD-STE100 Simplified Technical English.
 
@@ -186,6 +179,7 @@ public class WikiGenerationService {
                         stats.filesCount(),
                         classification,
                         targetPages,
+                        MermaidGrammar.GUIDANCE,
                         patternsContext,
                         dimensionsContext);
 

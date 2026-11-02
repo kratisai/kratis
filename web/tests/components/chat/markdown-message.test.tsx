@@ -5,7 +5,8 @@ import userEvent from '@testing-library/user-event'
 import mermaid from 'mermaid'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getMermaidConfig, MarkdownMessage, sanitizeMermaidSource } from '@/components/chat/markdown-message'
+import { getMermaidConfig, MarkdownMessage } from '@/components/chat/markdown-message'
+import { recognize } from '@/lib/mermaid'
 
 const mockResolvedTheme = vi.fn().mockReturnValue('light')
 
@@ -113,7 +114,7 @@ describe('MarkdownMessage', () => {
   })
 
   it('renders a mermaid diagram when code block language is mermaid', async () => {
-    const mermaidContent = 'graph TD;\nA-->B;'
+    const mermaidContent = 'flowchart TD\nA --> B'
     render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
 
     // Wait for the mermaid diagram to be rendered
@@ -123,11 +124,11 @@ describe('MarkdownMessage', () => {
   })
 
   it('defers mermaid rendering while its fence is still streaming', async () => {
-    const partial = '```mermaid\ngraph TD;\nA-->B;'
+    const partial = '```mermaid\nflowchart TD\nA --> B'
     const { rerender } = render(<MarkdownMessage content={partial} />)
 
     expect(mermaid.render).not.toHaveBeenCalled()
-    expect(screen.getByText(/A-->B;/)).toBeInTheDocument()
+    expect(screen.getByText('Incomplete Mermaid diagram')).toBeInTheDocument()
 
     rerender(<MarkdownMessage content={`${partial}\n\`\`\``} />)
 
@@ -137,21 +138,54 @@ describe('MarkdownMessage', () => {
     expect(mermaid.render).toHaveBeenCalledTimes(1)
   })
 
+  it.each([
+    '> ```mermaid\n> flowchart TD\n> A --> B',
+    '- ```mermaid\n  flowchart TD\n  A --> B',
+  ])('does not render an unclosed nested Mermaid fence', (content) => {
+    render(<MarkdownMessage content={content} />)
+    expect(screen.getByText('Incomplete Mermaid diagram')).toBeInTheDocument()
+    expect(mermaid.render).not.toHaveBeenCalled()
+  })
+
+  it('detects a streaming Mermaid fence after an implicitly closed blockquote fence', () => {
+    const content = '> ```text\noutside\n```mermaid\nflowchart TD\nA --> B'
+    render(<MarkdownMessage content={content} />)
+    expect(screen.getByText('Incomplete Mermaid diagram')).toBeInTheDocument()
+    expect(mermaid.render).not.toHaveBeenCalled()
+  })
+
+  it('renders a Mermaid fence implicitly closed by leaving its blockquote', async () => {
+    const content = '> ```mermaid\n> flowchart TD\n> A --> B\n\nnext'
+    render(<MarkdownMessage content={content} />)
+    await screen.findByText('Mocked Mermaid Diagram')
+    expect(screen.queryByText('Incomplete Mermaid diagram')).not.toBeInTheDocument()
+    expect(mermaid.render).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('next')).toBeInTheDocument()
+  })
+
   it('renders completed diagrams while a later mermaid fence is still streaming', async () => {
-    const completed = '```mermaid\ngraph TD;\nA-->B;\n```'
-    const streaming = '```mermaid\ngraph TD;\nC-->D'
+    const completed = '```mermaid\nflowchart TD\nA --> B\n```'
+    const streaming = '```mermaid\nflowchart TD\nC --> D'
     render(<MarkdownMessage content={`${completed}\n\n${streaming}`} />)
 
     await waitFor(() => {
       expect(screen.getByText('Mocked Mermaid Diagram')).toBeInTheDocument()
     })
     expect(mermaid.render).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(mermaid.render).mock.calls[0]?.[1]).toContain('A-->B;')
-    expect(screen.getByText(/C-->D/)).toBeInTheDocument()
+    expect(vi.mocked(mermaid.render).mock.calls[0]?.[1]).toContain('A --> B')
+    expect(screen.getByText('Incomplete Mermaid diagram')).toBeInTheDocument()
+  })
+
+  it('does not confuse an identical streaming diagram with a completed diagram', async () => {
+    const chart = 'flowchart TD\nA --> B'
+    render(<MarkdownMessage content={`\`\`\`mermaid\n${chart}\n\`\`\`\n\n\`\`\`mermaid\n${chart}`} />)
+    await screen.findByText('Mocked Mermaid Diagram')
+    expect(screen.getByText('Incomplete Mermaid diagram')).toBeInTheDocument()
+    expect(mermaid.render).toHaveBeenCalledTimes(1)
   })
 
   it('renders completed diagrams while a non-mermaid fence is still streaming', async () => {
-    const content = '```mermaid\ngraph TD;\nA-->B;\n```\n\n```text\nstill streaming'
+    const content = '```mermaid\nflowchart TD\nA --> B\n```\n\n```text\nstill streaming'
     render(<MarkdownMessage content={content} />)
 
     await waitFor(() => {
@@ -167,7 +201,7 @@ describe('MarkdownMessage', () => {
 
   it('re-renders mermaid diagram when theme changes', async () => {
     mockResolvedTheme.mockReturnValue('light')
-    const mermaidContent = 'graph TD;\nA-->B;'
+    const mermaidContent = 'flowchart TD\nA --> B'
     const { rerender } = render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
 
     await waitFor(() => {
@@ -217,7 +251,7 @@ describe('MarkdownMessage', () => {
       return secondPromise
     })
 
-    const mermaidContent = 'graph TD;\nA-->B;'
+    const mermaidContent = 'flowchart TD\nA --> B'
     mockResolvedTheme.mockReturnValue('light')
     const { container, rerender } = render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
 
@@ -246,7 +280,7 @@ describe('MarkdownMessage', () => {
   })
 
   it('shows a fullscreen expand button once the diagram has rendered', async () => {
-    const mermaidContent = 'graph TD;\nA-->B;'
+    const mermaidContent = 'flowchart TD\nA --> B'
     render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
 
     await waitFor(() => {
@@ -254,9 +288,9 @@ describe('MarkdownMessage', () => {
     })
   })
 
-  it('shows a copy button that writes the diagram source to the clipboard', async () => {
+  it('shows a copy button that writes canonical diagram text to the clipboard', async () => {
     const user = userEvent.setup()
-    const mermaidContent = 'graph TD;\nA-->B;'
+    const mermaidContent = 'flowchart TD\nA --> B'
     render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
 
     const copyButton = await screen.findByRole('button', { name: /copy diagram source/i })
@@ -279,7 +313,7 @@ describe('MarkdownMessage', () => {
         }),
     )
 
-    const mermaidContent = 'graph TD;\nA-->B;'
+    const mermaidContent = 'flowchart TD\nA --> B'
     render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
 
     expect(screen.queryByRole('button', { name: /copy diagram source/i })).not.toBeInTheDocument()
@@ -290,7 +324,7 @@ describe('MarkdownMessage', () => {
 
   it('opens a fullscreen dialog with the diagram when the expand button is clicked', async () => {
     const user = userEvent.setup()
-    const mermaidContent = 'graph TD;\nA-->B;'
+    const mermaidContent = 'flowchart TD\nA --> B'
     render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
 
     const expandButton = await screen.findByRole('button', { name: /view diagram fullscreen/i })
@@ -306,7 +340,7 @@ describe('MarkdownMessage', () => {
 
   it('closes the fullscreen dialog when dismissed', async () => {
     const user = userEvent.setup()
-    const mermaidContent = 'graph TD;\nA-->B;'
+    const mermaidContent = 'flowchart TD\nA --> B'
     render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
 
     const expandButton = await screen.findByRole('button', { name: /view diagram fullscreen/i })
@@ -330,7 +364,7 @@ describe('MarkdownMessage', () => {
         }),
     )
 
-    const mermaidContent = 'graph TD;\nA-->B;'
+    const mermaidContent = 'flowchart TD\nA --> B'
     render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
 
     expect(screen.queryByRole('button', { name: /view diagram fullscreen/i })).not.toBeInTheDocument()
@@ -339,84 +373,68 @@ describe('MarkdownMessage', () => {
     resolveRender(mockMermaidRenderResult('<svg>Mocked Mermaid Diagram</svg>'))
   })
 
-  describe('sanitizeMermaidSource', () => {
-    it('quotes a bare subgraph title containing parentheses', () => {
-      const source = 'graph TD\n    subgraph Control Plane Tier (Spring Boot)\n        API[REST Controllers]\n    end'
-      expect(sanitizeMermaidSource(source)).toContain('subgraph "Control Plane Tier (Spring Boot)"')
-    })
-
-    it('quotes a bare subgraph title containing a colon', () => {
-      expect(sanitizeMermaidSource('subgraph Control Plane: API')).toContain('subgraph "Control Plane: API"')
-    })
-
-    it('leaves already-quoted titles untouched', () => {
-      const source = 'subgraph "Control Plane Tier (Spring Boot)"'
-      expect(sanitizeMermaidSource(source)).toBe(source)
-    })
-
-    it('leaves bracketed titles untouched', () => {
-      const source = 'subgraph cpt[Control Plane Tier (Spring Boot)]'
-      expect(sanitizeMermaidSource(source)).toBe(source)
-    })
-
-    it('leaves plain titles untouched', () => {
-      const source = 'subgraph Client Tier'
-      expect(sanitizeMermaidSource(source)).toBe(source)
-    })
-
-    it('does not modify simple node edges without labels', () => {
-      const source = 'graph TD\n    A --> B'
-      expect(sanitizeMermaidSource(source)).toBe(source)
-    })
-
-    it('quotes unquoted edge labels containing parentheses', () => {
-      const source = 'SandboxProv -->|Generate Virtual Key (TTL + Budget)| LiteLLMSvc'
-      expect(sanitizeMermaidSource(source)).toBe(
-        'SandboxProv -->|"Generate Virtual Key (TTL + Budget)"| LiteLLMSvc',
-      )
-    })
-
-    it('quotes unquoted edge labels containing colons, brackets, or braces', () => {
-      const source = 'A -->|payload [0]| B\nB -->|config {key: val}| C\nC -->|port: 8080| D'
-      expect(sanitizeMermaidSource(source)).toBe(
-        'A -->|"payload [0]"| B\nB -->|"config {key: val}"| C\nC -->|"port: 8080"| D',
-      )
-    })
-
-    it('leaves already-quoted edge labels untouched', () => {
-      const doubleQuoted = 'SandboxProv -->|"Generate Virtual Key (TTL + Budget)"| LiteLLMSvc'
-      const singleQuoted = "SandboxProv -->|'Generate Virtual Key (TTL + Budget)'| LiteLLMSvc"
-      expect(sanitizeMermaidSource(doubleQuoted)).toBe(doubleQuoted)
-      expect(sanitizeMermaidSource(singleQuoted)).toBe(singleQuoted)
-    })
-
-    it('leaves plain edge labels without special characters untouched', () => {
-      const source = 'LiteLLMSvc -->|Register Upstream Model| LiteLLMGW'
-      expect(sanitizeMermaidSource(source)).toBe(source)
-    })
-
-    it('quotes multiple unsafe edge labels on the same line', () => {
-      const source = 'A -->|step 1 (init)| B -->|step 2 [run]| C'
-      expect(sanitizeMermaidSource(source)).toBe('A -->|"step 1 (init)"| B -->|"step 2 [run]"| C')
-    })
+  it('passes C4 arrow and pipe text through without modification', async () => {
+    const chart = 'C4Context\nPerson(user, "Client --o|read (fast)| Server")'
+    const result = recognize(chart)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.error)
+    expect(result.renderText).toBe(chart)
+    render(<MarkdownMessage content={`\`\`\`mermaid\n${chart}\n\`\`\``} />)
+    await screen.findByText('Mocked Mermaid Diagram')
+    expect(mermaid.render).toHaveBeenCalledWith(expect.any(String), result.renderText)
   })
 
-  it('passes sanitized mermaid source to mermaid.render', async () => {
-    const chart = 'graph TD\n    subgraph Control Plane Tier (Spring Boot)\n        API[REST Controllers]\n    end'
+  it('passes exactly the recognized render text to mermaid.render', async () => {
+    const chart = 'flowchart LR\nA["Start & go"] -->|"yes; now"| B["Finish"]'
+    const result = recognize(chart)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.error)
     render(<MarkdownMessage content={`\`\`\`mermaid\n${chart}\n\`\`\``} />)
 
-    await waitFor(() => {
-      expect(screen.getByText('Mocked Mermaid Diagram')).toBeInTheDocument()
-    })
+    await screen.findByText('Mocked Mermaid Diagram')
+    expect(mermaid.render).toHaveBeenCalledWith(expect.any(String), result.renderText)
+    expect(result.renderText).toContain('Start #38; go')
+    expect(result.renderText).toContain('yes#59; now')
+  })
 
-    const renderCall = vi.mocked(mermaid.render).mock.calls.at(-1)
-    expect(renderCall?.[1]).toContain('subgraph "Control Plane Tier (Spring Boot)"')
+  it.each(['chat', 'document', 'wiki'] as const)(
+    'rejects unsafe and unsupported diagrams in %s without invoking Mermaid',
+    (variant) => {
+      const chart = 'flowchart LR\nA --> B\nclick A "https://example.com"'
+      const { container } = render(<MarkdownMessage content={`\`\`\`mermaid\n${chart}\n\`\`\``} variant={variant} />)
+      expect(screen.getByText('Failed to render Mermaid diagram')).toBeInTheDocument()
+      expect(mermaid.render).not.toHaveBeenCalled()
+      expect(container.querySelector('.mermaid-diagram')).toBeNull()
+      expect(container.querySelector('details code')?.textContent).toBe(chart)
+      expect(screen.queryByRole('button', { name: /copy diagram source/i })).not.toBeInTheDocument()
+    },
+  )
+
+  it('replaces an earlier rendered diagram with a closed error for invalid updates', async () => {
+    const { container, rerender } = render(<MarkdownMessage content={'```mermaid\nflowchart LR\nA --> B\n```'} />)
+    await screen.findByText('Mocked Mermaid Diagram')
+    rerender(<MarkdownMessage content={'```mermaid\nflowchart LR\nclick A "javascript:alert(1)"\n```'} />)
+    expect(screen.getByText('Failed to render Mermaid diagram')).toBeInTheDocument()
+    expect(container.querySelector('svg')).toBeNull()
+    expect(mermaid.render).toHaveBeenCalledTimes(1)
+  })
+
+  it('copies canonicalized render text instead of the original source', async () => {
+    const user = userEvent.setup()
+    const chart = 'flowchart LR\n  A["Start & go"] --> B'
+    const result = recognize(chart)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.error)
+    render(<MarkdownMessage content={`\`\`\`mermaid\n${chart}\n\`\`\``} />)
+    await user.click(await screen.findByRole('button', { name: /copy diagram source/i }))
+    expect(await navigator.clipboard.readText()).toBe(result.renderText)
+    expect(vi.mocked(mermaid.render).mock.calls[0]?.[1]).toBe(result.renderText)
   })
 
   it('shows the raw diagram source when rendering fails', async () => {
     vi.mocked(mermaid.render).mockRejectedValue(new Error('Parse error on line 6'))
 
-    const chart = 'graph TD\n    subgraph Broken (Diagram)\n        A\n    end'
+    const chart = 'flowchart TD\nA --> B'
     render(<MarkdownMessage content={`\`\`\`mermaid\n${chart}\n\`\`\``} />)
 
     await waitFor(() => {
@@ -426,6 +444,6 @@ describe('MarkdownMessage', () => {
 
     const summary = screen.getByText('Show diagram source')
     await userEvent.click(summary)
-    expect(screen.getByText(/subgraph Broken \(Diagram\)/)).toBeInTheDocument()
+    expect(screen.getByText(/A --> B/)).toBeInTheDocument()
   })
 })

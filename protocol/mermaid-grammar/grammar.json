@@ -1,0 +1,373 @@
+{
+  "version": 1,
+  "headers": {
+    "flowchart": [
+      "flowchart",
+      "graph"
+    ],
+    "sequenceDiagram": [
+      "sequenceDiagram"
+    ],
+    "classDiagram": [
+      "classDiagram"
+    ],
+    "stateDiagram-v2": [
+      "stateDiagram-v2"
+    ],
+    "erDiagram": [
+      "erDiagram"
+    ],
+    "C4Context": [
+      "C4Context"
+    ],
+    "C4Container": [
+      "C4Container"
+    ],
+    "C4Component": [
+      "C4Component"
+    ],
+    "pie": [
+      "pie"
+    ],
+    "quadrantChart": [
+      "quadrantChart"
+    ],
+    "xychart-beta": [
+      "xychart-beta"
+    ],
+    "journey": [
+      "journey"
+    ]
+  },
+  "productions": {
+    "common": [
+      "diagram = header, newline, statement, { newline, statement } ;",
+      "id = letter, { letter | digit | '_' } ;",
+      "number = [ '-' ], ( '0' | nonzero-digit, { digit } ), [ '.', digit, { digit } ] ;",
+      "coordinate = '0' | '0.', digit, { digit } | '1' ;",
+      "quoted = double-quote, nonempty-text-without-double-quote, double-quote ;",
+      "bare = unwrapped-text | double-quote, nonempty-text-without-double-quote, double-quote ;"
+    ],
+    "flowchart": [
+      "header = ( 'flowchart' | 'graph' ), [ ' ', direction ] ;",
+      "direction = 'TD' | 'TB' | 'BT' | 'LR' | 'RL' ;",
+      "node = flow-id, [ shape-open, ( quoted | unquoted-label ), shape-close ] ;",
+      "arrow = a token from flowchartSyntax.arrows ;",
+      "statement = node, { arrow, [ '|', ( quoted | unquoted-label ), '|' ], node } | 'subgraph ', id, [ '[', ( quoted | unquoted-label ), ']' ] | 'subgraph ', title-with-spaces | 'end' ;"
+    ],
+    "sequenceDiagram": [
+      "arrow = '->>' | '-->>' | '->' | '-->' | '-)' | '--)' | '-x' | '--x' ;",
+      "statement = ( 'participant' | 'actor' ), ' ', id, [ ' as ', bare ] | ( 'alt' | 'loop' | 'opt' | 'par' | 'else' | 'and' | 'title' ), ' ', bare | 'end' | 'autonumber' | 'Note ', ( 'over' | 'left of' | 'right of' ), ' ', id, [ ',', id ], ': ', bare | ( 'activate' | 'deactivate' ), ' ', id | id, arrow, [ '+' | '-' ], id, ': ', bare ;"
+    ],
+    "classDiagram": [
+      "arrow = '<|--' | '*--' | 'o--' | '-->' | '..>' | '..|>' | '<|..' | '<..' | 'o..' | '..o' | '--' ;",
+      "statement = 'class ', id, [ '~', bare, '~' ], [ '[', quoted, ']' ], [ annotation ], [ ' {' ] | bare-member | '}' | id, [ ' ', quoted ], ' ', arrow, ' ', [ quoted, ' ' ], id, [ ' : ', bare ] ;"
+    ],
+    "stateDiagram-v2": [
+      "state-id = id | '[*]' ;",
+      "statement = 'state ', quoted, ' as ', id | state-id, ' --> ', state-id, [ ' : ', bare ] | 'note ', ( 'left' | 'right' ), ' of ', id, ( ' : ', bare | newline, bare, { newline, bare }, newline, 'end note' ) ;"
+    ],
+    "erDiagram": [
+      "name = id | quoted ;",
+      "cardinality = '||' | '|o' | 'o|' | '}o' | 'o{' | '}|' | '|{' ;",
+      "key = 'PK' | 'FK' | 'UK' ;",
+      "attribute-type = id, [ '(', digits, [ ',', digits ], ')' ], { '[]' } ;",
+      "statement = name, '{' | attribute-type, id, [ key, { ',', key } ], [ quoted ] | '}' | name, cardinality, '--', cardinality, name, ':', ( quoted | bare ) ;"
+    ],
+    "C4Context": [
+      "statement = c4-statement ;"
+    ],
+    "C4Container": [
+      "statement = c4-statement ;"
+    ],
+    "C4Component": [
+      "statement = c4-statement ;"
+    ],
+    "c4": [
+      "element = 'Person' | 'Person_Ext' | 'System' | 'System_Ext' | 'Container' | 'Container_Ext' | 'Component' | 'Component_Ext' ;",
+      "boundary = 'System_Boundary' | 'Container_Boundary' | 'Boundary' ;",
+      "relation = 'Rel' | 'Rel_Neighbor' ;",
+      "c4-statement = element, '(', id, ',', c4raw, { ',', c4raw }, ')' | boundary, '(', id, ',', c4raw, [ ',', c4raw ], ')', '{' | relation, '(', id, ',', id, ',', c4raw, [ ',', c4raw ], ')' | '}' ;"
+    ],
+    "pie": [
+      "statement = 'title ', bare | quoted, ':', number ;"
+    ],
+    "quadrantChart": [
+      "statement = 'title ', bare | ( 'x-axis' | 'y-axis' ), ' ', quoted, ' --> ', quoted | ( 'quadrant-1' | 'quadrant-2' | 'quadrant-3' | 'quadrant-4' ), ' ', quoted | quoted, ': [', coordinate, ',', optional-space, coordinate, ']' ;"
+    ],
+    "xychart-beta": [
+      "statement = 'title ', quoted | 'x-axis ', [ quoted, ' ' ], '[', quoted, { ',', quoted }, ']' | 'y-axis ', quoted, ' ', number, ' --> ', number | ( 'bar' | 'line' ), ' [', number, { ',', optional-space, number }, ']' ;"
+    ],
+    "journey": [
+      "statement = 'title ', bare | 'section ', bare | task-text, ':', optional-space, integer, optional-space, ':', optional-space, role, { ',', role } ;"
+    ]
+  },
+  "flowchartSyntax": {
+    "nodeShapes": [
+      {
+        "open": "(((",
+        "closes": [
+          ")))"
+        ]
+      },
+      {
+        "open": "[[",
+        "closes": [
+          "]]"
+        ]
+      },
+      {
+        "open": "([",
+        "closes": [
+          "])"
+        ]
+      },
+      {
+        "open": "[(",
+        "closes": [
+          ")]"
+        ]
+      },
+      {
+        "open": "{{",
+        "closes": [
+          "}}"
+        ]
+      },
+      {
+        "open": "((",
+        "closes": [
+          "))"
+        ]
+      },
+      {
+        "open": "[/",
+        "closes": [
+          "/]",
+          "\\]"
+        ]
+      },
+      {
+        "open": "[\\",
+        "closes": [
+          "\\]",
+          "/]"
+        ]
+      },
+      {
+        "open": "[",
+        "closes": [
+          "]"
+        ]
+      },
+      {
+        "open": "(",
+        "closes": [
+          ")"
+        ]
+      },
+      {
+        "open": "{",
+        "closes": [
+          "}"
+        ]
+      },
+      {
+        "open": ">",
+        "closes": [
+          "]"
+        ]
+      }
+    ],
+    "arrows": [
+      "<-->",
+      "<==>",
+      "<-.->",
+      "o--o",
+      "x--x",
+      "---o",
+      "---x",
+      "===o",
+      "===x",
+      "-.-o",
+      "-.-x",
+      "-->",
+      "---",
+      "-.->",
+      "-.-",
+      "==>",
+      "===",
+      "--o",
+      "--x",
+      "~~~"
+    ]
+  },
+  "slots": {
+    "flowchart": {
+      "nodeLabel": "quoted",
+      "edgeLabel": "quoted",
+      "subgraphLabel": "quoted"
+    },
+    "sequenceDiagram": {
+      "alias": "bare",
+      "message": "bare",
+      "note": "bare",
+      "block": "bare",
+      "title": "bare"
+    },
+    "classDiagram": {
+      "displayName": "quoted",
+      "cardinality": "quoted",
+      "member": "bare",
+      "relationLabel": "bare"
+    },
+    "stateDiagram-v2": {
+      "displayName": "quoted",
+      "transitionLabel": "bare",
+      "note": "bare"
+    },
+    "erDiagram": {
+      "entityName": "quoted",
+      "attributeComment": "quoted",
+      "relationLabel": "quoted"
+    },
+    "C4Context": {
+      "argument": "c4raw"
+    },
+    "C4Container": {
+      "argument": "c4raw"
+    },
+    "C4Component": {
+      "argument": "c4raw"
+    },
+    "pie": {
+      "title": "bare",
+      "slice": "quoted"
+    },
+    "quadrantChart": {
+      "title": "bare",
+      "axis": "quoted",
+      "quadrant": "quoted",
+      "point": "quoted"
+    },
+    "xychart-beta": {
+      "title": "quoted",
+      "axisLabel": "quoted",
+      "category": "quoted"
+    },
+    "journey": {
+      "title": "bare",
+      "section": "bare",
+      "task": "bare",
+      "role": "bare"
+    }
+  },
+  "reserved": {
+    "flowchart": [
+      "call",
+      "class",
+      "classdef",
+      "click",
+      "end",
+      "flowchart",
+      "graph",
+      "href",
+      "linkstyle",
+      "style",
+      "subgraph"
+    ],
+    "sequenceDiagram": [
+      "accdescr",
+      "acctitle",
+      "activate",
+      "actor",
+      "alt",
+      "and",
+      "as",
+      "autonumber",
+      "box",
+      "break",
+      "create",
+      "critical",
+      "deactivate",
+      "destroy",
+      "details",
+      "else",
+      "end",
+      "link",
+      "links",
+      "loop",
+      "note",
+      "off",
+      "opt",
+      "option",
+      "over",
+      "par",
+      "par_over",
+      "participant",
+      "properties",
+      "rect",
+      "sequencediagram",
+      "title"
+    ],
+    "classDiagram": [
+      "call",
+      "callback",
+      "class",
+      "classdef",
+      "classdiagram",
+      "click",
+      "cssclass",
+      "href",
+      "link",
+      "namespace",
+      "note",
+      "style"
+    ],
+    "stateDiagram-v2": [
+      "class",
+      "classdef",
+      "click",
+      "default",
+      "href",
+      "note",
+      "state",
+      "statediagram",
+      "style"
+    ],
+    "erDiagram": [
+      "class",
+      "classdef",
+      "end",
+      "erdiagram",
+      "many",
+      "one",
+      "style",
+      "subgraph"
+    ],
+    "erAttribute": [
+      "fk",
+      "pk",
+      "uk"
+    ],
+    "C4Context": [],
+    "C4Container": [],
+    "C4Component": [],
+    "pie": [],
+    "quadrantChart": [],
+    "xychart-beta": [],
+    "journey": []
+  },
+  "patterns": {
+    "identifier": "^[A-Za-z][A-Za-z0-9_]*$",
+    "flowIdentifier": "^[A-Za-z0-9_]+$",
+    "number": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+    "coordinate": "^(?:0(?:\\.[0-9]+)?|1)$"
+  },
+  "bounds": {
+    "maxInputUtf16Units": 100000,
+    "maxDepth": 32,
+    "journeyScoreMin": 1,
+    "journeyScoreMax": 5
+  }
+}

@@ -11,6 +11,7 @@ import remarkGfm from 'remark-gfm'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { useResetAfterDelay } from '@/hooks/use-reset-after-delay'
 import { copyToClipboard } from '@/lib/clipboard'
+import { recognize } from '@/lib/mermaid'
 import { cn } from '@/lib/utils'
 
 type MarkdownVariant = 'chat' | 'document' | 'wiki'
@@ -102,7 +103,6 @@ mermaid.initialize({
   ...getMermaidConfig(false),
 })
 
-const UNSAFE_BARE_TITLE_CHARS = /[()[\]{}:;#"']/
 const CALLOUT_RE = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*:?\s*/i
 
 const CALLOUT_LABELS: Record<string, string> = {
@@ -142,20 +142,19 @@ export function MarkdownMessage({ content, variant = 'chat' }: MarkdownMessagePr
               </blockquote>
             )
           },
-          code({ children, className, node: _node, ...props }) {
+          code({ children, className, node, ...props }) {
             const match = /language-([\w+-]+)/.exec(className || '')
             if (match?.[1] === 'mermaid') {
-              const chart = codeText(children).trim()
-              // Streaming output briefly exposes an unclosed fence. Rendering that
-              // partial source only produces transient parse errors.
-              if (unclosedMermaid !== null && unclosedMermaid.trim() === chart) {
-                return (
-                  <code className="language-text" {...props}>
-                    {children}
-                  </code>
-                )
-              }
-              return <MermaidDiagram chart={chart} />
+              const chart = codeText(children).replace(/\n$/, '')
+              const incomplete =
+                unclosedMermaid !== null && node?.position?.start.line === unclosedMermaid
+              return (
+                <MermaidDiagram
+                  chart={chart}
+                  incomplete={incomplete}
+                  key={`${incomplete}:${chart}`}
+                />
+              )
             }
             return (
               <code className={className} {...props}>
@@ -191,36 +190,6 @@ export function MarkdownMessage({ content, variant = 'chat' }: MarkdownMessagePr
   )
 }
 
-export function sanitizeMermaidSource(source: string): string {
-  let sanitized = source.replace(
-    /^(\s*subgraph\s+)(.+?)(\s*)$/gm,
-    (match, prefix: string, title: string, suffix: string) => {
-      const trimmed = title.trim()
-      return needsQuoting(trimmed) ? `${prefix}"${trimmed}"${suffix}` : match
-    },
-  )
-
-  sanitized = sanitized.replace(
-    /((?:[-=.~]+[>oox]?|[<oox]?[-=.~]+|[-=.~]+)\s*\|)([^|\r\n]+)(\|)/g,
-    (match, arrowPrefix: string, label: string, arrowSuffix: string) => {
-      const trimmed = label.trim()
-      if (
-        (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-        (trimmed.startsWith("'") && trimmed.endsWith("'"))
-      ) {
-        return match
-      }
-      if (UNSAFE_BARE_TITLE_CHARS.test(trimmed)) {
-        const escaped = trimmed.replace(/"/g, '\\"')
-        return `${arrowPrefix}"${escaped}"${arrowSuffix}`
-      }
-      return match
-    },
-  )
-
-  return sanitized
-}
-
 function codeText(children: ReactNode): string {
   if (typeof children === 'string') return children
   if (Array.isArray(children)) {
@@ -248,19 +217,29 @@ function detectCallout(children: ReactNode): null | {
   return { content: stripped, label: CALLOUT_LABELS[type] ?? type, type }
 }
 
-function findUnclosedMermaidFence(content: string): null | string {
-  let open: null | { language: string; marker: string; markerLength: number; source: string[] } =
-    null
+function findUnclosedMermaidFence(content: string): null | number {
+  let open: null | {
+    language: string
+    line: number
+    marker: string
+    markerLength: number
+    quoteDepth: number
+  } = null
 
-  for (const line of content.split('\n')) {
-    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line)
+  for (const [index, line] of content.split('\n').entries()) {
+    const quotePrefix = /^(?: {0,3}>[ \t]?)+/.exec(line)?.[0] ?? ''
+    const quoteDepth = (quotePrefix.match(/>/g) ?? []).length
+    if (open !== null && quoteDepth < open.quoteDepth) open = null
+    const nestedLine = line.slice(quotePrefix.length).replace(/^\s*(?:[-+*]|\d+[.)])\s+/, '')
+    const fence = /^\s*(`{3,}|~{3,})(.*)$/.exec(nestedLine)
     if (open === null) {
       if (fence) {
         open = {
           language: fence[2].trim().split(/\s+/)[0] ?? '',
+          line: index + 1,
           marker: fence[1][0],
           markerLength: fence[1].length,
-          source: [],
+          quoteDepth,
         }
       }
       continue
@@ -273,15 +252,20 @@ function findUnclosedMermaidFence(content: string): null | string {
       fence[2].trim() === ''
     if (closesFence) {
       open = null
-    } else {
-      open.source.push(line)
     }
   }
 
-  return open?.language === 'mermaid' ? open.source.join('\n') : null
+  return open?.language === 'mermaid' ? open.line : null
 }
 
-function MermaidDiagram({ chart }: { chart: string }) {
+function MermaidDiagram({ chart, incomplete }: { chart: string; incomplete: boolean }) {
+  const recognition = recognize(chart)
+  const recognitionError = incomplete
+    ? 'Incomplete Mermaid diagram'
+    : recognition.ok
+      ? null
+      : recognition.error
+  const renderText = recognition.ok && !incomplete ? recognition.renderText : null
   const [svg, setSvg] = useState<null | string>(null)
   const [error, setError] = useState<null | string>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -291,7 +275,10 @@ function MermaidDiagram({ chart }: { chart: string }) {
   const renderCounter = useRef(0)
 
   const handleCopy = () => {
-    void copyToClipboard(chart, 'Diagram source copied to clipboard').then(() => setCopied(true))
+    if (!recognition.ok || incomplete) return
+    void copyToClipboard(recognition.renderText, 'Diagram copied to clipboard').then(() =>
+      setCopied(true),
+    )
   }
 
   useEffect(() => {
@@ -301,6 +288,8 @@ function MermaidDiagram({ chart }: { chart: string }) {
     const cleanId = id.replace(/:/g, '')
     const svgId = `mermaid-${cleanId}-${currentRenderId}`
 
+    if (renderText === null) return
+
     const renderMermaid = async () => {
       try {
         const isDarkMode = resolvedTheme === 'dark'
@@ -309,7 +298,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
           startOnLoad: false,
           ...getMermaidConfig(isDarkMode),
         })
-        const { svg: renderedSvg } = await mermaid.render(svgId, sanitizeMermaidSource(chart))
+        const { svg: renderedSvg } = await mermaid.render(svgId, renderText)
         if (!isCancelled) {
           setSvg(renderedSvg)
           setError(null)
@@ -326,13 +315,14 @@ function MermaidDiagram({ chart }: { chart: string }) {
     return () => {
       isCancelled = true
     }
-  }, [chart, resolvedTheme, id])
+  }, [renderText, resolvedTheme, id])
 
-  if (error) {
+  const displayError = recognitionError ?? error
+  if (displayError) {
     return (
       <div className="border-destructive bg-destructive/10 text-destructive rounded-md border p-4 text-sm">
         <p className="font-semibold">Failed to render Mermaid diagram</p>
-        <p className="mt-1 break-words opacity-80">{error}</p>
+        <p className="mt-1 break-words opacity-80">{displayError}</p>
         <details className="mt-3">
           <summary className="cursor-pointer text-xs font-medium opacity-80">
             Show diagram source
@@ -389,12 +379,6 @@ function MermaidDiagram({ chart }: { chart: string }) {
       </Dialog>
     </>
   )
-}
-
-function needsQuoting(title: string): boolean {
-  if (title.startsWith('"') || title.startsWith("'")) return false
-  if (title.includes('[')) return false
-  return UNSAFE_BARE_TITLE_CHARS.test(title)
 }
 
 function stripDeep(element: ReactElement<{ children?: ReactNode }>): ReactNode {

@@ -15,10 +15,7 @@ import com.kratisai.controlplane.planningagent.WikiTool.WikiSearchResult;
 import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
 import com.kratisai.controlplane.validation.ValidPasswordValidator;
 import java.lang.reflect.Type;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import org.springframework.aot.hint.BindingReflectionHintsRegistrar;
 import org.springframework.aot.hint.MemberCategory;
 import org.springframework.aot.hint.RuntimeHints;
@@ -32,6 +29,7 @@ public class AotHints implements RuntimeHintsRegistrar {
 
     @Override
     public void registerHints(RuntimeHints hints, ClassLoader classLoader) {
+        hints.resources().registerPattern("mermaid-grammar/grammar.json");
         hints.proxies().registerJdkProxy(ModelDiscoveryClient.class);
 
         registerWebSocketPayloadHints(hints, classLoader);
@@ -176,7 +174,8 @@ public class AotHints implements RuntimeHintsRegistrar {
         scanner.addIncludeFilter((metadataReader, metadataReaderFactory) -> true);
         List<Type> payloadTypes = new ArrayList<>();
         for (BeanDefinition candidate : scanner.findCandidateComponents("com.kratisai.controlplane.api.wsdto")) {
-            payloadTypes.add(ClassUtils.resolveClassName(candidate.getBeanClassName(), classLoader));
+            payloadTypes.add(
+                    ClassUtils.resolveClassName(Objects.requireNonNull(candidate.getBeanClassName()), classLoader));
         }
         registrar.registerReflectionHints(hints.reflection(), payloadTypes.toArray(new Type[0]));
 
@@ -200,7 +199,8 @@ public class AotHints implements RuntimeHintsRegistrar {
         scanner.addIncludeFilter((metadataReader, metadataReaderFactory) -> true);
         Set<Class<?>> recordTypes = new LinkedHashSet<>();
         for (BeanDefinition candidate : scanner.findCandidateComponents("com.kratisai.controlplane")) {
-            Class<?> type = ClassUtils.resolveClassName(candidate.getBeanClassName(), classLoader);
+            Class<?> type =
+                    ClassUtils.resolveClassName(Objects.requireNonNull(candidate.getBeanClassName()), classLoader);
             if (type.isRecord()) {
                 recordTypes.add(type);
             }
@@ -256,7 +256,8 @@ public class AotHints implements RuntimeHintsRegistrar {
                     new ClassPathScanningCandidateComponentProvider(false);
             scanner.addIncludeFilter((metadataReader, metadataReaderFactory) -> true);
             for (BeanDefinition candidate : scanner.findCandidateComponents(basePackage)) {
-                classes.add(ClassUtils.resolveClassName(candidate.getBeanClassName(), classLoader));
+                classes.add(
+                        ClassUtils.resolveClassName(Objects.requireNonNull(candidate.getBeanClassName()), classLoader));
             }
         }
         return classes;

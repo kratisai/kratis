@@ -258,26 +258,31 @@ class CanvasToolTest extends AgentTestHarness {
     void writeCanvas_withInvalidMermaid_returnsErrorAndDoesNotPersist() {
         String content = """
                 ```mermaid
+                flowchart LR
+                A --> B
+                ```
+                ```mermaid
                 graph TD
-                    subgraph Control Plane Tier (Spring Boot)
-                        API[REST Controllers]
-                    end
+                    style A fill:#fff
+                    A --> B
                 ```
                 """;
 
         String result = canvasTool.writeCanvas(null, "Arch", content, CanvasType.DOCUMENT, null, null, toolContext);
 
-        assertThat(result).startsWith("ERROR: Invalid Mermaid diagram syntax in content.");
+        assertThat(result)
+                .startsWith("ERROR: Invalid Mermaid diagram syntax in content.")
+                .contains("diagram #2, line 2");
         assertThat(canvasService.getCanvasesForChat(chatId)).isEmpty();
     }
 
     @Test
-    void writeCanvas_withQuotedMermaidSubgraphTitle_succeeds() {
+    void writeCanvas_withCommonFlowchartForms_preservesSource() {
         String content = """
                 ```mermaid
                 graph TD
-                    subgraph "Control Plane Tier (Spring Boot)"
-                        API[REST Controllers]
+                    subgraph External
+                        API[API Layer] --> DB[(PostgreSQL)]
                     end
                 ```
                 """;
@@ -286,6 +291,8 @@ class CanvasToolTest extends AgentTestHarness {
 
         assertThat(result).contains("Document successfully written");
         assertThat(canvasService.getCanvasesForChat(chatId)).hasSize(1);
+        assertThat(canvasService.getCanvasesForChat(chatId).getFirst().getContent())
+                .isEqualTo(content);
     }
 
     @Test
@@ -297,17 +304,28 @@ class CanvasToolTest extends AgentTestHarness {
         String invalidMermaid = """
                 ```mermaid
                 graph TD
-                    subgraph Tier (One)
-                        A
-                    end
+                    style A fill:#fff
+                    A
                 ```
                 """;
-        CanvasTool.ReplaceBlock patch = new CanvasTool.ReplaceBlock("MySQL database", invalidMermaid);
+        CanvasTool.ReplaceBlock patch = new CanvasTool.ReplaceBlock("MySQL database", "\n" + invalidMermaid);
 
         String result = canvasTool.patchCanvas(docId, List.of(patch), toolContext);
 
         assertThat(result).startsWith("ERROR: Invalid Mermaid diagram syntax after patching.");
         assertThat(canvasTool.retrieveFromCanvas(docId, toolContext)).isEqualTo("The system uses MySQL database.");
+    }
+
+    @Test
+    void patchCanvas_preservesLiteralMermaidSourceAcrossEdits() {
+        String docId = UUID.randomUUID().toString();
+        String original = "Notes\r\n```mermaid\r\nflowchart LR\r\nA[\"Start & go\"] --> B\r\n```\r\n";
+        canvasService.createCanvas(chatId, docId, "Design", original, CanvasType.DOCUMENT, null, null);
+        String result = canvasTool.patchCanvas(
+                docId, List.of(new CanvasTool.ReplaceBlock("Start & go", "Finish & go")), toolContext);
+        assertThat(result).isEqualTo("Document successfully patched.");
+        assertThat(canvasTool.retrieveFromCanvas(docId, toolContext))
+                .isEqualTo(original.replace("Start & go", "Finish & go"));
     }
 
     private Repository saveRepository(String name, Team team) {

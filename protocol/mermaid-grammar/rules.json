@@ -1,0 +1,23 @@
+[
+  { "id": "input.type", "description": "The source must be a string.", "error": "input.type" },
+  { "id": "input.length", "description": "The source must fit the UTF-16 length bound.", "error": "input.length" },
+  { "id": "input.control", "description": "The source must not contain disallowed control characters.", "error": "input.control" },
+  { "id": "input.depth", "description": "Nested flow, sequence, and C4 blocks must fit the depth bound.", "error": "input.depth" },
+  { "id": "input.header", "description": "A supported header must start the diagram.", "error": "input.header" },
+  { "id": "input.empty-diagram", "description": "A diagram must contain a statement.", "error": "input.empty-diagram" },
+  { "id": "syntax.statement", "description": "Statements and text must satisfy the grammar and remaining semantic restrictions.", "error": "syntax.statement" },
+  { "id": "identifier.reserved", "description": "Identifiers must not match reserved words for their position.", "error": "identifier.reserved" },
+  { "id": "flow.subgraph-id-unique", "description": "Subgraph identifiers must not repeat, collide with declared nodes, or reference themselves within their own subgraph.", "error": "flow.subgraph-id-unique" },
+  { "id": "sequence.activation-balance", "description": "Deactivation must not make an activation depth negative.", "error": "sequence.activation-balance" },
+  { "id": "sequence.activation-participant", "description": "Activation references must identify a participant introduced by a declaration, message, or note.", "error": "sequence.activation-participant" },
+  { "id": "sequence.declaration-unique", "description": "A participant must not be declared more than once.", "error": "sequence.declaration-unique" },
+  { "id": "sequence.branch", "description": "Else and and branches must occur inside their respective alt or par block.", "error": "sequence.branch" },
+  { "id": "state.note-after-state", "description": "A state note must follow a declaration or transition that introduces its target.", "error": "state.note-after-state" },
+  { "id": "c4.endpoint-declared", "description": "Every relation endpoint must refer to a declared non-boundary shape.", "error": "c4.endpoint-declared" },
+  { "id": "c4.id-unique", "description": "Shape and boundary identifiers must be unique.", "error": "c4.id-unique" },
+  { "id": "c4.boundary-nonempty", "description": "Every C4 boundary must contain a statement.", "error": "c4.boundary-nonempty" },
+  { "id": "c4.raw-text", "description": "C4 raw text must not contain forbidden characters or entity forms.", "error": "c4.raw-text" },
+  { "id": "text.statement-separator", "description": "Unwrapped bare text must not contain an ambiguous statement separator.", "error": "text.statement-separator" },
+  { "id": "xy.series-length", "description": "Every XY series must have one value for each category.", "error": "xy.series-length" },
+  { "id": "journey.score", "description": "A journey score must be a safe integer within the declared bounds.", "error": "journey.score" }
+]

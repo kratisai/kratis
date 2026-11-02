@@ -5,6 +5,7 @@ import com.kratisai.controlplane.agentloop.ReActLoop.ToolPhase;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
 import com.kratisai.controlplane.service.ScratchpadService;
+import com.kratisai.controlplane.validation.mermaid.MermaidGrammar;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -169,12 +170,7 @@ public class PlanningAgentLoop {
                            - NEVER use `newRepoName` when working on an existing repository or codebase.
                            - `newRepoName` is strictly reserved for brand-new greenfield projects where no repository exists yet.
 
-                        When writing Mermaid diagrams, follow these syntax rules (the renderer parses strictly):
-                        - Always quote edge labels if they contain spaces, parentheses, colons, slashes, or special characters, e.g. -->|"Generate Virtual Key (TTL + Budget)"| or -->|"POST /key/generate"|.
-                        - Always quote or bracket any subgraph or node title/label containing spaces, parentheses, colons, braces, brackets, quotes, or hashes, e.g. subgraph "Control Plane Tier (Spring Boot)" or subgraph cpt[Control Plane Tier (Spring Boot)].
-                        - A subgraph without a quoted/bracketed title must contain only simple word characters and spaces, e.g. subgraph Client Tier.
-                        - Always close every subgraph with "end".
-                        - Never use erDiagram relationship markers (||, |o, }o, o{) in flowchart/graph diagrams; those belong to erDiagram only. Use --> or ---, or switch the diagram to erDiagram.
+                        Include mermaid diagrams where needed. %2$s
 
                         Use your scratchpad to track a TODO list, and internal thoughts/lessons.  The scratchpad is not, and should not be presented to the user.  All
                         scratchpad entries will be replayed to you on every turn. Keep them short and remove when they are no-longer relevant.
@@ -184,6 +180,6 @@ public class PlanningAgentLoop {
                         </scratchpad>
 
                         When responding to the user, write prose following ASD-STE100 Simplified Technical English.
-                        """.formatted(scratchpadFacts);
+                        """.formatted(scratchpadFacts, MermaidGrammar.GUIDANCE);
     }
 }

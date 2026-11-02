@@ -2,1064 +2,208 @@ package com.kratisai.controlplane.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.List;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.agentloop.KratisTool;
+import com.kratisai.controlplane.ingestion.WriteWikiPageTool;
+import com.kratisai.controlplane.planningagent.CanvasTool;
+import com.kratisai.controlplane.validation.mermaid.MermaidGrammar;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
 class MermaidDiagramValidatorTest {
-
+    private static final ObjectMapper MAPPER = new ObjectMapper();
     private final MermaidDiagramValidator validator = new MermaidDiagramValidator();
 
-    @Test
-    void findIssues_returnsEmptyForNullOrBlankContent() {
-        assertThat(validator.findIssues(null)).isEmpty();
-        assertThat(validator.findIssues("   ")).isEmpty();
+    private static Path grammarDirectory() {
+        Path relative = Path.of("../protocol/mermaid-grammar");
+        if (Files.isDirectory(relative)) return relative;
+        Path local = Path.of("protocol/mermaid-grammar");
+        if (Files.isDirectory(local)) return local;
+        throw new IllegalStateException("Cannot locate protocol/mermaid-grammar");
+    }
+
+    private static JsonNode cases() throws Exception {
+        return MAPPER.readTree(grammarDirectory().resolve("cases.json").toFile());
+    }
+
+    private static String fence(String source) {
+        return "```mermaid\n" + source + (source.endsWith("\n") ? "" : "\n") + "```\n";
     }
 
     @Test
-    void findIssues_returnsEmptyForContentWithoutMermaidBlocks() {
-        assertThat(validator.findIssues("# Just markdown\n\nNo diagrams here.")).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsUnquotedSubgraphTitleWithParentheses() {
-        String content = """
-                ```mermaid
-                graph TD
-                    subgraph Client Tier
-                        UI[React SPA]
-                    end
-                    subgraph Control Plane Tier (Spring Boot)
-                        API[REST Controllers]
-                    end
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst())
-                .contains("diagram #1, line 5")
-                .contains("Control Plane Tier (Spring Boot)")
-                .contains("subgraph \"Control Plane Tier (Spring Boot)\"");
-    }
-
-    @Test
-    void findIssues_acceptsQuotedSubgraphTitleWithParentheses() {
-        String content = """
-                ```mermaid
-                graph TD
-                    subgraph "Control Plane Tier (Spring Boot)"
-                        API[REST Controllers]
-                    end
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_acceptsSingleQuotedSubgraphTitleWithParentheses() {
-        String content = """
-                ```mermaid
-                graph TD
-                    subgraph 'Control Plane Tier (Spring Boot)'
-                        API[REST Controllers]
-                    end
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsBracketedSubgraphTitleWithParentheses() {
-        String content = """
-                ```mermaid
-                graph TD
-                    subgraph cpt[Control Plane Tier (Spring Boot)]
-                        API[REST Controllers]
-                    end
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst())
-                .contains("diagram #1, line 2")
-                .contains("subgraph title")
-                .contains("Control Plane Tier (Spring Boot)");
-    }
-
-    @Test
-    void findIssues_acceptsBracketedSubgraphTitleWithoutSpecialChars() {
-        String content = """
-                ```mermaid
-                graph TD
-                    subgraph cpt[Control Plane Tier]
-                        API[REST Controllers]
-                    end
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsNodeLabelWithUnquotedParentheses() {
-        String content = """
-                ```mermaid
-                graph LR
-                    GIT[Git Providers (GitHub/GitLab/ADO)]
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst())
-                .contains("diagram #1, line 2")
-                .contains("node \"GIT\"")
-                .contains("Git Providers (GitHub/GitLab/ADO)");
-    }
-
-    @Test
-    void findIssues_acceptsQuotedNodeLabelWithParentheses() {
-        String content = """
-                ```mermaid
-                graph LR
-                    GIT["Git Providers (GitHub/GitLab/ADO)"]
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsNodeLabelWithOtherShapeDelimiters() {
-        String content = """
-                ```mermaid
-                graph TD
-                    A[text with | pipe]
-                    B{rhombus (x)}
-                    C(round (nested))
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(3);
-        assertThat(issues.get(0)).contains("line 2").contains("node \"A\"");
-        assertThat(issues.get(1)).contains("line 3").contains("node \"B\"");
-        assertThat(issues.get(2)).contains("line 4").contains("node \"C\"");
-    }
-
-    @Test
-    void findIssues_acceptsNodeLabelsWithSafeCharacters() {
-        String content = """
-                ```mermaid
-                graph LR
-                    DEV[Developer / User]
-                    UI[Web: Frontend]
-                    SB[Sandbox #1; primary]
-                    CP[Control, Plane]
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsFullDiagramWithUnsafeNodeLabels() {
-        String content = """
-                ```mermaid
-                graph LR
-                    subgraph "External Actors"
-                        DEV[Developer / User]
-                        ADMIN[Enterprise Admin]
-                    end
-
-                    subgraph "Kratis Platform"
-                        CP[Control Plane Service]
-                        UI[Web Frontend]
-                        SB[Execution Sandboxes]
-                    end
-
-                    subgraph "External Services"
-                        GIT[Git Providers (GitHub/GitLab/ADO)]
-                        LLM[LLM Gateways (LiteLLM / OpenAI)]
-                    end
-
-                    DEV --> UI
-                    ADMIN --> UI
-                    UI --> CP
-                    CP --> GIT
-                    CP --> LLM
-                    CP --> SB
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(2);
-        assertThat(issues.get(0)).contains("diagram #1, line 14").contains("node \"GIT\"");
-        assertThat(issues.get(1)).contains("diagram #1, line 15").contains("node \"LLM\"");
-    }
-
-    @Test
-    void findIssues_doesNotFlagEdgeLinkSyntax() {
-        String content = """
-                ```mermaid
-                graph LR
-                    A --> B
-                    C -->|text| D
-                    E -- edge text --> F
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsUnquotedSubgraphTitleWithColon() {
-        String content = """
-                ```mermaid
-                graph TD
-                    subgraph Control Plane: API
-                        A
-                    end
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst()).contains("Control Plane: API");
-    }
-
-    @Test
-    void findIssues_flagsEachUnsafeDiagramInOrder() {
-        String content = """
-                ```mermaid
-                graph TD
-                    subgraph Tier (One)
-                        A
-                    end
-                ```
-
-                ```mermaid
-                graph TD
-                    subgraph Tier (Two)
-                        B
-                    end
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(2);
-        assertThat(issues.get(0)).contains("diagram #1, line 2");
-        assertThat(issues.get(1)).contains("diagram #2, line 2");
-    }
-
-    @Test
-    void findIssues_ignoresNonMermaidFencedBlocks() {
-        String content = """
-                ```mermaid
-                graph TD
-                    subgraph Tier (One)
-                        A
-                    end
-                ```
-
-                ```java
-                // subgraph Tier (Two) - not a mermaid block
-                ```
-
-                ```text
-                subgraph Not A Diagram (Three)
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        // Only the real mermaid block is validated; java and text fences are ignored.
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst()).contains("diagram #1");
-    }
-
-    @Test
-    void findIssues_acceptsSimpleSubgraphWithPlainTitle() {
-        String content = """
-                ```mermaid
-                graph TD
-                    subgraph Client Tier
-                        UI[React SPA]
-                    end
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsMissingSubgraphEnd() {
-        String content = """
-                ```mermaid
-                graph TD
-                    subgraph Client Tier
-                        UI[React SPA]
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst()).contains("diagram #1").contains("1 subgraph(s) but only 0 'end' keyword(s)");
-    }
-
-    @Test
-    void findIssues_flagsNestedSubgraphMissingEnd() {
-        String content = """
-                ```mermaid
-                flowchart LR
-                    subgraph Outer
-                        subgraph Inner
-                            A
-                        end
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst()).contains("2 subgraph(s) but only 1 'end' keyword(s)");
-    }
-
-    @Test
-    void findIssues_acceptsFlowchartWithoutSubgraphs() {
-        String content = """
-                ```mermaid
-                graph TD
-                    A --> B
-                    B --> C
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsMissingSequenceBlockEnd() {
-        String content = """
-                ```mermaid
-                sequenceDiagram
-                    participant Client
-                    participant Server
-                    loop Retry
-                        Client->>Server: request
-                        Server-->>Client: response
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst())
-                .contains("diagram #1")
-                .contains("1 sequence block(s) (loop/alt/opt/par/rect/critical/break) but only 0 'end' keyword(s)");
-    }
-
-    @Test
-    void findIssues_acceptsSequenceDiagramWithAllBlocksClosed() {
-        String content = """
-                ```mermaid
-                sequenceDiagram
-                    participant Client
-                    participant Server
-                    loop Retry
-                        Client->>Server: request
-                    end
-                    alt success
-                        Server-->>Client: ok
-                    else failure
-                        Server-->>Client: error
-                    end
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsUnbalancedClassDiagramBraces() {
-        String content = """
-                ```mermaid
-                classDiagram
-                    class Animal {
-                        +String name
-                        +int age
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst()).contains("unbalanced braces");
-    }
-
-    @Test
-    void findIssues_acceptsBalancedClassDiagramBraces() {
-        String content = """
-                ```mermaid
-                classDiagram
-                    class Animal {
-                        +String name
-                        +int age
-                    }
-                    class Dog {
-                        +String breed
-                    }
-                    Animal <|-- Dog
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_acceptsBalancedStateDiagramBraces() {
-        String content = """
-                ```mermaid
-                stateDiagram-v2
-                    [*] --> Still
-                    state Still {
-                        [*] --> one
-                        one --> two
-                    }
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_doesNotFlagErDiagramCardinalityBraces() {
-        String content = """
-                ```mermaid
-                erDiagram
-                    CUSTOMER ||--o{ ORDER : places
-                    ORDER ||--|{ LINE-ITEM : contains
-                ```
-                """;
-
-        // Cardinality symbols (o{, |{) contain '{' with no matching '}' and are valid syntax,
-        // so brace-balancing must not be applied to erDiagram.
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsInvalidDiagramType() {
-        String content = """
-                ```mermaid
-                floachart TD
-                    A --> B
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst()).contains("diagram #1").contains("no valid diagram type");
-    }
-
-    @Test
-    void findIssues_acceptsInitDirectiveBeforeDiagramType() {
-        String content = """
-                ```mermaid
-                %%{init: {"theme": "dark"}}%%
-                flowchart TD
-                    A --> B
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_acceptsDiagramTypeWithSemicolon() {
-        String content = """
-                ```mermaid
-                graph TD;
-                    A --> B;
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_ignoresSubgraphKeywordsInsideComments() {
-        String content = """
-                ```mermaid
-                graph TD
-                    %% subgraph Legacy (Deprecated)
-                    A --> B
-                ```
-                """;
-
-        // The commented subgraph must not count toward the subgraph/end balance.
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_validatesMultipleDiagramsIndependently() {
-        String content = """
-                # Architecture
-
-                ```mermaid
-                graph TD
-                    subgraph Tier (One)
-                        A
-                    end
-                ```
-
-                Text between diagrams.
-
-                ```mermaid
-                sequenceDiagram
-                    loop Retry
-                        A->>B: ping
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        // Diagram #1: unquoted subgraph title. Diagram #2: missing 'end' for the loop block.
-        // Rules must be attributed to the correct diagram index.
-        assertThat(issues).hasSize(2);
-        assertThat(issues.get(0)).contains("diagram #1").contains("subgraph title");
-        assertThat(issues.get(1)).contains("diagram #2").contains("sequence block");
-    }
-
-    @Test
-    void findIssues_doesNotLeakEndBalanceAcrossBlocks() {
-        String content = """
-                ```mermaid
-                graph TD
-                    subgraph First (One)
-                        A
-                    end
-                ```
-
-                ```mermaid
-                graph TD
-                    subgraph Second (Two)
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        // Diagram #1 has a balanced subgraph/end and one unquoted title issue.
-        // Diagram #2 is missing its 'end'. The 'end' from diagram #1 must not satisfy
-        // diagram #2's balance.
-        assertThat(issues).hasSize(3);
-        assertThat(issues.get(0)).contains("diagram #1").contains("subgraph title");
-        assertThat(issues.get(1)).contains("diagram #2").contains("subgraph title");
-        assertThat(issues.get(2)).contains("diagram #2").contains("1 subgraph(s) but only 0 'end' keyword(s)");
-    }
-
-    @Test
-    void findIssues_reportsLineNumbersRelativeToEachBlock() {
-        String content = """
-                ```mermaid
-                graph TD
-                    subgraph Tier (One)
-                        A
-                    end
-                ```
-
-                ```mermaid
-                flowchart LR
-                    subgraph Tier (Two)
-                        B
-                    end
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(2);
-        assertThat(issues.get(0)).contains("diagram #1, line 2");
-        assertThat(issues.get(1)).contains("diagram #2, line 2");
-    }
-
-    @Test
-    void findIssues_flagsUnquotedEdgeLabelWithParentheses() {
-        String content = """
-                ```mermaid
-                flowchart TD
-                    A --> B
-                    SandboxProv -->|Generate Virtual Key (TTL + Budget)| LiteLLMSvc
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst())
-                .contains("diagram #1, line 3")
-                .contains("Generate Virtual Key (TTL + Budget)")
-                .contains("-->|\"Generate Virtual Key (TTL + Budget)\"|");
-    }
-
-    @Test
-    void findIssues_acceptsQuotedEdgeLabelWithParentheses() {
-        String content = """
-                ```mermaid
-                flowchart TD
-                    A --> B
-                    SandboxProv -->|"Generate Virtual Key (TTL + Budget)"| LiteLLMSvc
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_acceptsSingleQuotedEdgeLabelWithParentheses() {
-        String content = """
-                ```mermaid
-                flowchart TD
-                    A --> B
-                    SandboxProv -->|'Generate Virtual Key (TTL + Budget)'| LiteLLMSvc
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsUnquotedEdgeLabelWithBracketsBracesAndColons() {
-        String content = """
-                ```mermaid
-                graph LR
-                    A -->|payload [0]| B
-                    B -->|config {key: val}| C
-                    C -->|port: 8080| D
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(3);
-        assertThat(issues.get(0)).contains("diagram #1, line 2").contains("payload [0]");
-        assertThat(issues.get(1)).contains("diagram #1, line 3").contains("config {key: val}");
-        assertThat(issues.get(2)).contains("diagram #1, line 4").contains("port: 8080");
-    }
-
-    @Test
-    void findIssues_acceptsQuotedEdgeLabelWithColonsAndSlashes() {
-        String content = """
-                ```mermaid
-                flowchart TD
-                    LiteLLMSvc -->|"POST /key/generate"| LiteLLMGW
-                    LiteLLMSvc -->|"port: 4000"| LiteLLMGW
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsExactWikiGenerationFailureDiagram() {
-        String content = """
-                ```mermaid
-                flowchart TD
-                    subgraph TeamConfiguration["Team Provider Configuration"]
-                        Settings["Team Settings UI / REST API"]
-                        ModelCreds["model_providers Table (Encrypted API Keys)"]
-                    end
-
-                    subgraph ControlPlane["Control Plane Layer"]
-                        LiteLLMSvc["LiteLLMProvisioningService"]
-                        SandboxProv["SandboxProvisioningService"]
-                    end
-
-                    subgraph GatewayTier["LiteLLM Proxy Tier (Port 4000)"]
-                        LiteLLMGW["LiteLLM Server"]
-                        SpendTracker["PostgreSQL Spend & Usage Database"]
-                    end
-
-                    subgraph SandboxedExecution["Execution Sandbox"]
-                        Agent["ACP Agent Process"]
-                    end
-
-                    Settings --> LiteLLMSvc
-                    LiteLLMSvc --> ModelCreds
-                    LiteLLMSvc -->|Register Upstream Model| LiteLLMGW
-                    SandboxProv -->|Generate Virtual Key (TTL + Budget)| LiteLLMSvc
-                    LiteLLMSvc -->|POST /key/generate| LiteLLMGW
-                    SandboxProv -->|Deliver Virtual Key over /ws/env| Agent
-                    Agent -->|Inference via Virtual Key| LiteLLMGW
-                    LiteLLMGW --> SpendTracker
-                    LiteLLMGW -->|Forward with Real API Key| UpstreamLLM["Upstream LLM (OpenAI / Anthropic)"]
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst())
-                .contains("diagram #1, line 24")
-                .contains("Generate Virtual Key (TTL + Budget)")
-                .contains("-->|\"Generate Virtual Key (TTL + Budget)\"|");
-    }
-
-    @Test
-    void findIssues_acceptsExactWikiGenerationFailureDiagramWhenQuoted() {
-        String content = """
-                ```mermaid
-                flowchart TD
-                    subgraph TeamConfiguration["Team Provider Configuration"]
-                        Settings["Team Settings UI / REST API"]
-                        ModelCreds["model_providers Table (Encrypted API Keys)"]
-                    end
-
-                    subgraph ControlPlane["Control Plane Layer"]
-                        LiteLLMSvc["LiteLLMProvisioningService"]
-                        SandboxProv["SandboxProvisioningService"]
-                    end
-
-                    subgraph GatewayTier["LiteLLM Proxy Tier (Port 4000)"]
-                        LiteLLMGW["LiteLLM Server"]
-                        SpendTracker["PostgreSQL Spend & Usage Database"]
-                    end
-
-                    subgraph SandboxedExecution["Execution Sandbox"]
-                        Agent["ACP Agent Process"]
-                    end
-
-                    Settings --> LiteLLMSvc
-                    LiteLLMSvc --> ModelCreds
-                    LiteLLMSvc -->|Register Upstream Model| LiteLLMGW
-                    SandboxProv -->|"Generate Virtual Key (TTL + Budget)"| LiteLLMSvc
-                    LiteLLMSvc -->|POST /key/generate| LiteLLMGW
-                    SandboxProv -->|Deliver Virtual Key over /ws/env| Agent
-                    Agent -->|Inference via Virtual Key| LiteLLMGW
-                    LiteLLMGW --> SpendTracker
-                    LiteLLMGW -->|Forward with Real API Key| UpstreamLLM["Upstream LLM (OpenAI / Anthropic)"]
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsMultipleUnquotedEdgeLabelsOnSameLine() {
-        String content = """
-                ```mermaid
-                graph LR
-                    A -->|step 1 (init)| B -->|step 2 [run]| C
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(2);
-        assertThat(issues.get(0)).contains("diagram #1, line 2").contains("step 1 (init)");
-        assertThat(issues.get(1)).contains("diagram #1, line 2").contains("step 2 [run]");
-    }
-
-    @Test
-    void findIssues_flagsErRelationshipSyntaxInFlowchart() {
-        String content = """
-                ```mermaid
-                flowchart TB
-                    subgraph "Execution Environment Lifecycle"
-                        A[Created] --> B[Provisioned]
-                        B --> C[Connected]
-                        C --> D[Executing]
-                        D --> C
-                        C --> E[Disconnected]
-                        E --> B
-                    end
-
-                    subgraph "Components"
-                        ENV[ExecutionEnvironment Entity]
-                        PROVIDER[EnvironmentProvider]
-                        TEAM[Team]
-                        USER[User]
-                    end
-
-                    ENV }o--o|belongs to| TEAM
-                    ENV }o--o|provisioned by| PROVIDER
-                    ENV }o--o|created by| USER
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(3);
-        assertThat(issues.get(0)).contains("diagram #1, line 18").contains("erDiagram");
-        assertThat(issues.get(1)).contains("diagram #1, line 19").contains("erDiagram");
-        assertThat(issues.get(2)).contains("diagram #1, line 20").contains("erDiagram");
-    }
-
-    @Test
-    void findIssues_flagsErRelationshipSyntaxInGraph() {
-        String content = """
-                ```mermaid
-                graph TD
-                    CUSTOMER ||--o{ ORDER : places
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(1);
-        assertThat(issues.getFirst()).contains("diagram #1, line 2").contains("erDiagram");
-    }
-
-    @Test
-    void findIssues_acceptsValidFlowchartCircleAndCrossEdges() {
-        String content = """
-                ```mermaid
-                flowchart LR
-                    A o--o B
-                    B --o C
-                    C --x D
-                    D x--x E
-                    E <--> F
-                    G --- H
-                    H -.-> I
-                    I ==> J
-                    J ~~~ K
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_ignoresErMarkersInsideQuotedNodeLabels() {
-        String content = """
-                ```mermaid
-                flowchart LR
-                    A["}o--o{"] --> B
-                    C["||--||"] --> D
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_ignoresErMarkersInsideComments() {
-        String content = """
-                ```mermaid
-                flowchart LR
-                    %% ENV }o--o{ TEAM
-                    A --> B
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_doesNotFlagErDiagramRelationships() {
-        String content = """
-                ```mermaid
-                erDiagram
-                    CUSTOMER ||--o{ ORDER : places
-                    ORDER ||--|{ LINE-ITEM : contains
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
-    }
-
-    @Test
-    void findIssues_flagsInvalidSequenceArrow_reverseArrows() {
-        String content = """
-                ```mermaid
-                sequenceDiagram
-                    participant User as Developer / CI
-                    participant Build as scripts/build.sh
-                    participant Firmware as scripts/extract_wintv_firmware.sh
-                    participant ImageGen as rpi-image-gen / mmdebstrap
-
-                    User->>Build: Execute build.sh
-                    Build->>Firmware: Extract WinTV firmware binaries
-                    Firmware--<Build: Output si2168 / si2158 firmware
-                    Build->>ImageGen: Setup rpi-image-gen environment
-                    ImageGen->>ImageGen: Process config/tuner-box.yaml & layers
-                    ImageGen--<Build: Generate deployable Raspberry Pi OS image
-                    Build--<User: Final image ready in deploy/
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(3);
-        assertThat(issues.get(0))
-                .contains("diagram #1, line 9")
-                .contains("invalid sequence diagram arrow \"--<\"")
-                .contains("use \"->>\" for requests and \"-->>\" for responses");
-        assertThat(issues.get(1))
-                .contains("diagram #1, line 12")
-                .contains("invalid sequence diagram arrow \"--<\"")
-                .contains("use \"->>\" for requests and \"-->>\" for responses");
-        assertThat(issues.get(2))
-                .contains("diagram #1, line 13")
-                .contains("invalid sequence diagram arrow \"--<\"")
-                .contains("use \"->>\" for requests and \"-->>\" for responses");
-    }
-
-    @Test
-    void findIssues_flagsAllInvalidSequenceArrowPatterns() {
-        String content = """
-                ```mermaid
-                sequenceDiagram
-                    participant A
-                    participant B
-                    A<<-->>B: bidirectional 1
-                    A<-->>B: bidirectional 2
-                    A<-->B: bidirectional 3
-                    A<->B: bidirectional 4
-                    A<<--B: left 1
-                    A<--B: left 2
-                    A<-B: left 3
-                    A--<<B: reverse 1
-                    A-<<B: reverse 2
-                    A<<-B: reverse 3
-                    A--<B: reverse 4
-                    A-<B: reverse 5
-                    A-.->B: dotted arrow
-                    A==>B: thick arrow
-                    A===B: thick line
-                    A-.-B: dotted line
-                    A---+B: open line plus
-                    A---B: open line 3
-                    A--B: open line 2
-                    A-B: open line 1
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(20);
-        assertThat(issues.get(0)).contains("diagram #1, line 4").contains("invalid sequence diagram arrow \"<<-->>\"");
-        assertThat(issues.get(1)).contains("diagram #1, line 5").contains("invalid sequence diagram arrow \"<-->>\"");
-        assertThat(issues.get(2)).contains("diagram #1, line 6").contains("invalid sequence diagram arrow \"<-->\"");
-        assertThat(issues.get(3)).contains("diagram #1, line 7").contains("invalid sequence diagram arrow \"<->\"");
-        assertThat(issues.get(4)).contains("diagram #1, line 8").contains("invalid sequence diagram arrow \"<<--\"");
-        assertThat(issues.get(5)).contains("diagram #1, line 9").contains("invalid sequence diagram arrow \"<--\"");
-        assertThat(issues.get(6)).contains("diagram #1, line 10").contains("invalid sequence diagram arrow \"<-\"");
-        assertThat(issues.get(7)).contains("diagram #1, line 11").contains("invalid sequence diagram arrow \"--<<\"");
-        assertThat(issues.get(8)).contains("diagram #1, line 12").contains("invalid sequence diagram arrow \"-<<\"");
-        assertThat(issues.get(9)).contains("diagram #1, line 13").contains("invalid sequence diagram arrow \"<<-\"");
-        assertThat(issues.get(10)).contains("diagram #1, line 14").contains("invalid sequence diagram arrow \"--<\"");
-        assertThat(issues.get(11)).contains("diagram #1, line 15").contains("invalid sequence diagram arrow \"-<\"");
-        assertThat(issues.get(12)).contains("diagram #1, line 16").contains("invalid sequence diagram arrow \"-.->\"");
-        assertThat(issues.get(13)).contains("diagram #1, line 17").contains("invalid sequence diagram arrow \"==>\"");
-        assertThat(issues.get(14)).contains("diagram #1, line 18").contains("invalid sequence diagram arrow \"===\"");
-        assertThat(issues.get(15)).contains("diagram #1, line 19").contains("invalid sequence diagram arrow \"-.-\"");
-        assertThat(issues.get(16)).contains("diagram #1, line 20").contains("invalid sequence diagram arrow \"---+\"");
-        assertThat(issues.get(17)).contains("diagram #1, line 21").contains("invalid sequence diagram arrow \"---\"");
-        assertThat(issues.get(18)).contains("diagram #1, line 22").contains("invalid sequence diagram arrow \"--\"");
-        assertThat(issues.get(19)).contains("diagram #1, line 23").contains("invalid sequence diagram arrow \"-\"");
-
-        for (String issue : issues) {
-            assertThat(issue)
-                    .contains("Sequence diagrams do not support forbidden arrow types")
-                    .contains("use \"->>\" for requests and \"-->>\" for responses");
+    void toolDescriptionsDoNotInlineGuidance() {
+        for (Class<?> tool : new Class<?>[] {CanvasTool.class, WriteWikiPageTool.class}) {
+            assertThat(Arrays.stream(tool.getDeclaredMethods())
+                            .map(method -> method.getAnnotation(KratisTool.class))
+                            .filter(annotation -> annotation != null
+                                    && (annotation.name().equals("write_canvas")
+                                            || annotation.name().equals("patch_canvas")
+                                            || annotation.name().equals("write_wiki_page"))))
+                    .allSatisfy(
+                            annotation -> assertThat(annotation.description()).doesNotContain(MermaidGrammar.GUIDANCE))
+                    .hasSize(tool == CanvasTool.class ? 2 : 1);
         }
     }
 
     @Test
-    void findIssues_flagsOtherLeftPointingSequenceArrows() {
-        String content = """
-                ```mermaid
-                sequenceDiagram
-                    participant A
-                    participant B
-                    A<--B: msg 1
-                    A-<B: msg 2
-                    A<-B: msg 3
-                    A<<--B: msg 4
-                ```
-                """;
-
-        List<String> issues = validator.findIssues(content);
-
-        assertThat(issues).hasSize(4);
-        assertThat(issues.get(0)).contains("diagram #1, line 4").contains("invalid sequence diagram arrow \"<--\"");
-        assertThat(issues.get(1)).contains("diagram #1, line 5").contains("invalid sequence diagram arrow \"-<\"");
-        assertThat(issues.get(2)).contains("diagram #1, line 6").contains("invalid sequence diagram arrow \"<-\"");
-        assertThat(issues.get(3)).contains("diagram #1, line 7").contains("invalid sequence diagram arrow \"<<--\"");
+    void acceptsPlainMarkdownAndSupportedDiagrams() {
+        assertThat(validator.findIssues(null)).isEmpty();
+        assertThat(validator.findIssues("plain markdown")).isEmpty();
+        assertThat(validator.findIssues("```mermaid\nflowchart LR\nA[\"Start\"] --> B\n```\n"))
+                .isEmpty();
     }
 
     @Test
-    void findIssues_acceptsValidSequenceArrows() {
-        String content = """
+    void reportsEachInvalidDiagramAndOriginalBlockLine() {
+        String markdown = """
                 ```mermaid
+                flowchart LR
+                A --> B
+                ```
+                ~~~~mermaid extra
                 sequenceDiagram
-                    participant A
-                    participant B
-                    A->>B: solid filled
-                    B-->>A: dotted filled
-                    A->B: solid open
-                    B-->A: dotted open
-                    A-xB: solid cross
-                    B--xA: dotted cross
-                    A-)B: async solid
-                    B--)A: async dotted
-                    activate B
-                    deactivate B
+
+                A->>B: hello
+                invalid statement
+                ~~~~
+                ```mermaid
+                gantt
+                task
                 ```
                 """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
+        assertThat(validator.findIssues(markdown))
+                .hasSize(2)
+                .first()
+                .asString()
+                .contains("diagram #2", "line 4", "syntax.statement");
+        assertThat(validator.findIssues(markdown).get(1)).contains("diagram #3", "line 1", "input.header");
     }
 
     @Test
-    void findIssues_ignoresLessThanSignsInNoteText() {
-        String content = """
-                ```mermaid
-                sequenceDiagram
-                    participant A
-                    participant B
-                    Note over A: count < 10
-                    note right of B: count <= 5
-                    A->>B: check if value < 5
-                    B-->>A: return x < y and a <= b
-                ```
-                """;
-
-        assertThat(validator.findIssues(content)).isEmpty();
+    void ignoresFencesInsideOtherCodeBlocksAndReportsUnclosedMermaid() {
+        assertThat(validator.findIssues("````text\n```mermaid\ngantt\n```\n````\n"))
+                .isEmpty();
+        assertThat(validator.findIssues("text\n```mermaid\nflowchart LR\nA --> B"))
+                .singleElement()
+                .asString()
+                .contains("diagram #1", "unclosed fence", "Markdown line 2");
     }
 
     @Test
-    void findIssues_acceptsCorrectedSequenceDiagram() {
-        String content = """
-                ```mermaid
-                sequenceDiagram
-                    participant User as Developer / CI
-                    participant Build as scripts/build.sh
-                    participant Firmware as scripts/extract_wintv_firmware.sh
-                    participant ImageGen as rpi-image-gen / mmdebstrap
+    void quoteScopeExitDoesNotHideFollowingDiagram() {
+        String content = "> ```text\noutside\n```mermaid\ngantt\n```\n";
+        assertThat(validator.findIssues(content)).singleElement().asString().contains("diagram #1", "input.header");
+        assertThat(validator.findIssues("> ```mermaid\n> flowchart TD\n> A --> B\n\nnext"))
+                .isEmpty();
+        assertThat(validator.findIssues("- ```text\noutside\n```mermaid\ngantt\n```\n"))
+                .singleElement()
+                .asString()
+                .contains("input.header");
+    }
 
-                    User->>Build: Execute build.sh
-                    Build->>Firmware: Extract WinTV firmware binaries
-                    Firmware-->>Build: Output si2168 / si2158 firmware
-                    Build->>ImageGen: Setup rpi-image-gen environment
-                    ImageGen->>ImageGen: Process config/tuner-box.yaml & layers
-                    ImageGen-->>Build: Generate deployable Raspberry Pi OS image
-                    Build-->>User: Final image ready in deploy/
-                ```
-                """;
+    @Test
+    void ignoresIndentedCodeThatIsNotAFencedDiagram() {
+        assertThat(validator.findIssues("    ```mermaid\n    gantt\n    ```\n")).isEmpty();
+        assertThat(validator.findIssues("\t```mermaid\n\tgantt\n\t```\n")).isEmpty();
+        assertThat(validator.findIssues(">     ```mermaid\n>     gantt\n>     ```\n"))
+                .isEmpty();
+        assertThat(validator.findIssues("- item\n\n      ```mermaid\n      gantt\n      ```\n"))
+                .isEmpty();
+        assertThat(validator.findIssues("-     ```mermaid\n      gantt\n      ```\n"))
+                .isEmpty();
+        assertThat(validator.findIssues("- item\n\noutside\n    ```mermaid\n    gantt\n    ```\n"))
+                .isEmpty();
+        assertThat(validator.findIssues("    ```mermaid\n    gantt\n    ```\n\n```mermaid\ngantt\n```\n"))
+                .singleElement()
+                .asString()
+                .contains("diagram #1", "input.header");
+    }
 
-        assertThat(validator.findIssues(content)).isEmpty();
+    @Test
+    void nestedListFencesFailClosed() {
+        assertThat(validator.findIssues("- ```mermaid\n  gantt\n  ```\n"))
+                .singleElement()
+                .asString()
+                .contains("diagram #1", "nested fence", "top-level");
+        assertThat(validator.findIssues("> - item\n>     ```mermaid\n>     gantt\n>     ```\n"))
+                .singleElement()
+                .asString()
+                .contains("nested fence");
+        assertThat(validator.findIssues("- item\n\n    ```mermaid\n    gantt\n    ```\n"))
+                .singleElement()
+                .asString()
+                .contains("nested fence");
+        assertThat(validator.findIssues("- item\nlazy continuation\n    ```mermaid\n    gantt\n    ```\n"))
+                .singleElement()
+                .asString()
+                .contains("nested fence");
+        assertThat(validator.findIssues("- one\n  - two\n    ```mermaid\n    gantt\n    ```\n"))
+                .singleElement()
+                .asString()
+                .contains("nested fence");
+        assertThat(validator.findIssues("- item\n    > ```mermaid\n    > gantt\n    > ```\n"))
+                .singleElement()
+                .asString()
+                .contains("nested fence");
+        assertThat(validator.findIssues("- - - ```mermaid\n      gantt\n      ```\n"))
+                .singleElement()
+                .asString()
+                .contains("nested fence");
+        assertThat(validator.findIssues("- > ```mermaid\n  > gantt\n  > ```\n"))
+                .singleElement()
+                .asString()
+                .contains("nested fence");
+        assertThat(validator.findIssues("-    ```mermaid\n     gantt\n     ```\n"))
+                .singleElement()
+                .asString()
+                .contains("nested fence");
+        assertThat(validator.findIssues("1. item\n    ```mermaid\n    gantt\n    ```\n"))
+                .singleElement()
+                .asString()
+                .contains("nested fence");
+        assertThat(validator.findIssues("- item\n  ```mermaid\n  gantt\n  ```\n"))
+                .singleElement()
+                .asString()
+                .contains("input.header");
+    }
+
+    @Test
+    void validatesIndentedAndLongFencesWithCrLf() {
+        assertThat(validator.findIssues("   ~~~~mermaid\r\nflowchart LR\r\ninvalid syntax\r\n   ~~~~\r\n"))
+                .singleElement()
+                .asString()
+                .contains("diagram #1", "line 2");
+    }
+
+    @Test
+    void acceptsEverySharedAcceptedCaseThroughMarkdown() throws Exception {
+        for (JsonNode test : cases()) {
+            if (!test.required("ok").asBoolean()) continue;
+            JsonNode source = test.get("source");
+            if (source == null || !source.isTextual() || source.asText().isBlank()) continue;
+            assertThat(validator.findIssues(fence(source.asText())))
+                    .as(test.required("name").asText())
+                    .isEmpty();
+        }
+    }
+
+    @Test
+    void rejectsEverySharedRejectedCaseThroughMarkdown() throws Exception {
+        for (JsonNode test : cases()) {
+            if (test.required("ok").asBoolean()) continue;
+            JsonNode source = test.get("source");
+            if (source == null || !source.isTextual() || source.asText().isBlank()) continue;
+            String rule = test.required("rule").asText();
+            if (rule.equals("input.control") || rule.equals("input.type")) continue;
+            String name = test.required("name").asText();
+            assertThat(validator.findIssues(fence(source.asText())))
+                    .as(name)
+                    .singleElement()
+                    .asString()
+                    .contains("diagram #1", "(" + rule + ")");
+        }
     }
 }

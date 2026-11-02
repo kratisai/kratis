@@ -241,6 +241,17 @@
 	</dependencies>
 
 	<build>
+		<resources>
+			<resource>
+				<directory>src/main/resources</directory>
+			</resource>
+			<resource>
+				<directory>${project.basedir}/../protocol</directory>
+				<includes>
+					<include>mermaid-grammar/grammar.json</include>
+				</includes>
+			</resource>
+		</resources>
 		<!-- The LiteLLM patch script lives in deploy/ so the compose stack is self-contained for
 		     remote installs; tests load it from the classpath (PostgresTestInitializer,
 		     LiteLLMLoggingPatchTest). -->

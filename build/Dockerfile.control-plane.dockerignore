@@ -1,0 +1,7 @@
+.git
+control-plane/postgres-data
+control-plane/target
+web/node_modules
+**/.env
+**/.env.*
+!**/.env.example
