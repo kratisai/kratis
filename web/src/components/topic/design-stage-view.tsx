@@ -46,9 +46,9 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
   const [copiedMessageId, setCopiedMessageId] = useResetAfterDelay<null | string>(null, null, 1500)
 
   const handleCopyMessage = (messageId: string, content: string) => {
-    void copyToClipboard(canonicalizeMermaidMarkdown(content)).then(() =>
-      setCopiedMessageId(messageId),
-    )
+    void copyToClipboard(canonicalizeMermaidMarkdown(content)).then((copied) => {
+      if (copied) setCopiedMessageId(messageId)
+    })
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- messages[chatId] can be undefined at runtime despite the Record type

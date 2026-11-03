@@ -276,9 +276,7 @@ function MermaidDiagram({ chart, incomplete }: { chart: string; incomplete: bool
 
   const handleCopy = () => {
     if (!recognition.ok || incomplete) return
-    void copyToClipboard(recognition.renderText, 'Diagram copied to clipboard').then(() =>
-      setCopied(true),
-    )
+    void copyToClipboard(recognition.renderText, 'Diagram copied to clipboard').then(setCopied)
   }
 
   useEffect(() => {
