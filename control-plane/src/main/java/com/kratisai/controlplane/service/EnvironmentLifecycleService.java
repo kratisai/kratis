@@ -94,9 +94,10 @@ public class EnvironmentLifecycleService {
     }
 
     /**
-     * A PENDING_CONNECT row that never registered has a lost runtime. Resume already rolls back
-     * inside its own transaction, so this handles rows whose spawn never completed: remove owned
-     * compute, keep the snapshot when one exists by returning to SLEEPING, else TERMINATED.
+     * A PENDING_CONNECT row past {@code connect-timeout} never registered, regardless of whether
+     * its container is still running. Liveness is not connectivity: keeping a running container
+     * whose connector cannot reach the control plane leaks compute forever. Remove it and roll the
+     * row back inside its own transaction, keeping the snapshot when one exists.
      */
     private void resolveStuckResumes(Instant now) {
         for (ExecutionEnvironment env : environmentRepository.findByTypeAndStatus(
@@ -108,22 +109,28 @@ public class EnvironmentLifecycleService {
             if (provider == null) {
                 continue;
             }
-            failRow(
-                    "resolving stuck resume",
-                    () -> {
-                        if (provider.isSandboxRunning(env.getId())) {
-                            logger.trace("Stuck-resume check: env {} runtime live; keeping", env.getId());
-                            return;
-                        }
-                        logger.warn("Environment {} never connected; removing compute", env.getId());
-                        provider.terminateSandbox(env.getId());
-                        if (provider.isRetained(env.getId())) {
-                            executionEnvironmentService.rollbackFailedResume(env);
-                        } else {
-                            executionEnvironmentService.reconcilePurgedEnvironment(env);
-                        }
-                    },
-                    env.getId());
+            failRow("resolving stuck connect", () -> resolveStuckConnect(env, provider), env.getId());
+        }
+    }
+
+    private void resolveStuckConnect(ExecutionEnvironment env, SandboxProvider provider) {
+        UUID envId = env.getId();
+        logger.warn("Environment {} never connected within {}; removing compute", envId, connectTimeout);
+        provider.captureSidecarLogs(envId);
+        provider.terminateSandbox(envId);
+
+        // The connector may have registered while compute was being removed. The conditional
+        // transition fails in that case, so a CONNECTED row is never overwritten; the lost-runtime
+        // rule reconciles the now-missing runtime on a later sweep.
+        boolean retained = provider.isRetained(envId);
+        boolean claimed = retained
+                ? executionEnvironmentService.rollbackFailedResumeIfStillPending(envId, env.getStateChangedAt())
+                : executionEnvironmentService.reconcilePurgedEnvironmentIfStillPending(envId, env.getStateChangedAt());
+        if (!claimed) {
+            logger.debug(
+                    "Environment {} registered while its stuck runtime was removed;"
+                            + " the lost-runtime rule will reconcile it",
+                    envId);
         }
     }
 

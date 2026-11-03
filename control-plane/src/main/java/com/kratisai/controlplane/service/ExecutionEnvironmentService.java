@@ -448,7 +448,63 @@ public class ExecutionEnvironmentService {
         transition(env, EnvironmentStatus.TERMINATED);
         executionEnvironmentRepository.save(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
+        finishPurgedEnvironment(envId, teamId);
+    }
 
+    /**
+     * A stuck resume that still owns its snapshot returns to SLEEPING. Returns false when the
+     * connector registered first, in which case the row must keep its CONNECTED state.
+     */
+    @Transactional
+    public boolean rollbackFailedResumeIfStillPending(UUID envId, Instant expectedStateChangedAt) {
+        ExecutionEnvironment env =
+                executionEnvironmentRepository.findById(envId).orElse(null);
+        if (env == null) {
+            return false;
+        }
+        UUID teamId = env.getTeam().getId();
+        if (executionEnvironmentRepository.transitionIfUnchanged(
+                        envId,
+                        EnvironmentStatus.PENDING_CONNECT,
+                        expectedStateChangedAt,
+                        EnvironmentStatus.SLEEPING,
+                        Instant.now())
+                == 0) {
+            return false;
+        }
+        logger.debug("Rolled back stuck resume of env {}; back to SLEEPING", envId);
+        eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
+        return true;
+    }
+
+    /**
+     * A stuck environment without a snapshot becomes TERMINATED. Returns false when the connector
+     * registered first, in which case the row must keep its CONNECTED state.
+     */
+    @Transactional
+    public boolean reconcilePurgedEnvironmentIfStillPending(UUID envId, Instant expectedStateChangedAt) {
+        ExecutionEnvironment env =
+                executionEnvironmentRepository.findById(envId).orElse(null);
+        if (env == null) {
+            return false;
+        }
+        UUID teamId = env.getTeam().getId();
+        if (executionEnvironmentRepository.transitionIfUnchanged(
+                        envId,
+                        EnvironmentStatus.PENDING_CONNECT,
+                        expectedStateChangedAt,
+                        EnvironmentStatus.TERMINATED,
+                        Instant.now())
+                == 0) {
+            return false;
+        }
+        logger.debug("Reconciling env {} as purged after a stuck connect", envId);
+        eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
+        finishPurgedEnvironment(envId, teamId);
+        return true;
+    }
+
+    private void finishPurgedEnvironment(UUID envId, UUID teamId) {
         SandboxExecution active = findActiveExecution(envId);
         if (active != null) {
             terminationTemplate.executeWithoutResult(

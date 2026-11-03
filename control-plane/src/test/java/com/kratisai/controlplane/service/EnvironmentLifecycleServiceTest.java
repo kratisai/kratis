@@ -407,23 +407,60 @@ class EnvironmentLifecycleServiceTest {
     void sweep_rollsStuckResumeBackToSleeping() {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.PENDING_CONNECT);
         givenEnvironments(EnvironmentStatus.PENDING_CONNECT, env);
-        when(sandboxProvider.isSandboxRunning(ENV_ID)).thenReturn(false);
         when(sandboxProvider.isRetained(ENV_ID)).thenReturn(true);
+        when(executionEnvironmentService.rollbackFailedResumeIfStillPending(ENV_ID, LONG_AGO))
+                .thenReturn(true);
 
         lifecycleService.sweep();
 
-        verify(executionEnvironmentService).rollbackFailedResume(env);
+        verify(sandboxProvider).captureSidecarLogs(ENV_ID);
+        verify(sandboxProvider).terminateSandbox(ENV_ID);
+        verify(executionEnvironmentService).rollbackFailedResumeIfStillPending(ENV_ID, LONG_AGO);
+        verify(executionEnvironmentService, never()).rollbackFailedResume(any());
     }
 
     @Test
-    void sweep_leavesPendingEnvironmentWithLiveRuntimeAlone() {
+    void sweep_reapsPendingEnvironmentWithLiveRuntimePastConnectTimeout() {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.PENDING_CONNECT);
         givenEnvironments(EnvironmentStatus.PENDING_CONNECT, env);
         when(sandboxProvider.isSandboxRunning(ENV_ID)).thenReturn(true);
         when(sandboxProvider.isRetained(ENV_ID)).thenReturn(true);
+        when(executionEnvironmentService.rollbackFailedResumeIfStillPending(ENV_ID, LONG_AGO))
+                .thenReturn(true);
 
         lifecycleService.sweep();
 
+        verify(sandboxProvider, never()).isSandboxRunning(ENV_ID);
+        verify(sandboxProvider).captureSidecarLogs(ENV_ID);
+        verify(sandboxProvider).terminateSandbox(ENV_ID);
+    }
+
+    @Test
+    void sweep_reapsPendingEnvironmentWithoutSnapshotAsTerminated() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.PENDING_CONNECT);
+        givenEnvironments(EnvironmentStatus.PENDING_CONNECT, env);
+        when(sandboxProvider.isRetained(ENV_ID)).thenReturn(false);
+        when(executionEnvironmentService.reconcilePurgedEnvironmentIfStillPending(ENV_ID, LONG_AGO))
+                .thenReturn(true);
+
+        lifecycleService.sweep();
+
+        verify(sandboxProvider).terminateSandbox(ENV_ID);
+        verify(executionEnvironmentService).reconcilePurgedEnvironmentIfStillPending(ENV_ID, LONG_AGO);
+        verify(executionEnvironmentService, never()).rollbackFailedResume(any());
+    }
+
+    @Test
+    void sweep_keepsRowWhenConnectorRegisteredDuringStuckReap() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.PENDING_CONNECT);
+        givenEnvironments(EnvironmentStatus.PENDING_CONNECT, env);
+        when(sandboxProvider.isRetained(ENV_ID)).thenReturn(false);
+        when(executionEnvironmentService.reconcilePurgedEnvironmentIfStillPending(ENV_ID, LONG_AGO))
+                .thenReturn(false);
+
+        lifecycleService.sweep();
+
+        verify(executionEnvironmentService, never()).reconcilePurgedEnvironment(any());
         verify(executionEnvironmentService, never()).rollbackFailedResume(any());
     }
 

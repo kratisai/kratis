@@ -497,6 +497,11 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
     }
 
     private void spawnDindSibling(String envId, String networkName, String dindName) {
+        String sandboxHost = sandboxHost(networkName);
+        // dockerd maps `host-gateway` to its own bridge by default, which is this sibling's daemon
+        // rather than the machine running the control plane. Point it at the resolved sandbox host
+        // so every container inside the sibling reaches the control plane via host.docker.internal.
+        String hostInternal = sandboxHost != null ? sandboxHost : "host-gateway";
         List<String> command = new ArrayList<>(List.of(
                 "docker",
                 "run",
@@ -521,7 +526,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         }
         command.addAll(List.of(
                 "--add-host",
-                "host.docker.internal:host-gateway",
+                "host.docker.internal:" + hostInternal,
                 "-e",
                 "DOCKER_TLS_CERTDIR=",
                 "--label",
@@ -532,12 +537,8 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 "kratis.role=dind",
                 "docker:dind-rootless",
                 "dockerd-entrypoint.sh"));
-        // dockerd maps `host-gateway` to its own bridge by default, which is this sibling's daemon
-        // rather than the machine running the control plane. Point it at this process instead so
-        // every container inside the sibling reaches the control plane via host.docker.internal.
-        String gateway = dockerNetworkGateway(networkName);
-        if (gateway != null) {
-            command.add("--host-gateway-ip=" + resolveContainerReachableHost(gateway));
+        if (sandboxHost != null) {
+            command.add("--host-gateway-ip=" + sandboxHost);
         } else {
             logger.warn(
                     "Could not resolve the gateway of {} (kratis.sandbox.*); containers inside the sibling"
@@ -552,19 +553,33 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
     }
 
     /**
-     * Address that containers reach this control plane on. The docker bridge gateway does that
-     * when this JVM runs on the host; inside a container the gateway leads to the docker host
-     * instead, so use our own address.
+     * Address that sandboxes use for {@code host.docker.internal}. A host daemon (on the host or
+     * inside a compose container) is reachable through the sandbox network gateway. Only a nested
+     * dind, where {@code DOCKER_HOST} points at the sibling over TCP, needs this process's own
+     * address: its bridge gateway is the dind itself, not the control plane.
      */
-    public static String resolveContainerReachableHost(String dockerGatewayIp) {
-        if (!Files.exists(Path.of("/.dockerenv"))) {
-            return dockerGatewayIp;
+    public static String resolveSandboxHost(String networkGateway, String dockerHost, boolean inContainer) {
+        if (networkGateway == null || networkGateway.isBlank()) {
+            return null;
         }
+        return usesNestedDaemon(dockerHost, inContainer) ? localHostAddress(networkGateway) : networkGateway;
+    }
+
+    public static boolean usesNestedDaemon(String dockerHost, boolean inContainer) {
+        return inContainer && dockerHost != null && dockerHost.startsWith("tcp://");
+    }
+
+    private static String localHostAddress(String fallback) {
         try {
             return InetAddress.getLocalHost().getHostAddress();
         } catch (UnknownHostException e) {
-            return dockerGatewayIp;
+            return fallback;
         }
+    }
+
+    private String sandboxHost(String networkName) {
+        return resolveSandboxHost(
+                dockerNetworkGateway(networkName), System.getenv("DOCKER_HOST"), Files.exists(Path.of("/.dockerenv")));
     }
 
     private String dockerNetworkGateway(String networkName) {
@@ -644,8 +659,8 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             }
         }
 
-        String gateway = dockerNetworkGateway(networkName);
-        String hostInternal = gateway != null ? resolveContainerReachableHost(gateway) : "host-gateway";
+        String sandboxHost = sandboxHost(networkName);
+        String hostInternal = sandboxHost != null ? sandboxHost : "host-gateway";
 
         List<String> command = new ArrayList<>(List.of(
                 "docker",

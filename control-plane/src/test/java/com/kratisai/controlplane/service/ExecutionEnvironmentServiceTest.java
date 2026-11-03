@@ -670,4 +670,73 @@ class ExecutionEnvironmentServiceTest {
         verify(activityRepository, never()).save(any());
         verify(eventPublisher, never()).publishEvent(any(ExecutionStatusChangedEvent.class));
     }
+
+    @Test
+    void rollbackFailedResumeIfStillPending_claimsRowAndPublishes() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
+        Instant observed = Instant.now();
+        env.setStateChangedAt(observed);
+        when(executionEnvironmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
+        when(executionEnvironmentRepository.transitionIfUnchanged(any(), any(), any(), any(), any()))
+                .thenReturn(1);
+
+        assertThat(executionEnvironmentService.rollbackFailedResumeIfStillPending(ENV_ID, observed))
+                .isTrue();
+
+        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+        verify(executionEnvironmentRepository, never()).save(any());
+    }
+
+    @Test
+    void rollbackFailedResumeIfStillPending_keepsRowWhenConnectorRegistered() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
+        Instant observed = Instant.now();
+        env.setStateChangedAt(observed);
+        when(executionEnvironmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
+        when(executionEnvironmentRepository.transitionIfUnchanged(any(), any(), any(), any(), any()))
+                .thenReturn(0);
+
+        assertThat(executionEnvironmentService.rollbackFailedResumeIfStillPending(ENV_ID, observed))
+                .isFalse();
+
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void reconcilePurgedEnvironmentIfStillPending_claimsRowAndFinishesPurge() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
+        Instant observed = Instant.now();
+        env.setStateChangedAt(observed);
+        when(executionEnvironmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
+        when(executionEnvironmentRepository.transitionIfUnchanged(any(), any(), any(), any(), any()))
+                .thenReturn(1);
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
+                .thenReturn(Optional.empty());
+
+        assertThat(executionEnvironmentService.reconcilePurgedEnvironmentIfStillPending(ENV_ID, observed))
+                .isTrue();
+
+        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+        verify(executionEnvironmentRepository, never()).save(any());
+        verify(activityRepository, never()).save(any());
+    }
+
+    @Test
+    void reconcilePurgedEnvironmentIfStillPending_keepsRowWhenConnectorRegistered() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
+        Instant observed = Instant.now();
+        env.setStateChangedAt(observed);
+        when(executionEnvironmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
+        when(executionEnvironmentRepository.transitionIfUnchanged(any(), any(), any(), any(), any()))
+                .thenReturn(0);
+
+        assertThat(executionEnvironmentService.reconcilePurgedEnvironmentIfStillPending(ENV_ID, observed))
+                .isFalse();
+
+        verify(eventPublisher, never()).publishEvent(any());
+    }
 }

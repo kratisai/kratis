@@ -168,10 +168,12 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
         // this JVM. A spawned sandbox shares a network with the dind sibling, so it reaches
         // LiteLLM through the published port there.
         boolean insideSandbox = Files.exists(Paths.get("/.dockerenv"));
-        String agentHost = insideSandbox ? LITELLM_CONTAINER.getHost() : postgresNetwork.getGateway();
+        boolean nestedDaemon = LocalDockerSandboxProvider.usesNestedDaemon(System.getenv("DOCKER_HOST"), insideSandbox);
+        String agentHost = nestedDaemon ? LITELLM_CONTAINER.getHost() : postgresNetwork.getGateway();
         System.setProperty("kratis.litellm.sandbox-base-url", "http://" + agentHost + ":" + litellmMappedPort);
 
-        String containerHost = LocalDockerSandboxProvider.resolveContainerReachableHost(postgresNetwork.getGateway());
+        String containerHost = LocalDockerSandboxProvider.resolveSandboxHost(
+                postgresNetwork.getGateway(), System.getenv("DOCKER_HOST"), insideSandbox);
         System.setProperty("kratis.litellm.container-host", containerHost);
         logger.info(
                 "LiteLLM operational at {} (agents {}, mock upstream host {})",
