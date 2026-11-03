@@ -19,7 +19,7 @@ export function CanvasDocument({ chatId, documentId }: CanvasDocumentProps) {
   const [copied, setCopied] = useResetAfterDelay(false, false, 1500)
 
   const handleCopy = (content: string) => {
-    void copyToClipboard(canonicalizeMermaidMarkdown(content)).then(() => setCopied(true))
+    void copyToClipboard(canonicalizeMermaidMarkdown(content)).then(setCopied)
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- messages[chatId] can be undefined at runtime despite the Record type
