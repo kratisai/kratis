@@ -145,4 +145,32 @@ class ExecutionEnvironmentRepositoryTest {
         assertThat(fourthEnv.getId()).isEqualTo(envNoExec.getId());
         assertThat(fourthAct).isNull();
     }
+
+    @Test
+    void transitionIfUnchanged_updatesOnlyWhenStatusAndTimestampMatch() {
+        ExecutionEnvironment env = createEnvironment(team, "stuck");
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
+        Instant observed = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        env.setStateChangedAt(observed);
+        executionEnvironmentRepository.save(env);
+        entityManager.flush();
+        entityManager.clear();
+
+        Instant now = Instant.now();
+        int updated = executionEnvironmentRepository.transitionIfUnchanged(
+                env.getId(), EnvironmentStatus.PENDING_CONNECT, observed, EnvironmentStatus.TERMINATED, now);
+        assertThat(updated).isEqualTo(1);
+
+        entityManager.flush();
+        entityManager.clear();
+        assertThat(executionEnvironmentRepository
+                        .findById(env.getId())
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(EnvironmentStatus.TERMINATED);
+
+        int stale = executionEnvironmentRepository.transitionIfUnchanged(
+                env.getId(), EnvironmentStatus.PENDING_CONNECT, observed, EnvironmentStatus.SLEEPING, now);
+        assertThat(stale).isZero();
+    }
 }

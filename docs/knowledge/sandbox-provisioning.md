@@ -254,10 +254,14 @@ never strands a turn that waits for the user.
 
 A runtime is lost when a `PENDING_CONNECT` environment does not register within
 `connect-timeout`, or a `CONNECTED` environment has no runner past `startup-grace`
-(30 seconds). The sweep:
+(30 seconds). A running container does not make a `PENDING_CONNECT` environment healthy:
+the connector never registered, so the sweep removes it after the timeout. The sweep:
 
 1. Calls `terminateSandbox`. It never commits a snapshot.
-2. Sets `SLEEPING` if a snapshot exists, otherwise `TERMINATED`.
+2. Transitions to `SLEEPING` if a snapshot exists, otherwise `TERMINATED`, using a
+   conditional update that fails if the connector registered in the meantime. A late
+   registration is never overwritten with `TERMINATED`; the lost-runtime rule reconciles
+   the now-missing runtime.
 3. Sets `RUNNING` executions to `UNKNOWN`. `IDLE` executions stay `IDLE` for `SLEEPING`.
 
 ### Reaping
@@ -266,7 +270,7 @@ The sweep keys all cleanup on the environment row:
 
 | Row | Compute | Snapshot |
 |-----|---------|----------|
-| `PENDING_CONNECT`, `CONNECTED` | Kept. Removed only by the lost runtime rule. | Kept |
+| `PENDING_CONNECT`, `CONNECTED` | Kept until the lost runtime rule fires, even when the container is still running. | Kept |
 | `SLEEPING` | Owned leftovers removed. Status unchanged. | Kept |
 | `TERMINATED` | Owned resources removed | Owned snapshot removed |
 | No row | Owned resources removed after `startup-grace` | Owned snapshot removed after `startup-grace` |
@@ -322,11 +326,17 @@ namespace, so their own IPs are not routable from the runner. Published ports ar
 rootlesskit's port driver forwards them into the sibling's namespace, which is why the
 runner gets `TESTCONTAINERS_HOST_OVERRIDE=<dind>` and connects to `<dind>:<mappedPort>`.
 The sibling's dockerd is also started with
-`--host-gateway-ip=<gateway of the sandbox network>`, so `host.docker.internal` inside the
-sibling's containers — including nested sandboxes — resolves to the machine running the
-control plane, which is what the connector's `--server-url` depends on. The docker default
-(gateway of the sibling's own bridge) points at the sibling's daemon instead, which nothing
-outside the sibling listens on.
+`--host-gateway-ip=<sandbox host>`, so `host.docker.internal` inside the sibling's containers —
+including nested sandboxes — resolves to the control plane. The docker default (gateway of the
+sibling's own bridge) points at the sibling's daemon instead, which nothing outside the sibling
+listens on. The same value is written to the runner's `--add-host` entry.
+
+The sandbox host is the **sandbox network gateway** when the control plane uses the host daemon,
+including when the control plane itself runs in a compose container: the gateway is the host, and
+the published port reaches the control-plane container. It is **the control plane's own address**
+only when the control plane runs inside a sandbox and its `DOCKER_HOST` points at the sibling dind
+over TCP; that gateway is the dind, not the host. The connector's `--server-url` and the sandbox's
+LiteLLM/registry URLs continue to use `host.docker.internal`, so one mapping serves every consumer.
 
 **Container-to-container addressing:** three consumers, three different addresses, published by
 `PostgresTestInitializer` for the test suite.
@@ -344,13 +354,15 @@ outside the sibling listens on.
   sandbox, localhost on a developer host).
 - *Container → the test JVM* (LiteLLM reaching a `WireMockLlmServer` in the runner) must use
   the **runner's own address**, not the inner gateway and not `host.docker.internal`.
-  `kratis.litellm.container-host` carries it: the bridge gateway on a developer host, the
-  JVM's own address when it runs inside a container. `WireMockLlmServer.getBaseUrl(...)` reads it.
+  `kratis.litellm.container-host` carries it: the bridge gateway when the daemon is the host's
+  (on a developer host or in a compose container), the JVM's own address only when it runs in a
+  sandbox and `DOCKER_HOST` points at the sibling dind. `WireMockLlmServer.getBaseUrl(...)` reads it.
 - *Spawned sandbox agent → LiteLLM* (`kratis.litellm.sandbox-base-url`) must be reachable from
   inside a sandbox. Spawned sandboxes sit on the same network as the sibling, so they address
-  LiteLLM through its published port on the sibling — the same value as `getHost()` when the
-  control plane itself runs in a sandbox, and the gateway plus published port on a developer
-  host. Do not use a container IP: Docker isolates traffic between different bridge networks,
+  LiteLLM through its published port on the sibling — the gateway plus published port when the
+  daemon is the host's (on a developer host or in a compose container), and `getHost()` only when
+  the control plane itself runs in a sandbox. Do not use a container IP: Docker isolates traffic
+  between different bridge networks,
   so a peer IP is unreachable from a container on another network.
 
 **Testcontainer lifecycle:** `TESTCONTAINERS_RYUK_DISABLED=true` because Ryuk cannot reach

@@ -1272,16 +1272,32 @@ class LocalDockerSandboxProviderTest {
     }
 
     @Test
-    void testResolveContainerReachableHost() {
-        String gateway = "172.18.0.1";
-        String resolved = LocalDockerSandboxProvider.resolveContainerReachableHost(gateway);
+    void testResolveSandboxHostForHostDaemon() {
+        String gateway = "10.210.4.1";
+        assertThat(LocalDockerSandboxProvider.resolveSandboxHost(gateway, null, false))
+                .isEqualTo(gateway);
+        assertThat(LocalDockerSandboxProvider.resolveSandboxHost(gateway, null, true))
+                .isEqualTo(gateway);
+        assertThat(LocalDockerSandboxProvider.resolveSandboxHost(gateway, "unix:///var/run/docker.sock", true))
+                .isEqualTo(gateway);
+    }
 
-        if (Files.exists(Path.of("/.dockerenv"))) {
-            // Inside a container the bridge gateway points at the docker host, not this
-            // process, so the resolved address must differ from the gateway.
-            assertThat(resolved).isNotBlank();
-        } else {
-            assertThat(resolved).isEqualTo(gateway);
-        }
+    @Test
+    void testResolveSandboxHostForNestedDaemonUsesOwnAddress() {
+        String gateway = "172.17.0.1";
+        String resolved = LocalDockerSandboxProvider.resolveSandboxHost(gateway, "tcp://kratis-dind-test:2375", true);
+
+        assertThat(LocalDockerSandboxProvider.usesNestedDaemon("tcp://kratis-dind-test:2375", true))
+                .isTrue();
+        assertThat(resolved).isNotBlank();
+        assertThat(resolved).isNotEqualTo(gateway);
+    }
+
+    @Test
+    void testResolveSandboxHostWithoutGateway() {
+        assertThat(LocalDockerSandboxProvider.resolveSandboxHost(null, null, false))
+                .isNull();
+        assertThat(LocalDockerSandboxProvider.resolveSandboxHost("  ", null, false))
+                .isNull();
     }
 }
