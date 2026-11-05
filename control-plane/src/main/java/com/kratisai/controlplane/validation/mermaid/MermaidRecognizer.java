@@ -22,10 +22,16 @@ public final class MermaidRecognizer {
     private static final Pattern HTML_ENTITY = Pattern.compile("&[#A-Za-z0-9]");
     private static final Pattern RAW_FORBIDDEN =
             Pattern.compile("[\"<>\\r\\n\\x00-\\x1f]|#(?:quot|\\d+);|&[#A-Za-z0-9]", Pattern.CASE_INSENSITIVE);
-    private static final Pattern FLOW_HEADER = Pattern.compile("^(flowchart|graph)(?: (?:TD|TB|BT|LR|RL))?$");
+    private static final Pattern FLOW_HEADER = Pattern.compile("^(flowchart|graph)(?i:(?: (?:td|tb|bt|lr|rl)))?$");
     private static final Pattern FLOW_AMBIGUOUS = Pattern.compile("[\"\\[\\]{}|]");
+    private static final Pattern INLINE_SOLID = Pattern.compile("^--\\s*\"([^\"]*)\"\\s*(-->|---|--o|--x)");
+    private static final Pattern INLINE_DOTTED = Pattern.compile("^-\\.\\s*\"([^\"]*)\"\\s*(\\.-?>|-?\\.-)");
+    private static final Pattern INLINE_THICK = Pattern.compile("^==\\s*\"([^\"]*)\"\\s*(==>|===|===o|===x)");
+    private static final Pattern BROKEN_INLINE_SOLID = Pattern.compile("^--\\s*([^->\\n]+?)\\s*(-->|---|--o|--x)");
+    private static final Pattern BROKEN_INLINE_DOTTED = Pattern.compile("^-\\.\\s*([^-.\\n]+?)\\s*(\\.-?>|-?\\.-)");
+    private static final Pattern BROKEN_INLINE_THICK = Pattern.compile("^==\\s*([^=>\\n]+?)\\s*(==>|===|===o|===x)");
     private static final Pattern CARDINALITY = Pattern.compile("^(?:\\|\\||\\|o|o\\||}o|o\\{|}\\||\\|\\{)");
-    private static final Pattern KEY = Pattern.compile("^(?:PK|FK|UK)(?:,(?:PK|FK|UK))*");
+    private static final Pattern KEY = Pattern.compile("^(?:PK|FK|UK)(?:,\\s*(?:PK|FK|UK))*");
     private static final Pattern ER_TYPE =
             Pattern.compile("^[A-Za-z][A-Za-z0-9_]*(?:\\([0-9]+(?:,[0-9]+)?\\))?(?:\\[\\])*");
     private static final Pattern C4_NAME = Pattern.compile("^[A-Za-z_]+");
@@ -106,9 +112,25 @@ public final class MermaidRecognizer {
             String header = lines.removeFirst();
             LINE_CURSOR.set(new LineCursor(normalized));
             advance(header);
-            String type = FLOW_HEADER.matcher(header).matches() ? "flowchart" : header;
+            String type;
+            if (FLOW_HEADER.matcher(header).matches()) {
+                type = "flowchart";
+            } else if (header.equals("stateDiagram")) {
+                type = "stateDiagram-v2";
+            } else if (header.equals("pie") || header.startsWith("pie title ") || header.equals("pie title")) {
+                type = "pie";
+            } else if (header.equals("journey")
+                    || header.startsWith("journey title ")
+                    || header.equals("journey title")) {
+                type = "journey";
+            } else {
+                type = header;
+            }
             if (!grammar.headers.containsKey(type)
-                    || (!type.equals("flowchart") && !grammar.headers.get(type).contains(header)))
+                    || (!type.equals("flowchart")
+                            && !type.equals("pie")
+                            && !type.equals("journey")
+                            && !grammar.headers.get(type).contains(header)))
                 fail(
                         "input.header",
                         "unsupported header; supported: " + String.join(", ", new TreeSet<>(grammar.headers.keySet())));
@@ -354,31 +376,67 @@ public final class MermaidRecognizer {
             } else {
                 String first = flowNode(s);
                 StringBuilder result = new StringBuilder(first);
-                String firstId = flowPrefixId(first);
-                if (!first.equals(firstId)) nodes.add(firstId);
+                List<String> firstParts = Arrays.asList(first.split(" & "));
+                List<String> firstIds = new ArrayList<>();
+                for (String part : firstParts) {
+                    String firstId = flowPrefixId(part);
+                    firstIds.add(firstId);
+                    if (!part.equals(firstId)) nodes.add(firstId);
+                }
                 s.space();
                 boolean standalone = s.pos == line.length();
-                List<String> endpoints = new ArrayList<>(List.of(firstId));
+                List<String> endpoints = new ArrayList<>(firstIds);
                 while (s.pos < line.length()) {
                     String arrow = null;
-                    for (String candidate : grammar.flowArrows) {
-                        if (s.line.startsWith(candidate, s.pos)) {
-                            arrow = candidate;
-                            break;
+                    String label;
+                    String remaining = s.line.substring(s.pos);
+                    Matcher inlineMatcher;
+                    if ((inlineMatcher = INLINE_SOLID.matcher(remaining)).lookingAt()) {
+                        String text = inlineMatcher.group(1);
+                        arrow = inlineMatcher.group(2);
+                        label = "|" + quoted(text(text)) + "|";
+                        s.pos += inlineMatcher.end();
+                    } else if ((inlineMatcher = INLINE_DOTTED.matcher(remaining)).lookingAt()) {
+                        String text = inlineMatcher.group(1);
+                        String close = inlineMatcher.group(2);
+                        arrow = close.contains(">") ? "-.->" : "-.-";
+                        label = "|" + quoted(text(text)) + "|";
+                        s.pos += inlineMatcher.end();
+                    } else if ((inlineMatcher = INLINE_THICK.matcher(remaining)).lookingAt()) {
+                        String text = inlineMatcher.group(1);
+                        arrow = inlineMatcher.group(2);
+                        label = "|" + quoted(text(text)) + "|";
+                        s.pos += inlineMatcher.end();
+                    } else {
+                        checkBrokenInlineEdge(remaining);
+                        for (String candidate : grammar.flowArrows) {
+                            if (s.line.startsWith(candidate, s.pos)) {
+                                arrow = candidate;
+                                break;
+                            }
                         }
+                        if (arrow == null) {
+                            if (remaining.startsWith("--")
+                                    || remaining.startsWith("-.")
+                                    || remaining.startsWith("==")) {
+                                fail("invalid inline edge; expected quoted label, e.g. -- \"label\" -->");
+                            }
+                            fail("expected an arrow such as -->, e.g. A --> B");
+                        }
+                        s.pos += arrow.length();
+                        label = s.maybe("|") ? "|" + flowLabel(s, List.of("|")).label() + "|" : "";
                     }
-                    if (arrow == null) fail("expected an arrow such as -->, e.g. A --> B");
-                    s.pos += arrow.length();
-                    String label =
-                            s.maybe("|") ? "|" + flowLabel(s, List.of("|")).label() + "|" : "";
                     String to = flowNode(s);
-                    String toId = flowPrefixId(to);
-                    endpoints.add(toId);
-                    if (!to.equals(toId)) nodes.add(toId);
+                    List<String> toParts = Arrays.asList(to.split(" & "));
+                    for (String part : toParts) {
+                        String toId = flowPrefixId(part);
+                        endpoints.add(toId);
+                        if (!part.equals(toId)) nodes.add(toId);
+                    }
                     result.append(' ').append(arrow).append(label).append(' ').append(to);
                     s.space();
                 }
-                if (standalone) nodes.add(firstId);
+                if (standalone) nodes.addAll(firstIds);
                 for (Set<String> scope : scopedEndpoints) scope.addAll(endpoints);
                 if (endpoints.stream().anyMatch(stack::contains))
                     fail("flow.subgraph-id-unique", "subgraph cannot contain itself as an edge endpoint");
@@ -391,6 +449,23 @@ public final class MermaidRecognizer {
         return out;
     }
 
+    private static void checkBrokenInlineEdge(String remaining) {
+        if (BROKEN_INLINE_SOLID.matcher(remaining).lookingAt()
+                || BROKEN_INLINE_DOTTED.matcher(remaining).lookingAt()
+                || BROKEN_INLINE_THICK.matcher(remaining).lookingAt()) {
+            fail("unquoted inline edge label; edge labels must be quoted, e.g. -- \"label\" --> or -->|\"label\"|");
+        }
+        if (Pattern.compile("^(?:--|-\\.|==)\\s*\"").matcher(remaining).lookingAt()) {
+            int firstQuote = remaining.indexOf('"');
+            int secondQuote = remaining.indexOf('"', firstQuote + 1);
+            if (secondQuote < 0) {
+                fail("unterminated quoted label in edge; e.g. -- \"label\" -->");
+            } else {
+                fail("missing or invalid closing arrow for inline edge label; e.g. -- \"label\" -->");
+            }
+        }
+    }
+
     private static void addGroup(String id, Set<String> groups, Set<String> nodes) {
         if (groups.contains(id) || nodes.contains(id))
             fail("flow.subgraph-id-unique", "duplicate or conflicting subgraph id");
@@ -398,11 +473,21 @@ public final class MermaidRecognizer {
     }
 
     private List<String> pie(List<String> lines, String header) {
+        boolean strippedTitle = false;
+        if (header.matches("^pie\\s+title(?:\\s+.*)?$")) {
+            String titlePart = header.substring(9).trim();
+            lines.add(0, "title " + titlePart);
+            header = "pie";
+            strippedTitle = true;
+        }
         List<String> out = new ArrayList<>(List.of(header));
         int slices = 0;
         boolean title = false;
-        for (String line : lines) {
-            advance(line);
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            if (!strippedTitle || i > 0) {
+                advance(line);
+            }
             if (line.startsWith("title ")) {
                 if (title || slices > 0) fail("duplicate or misplaced pie title");
                 title = true;
@@ -509,12 +594,22 @@ public final class MermaidRecognizer {
     }
 
     private List<String> journey(List<String> lines, String header) {
+        boolean strippedTitle = false;
+        if (header.matches("^journey\\s+title(?:\\s+.*)?$")) {
+            String titlePart = header.substring(13).trim();
+            lines.add(0, "title " + titlePart);
+            header = "journey";
+            strippedTitle = true;
+        }
         List<String> out = new ArrayList<>(List.of(header));
         boolean title = false;
         boolean section = false;
         int tasks = 0;
-        for (String line : lines) {
-            advance(line);
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            if (!strippedTitle || i > 0) {
+                advance(line);
+            }
             Matcher m;
             if ((m = match("^title (.+)$", line)) != null) {
                 if (title || section) fail("duplicate or misplaced journey title");
@@ -637,7 +732,7 @@ public final class MermaidRecognizer {
                 "syntax.statement", "missing closing shape; e.g. A[\"Service\"] or DB[(\"Database\")]");
     }
 
-    private String flowNode(Scanner s) {
+    private String flowSingleNode(Scanner s) {
         s.space();
         if (!grammar.flowIdentifierPrefix.matcher(s.line.substring(s.pos)).find())
             fail("expected a node ID such as A or DB");
@@ -651,6 +746,20 @@ public final class MermaidRecognizer {
             }
         }
         return id;
+    }
+
+    private String flowNode(Scanner s) {
+        String first = flowSingleNode(s);
+        s.space();
+        if (!s.maybe("&")) {
+            return first;
+        }
+        List<String> parts = new ArrayList<>(List.of(first));
+        do {
+            parts.add(flowSingleNode(s));
+            s.space();
+        } while (s.maybe("&"));
+        return String.join(" & ", parts);
     }
 
     private static Matcher match(String regex, String value) {
@@ -808,7 +917,8 @@ public final class MermaidRecognizer {
                 s.space();
                 if (s.pos < line.length() && line.charAt(s.pos) != '"') {
                     key = s.take(KEY);
-                    List<String> keys = Arrays.asList(key.split(","));
+                    List<String> keys =
+                            Arrays.stream(key.split(",")).map(String::trim).toList();
                     if (new HashSet<>(keys).size() != keys.size()) fail("duplicate attribute key");
                 }
                 s.space();
@@ -880,7 +990,7 @@ public final class MermaidRecognizer {
                 out.add("end");
             } else if ((m = match("^title (.+)$", line)) != null) {
                 out.add("title " + structuralText(m.group(1), SEQUENCE_SEPARATOR));
-            } else if ((m = match("^Note (over|left of|right of) (" + ID + ")(?:,(" + ID + "))?: (.+)$", line))
+            } else if ((m = match("^(?:Note|note) (over|left of|right of) (" + ID + ")(?:,(" + ID + "))?: (.+)$", line))
                     != null) {
                 if (m.group(3) != null && !m.group(1).equals("over")) fail("invalid note participants");
                 String first = identifier(m.group(2), "sequenceDiagram");
@@ -927,7 +1037,7 @@ public final class MermaidRecognizer {
     }
 
     private List<String> state(List<String> lines, String header) {
-        List<String> out = new ArrayList<>(List.of(header));
+        List<String> out = new ArrayList<>(List.of(header.equals("stateDiagram") ? "stateDiagram-v2" : header));
         Set<String> states = new HashSet<>();
         String noteId = null;
         String noteSide = null;
@@ -936,14 +1046,14 @@ public final class MermaidRecognizer {
             advance(line);
             Matcher m;
             if (noteId != null) {
-                if (line.equals("end note")) {
+                if (line.equalsIgnoreCase("end note")) {
                     if (noteParts.isEmpty()) fail("empty state note");
                     out.add("note " + noteSide + " of " + noteId + " : " + String.join("<br/>", noteParts));
                     noteId = null;
                     noteSide = null;
                     noteParts.clear();
                 } else noteParts.add(structuralText(line, STATE_SEPARATOR));
-            } else if ((m = match("^note (left|right) of (" + ID + ")$", line)) != null) {
+            } else if ((m = match("^(?:note|Note) (left|right) of (" + ID + ")$", line)) != null) {
                 noteId = identifier(m.group(2), "stateDiagram-v2");
                 if (!states.contains(noteId)) fail("state.note-after-state", "note references unknown state");
                 noteSide = m.group(1);
@@ -957,7 +1067,7 @@ public final class MermaidRecognizer {
                     if (!id.equals("[*]")) states.add(identifier(id, "stateDiagram-v2"));
                 out.add(m.group(1) + " --> " + m.group(2)
                         + (m.group(3) != null ? " : " + structuralText(m.group(3), STATE_SEPARATOR) : ""));
-            } else if ((m = match("^note (left|right) of (" + ID + ") : (.+)$", line)) != null) {
+            } else if ((m = match("^(?:note|Note) (left|right) of (" + ID + ") : (.+)$", line)) != null) {
                 String id = identifier(m.group(2), "stateDiagram-v2");
                 if (!states.contains(id)) fail("state.note-after-state", "note references unknown state");
                 out.add("note " + m.group(1) + " of " + id + " : " + structuralText(m.group(3), STATE_SEPARATOR));

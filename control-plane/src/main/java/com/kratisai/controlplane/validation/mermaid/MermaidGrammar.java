@@ -22,10 +22,15 @@ public final class MermaidGrammar {
                 " ",
                 List.of(
                         "Supported Mermaid types: flowchart, graph, sequenceDiagram, classDiagram, stateDiagram-v2, erDiagram, C4Context/Container/Component, pie, quadrantChart, xychart-beta, journey.",
-                        "Quote all display text. Give every subgraph an explicit ID and quoted title. One statement per line; close every block.",
-                        "No front matter, init directives, styling, links, click statements, or HTML tags. Preserve useful detail; correct reported syntax rather than simplifying.",
-                        "Use varied supported types of diagram (including journey, C4, stateDiagram-v2 etc) or chart (including pie, quadrantChart) that best fits the content.",
-                        ""));
+                        "Always quote display text and labels with double quotes.",
+                        "Flowchart rules: quote all node text, e.g. A[\"Node Label\"]; quote all edge labels, e.g. A -->|\"Edge Label\"| B or A -- \"Edge Label\" --> B; subgraphs must have explicit IDs and quoted names, e.g. subgraph ID[\"Title\"].",
+                        "Sequence diagram rules: left-to-right arrows only (->>, -->>); e.g. Alice->>Bob: \"Message\".",
+                        "State diagram rules: e.g. state \"State Label\" as S1, [*] --> S1.",
+                        "Pie and journey headers support optional inline titles, e.g. pie title \"Distribution\".",
+                        "One statement per line; close every block.",
+                        "No front matter, init directives, styling directives, linkStyle, links, markdown click events, or HTML tags.",
+                        "Preserve useful detail; correct reported syntax rather than simplifying.",
+                        "Use varied supported types of diagram (including journey, C4, stateDiagram-v2 etc) or chart (including pie, quadrantChart) that best fits the content."));
     }
 
     public static MermaidGrammar load() {

@@ -12,7 +12,8 @@
       "classDiagram"
     ],
     "stateDiagram-v2": [
-      "stateDiagram-v2"
+      "stateDiagram-v2",
+      "stateDiagram"
     ],
     "erDiagram": [
       "erDiagram"
@@ -50,14 +51,14 @@
     ],
     "flowchart": [
       "header = ( 'flowchart' | 'graph' ), [ ' ', direction ] ;",
-      "direction = 'TD' | 'TB' | 'BT' | 'LR' | 'RL' ;",
+      "direction = 'TD' | 'TB' | 'BT' | 'LR' | 'RL' | 'td' | 'tb' | 'bt' | 'lr' | 'rl' ;",
       "node = flow-id, [ shape-open, ( quoted | unquoted-label ), shape-close ] ;",
       "arrow = a token from flowchartSyntax.arrows ;",
       "statement = node, { arrow, [ '|', ( quoted | unquoted-label ), '|' ], node } | 'subgraph ', id, [ '[', ( quoted | unquoted-label ), ']' ] | 'subgraph ', title-with-spaces | 'end' ;"
     ],
     "sequenceDiagram": [
       "arrow = '->>' | '-->>' | '->' | '-->' | '-)' | '--)' | '-x' | '--x' ;",
-      "statement = ( 'participant' | 'actor' ), ' ', id, [ ' as ', bare ] | ( 'alt' | 'loop' | 'opt' | 'par' | 'else' | 'and' | 'title' ), ' ', bare | 'end' | 'autonumber' | 'Note ', ( 'over' | 'left of' | 'right of' ), ' ', id, [ ',', id ], ': ', bare | ( 'activate' | 'deactivate' ), ' ', id | id, arrow, [ '+' | '-' ], id, ': ', bare ;"
+      "statement = ( 'participant' | 'actor' ), ' ', id, [ ' as ', bare ] | ( 'alt' | 'loop' | 'opt' | 'par' | 'else' | 'and' | 'title' ), ' ', bare | 'end' | 'autonumber' | ( 'Note ' | 'note ' ), ( 'over' | 'left of' | 'right of' ), ' ', id, [ ',', id ], ': ', bare | ( 'activate' | 'deactivate' ), ' ', id | id, arrow, [ '+' | '-' ], id, ': ', bare ;"
     ],
     "classDiagram": [
       "arrow = '<|--' | '*--' | 'o--' | '-->' | '..>' | '..|>' | '<|..' | '<..' | 'o..' | '..o' | '--' ;",
@@ -65,14 +66,14 @@
     ],
     "stateDiagram-v2": [
       "state-id = id | '[*]' ;",
-      "statement = 'state ', quoted, ' as ', id | state-id, ' --> ', state-id, [ ' : ', bare ] | 'note ', ( 'left' | 'right' ), ' of ', id, ( ' : ', bare | newline, bare, { newline, bare }, newline, 'end note' ) ;"
+      "statement = 'state ', quoted, ' as ', id | state-id, ' --> ', state-id, [ ' : ', bare ] | ( 'note ' | 'Note ' ), ( 'left' | 'right' ), ' of ', id, ( ' : ', bare | newline, bare, { newline, bare }, newline, 'end note' ) ;"
     ],
     "erDiagram": [
       "name = id | quoted ;",
       "cardinality = '||' | '|o' | 'o|' | '}o' | 'o{' | '}|' | '|{' ;",
       "key = 'PK' | 'FK' | 'UK' ;",
       "attribute-type = id, [ '(', digits, [ ',', digits ], ')' ], { '[]' } ;",
-      "statement = name, '{' | attribute-type, id, [ key, { ',', key } ], [ quoted ] | '}' | name, cardinality, '--', cardinality, name, ':', ( quoted | bare ) ;"
+      "statement = name, '{' | attribute-type, id, [ key, { ',', [ optional-space ], key } ], [ quoted ] | '}' | name, cardinality, '--', cardinality, name, ':', ( quoted | bare ) ;"
     ],
     "C4Context": [
       "statement = c4-statement ;"
@@ -90,6 +91,7 @@
       "c4-statement = element, '(', id, ',', c4raw, { ',', c4raw }, ')' | boundary, '(', id, ',', c4raw, [ ',', c4raw ], ')', '{' | relation, '(', id, ',', id, ',', c4raw, [ ',', c4raw ], ')' | '}' ;"
     ],
     "pie": [
+      "header = 'pie', [ ' title ', ( quoted | bare ) ] ;",
       "statement = 'title ', bare | quoted, ':', number ;"
     ],
     "quadrantChart": [
@@ -99,6 +101,7 @@
       "statement = 'title ', quoted | 'x-axis ', [ quoted, ' ' ], '[', quoted, { ',', quoted }, ']' | 'y-axis ', quoted, ' ', number, ' --> ', number | ( 'bar' | 'line' ), ' [', number, { ',', optional-space, number }, ']' ;"
     ],
     "journey": [
+      "header = 'journey', [ ' title ', ( quoted | bare ) ] ;",
       "statement = 'title ', bare | 'section ', bare | task-text, ':', optional-space, integer, optional-space, ':', optional-space, role, { ',', role } ;"
     ]
   },

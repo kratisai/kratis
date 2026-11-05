@@ -8,9 +8,12 @@ import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.ingestion.WriteWikiPageTool;
 import com.kratisai.controlplane.planningagent.CanvasTool;
 import com.kratisai.controlplane.validation.mermaid.MermaidGrammar;
+import com.kratisai.controlplane.validation.mermaid.MermaidRecognition;
+import com.kratisai.controlplane.validation.mermaid.MermaidRecognizer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class MermaidDiagramValidatorTest {
@@ -205,5 +208,79 @@ class MermaidDiagramValidatorTest {
                     .asString()
                     .contains("diagram #1", "(" + rule + ")");
         }
+    }
+
+    @Test
+    void pieTitleInlineValidatesWithoutError() {
+        String markdown = fence("""
+                pie title "Code Dimensions"
+                "A" : 10
+                "B" : 20
+                """);
+        assertThat(validator.findIssues(markdown)).isEmpty();
+    }
+
+    @Test
+    void flowchartAmpersandGroupingParsesCorrectly() {
+        String source1 = fence("""
+                flowchart LR
+                A & B --> C
+                """);
+        assertThat(validator.findIssues(source1)).isEmpty();
+
+        String source2 = fence("""
+                flowchart LR
+                A --> B & C
+                """);
+        assertThat(validator.findIssues(source2)).isEmpty();
+    }
+
+    @Test
+    void flowchartInlineEdgeLabelValidatesAndRendersCleanly() {
+        String source = """
+                flowchart LR
+                A["Node A"] -- "label" --> B["Node B"]
+                """;
+        assertThat(validator.findIssues(fence(source))).isEmpty();
+
+        MermaidRecognizer recognizer = new MermaidRecognizer(MermaidGrammar.load());
+        MermaidRecognition result = recognizer.recognize(source);
+        assertThat(result.ok()).isTrue();
+        assertThat(result.renderText()).isEqualTo("flowchart LR\nA[\"Node A\"] -->|\"label\"| B[\"Node B\"]");
+    }
+
+    @Test
+    void unquotedLabelsTriggerActionableValidationErrors() {
+        String unquotedInline = fence("""
+                flowchart LR
+                A -- label --> B
+                """);
+        List<String> issues = validator.findIssues(unquotedInline);
+        assertThat(issues).singleElement().asString().contains("unquoted inline edge label", "-- \"label\" -->");
+    }
+
+    @Test
+    void stateDiagramHeaderWorksIdenticallyToStateDiagramV2() {
+        String stateV1 = """
+                stateDiagram
+                [*] --> Active
+                Active --> [*]
+                """;
+        String stateV2 = """
+                stateDiagram-v2
+                [*] --> Active
+                Active --> [*]
+                """;
+        assertThat(validator.findIssues(fence(stateV1))).isEmpty();
+        assertThat(validator.findIssues(fence(stateV2))).isEmpty();
+
+        MermaidRecognizer recognizer = new MermaidRecognizer(MermaidGrammar.load());
+        MermaidRecognition res1 = recognizer.recognize(stateV1);
+        MermaidRecognition res2 = recognizer.recognize(stateV2);
+        assertThat(res1.ok()).isTrue();
+        assertThat(res2.ok()).isTrue();
+        assertThat(res1.type()).isEqualTo("stateDiagram-v2");
+        assertThat(res2.type()).isEqualTo("stateDiagram-v2");
+        assertThat(res1.renderText()).isEqualTo(res2.renderText());
     }
 }

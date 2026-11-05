@@ -1202,5 +1202,110 @@
     "source": "sequenceDiagram\nA->>B: one\nB-->>A: two\nA->B: three\nB-->A: four\nA-)B: five\nB--)A: six\nA-xB: seven\nB--xA: eight",
     "ok": true,
     "renderText": "sequenceDiagram\nA->>B: one\nB-->>A: two\nA->B: three\nB-->A: four\nA-)B: five\nB--)A: six\nA-xB: seven\nB--xA: eight"
+  },
+  {
+    "name": "pie inline header title",
+    "type": "pie",
+    "source": "pie title \"Title\"\n\"A\" : 1",
+    "ok": true,
+    "renderText": "pie\ntitle Title\n\"A\" : 1"
+  },
+  {
+    "name": "journey inline header title",
+    "type": "journey",
+    "source": "journey title \"Title\"\nsection A\nTask: 3: User",
+    "ok": true,
+    "renderText": "journey\ntitle Title\nsection A\nTask: 3: User"
+  },
+  {
+    "name": "flowchart lowercase direction",
+    "type": "flowchart",
+    "source": "flowchart lr\nA[\"Start\"] --> B[\"End\"]",
+    "ok": true,
+    "renderText": "flowchart lr\nA[\"Start\"] --> B[\"End\"]"
+  },
+  {
+    "name": "flow inline edge label solid",
+    "type": "flowchart",
+    "source": "flowchart LR\nA[\"Node A\"] -- \"label\" --> B[\"Node B\"]",
+    "ok": true,
+    "renderText": "flowchart LR\nA[\"Node A\"] -->|\"label\"| B[\"Node B\"]"
+  },
+  {
+    "name": "flow inline edge label dotted",
+    "type": "flowchart",
+    "source": "flowchart LR\nA[\"Node A\"] -. \"label\" .-> B[\"Node B\"]",
+    "ok": true,
+    "renderText": "flowchart LR\nA[\"Node A\"] -.->|\"label\"| B[\"Node B\"]"
+  },
+  {
+    "name": "flow inline edge label thick",
+    "type": "flowchart",
+    "source": "flowchart LR\nA[\"Node A\"] == \"label\" ==> B[\"Node B\"]",
+    "ok": true,
+    "renderText": "flowchart LR\nA[\"Node A\"] ==>|\"label\"| B[\"Node B\"]"
+  },
+  {
+    "name": "flow ampersand source node grouping",
+    "type": "flowchart",
+    "source": "flowchart LR\nA & B --> C",
+    "ok": true,
+    "renderText": "flowchart LR\nA & B --> C"
+  },
+  {
+    "name": "flow ampersand target node grouping",
+    "type": "flowchart",
+    "source": "flowchart LR\nA --> B & C",
+    "ok": true,
+    "renderText": "flowchart LR\nA --> B & C"
+  },
+  {
+    "name": "sequence lowercase note",
+    "type": "sequenceDiagram",
+    "source": "sequenceDiagram\nA->>B: hi\nnote over A,B: text",
+    "ok": true,
+    "renderText": "sequenceDiagram\nA->>B: hi\nNote over A,B: text"
+  },
+  {
+    "name": "state uppercase note",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\n[*] --> A\nNote right of A : text",
+    "ok": true,
+    "renderText": "stateDiagram-v2\n[*] --> A\nnote right of A : text"
+  },
+  {
+    "name": "stateDiagram header alias",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram\n[*] --> A\nA --> [*]",
+    "ok": true,
+    "renderText": "stateDiagram-v2\n[*] --> A\nA --> [*]"
+  },
+  {
+    "name": "er composite keys with whitespace",
+    "type": "erDiagram",
+    "source": "erDiagram\nUSER {\nstring id PK, FK \"Key\"\n}",
+    "ok": true,
+    "renderText": "erDiagram\nUSER {\nstring id PK, FK \"Key\"\n}"
+  },
+  {
+    "name": "flow unquoted inline edge label solid",
+    "type": "flowchart",
+    "source": "flowchart LR\nA -- label --> B",
+    "ok": false,
+    "rule": "syntax.statement"
+  },
+  {
+    "name": "flow unquoted inline edge label dotted",
+    "type": "flowchart",
+    "source": "flowchart LR\nA -. label .-> B",
+    "ok": false,
+    "rule": "syntax.statement"
+  },
+  {
+    "name": "flow unquoted inline edge label thick",
+    "type": "flowchart",
+    "source": "flowchart LR\nA == label ==> B",
+    "ok": false,
+    "rule": "syntax.statement"
   }
 ]
