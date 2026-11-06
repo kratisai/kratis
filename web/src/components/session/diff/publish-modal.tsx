@@ -6,6 +6,7 @@ import {
   ExternalLink,
   GitPullRequest,
   Loader2,
+  Moon,
   RefreshCw,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -13,12 +14,12 @@ import { toast } from 'sonner'
 
 import type { ExecutionStatus } from '@/lib/execution-api'
 import type {
-  PublishCapabilities,
   PublishPrRequest,
   PullRequestResult,
   PushBranchResponse,
   RepositoryVisibility,
 } from '@/types/diff-types'
+import type { EnvironmentStatus } from '@/types/websocket-types'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -53,6 +54,7 @@ import {
 
 export interface PublishModalProps {
   chatId: string
+  environmentStatus?: EnvironmentStatus
   executionId: string
   executionStatus?: ExecutionStatus
   onOpenChange: (open: boolean) => void
@@ -68,6 +70,7 @@ interface PublishActionError {
 
 export function PublishModal({
   chatId,
+  environmentStatus,
   executionId,
   executionStatus,
   onOpenChange,
@@ -90,32 +93,17 @@ export function PublishModal({
   const queryClient = useQueryClient()
   const capabilitiesQueryKey = ['publish-capabilities', chatId, executionId] as const
 
-  const markPublishedInCache = () => {
-    queryClient.setQueryData<PublishCapabilities>(capabilitiesQueryKey, (old) => {
-      if (!old) return old
-      return {
-        ...old,
-        changeSet: { additions: 0, deletions: 0, digest: old.changeSet?.digest ?? '', files: [] },
-        commitCount: 0,
-        hasUncommittedChanges: false,
-        stats: {
-          ...old.stats,
-          additions: 0,
-          commitsAhead: 0,
-          deletions: 0,
-          formattedSummary: 'There are no changes to publish',
-          hasChanges: false,
-          stagedFiles: 0,
-          unstagedFiles: 0,
-        },
-        suggestedBody: '',
-        suggestedTitle: '',
-      }
-    })
+  // The sandbox's own answer after a successful publish is the truth worth showing.
+  const revalidateCapabilities = () => {
+    void queryClient.invalidateQueries({ queryKey: [...capabilitiesQueryKey] })
   }
 
+  // Publishing reads live git state from the sandbox; without it the control plane answers
+  // 409, which would be a lie about unpublished work if it were rendered as zeros.
+  const isEnvironmentAlive = !environmentStatus || environmentStatus === 'CONNECTED'
+
   const capabilitiesQuery = useQuery({
-    enabled: open,
+    enabled: open && isEnvironmentAlive,
     queryFn: () => fetchPublishCapabilities(chatId, executionId),
     queryKey: capabilitiesQueryKey,
   })
@@ -228,7 +216,7 @@ export function PublishModal({
       toast.error('Failed to push branch')
     },
     onSuccess: (data) => {
-      markPublishedInCache()
+      revalidateCapabilities()
       setPushResult(data)
       setActionError(null)
       toast.success(`Successfully pushed to branch ${data.branchName}`)
@@ -265,7 +253,7 @@ export function PublishModal({
       toast.error(updatingExisting ? 'Failed to push changes' : 'Failed to create Pull Request')
     },
     onSuccess: (data) => {
-      markPublishedInCache()
+      revalidateCapabilities()
       setPrResult(data)
       setActionError(null)
       toast.success(
@@ -329,7 +317,27 @@ export function PublishModal({
           </DialogDescription>
         </DialogHeader>
 
-        {capabilitiesQuery.isLoading ? (
+        {!isEnvironmentAlive ? (
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 py-8 text-center">
+            <Moon className="text-muted-foreground h-7 w-7" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Publishing needs a running environment.</p>
+              <p className="text-muted-foreground mx-auto max-w-sm text-xs">
+                The agent&apos;s workspace is not running, so the repository state cannot be read.
+                Changes recorded for this execution are still available as a patch.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button onClick={() => void handleExportPatch()} size="sm" variant="outline">
+                <Download className="h-3.5 w-3.5" />
+                Download diff (.patch)
+              </Button>
+              <Button onClick={() => onOpenChange(false)} size="sm" variant="ghost">
+                Close
+              </Button>
+            </div>
+          </div>
+        ) : capabilitiesQuery.isLoading ? (
           <div className="text-muted-foreground flex min-h-0 flex-1 flex-col items-center justify-center py-12 text-center">
             <Loader2 className="text-primary mb-3 h-7 w-7 animate-spin" />
             <p className="text-sm font-medium">
@@ -435,7 +443,8 @@ export function PublishModal({
                   </span>
                   <p className="text-muted-foreground mt-0.5">
                     Creating a remote repository requires a personal access token or app credential.
-                    Use Download Patch to apply the agent&apos;s changes to a repository you create.
+                    Use Download diff in the execution actions menu to apply the agent&apos;s
+                    changes to a repository you create.
                   </p>
                 </div>
               </div>
@@ -668,20 +677,7 @@ export function PublishModal({
                   </div>
                 )}
 
-                <DialogFooter className="border-border/50 bg-card sticky bottom-0 flex flex-col-reverse gap-2 border-t pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-between">
-                  {!patchOnlyNewRepo && (
-                    <Button
-                      className="text-muted-foreground hover:text-foreground gap-1.5 text-xs"
-                      disabled={isPending}
-                      onClick={() => void handleExportPatch()}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      Download Patch (.patch)
-                    </Button>
-                  )}
-
+                <DialogFooter className="border-border/50 bg-card sticky bottom-0 flex flex-col-reverse gap-2 border-t pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:flex-row sm:justify-between">
                   <div className="flex items-center justify-end gap-2">
                     <Button
                       disabled={isPending}

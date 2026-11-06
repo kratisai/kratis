@@ -152,7 +152,7 @@ describe('PublishModal', () => {
     expect(screen.getAllByRole('button', { name: /close/i }).length).toBeGreaterThan(0)
   })
 
-  it('clears stale changes after a publish and reopen', async () => {
+  it('refetches capabilities after a publish and shows the fresh zero state', async () => {
     const noChanges = makeCapabilities({
       changeSet: { additions: 0, deletions: 0, digest: 'digest-empty', files: [] },
       commitCount: 0,
@@ -166,13 +166,9 @@ describe('PublishModal', () => {
         unstagedFiles: 0,
       },
     })
-    let resolveRefresh!: (capabilities: PublishCapabilities) => void
-    const refresh = new Promise<PublishCapabilities>((resolve) => {
-      resolveRefresh = resolve
-    })
     vi.spyOn(publishApi, 'fetchPublishCapabilities')
       .mockResolvedValueOnce(makeCapabilities())
-      .mockReturnValueOnce(refresh)
+      .mockResolvedValueOnce(noChanges)
     vi.spyOn(publishApi, 'publishPullRequest').mockResolvedValue({
       baseBranch: 'main',
       headBranch: 'kratis/feature-9b3c2a3f',
@@ -180,7 +176,7 @@ describe('PublishModal', () => {
       prUrl: 'https://github.com/org/repo/pull/42',
     })
 
-    const { rerender } = renderModal()
+    renderModal()
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /create pull request/i })).toBeInTheDocument()
@@ -191,19 +187,12 @@ describe('PublishModal', () => {
       expect(screen.getByText(/pull request created successfully/i)).toBeInTheDocument()
     })
 
-    rerender(modalTree({ open: false }))
-    rerender(modalTree({ open: true }))
-
+    // Publish success invalidates the capabilities cache; the fresh sandbox answer replaces
+    // the stale data in place, without a reopen dance.
     await waitFor(() => {
       expect(screen.getByText(/there are no changes to publish/i)).toBeInTheDocument()
     })
     expect(screen.queryByRole('button', { name: /create pull request/i })).not.toBeInTheDocument()
-
-    await act(async () => {
-      resolveRefresh(noChanges)
-    })
-
-    expect(screen.getByText(/there are no changes to publish/i)).toBeInTheDocument()
   })
 
   it('renders rebase required and enables rebase action', async () => {
@@ -350,4 +339,22 @@ describe('PublishModal', () => {
       expect(steerSpy).toHaveBeenCalled()
     })
   })
+
+  it.each(['SLEEPING', 'TERMINATED'] as const)(
+    'shows an offline state instead of publish actions when the environment is %s',
+    async (environmentStatus) => {
+      const capabilitiesSpy = vi.spyOn(publishApi, 'fetchPublishCapabilities')
+      const downloadSpy = vi.spyOn(publishApi, 'downloadPatchFile').mockResolvedValue(undefined)
+
+      renderModal({ environmentStatus })
+
+      expect(await screen.findByText(/publishing needs a running environment/i)).toBeInTheDocument()
+      expect(screen.queryByText(/there are no changes to publish/i)).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /create pull request/i })).not.toBeInTheDocument()
+      expect(capabilitiesSpy).not.toHaveBeenCalled()
+
+      fireEvent.click(screen.getByRole('button', { name: /download diff/i }))
+      expect(downloadSpy).toHaveBeenCalledWith('chat-123', '9b3c2a3f-55b7-47a7-83ac-6b9c592f2a07')
+    },
+  )
 })

@@ -2,11 +2,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { SteeringPublishBar } from '@/components/session/diff/steering-publish-bar'
+import { SteeringBar } from '@/components/session/diff/steering-bar'
 import * as diffApi from '@/lib/diff-api'
+import * as publishApi from '@/lib/publish-api'
 import { useDiffReviewStore } from '@/store/diff-review-store'
 
-describe('SteeringPublishBar', () => {
+describe('SteeringBar', () => {
   let queryClient: QueryClient
 
   beforeEach(() => {
@@ -32,13 +33,13 @@ describe('SteeringPublishBar', () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <SteeringPublishBar chatId="chat-1" executionId="exec-1" executionStatus="RUNNING" />
+        <SteeringBar chatId="chat-1" executionId="exec-1" executionStatus="RUNNING" />
       </QueryClientProvider>,
     )
 
     expect(screen.getByText(/2 review comments pending/i)).toBeInTheDocument()
 
-    const bar = screen.getByTestId('steering-publish-bar')
+    const bar = screen.getByTestId('steering-bar')
     expect(bar).toHaveClass('fixed', 'md:absolute')
   })
 
@@ -55,7 +56,7 @@ describe('SteeringPublishBar', () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <SteeringPublishBar chatId="chat-1" executionId="exec-1" executionStatus="RUNNING" />
+        <SteeringBar chatId="chat-1" executionId="exec-1" executionStatus="RUNNING" />
       </QueryClientProvider>,
     )
 
@@ -76,44 +77,39 @@ describe('SteeringPublishBar', () => {
     })
   })
 
-  it('shows Publish button when execution status is COMPLETED', () => {
+  it('offers a publish shortcut on small screens once the change set is settled', () => {
     render(
       <QueryClientProvider client={queryClient}>
-        <SteeringPublishBar chatId="chat-1" executionId="exec-1" executionStatus="COMPLETED" />
+        <SteeringBar chatId="chat-1" executionId="exec-1" executionStatus="COMPLETED" />
       </QueryClientProvider>,
     )
 
-    const idleBar = screen.getByText(/Tap to steer agent/i)
-    fireEvent.click(idleBar)
-
-    expect(screen.getByRole('button', { name: /Publish/i })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /publish/i })).not.toHaveLength(0)
+    expect(screen.getAllByRole('button', { name: /publish/i })[0]).toHaveClass('hidden', 'md:inline-flex')
   })
 
-  it('shows Publish button when execution status is IDLE', () => {
+  it('hides the publish shortcut while a turn is still running', () => {
     render(
       <QueryClientProvider client={queryClient}>
-        <SteeringPublishBar chatId="chat-1" executionId="exec-1" executionStatus="IDLE" />
+        <SteeringBar chatId="chat-1" executionId="exec-1" executionStatus="RUNNING" />
       </QueryClientProvider>,
     )
 
-    // Publish button should be present in the idle bar
-    expect(screen.getByRole('button', { name: /Publish/i })).toBeInTheDocument()
-
-    // And also in the expanded guidance box
-    const idleBar = screen.getByText(/Tap to steer agent/i)
-    fireEvent.click(idleBar)
-
-    expect(screen.getByRole('button', { name: /Publish/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /publish/i })).not.toBeInTheDocument()
   })
 
-  it('hides Publish button when execution status is RUNNING', () => {
+  it('opens the publish dialog from the mobile publish shortcut', async () => {
+    vi.spyOn(publishApi, 'fetchPublishCapabilities').mockReturnValue(new Promise(() => {}))
+
     render(
       <QueryClientProvider client={queryClient}>
-        <SteeringPublishBar chatId="chat-1" executionId="exec-1" executionStatus="RUNNING" />
+        <SteeringBar chatId="chat-1" executionId="exec-1" executionStatus="COMPLETED" />
       </QueryClientProvider>,
     )
 
-    expect(screen.queryByRole('button', { name: /Publish/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: /publish/i })[0])
+
+    expect(await screen.findByText('Publish Changes')).toBeInTheDocument()
   })
 
   it('allows steering when execution status is FAILED (recovery)', async () => {
@@ -121,7 +117,7 @@ describe('SteeringPublishBar', () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <SteeringPublishBar chatId="chat-1" executionId="exec-1" executionStatus="FAILED" />
+        <SteeringBar chatId="chat-1" executionId="exec-1" executionStatus="FAILED" />
       </QueryClientProvider>,
     )
 
@@ -146,7 +142,7 @@ describe('SteeringPublishBar', () => {
   it('renders nothing while the environment is asleep', () => {
     render(
       <QueryClientProvider client={queryClient}>
-        <SteeringPublishBar
+        <SteeringBar
           chatId="chat-1"
           environmentStatus="SLEEPING"
           executionId="exec-1"
@@ -155,8 +151,8 @@ describe('SteeringPublishBar', () => {
       </QueryClientProvider>,
     )
 
-    expect(screen.queryByTestId('steering-publish-bar')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('steering-bar')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Steering guidance input')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Publish/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /publish/i })).not.toBeInTheDocument()
   })
 })

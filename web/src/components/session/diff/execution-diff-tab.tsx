@@ -6,97 +6,43 @@ import {
   Loader2,
   RefreshCw,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import type { ExecutionStatus } from '@/lib/execution-api'
+import type { EnvironmentStatus } from '@/types/websocket-types'
 
 import { Button } from '@/components/ui/button'
 import { useDiffSummary } from '@/hooks/use-diff'
-import { useIsMobile } from '@/hooks/use-is-mobile'
+import { canPublishChanges } from '@/lib/execution-api'
 import { cn } from '@/lib/utils'
 import { useDiffReviewStore } from '@/store/diff-review-store'
 
 import { DiffBreadcrumb } from './diff-breadcrumb'
 import { DiffFileCard } from './diff-file-card'
 import { PublishModal } from './publish-modal'
-import { SteeringPublishBar } from './steering-publish-bar'
 
 interface ExecutionDiffTabProps {
   chatId: string
+  environmentStatus?: EnvironmentStatus
   executionId: string
   executionStatus?: ExecutionStatus
   onScroll?: (e: React.UIEvent<HTMLDivElement>) => void
-  showSteeringBar?: boolean
 }
 
 export function ExecutionDiffTab({
   chatId,
+  environmentStatus,
   executionId,
   executionStatus,
   onScroll,
-  showSteeringBar = false,
 }: ExecutionDiffTabProps) {
   const { data: summary, isError, isLoading, refetch } = useDiffSummary(chatId, executionId)
-
-  const [isAutoHidden, setIsAutoHidden] = useState(false)
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const lastScrollTopRef = useRef(0)
-  const isMobile = useIsMobile()
 
   const collapseAll = useDiffReviewStore((state) => state.collapseAll)
   const expandAll = useDiffReviewStore((state) => state.expandAll)
   const diffViewMode = useDiffReviewStore((state) => state.diffViewMode)
   const setDiffViewMode = useDiffReviewStore((state) => state.setDiffViewMode)
-
-  // Scroll listener for auto-hide heuristics
-  useEffect(() => {
-    if (isMobile) {
-      const handleWindowScroll = () => {
-        const currentScrollY = window.scrollY
-        const scrollable = document.documentElement
-        const isScrollingDown = currentScrollY > lastScrollTopRef.current && currentScrollY > 50
-        const isAtBottom = currentScrollY + window.innerHeight >= scrollable.scrollHeight - 20
-        const isAtTop = currentScrollY < 20
-
-        if (isAtTop || isAtBottom) {
-          setIsAutoHidden(false)
-        } else if (isScrollingDown) {
-          setIsAutoHidden(true)
-        } else {
-          setIsAutoHidden(false)
-        }
-
-        lastScrollTopRef.current = currentScrollY
-      }
-
-      window.addEventListener('scroll', handleWindowScroll, { passive: true })
-      return () => window.removeEventListener('scroll', handleWindowScroll)
-    }
-
-    const el = scrollContainerRef.current
-    if (!el) return
-
-    const handleScroll = () => {
-      const currentScrollTop = el.scrollTop
-      const isScrollingDown = currentScrollTop > lastScrollTopRef.current && currentScrollTop > 50
-      const isAtBottom = currentScrollTop + el.clientHeight >= el.scrollHeight - 20
-      const isAtTop = currentScrollTop < 20
-
-      if (isAtTop || isAtBottom) {
-        setIsAutoHidden(false)
-      } else if (isScrollingDown) {
-        setIsAutoHidden(true)
-      } else {
-        setIsAutoHidden(false)
-      }
-
-      lastScrollTopRef.current = currentScrollTop
-    }
-
-    el.addEventListener('scroll', handleScroll, { passive: true })
-    return () => el.removeEventListener('scroll', handleScroll)
-  }, [isMobile])
 
   const sortedFiles = useMemo(() => {
     if (!summary?.files) return []
@@ -111,11 +57,7 @@ export function ExecutionDiffTab({
       <DiffBreadcrumb />
 
       {/* Main Diff Content */}
-      <div
-        className="flex-1 overflow-visible pb-20 md:overflow-y-auto"
-        onScroll={onScroll}
-        ref={scrollContainerRef}
-      >
+      <div className="flex-1 overflow-visible pb-20 md:overflow-y-auto" onScroll={onScroll}>
         <div className="mx-auto space-y-2 p-2 sm:space-y-4 sm:p-4">
           {/* Diff Summary Top Header */}
           <div className="border-border/60 flex h-8 items-center justify-between gap-2 border-b pb-2">
@@ -194,16 +136,17 @@ export function ExecutionDiffTab({
                 </Button>
               </div>
 
-              <Button
-                aria-label="Publish changes"
-                className="text-muted-foreground hover:text-foreground h-7 px-1.5 text-xs sm:px-2"
-                onClick={() => setIsPublishModalOpen(true)}
-                size="sm"
-                variant="ghost"
-              >
-                <GitPullRequest className="h-3.5 w-3.5 sm:mr-1" />
-                <span className="hidden sm:inline">Publish</span>
-              </Button>
+              {canPublishChanges(executionStatus, environmentStatus) && (
+                <Button
+                  aria-label="Publish changes"
+                  className="h-7 gap-1.5 px-3 text-xs"
+                  onClick={() => setIsPublishModalOpen(true)}
+                  size="sm"
+                >
+                  <GitPullRequest className="h-3.5 w-3.5" />
+                  Publish
+                </Button>
+              )}
 
               <Button
                 aria-label="Refresh diff"
@@ -263,19 +206,10 @@ export function ExecutionDiffTab({
         </div>
       </div>
 
-      {/* Dynamic Steering & Publish Bottom Bar (When Rendered Standalone) */}
-      {showSteeringBar && (
-        <SteeringPublishBar
-          chatId={chatId}
-          executionId={executionId}
-          executionStatus={executionStatus}
-          isAutoHidden={isAutoHidden}
-        />
-      )}
-
       {/* Publish Dialog Modal */}
       <PublishModal
         chatId={chatId}
+        environmentStatus={environmentStatus}
         executionId={executionId}
         executionStatus={executionStatus}
         onOpenChange={setIsPublishModalOpen}

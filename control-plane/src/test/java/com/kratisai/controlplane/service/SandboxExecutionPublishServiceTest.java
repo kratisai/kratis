@@ -65,6 +65,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.http.HttpStatus;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -186,6 +187,21 @@ class SandboxExecutionPublishServiceTest {
         when(sandboxExecutionRepository.findById(executionId)).thenReturn(Optional.of(execution));
     }
 
+    private void stubWorkspaceObserve() throws Exception {
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(new EnvironmentConnectorResult.GitObservePublish(
+                        "main",
+                        "sha-main",
+                        "sha-main",
+                        true,
+                        0,
+                        0,
+                        false,
+                        "sha-head",
+                        new EnvironmentConnectorResult.GitChangeSetStats(0, 0, List.of(), "digest-empty")));
+    }
+
     private ChatModel createMockChatModel(String responseJson) {
         return createMockChatModel(new ChatResponse(List.of(new Generation(new AssistantMessage(responseJson)))));
     }
@@ -204,30 +220,22 @@ class SandboxExecutionPublishServiceTest {
     }
 
     @Test
-    void getPublishCapabilities_noEnvironment_returnsZeroStats() {
+    void getPublishCapabilities_noEnvironment_conflicts() {
         execution.setEnvironment(null);
         stubExecutionLookup();
 
-        RepoProvider repoProvider = mock(RepoProvider.class);
-        when(repoProvider.supportsPullRequests()).thenReturn(true);
-        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
-
-        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
-
-        assertThat(result.supportsPullRequests()).isTrue();
-        assertThat(result.repositoryType()).isEqualTo(RepositoryType.GITHUB);
-        assertThat(result.defaultBaseBranch()).isEqualTo("main");
-        assertThat(result.stats().hasChanges()).isFalse();
-        assertThat(result.stats().formattedSummary()).isEqualTo("There are no changes to publish");
-        assertThat(result.suggestedTitle()).isEmpty();
-        assertThat(result.suggestedBody()).isEmpty();
+        // A zeroed payload would masquerade unpublished work as "nothing to publish".
+        assertThatThrownBy(() -> service.getPublishCapabilities(userId, chatId, executionId))
+                .isInstanceOfSatisfying(ResponseStatusException.class, e -> assertThat(e.getStatusCode())
+                        .isEqualTo(HttpStatus.CONFLICT))
+                .hasMessageContaining("Publishing needs a running environment");
     }
 
     @Test
-    void getPublishCapabilities_noRepository_returnsGenericType() {
+    void getPublishCapabilities_noRepository_returnsGenericType() throws Exception {
         execution.setRepository(null);
-        execution.setEnvironment(null);
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
 
@@ -559,7 +567,7 @@ class SandboxExecutionPublishServiceTest {
     }
 
     @Test
-    void getPublishCapabilities_rpcException_gracefullyDegrades() throws Exception {
+    void getPublishCapabilities_rpcFailure_returnsServiceUnavailable() throws Exception {
         stubExecutionLookup();
         RepoProvider repoProvider = mock(RepoProvider.class);
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
@@ -568,10 +576,9 @@ class SandboxExecutionPublishServiceTest {
                         eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
                 .thenThrow(new RuntimeException("RPC timeout"));
 
-        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
-
-        assertThat(result.stats().hasChanges()).isFalse();
-        assertThat(result.stats().formattedSummary()).isEqualTo("There are no changes to publish");
+        assertThatThrownBy(() -> service.getPublishCapabilities(userId, chatId, executionId))
+                .isInstanceOfSatisfying(ResponseStatusException.class, e -> assertThat(e.getStatusCode())
+                        .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
     }
 
     @Test
@@ -748,11 +755,12 @@ class SandboxExecutionPublishServiceTest {
     }
 
     @Test
-    void getPublishCapabilities_newRepository_reportsCreationCapabilities() {
+    void getPublishCapabilities_newRepository_reportsCreationCapabilities() throws Exception {
         execution.setRepository(null);
         execution.setNewRepoName("fresh-repo");
         execution.setNewRepoCredential(githubNewRepoCredential());
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         RepoProvider provider = newRepoProvider(true, true);
         when(providerRegistry.getProvider(RepositoryType.GITHUB)).thenReturn(provider);
@@ -776,6 +784,7 @@ class SandboxExecutionPublishServiceTest {
         RepoCredential credential = githubNewRepoCredential();
         execution.setNewRepoCredential(credential);
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         RepoProvider provider = newRepoProvider(true, true);
         when(providerRegistry.getProvider(RepositoryType.GITHUB)).thenReturn(provider);
@@ -840,6 +849,7 @@ class SandboxExecutionPublishServiceTest {
         RepoCredential credential = githubNewRepoCredential();
         execution.setNewRepoCredential(credential);
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         RepoProvider provider = newRepoProvider(true, true);
         when(providerRegistry.getProvider(RepositoryType.GITHUB)).thenReturn(provider);
@@ -892,6 +902,7 @@ class SandboxExecutionPublishServiceTest {
         execution.setNewRepoName("fresh-repo");
         execution.setNewRepoCredential(null);
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         RepoCredential selected = githubNewRepoCredential();
         selected.setId(UUID.randomUUID());
@@ -956,6 +967,7 @@ class SandboxExecutionPublishServiceTest {
         execution.setNewRepoName("fresh-repo");
         execution.setNewRepoCredential(null);
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         RepoCredential selected = githubNewRepoCredential();
         selected.setId(UUID.randomUUID());
@@ -1136,6 +1148,7 @@ class SandboxExecutionPublishServiceTest {
     @Test
     void pushBranch_sendsTargetBranchToSandbox() throws Exception {
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
                 "sha123", "feature-branch", "refs/heads/feature-branch", "SUCCESS");
@@ -1156,6 +1169,7 @@ class SandboxExecutionPublishServiceTest {
     @Test
     void pushBranch_rebaseConflict_throwsConflict() throws Exception {
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         when(environmentRpcClient.request(
                         eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
@@ -1171,6 +1185,7 @@ class SandboxExecutionPublishServiceTest {
     @Test
     void pushBranch_successfulPush() throws Exception {
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
                 "sha123", "feature-branch", "refs/heads/feature-branch", "SUCCESS");
@@ -1204,6 +1219,7 @@ class SandboxExecutionPublishServiceTest {
     @Test
     void pushBranch_nullResult_throwsInternalServerError() throws Exception {
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         when(environmentRpcClient.request(
                         eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
@@ -1219,6 +1235,7 @@ class SandboxExecutionPublishServiceTest {
     @Test
     void pushBranch_interrupted_throwsInternalServerError() throws Exception {
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         when(environmentRpcClient.request(
                         eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
@@ -1234,6 +1251,7 @@ class SandboxExecutionPublishServiceTest {
     @Test
     void pushBranch_timeout_throwsGatewayTimeout() throws Exception {
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         when(environmentRpcClient.request(
                         eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
@@ -1249,6 +1267,7 @@ class SandboxExecutionPublishServiceTest {
     @Test
     void pushBranch_rpcException_throwsBadGateway() throws Exception {
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         when(environmentRpcClient.request(
                         eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
@@ -1264,6 +1283,7 @@ class SandboxExecutionPublishServiceTest {
     @Test
     void publishPullRequest_successfulCreation() throws Exception {
         stubExecutionLookup();
+        stubWorkspaceObserve();
 
         RepoProvider repoProvider = mock(RepoProvider.class);
         when(repoProvider.supportsPullRequests()).thenReturn(true);

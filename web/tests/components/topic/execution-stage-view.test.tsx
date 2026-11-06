@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ExecutionStageView } from '@/components/topic/execution-stage-view'
@@ -8,6 +9,7 @@ import { useResumeEnvironment } from '@/hooks/use-environments'
 import { useChatExecutions, useHaltExecution } from '@/hooks/use-executions'
 import * as diffApi from '@/lib/diff-api'
 import * as execApi from '@/lib/execution-api'
+import { downloadPatchFile } from '@/lib/publish-api'
 import { useActivityStore } from '@/store/activity-store'
 import { useDiffReviewStore } from '@/store/diff-review-store'
 import { useExecutionStore } from '@/store/execution-store'
@@ -42,6 +44,10 @@ vi.mock('@/hooks/use-executions', () => ({
 
 vi.mock('@/lib/activity-log-export', () => ({
   downloadActivityLog: vi.fn(),
+}))
+
+vi.mock('@/lib/publish-api', () => ({
+  downloadPatchFile: vi.fn(),
 }))
 
 vi.mock('sonner', () => ({
@@ -122,7 +128,7 @@ describe('ExecutionStageView', () => {
     renderView()
 
     expect(await screen.findByTestId('activity-log-mock')).toBeInTheDocument()
-    expect(screen.getByTestId('steering-publish-bar')).toBeInTheDocument()
+    expect(screen.getByTestId('steering-bar')).toBeInTheDocument()
   })
 
   it('renders the diff tab when the changes sub-tab is selected in the URL', async () => {
@@ -275,7 +281,7 @@ describe('ExecutionStageView', () => {
     renderView()
 
     await user.click(screen.getByRole('button', { name: /activity log options/i }))
-    expect(screen.getByRole('menuitem', { name: /download/i })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /export activity log/i })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /show terminal/i })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: /halt/i })).toBeNull()
   })
@@ -287,7 +293,7 @@ describe('ExecutionStageView', () => {
     expect(root).toHaveClass('min-w-0', 'md:overflow-hidden')
     expect(root).not.toHaveClass('overflow-hidden')
 
-    const bar = screen.getByTestId('steering-publish-bar')
+    const bar = screen.getByTestId('steering-bar')
     expect(bar).toHaveClass('fixed', 'md:absolute')
   })
 
@@ -407,7 +413,7 @@ describe('ExecutionStageView', () => {
 
     renderView()
 
-    expect(screen.queryByTestId('steering-publish-bar')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('steering-bar')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /activity log options/i }))
     expect(screen.queryByRole('menuitem', { name: /show terminal/i })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: /halt/i })).toBeNull()
@@ -428,9 +434,47 @@ describe('ExecutionStageView', () => {
 
     renderView()
 
-    expect(screen.queryByTestId('steering-publish-bar')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('steering-bar')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /activity log options/i }))
     expect(screen.queryByRole('menuitem', { name: /show terminal/i })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: /halt/i })).toBeNull()
+  })
+
+  it('offers the diff download even when the environment is terminated', async () => {
+    const user = userEvent.setup()
+    const downloadSpy = vi.mocked(downloadPatchFile).mockResolvedValue(undefined)
+    vi.mocked(useChatExecutions).mockReturnValue({
+      data: [
+        {
+          ...completedExecution(),
+          environmentStatus: 'TERMINATED',
+        },
+      ],
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useChatExecutions>)
+
+    renderView()
+
+    await user.click(screen.getByRole('button', { name: /activity log options/i }))
+    await user.click(screen.getByRole('menuitem', { name: /download diff/i }))
+
+    expect(downloadSpy).toHaveBeenCalledWith('session-1', 'exec-1')
+    await waitFor(() => {
+      expect(vi.mocked(toast.success)).toHaveBeenCalledWith('Diff downloaded')
+    })
+  })
+
+  it('shows an error toast when the diff download fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(downloadPatchFile).mockRejectedValue(new Error('gone'))
+
+    renderView()
+
+    await user.click(screen.getByRole('button', { name: /activity log options/i }))
+    await user.click(screen.getByRole('menuitem', { name: /download diff/i }))
+
+    await waitFor(() => {
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith('Failed to download diff')
+    })
   })
 })

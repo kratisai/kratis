@@ -9,6 +9,7 @@ import type { EnvironmentStatus } from '@/types/websocket-types'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useSteerExecution } from '@/hooks/use-diff'
+import { canPublishChanges } from '@/lib/execution-api'
 import { cn } from '@/lib/utils'
 import { useDiffReviewStore } from '@/store/diff-review-store'
 
@@ -16,7 +17,7 @@ import { PublishModal } from './publish-modal'
 
 const EMPTY_COMMENTS: DiffCommentDraft[] = []
 
-interface SteeringPublishBarProps {
+interface SteeringBarProps {
   chatId: string
   environmentStatus?: EnvironmentStatus
   executionId: string
@@ -24,13 +25,13 @@ interface SteeringPublishBarProps {
   isAutoHidden?: boolean
 }
 
-export function SteeringPublishBar({
+export function SteeringBar({
   chatId,
   environmentStatus,
   executionId,
   executionStatus,
   isAutoHidden = false,
-}: SteeringPublishBarProps) {
+}: SteeringBarProps) {
   const [promptText, setPromptText] = useState('')
   const [isFocused, setIsFocused] = useState(false)
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false)
@@ -49,15 +50,15 @@ export function SteeringPublishBar({
     return null
   }
 
-  // Steering and publishing both need a live sandbox, so the bar is hidden unless the environment
-  // is awake; a sleeping, connecting, disconnected or terminated environment cannot be steered.
+  // Steering talks to a live sandbox, so the bar is hidden unless the environment is awake; a
+  // sleeping, connecting, disconnected or terminated environment cannot be steered.
   if (environmentStatus && environmentStatus !== 'CONNECTED') {
     return null
   }
 
-  const isReadyToPublish = executionStatus === 'IDLE' || executionStatus === 'COMPLETED'
   const canSteer =
     executionStatus === 'RUNNING' || executionStatus === 'IDLE' || executionStatus === 'FAILED'
+  const canPublish = canPublishChanges(executionStatus, environmentStatus)
   const commentCount = draftComments.length
 
   const handleSendFeedback = async () => {
@@ -101,7 +102,7 @@ export function SteeringPublishBar({
         'pb-[max(0.75rem,env(safe-area-inset-bottom))]',
         isAutoHidden && !isFocused && 'translate-y-full opacity-0',
       )}
-      data-testid="steering-publish-bar"
+      data-testid="steering-bar"
     >
       <div className="pointer-events-auto w-full max-w-4xl">
         {!isFocused && !promptText.trim() ? (
@@ -118,26 +119,24 @@ export function SteeringPublishBar({
               <span>
                 {commentCount > 0
                   ? `${commentCount} review ${commentCount === 1 ? 'comment' : 'comments'} pending · Tap to steer agent...`
-                  : 'Tap to steer agent, provide feedback, or publish changes...'}
+                  : 'Tap to steer agent or provide feedback...'}
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
-              {isReadyToPublish && (
-                <Button
-                  className="h-6 px-2.5 text-xs"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setIsPublishModalOpen(true)
-                  }}
-                  size="sm"
-                  variant="default"
-                >
-                  <GitPullRequest className="mr-1 h-3 w-3" />
-                  Publish
-                </Button>
-              )}
-            </div>
+            {/* The desktop toolbar owns publish on md+; the bar carries it on small screens. */}
+            {canPublish && (
+              <Button
+                className="hidden h-6 gap-1 px-2.5 text-xs md:inline-flex"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setIsPublishModalOpen(true)
+                }}
+                size="sm"
+              >
+                <GitPullRequest className="h-3 w-3" />
+                Publish
+              </Button>
+            )}
           </div>
         ) : (
           /* Focused / Expanded Guidance Box */
@@ -188,14 +187,13 @@ export function SteeringPublishBar({
               </span>
 
               <div className="flex items-center gap-2">
-                {isReadyToPublish && (
+                {canPublish && (
                   <Button
-                    className="h-7 text-xs"
+                    className="hidden h-7 gap-1 text-xs md:inline-flex"
                     onClick={() => setIsPublishModalOpen(true)}
                     size="sm"
-                    variant="outline"
                   >
-                    <GitPullRequest className="mr-1 h-3.5 w-3.5" />
+                    <GitPullRequest className="h-3.5 w-3.5" />
                     Publish
                   </Button>
                 )}
@@ -235,6 +233,7 @@ export function SteeringPublishBar({
 
       <PublishModal
         chatId={chatId}
+        environmentStatus={environmentStatus}
         executionId={executionId}
         executionStatus={executionStatus}
         onOpenChange={setIsPublishModalOpen}

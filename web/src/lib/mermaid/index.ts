@@ -41,6 +41,14 @@ const STATE_RESERVED = new Set(grammar.reserved['stateDiagram-v2'])
 const ER_RESERVED = new Set(grammar.reserved.erDiagram)
 const ER_ATTRIBUTE_RESERVED = new Set(grammar.reserved.erAttribute)
 const HEADERS = Object.values(grammar.headers).flat()
+const FLOW_HEADER = /^(flowchart|graph)(?: (?:[tT][dD]|[tT][bB]|[bB][tT]|[lL][rR]|[rR][lL]))?$/
+const INLINE_SOLID = /^--\s*"([^"]*)"\s*(-->|---|--o|--x)/
+const INLINE_DOTTED = /^-\.\s*"([^"]*)"\s*(\.-?>|-?\.-)/
+const INLINE_THICK = /^==\s*"([^"]*)"\s*(==>|===|===o|===x)/
+const BROKEN_INLINE_SOLID = /^--\s*([^->\n]+?)\s*(-->|---|--o|--x)/
+const BROKEN_INLINE_DOTTED = /^-\.\s*([^-.\n]+?)\s*(\.-?>|-?\.-)/
+const BROKEN_INLINE_THICK = /^==\s*([^=>\n]+?)\s*(==>|===|===o|===x)/
+const INLINE_QUOTED_EDGE = /^(?:--|-\.|==)\s*"/
 
 export function encode(value: string): string {
   const decoded = decode(value).replace(/<br\s*\/?>|\\n/gi, '\n')
@@ -180,8 +188,21 @@ class Scanner {
   }
 }
 
+function checkBrokenInlineEdge(remaining: string): void {
+  if (
+    BROKEN_INLINE_SOLID.exec(remaining) ||
+    BROKEN_INLINE_DOTTED.exec(remaining) ||
+    BROKEN_INLINE_THICK.exec(remaining)
+  )
+    fail(
+      'unquoted inline edge label; edge labels must be quoted, e.g. -- "label" --> or -->|"label"|',
+    )
+  if (INLINE_QUOTED_EDGE.exec(remaining))
+    fail('missing or invalid closing arrow for inline edge label; e.g. -- "label" -->')
+}
+
 function flow(lines: string[], header: string): string[] {
-  const out = [header.replace(/^graph/, 'flowchart')]
+  const out = [flowHeader(header)]
   const stack: string[] = []
   const scopedEndpoints: Set<string>[] = []
   const groups = new Set<string>()
@@ -213,27 +234,60 @@ function flow(lines: string[], header: string): string[] {
       out.push('end')
     } else {
       let result = flowNode(s)
-      const first = result.match(FLOW_IDENT_PREFIX)![0]
-      if (result !== first) nodes.add(first)
+      const firstIds: string[] = []
+      for (const part of result.split(' & ')) {
+        const id = part.match(FLOW_IDENT_PREFIX)![0]
+        firstIds.push(id)
+        if (part !== id) nodes.add(id)
+      }
       s.space()
-      const endpoints = [first]
+      const endpoints = [...firstIds]
       const standalone = s.pos === line.length
       while (s.pos < line.length) {
-        const arrow = grammar.flowchartSyntax.arrows.find((candidate) =>
-          s.line.startsWith(candidate, s.pos),
-        )
-        if (!arrow) fail('expected an arrow such as -->, e.g. A --> B')
-        s.pos += arrow.length
+        const remaining = s.line.slice(s.pos)
+        let arrow: string
         let label = ''
-        if (s.maybe('|')) label = `|${flowLabel(s, ['|']).label}|`
+        let inline: null | RegExpExecArray
+        if ((inline = INLINE_SOLID.exec(remaining))) {
+          arrow = inline[2]
+          label = `|${slots.quoted(text(inline[1]))}|`
+          s.pos += inline[0].length
+        } else if ((inline = INLINE_DOTTED.exec(remaining))) {
+          arrow = inline[2].includes('>') ? '-.->' : '-.-'
+          label = `|${slots.quoted(text(inline[1]))}|`
+          s.pos += inline[0].length
+        } else if ((inline = INLINE_THICK.exec(remaining))) {
+          arrow = inline[2]
+          label = `|${slots.quoted(text(inline[1]))}|`
+          s.pos += inline[0].length
+        } else {
+          checkBrokenInlineEdge(remaining)
+          const found = grammar.flowchartSyntax.arrows.find((candidate) =>
+            s.line.startsWith(candidate, s.pos),
+          )
+          if (!found) {
+            if (
+              remaining.startsWith('--') ||
+              remaining.startsWith('-.') ||
+              remaining.startsWith('==')
+            )
+              fail('invalid inline edge; expected quoted label, e.g. -- "label" -->')
+            fail('expected an arrow such as -->, e.g. A --> B')
+          }
+          arrow = found
+          s.pos += found.length
+          if (s.maybe('|')) label = `|${flowLabel(s, ['|']).label}|`
+        }
         const to = flowNode(s)
-        const id = to.match(FLOW_IDENT_PREFIX)![0]
-        endpoints.push(id)
-        if (to !== id) nodes.add(id)
+        for (const part of to.split(' & ')) {
+          const id = part.match(FLOW_IDENT_PREFIX)![0]
+          endpoints.push(id)
+          if (part !== id) nodes.add(id)
+        }
         result += ` ${arrow}${label} ${to}`
         s.space()
       }
-      if (standalone) nodes.add(first)
+      if (standalone) for (const id of firstIds) nodes.add(id)
       for (const scope of scopedEndpoints) for (const id of endpoints) scope.add(id)
       if (endpoints.some((id) => stack.includes(id)))
         fail('subgraph cannot contain itself as an edge endpoint', 'flow.subgraph-id-unique')
@@ -283,6 +337,12 @@ function flowGroup(s: Scanner): { id: string; render: string } {
   return { id: '', render: `subgraph ${slots.quoted(title)}` }
 }
 
+function flowHeader(header: string): string {
+  const match = /^(flowchart|graph)(?: ([a-zA-Z]{2}))?$/.exec(header)
+  if (!match || !match[2]) return 'flowchart'
+  return `flowchart ${match[2].toUpperCase()}`
+}
+
 function flowLabel(s: Scanner, closers: readonly string[]): { close: string; label: string } {
   s.space()
   let label: string
@@ -303,6 +363,18 @@ function flowLabel(s: Scanner, closers: readonly string[]): { close: string; lab
 }
 
 function flowNode(s: Scanner): string {
+  const first = flowSingleNode(s)
+  s.space()
+  if (!s.maybe('&')) return first
+  const parts = [first]
+  do {
+    parts.push(flowSingleNode(s))
+    s.space()
+  } while (s.maybe('&'))
+  return parts.join(' & ')
+}
+
+function flowSingleNode(s: Scanner): string {
   s.space()
   if (!FLOW_IDENT_PREFIX.test(s.line.slice(s.pos))) fail('expected a node ID such as A or DB')
   const id = flowIdentifier(s.take(FLOW_IDENT_PREFIX))
@@ -332,18 +404,29 @@ export function recognize(source: unknown): Recognition {
     if (!header) fail('missing header', 'input.header')
     let type = header
     let handler: Handler
-    if (/^(flowchart|graph)(?: (?:TD|TB|BT|LR|RL))?$/.test(header)) {
+    if (FLOW_HEADER.test(header)) {
       type = 'flowchart'
       handler = flow
+    } else if (header === 'stateDiagram') {
+      type = 'stateDiagram-v2'
+      handler = state
+    } else if (header === 'pie' || header.startsWith('pie title ') || header === 'pie title') {
+      type = 'pie'
+      handler = pie
+    } else if (
+      header === 'journey' ||
+      header.startsWith('journey title ') ||
+      header === 'journey title'
+    ) {
+      type = 'journey'
+      handler = journey
     } else if (header === 'sequenceDiagram') handler = sequence
     else if (header === 'classDiagram') handler = classDiagram
     else if (header === 'stateDiagram-v2') handler = state
     else if (header === 'erDiagram') handler = er
     else if (['C4Component', 'C4Container', 'C4Context'].includes(header)) handler = c4
-    else if (header === 'pie') handler = pie
     else if (header === 'quadrantChart') handler = quadrant
     else if (header === 'xychart-beta') handler = xy
-    else if (header === 'journey') handler = journey
     else fail(`unsupported header; supported: ${HEADERS.join(', ')}`, 'input.header')
     if (!lines.length) fail('empty diagram', 'input.empty-diagram')
     return {
@@ -525,8 +608,9 @@ function er(lines: string[], header: string): string[] {
       let comment = ''
       s.space()
       if (s.pos < line.length && line[s.pos] !== '"') {
-        key = s.take(/^(?:PK|FK|UK)(?:,(?:PK|FK|UK))*/)
-        if (new Set(key.split(',')).size !== key.split(',').length) fail('duplicate attribute key')
+        key = s.take(/^(?:PK|FK|UK)(?:,\s*(?:PK|FK|UK))*/)
+        if (new Set(key.split(',').map((part) => part.trim())).size !== key.split(',').length)
+          fail('duplicate attribute key')
       }
       s.space()
       if (s.pos < line.length) comment = ` ${slots.quoted(s.quoted())}`
@@ -571,6 +655,10 @@ function erName(s: Scanner): string {
 }
 
 function journey(lines: string[], header: string): string[] {
+  if (/^journey\s+title(?:\s+.*)?$/.test(header)) {
+    lines = [`title ${header.slice(13).trim()}`, ...lines]
+    header = 'journey'
+  }
   const out = [header]
   let title = false
   let section = false
@@ -610,6 +698,10 @@ function journeyText(value: string): string {
 }
 
 function pie(lines: string[], header: string): string[] {
+  if (/^pie\s+title(?:\s+.*)?$/.test(header)) {
+    lines = [`title ${header.slice(9).trim()}`, ...lines]
+    header = 'pie'
+  }
   const out = [header]
   let slices = 0
   let title = false
@@ -719,7 +811,7 @@ function sequence(lines: string[], header: string): string[] {
       out.push(`title ${sequenceText(match[1])}`)
     } else if (
       (match = line.match(
-        /^Note (over|left of|right of) ([A-Za-z][A-Za-z0-9_]*)(?:,([A-Za-z][A-Za-z0-9_]*))?: (.+)$/,
+        /^(?:Note|note) (over|left of|right of) ([A-Za-z][A-Za-z0-9_]*)(?:,([A-Za-z][A-Za-z0-9_]*))?: (.+)$/,
       ))
     ) {
       if (match[3] && match[1] !== 'over') fail('invalid note participants')
@@ -781,18 +873,18 @@ function splitRoles(value: string): string[] {
 }
 
 function state(lines: string[], header: string): string[] {
-  const out = [header]
+  const out = [header === 'stateDiagram' ? 'stateDiagram-v2' : header]
   const states = new Set<string>()
   let note: undefined | { id: string; parts: string[]; side: string }
   for (const line of lines) {
     let match: null | RegExpMatchArray
     if (note) {
-      if (line === 'end note') {
+      if (/^end note$/i.test(line)) {
         if (!note.parts.length) fail('empty state note')
         out.push(`note ${note.side} of ${note.id} : ${note.parts.join('<br/>')}`)
         note = undefined
       } else note.parts.push(stateText(line))
-    } else if ((match = line.match(/^note (left|right) of ([A-Za-z][A-Za-z0-9_]*)$/))) {
+    } else if ((match = line.match(/^(?:note|Note) (left|right) of ([A-Za-z][A-Za-z0-9_]*)$/))) {
       const id = identifier(match[2], STATE_RESERVED)
       if (!states.has(id))
         fail(`note references unknown or later state: ${id}`, 'state.note-after-state')
@@ -810,7 +902,9 @@ function state(lines: string[], header: string): string[] {
         if (id !== '[*]') states.add(identifier(id, STATE_RESERVED))
       }
       out.push(`${match[1]} --> ${match[2]}${match[3] ? ` : ${stateText(match[3])}` : ''}`)
-    } else if ((match = line.match(/^note (left|right) of ([A-Za-z][A-Za-z0-9_]*) : (.+)$/))) {
+    } else if (
+      (match = line.match(/^(?:note|Note) (left|right) of ([A-Za-z][A-Za-z0-9_]*) : (.+)$/))
+    ) {
       const id = identifier(match[2], STATE_RESERVED)
       if (!states.has(id))
         fail(`note references unknown or later state: ${id}`, 'state.note-after-state')
