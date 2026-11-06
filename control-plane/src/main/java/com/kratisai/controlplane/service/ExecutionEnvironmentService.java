@@ -303,7 +303,12 @@ public class ExecutionEnvironmentService {
         try {
             SandboxProvider sandboxProvider =
                     sandboxOrchestratorService.getProvider(env.getProvider().getType());
-            sandboxProvider.suspend(envId);
+            if (!sandboxProvider.suspend(envId)) {
+                // The row reported a sandbox that no longer exists; "sleeping" would be a lie.
+                logger.warn("Idle suspend found nothing to preserve for env {}; marking TERMINATED", envId);
+                reconcilePurgedEnvironment(env);
+                return;
+            }
             logger.debug("Suspend committed snapshot for env {}; marking SLEEPING", envId);
         } catch (Exception e) {
             logger.error("Failed to suspend sandbox for environment {}", envId, e);

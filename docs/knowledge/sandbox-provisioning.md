@@ -130,7 +130,10 @@ A user **halt** is the single terminate action: `POST /api/v1/chats/{chatId}/exe
   The connector stays `CONNECTED`.
 
 A transient `/ws/env` disconnect does not terminate the agent or discard its session; the
-connector reconnects and re-registers within the lease. See
+connector reconnects and re-registers within the lease. The lost-runtime rule gives it the
+same `connect-timeout` budget to re-register as a fresh spawn gets: nothing is suspended or
+removed while the heartbeat is inside its window, and a heartbeat-fresh row is healthy by
+definition. See
 [`acp-lifecycle.md`](acp-lifecycle.md) for reconnect and lease behaviour.
 
 ## Environment registration
@@ -198,9 +201,6 @@ changes execution status. Neither writes the other's rows.
 
 ### Environment states
 
-| Status | Compute | Snapshot | Meaning |
-|--------|---------|----------|---------|
-| `PENDING_CONNECT` | Being created | Present only when resuming | Sidecar not yet registered |
 | `CONNECTED` | Present | Present only after a prior suspend | Runtime live |
 | `SLEEPING` | Absent | Present | Resumable |
 | `TERMINATED` | Absent | Absent | Final |
@@ -216,22 +216,34 @@ stateDiagram-v2
     SLEEPING --> PENDING_CONNECT : user resume
     CONNECTED --> SLEEPING : idle 20m, quiet, no pending HITL
     SLEEPING --> TERMINATED : retention 30d
-    PENDING_CONNECT --> SLEEPING : lost runtime, snapshot exists
-    PENDING_CONNECT --> TERMINATED : lost runtime, no snapshot
-    CONNECTED --> SLEEPING : lost runtime, snapshot exists
-    CONNECTED --> TERMINATED : lost runtime, no snapshot
+    PENDING_CONNECT --> SLEEPING : stuck connect, suspend preserved state
+    PENDING_CONNECT --> TERMINATED : stuck connect, nothing left
+    CONNECTED --> SLEEPING : lost runtime or wedged connector, suspend preserved state
+    CONNECTED --> TERMINATED : lost runtime, nothing left past reconnect window
     TERMINATED --> [*]
 ```
 
 ### Clocks
 
-Each transition sets `state_changed_at`. The sweep uses this column as its only clock:
+Each transition sets `state_changed_at`. The sweep uses this column as its main clock:
 
 - `CONNECTED`: idle time, against `idle-timeout` (20 minutes). The clock starts when the
   last `RUNNING` execution stops.
 - `PENDING_CONNECT`: spawn or resume age, against `connect-timeout` (5 minutes).
 - `SLEEPING`: time since suspend, against `retention-period` (30 days). Each resume
   restarts it.
+
+A `CONNECTED` row additionally answers to its heartbeat (`last_heartbeat`, refreshed by
+`env.heartbeat`): a runner that is up while the heartbeat has been absent for
+`connect-timeout` is a wedged connector and is suspended. Two in-memory clocks cover rows
+whose `state_changed_at` cannot move (orphans, and a `CONNECTED` row with no resources at
+all): they wait out one grace window before the destructive step, so a docker listing
+glitch or a connector mid-reconnect can never masquerade as absence.
+
+Teardown always goes through `suspend`, which commits any runner still on disk — including
+a stopped corpse whose workspace layer is otherwise unreachable — before removing compute.
+A row only becomes `TERMINATED` through the lost-runtime rule when a full reconnect window
+confirms nothing remains to preserve.
 
 ### Execution states
 

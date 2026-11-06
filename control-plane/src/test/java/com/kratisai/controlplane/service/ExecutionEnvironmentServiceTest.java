@@ -152,6 +152,7 @@ class ExecutionEnvironmentServiceTest {
         ExecutionEnvironment env = createSandboxEnvironment();
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
+        when(sandboxProvider.suspend(ENV_ID)).thenReturn(true);
 
         executionEnvironmentService.sleepEnvironmentInternal(env);
 
@@ -167,11 +168,28 @@ class ExecutionEnvironmentServiceTest {
         ExecutionEnvironment env = createSandboxEnvironment();
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
+        when(sandboxProvider.suspend(ENV_ID)).thenReturn(true);
 
         executionEnvironmentService.sleepEnvironmentInternal(env);
 
         verify(sandboxProvider).suspend(ENV_ID);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
+    }
+
+    @Test
+    void sleepEnvironment_marksTerminatedWhenNothingToPreserve() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        when(sandboxProvider.suspend(ENV_ID)).thenReturn(false);
+
+        executionEnvironmentService.sleepEnvironmentInternal(env);
+
+        assertThat(env.getStatus())
+                .as("a 'sleep' of an empty sandbox is a purge, not a sleeping state")
+                .isEqualTo(EnvironmentStatus.TERMINATED);
+        verify(executionEnvironmentRepository).save(env);
+        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
     }
 
     @Test
@@ -184,6 +202,7 @@ class ExecutionEnvironmentServiceTest {
         when(activityRepository.nextSequence(EXECUTION_ID)).thenReturn(1L);
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
+        when(sandboxProvider.suspend(ENV_ID)).thenReturn(true);
 
         executionEnvironmentService.sleepEnvironmentInternal(env);
 
@@ -207,6 +226,7 @@ class ExecutionEnvironmentServiceTest {
         when(activityRepository.nextSequence(EXECUTION_ID)).thenReturn(1L);
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
+        when(sandboxProvider.suspend(ENV_ID)).thenReturn(true);
 
         executionEnvironmentService.sleepEnvironmentInternal(env);
 
@@ -482,6 +502,7 @@ class ExecutionEnvironmentServiceTest {
         ExecutionEnvironment env = createSandboxEnvironment();
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
+        when(sandboxProvider.suspend(ENV_ID)).thenReturn(true);
 
         executionEnvironmentService.sleepEnvironmentInternal(env);
 
