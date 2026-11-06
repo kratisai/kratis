@@ -397,7 +397,11 @@ the dind image store (hundreds of MB to GB). Teardown must use `docker rm -f -v`
 
 **Image contract:** `/kratis/workspace` and `/kratis/logs` must exist and be writable by
 the sandbox's non-root user at image build time; ownership is never fixed up at runtime
-(see `build/Dockerfile.runner-base`).
+(see `build/Dockerfile.runner-base`). The control plane derives every sandbox path from
+`kratis.sandbox.workspace` (default `/kratis/workspace`): `.kratis/` and `.kratis/skills/`
+sit inside the workspace so harnesses restricted to the workspace can read them, while
+logs and sidecar state derive from the workspace parent. The sidecar derives its state
+root the same way, so an alternate workspace cannot drift from the sidecar.
 
 **Connector injection:** the provider resolves the host binary
 (`KRATIS_CONNECTOR_PATH` → `kratis.connector.path` → `sidecar/kratis-connector`),

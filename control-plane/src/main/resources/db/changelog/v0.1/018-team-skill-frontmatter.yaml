@@ -1,0 +1,12 @@
+databaseChangeLog:
+- changeSet:
+    id: 018-team-skill-frontmatter-001
+    author: kratis
+    changes:
+    - dropColumn:
+        tableName: team_skill
+        columnName: trigger_condition
+    - modifyDataType:
+        tableName: team_skill
+        columnName: description
+        newDataType: VARCHAR(1024)

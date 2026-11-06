@@ -1,6 +1,5 @@
 package com.kratisai.controlplane.service;
 
-import static com.kratisai.controlplane.service.LocalDockerSandboxProvider.SIDECAR_LOG_LOC;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
@@ -25,6 +24,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
 class LocalDockerSandboxProviderTest {
+
+    private static final String SIDECAR_LOG_LOC = new SandboxProperties().getSidecarLog();
 
     private ProcessExecutor mockProcessExecutor;
     private LocalDockerSandboxProvider provider;

@@ -29,13 +29,11 @@ const (
 	DefaultPermissionTimeout = 15 * time.Minute
 
 	DefaultPromptQuietPeriod = 10 * time.Second
-
-	// productionStateDir is the root of the running sidecar's persistent state.
-	// Everything the sidecar must keep across restarts lives below it.
-	productionStateDir = "/kratis"
 )
 
-var defaultStateDir = productionStateDir
+// defaultStateDir overrides the state root in tests. Empty derives it from the
+// workspace parent, so the state root and workspace cannot drift apart.
+var defaultStateDir string
 
 // maxOutboundFrameBytes bounds every JSON-RPC frame sent to the control plane.
 // Tomcat rejects inbound text messages above its maxTextMessageBufferSize
@@ -179,11 +177,15 @@ func NewClient(serverURL, token, workspace string) *Client {
 	if workspace == "" {
 		panic("rpc: NewClient requires an explicit workspace")
 	}
+	stateDir := defaultStateDir
+	if stateDir == "" {
+		stateDir = filepath.Dir(workspace)
+	}
 	c := &Client{
 		serverURL:          serverURL,
 		token:              token,
 		workspace:          workspace,
-		stateDir:           defaultStateDir,
+		stateDir:           stateDir,
 		executor:           runner.NewExecutor(),
 		pending:            make(map[interface{}]chan *JsonRpcResponse),
 		pendingHitl:        make(map[string]chan HitlActivityResult),
@@ -242,8 +244,8 @@ func (c *Client) SetDebug(debug bool) {
 
 // stateRoot returns this client's persistent state root. A Client is invalid
 // until its dependencies are set, so a zero-value Client fails instead of
-// silently falling back to the live sandbox's /kratis state. NewClient sets the
-// root for the daemon; tests must inject a t.TempDir() root.
+// silently falling back to the workspace parent. NewClient derives the root
+// from the workspace; tests must inject a t.TempDir() root.
 func (c *Client) stateRoot() string {
 	if c.stateDir == "" {
 		panic("rpc: Client has no stateDir; construct it with NewClient")

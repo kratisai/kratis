@@ -7,9 +7,9 @@ import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.ExecStatus;
 import com.kratisai.controlplane.api.wsdto.GitRegistrationStatus;
 import com.kratisai.controlplane.api.wsdto.LaunchStatus;
-import com.kratisai.controlplane.config.HarnessesProperties;
 import com.kratisai.controlplane.config.InstanceProperties;
 import com.kratisai.controlplane.config.LiteLLMProperties;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.CanvasRepository;
@@ -44,7 +44,8 @@ public class SandboxProvisioningService {
     private final TransactionTemplate requiresNewTransactionTemplate;
     private final EnvironmentRpcClient environmentRpcClient;
     private final InstanceProperties instanceProperties;
-    private final HarnessesProperties harnessesProperties;
+    private final SkillProvisioningService skillProvisioningService;
+    private final SandboxProperties sandboxProperties;
 
     private static final String GIT_USER_NAME = "Kratis";
 
@@ -59,7 +60,8 @@ public class SandboxProvisioningService {
             LiteLLMProperties litellmProperties,
             EnvironmentRpcClient environmentRpcClient,
             InstanceProperties instanceProperties,
-            HarnessesProperties harnessesProperties) {
+            SkillProvisioningService skillProvisioningService,
+            SandboxProperties sandboxProperties) {
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(
                 org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -73,7 +75,8 @@ public class SandboxProvisioningService {
         this.litellmProperties = litellmProperties;
         this.environmentRpcClient = environmentRpcClient;
         this.instanceProperties = instanceProperties;
-        this.harnessesProperties = harnessesProperties;
+        this.skillProvisioningService = skillProvisioningService;
+        this.sandboxProperties = sandboxProperties;
     }
 
     public void provisionEnvironment(ExecutionEnvironment environment, String token) {
@@ -102,13 +105,14 @@ public class SandboxProvisioningService {
             prepareNewRepository(execution);
         }
         verifyRepositoryCheckout(execution);
+        List<SkillDefinition> skills = skillProvisioningService.provisionSkills(execution);
         ensureModelRegistered(execution);
         // writeActiveTaskFile may run outside the load transaction, so reload the linked canvas
         // here; without it the lazy association is detached when the file is written.
         if (execution.getCanvas() != null) {
             execution.setCanvas(reloadCanvas(execution));
         }
-        writeActiveTaskFile(execution);
+        writeActiveTaskFile(execution, skills);
 
         String virtualKey = requiresNewTransactionTemplate.execute(status -> {
             SandboxExecution persisted =
@@ -250,17 +254,21 @@ public class SandboxProvisioningService {
                 execution.getEnvironment().getId());
     }
 
-    private void writeActiveTaskFile(SandboxExecution execution) throws InterruptedException, TimeoutException {
+    private void writeActiveTaskFile(SandboxExecution execution, List<SkillDefinition> skills)
+            throws InterruptedException, TimeoutException {
         runSetupCommand(
                 execution,
                 ActiveTaskPrompt.buildWriteCommands(
-                        ActiveTaskPrompt.buildActiveTaskDocument(execution.getId(), canvasContent(execution))));
+                        ActiveTaskPrompt.buildActiveTaskDocument(
+                                canvasContent(execution), skills, sandboxProperties.getSkillsDir()),
+                        sandboxProperties.getActiveTaskFile(),
+                        sandboxProperties.getPlatformDir()));
     }
 
     // Harness definitions are pure data, so files they need (e.g. the gemini ACP patch) are declared
     // as resources and materialised here before the setup commands that reference them run.
     private void writeHarnessResources(SandboxExecution execution) throws InterruptedException, TimeoutException {
-        Path harnessDirectory = Path.of(harnessesProperties.getDirectory());
+        Path harnessDirectory = Path.of(instanceProperties.getHarnessesDirectory());
         for (HarnessResource resource : execution.getHarness().getResources()) {
             runSetupCommand(
                     execution,

@@ -38,6 +38,7 @@ services:
       - 'KRATIS_KEY_FILE_PATH=/data/config/encryption.key'
       - 'KRATIS_STORAGE_LOCAL_PATH=/data/blobs'
       - 'KRATIS_HARNESSES_DIRECTORY=${KRATIS_HARNESSES_DIRECTORY:-/opt/kratis/harnesses}'
+      - 'KRATIS_SKILLS_DIRECTORY=${KRATIS_SKILLS_DIRECTORY:-/opt/kratis/skills}'
       - 'KRATIS_LITELLM_BASE_URL=http://litellm:4000'
       - 'KRATIS_LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
       - 'KRATIS_LITELLM_SANDBOX_BASE_URL=http://host.docker.internal:${LITELLM_PORT:-4000}'

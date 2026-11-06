@@ -1,12 +1,12 @@
 package com.kratisai.controlplane.e2e;
 
-import static com.kratisai.controlplane.service.LocalDockerSandboxProvider.SIDECAR_LOG_LOC;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.CreateSandboxExecutionRequest;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.AgentHarness;
 import com.kratisai.controlplane.model.CanvasType;
 import com.kratisai.controlplane.model.ChatEntity;
@@ -64,6 +64,8 @@ import org.springframework.web.context.WebApplicationContext;
 @SpringIntegrationTest
 @SlowTest(slotGroup = "E2E_GIT_CREDENTIAL")
 class GitCredentialFlowRealTest {
+
+    private static final String SIDECAR_LOG_LOC = new SandboxProperties().getSidecarLog();
 
     private static final Logger logger = LoggerFactory.getLogger(GitCredentialFlowRealTest.class);
 

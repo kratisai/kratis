@@ -14,6 +14,7 @@ import com.kratisai.controlplane.api.wsdto.HitlResolver;
 import com.kratisai.controlplane.api.wsdto.PromptStatus;
 import com.kratisai.controlplane.api.wsdto.StopReason;
 import com.kratisai.controlplane.config.LiteLLMProperties;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.model.event.EnvironmentRegisteredEvent;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
@@ -70,6 +71,7 @@ public class SandboxExecutionService {
     private final Executor dispatchExecutor;
     private final ExecutionActivityPersistenceService activityPersistenceService;
     private final SandboxOrchestratorService sandboxOrchestratorService;
+    private final SandboxProperties sandboxProperties;
 
     final Map<UUID, String> activePromptIds = new ConcurrentHashMap<>();
 
@@ -90,7 +92,8 @@ public class SandboxExecutionService {
             LiteLLMProperties litellmProperties,
             @Qualifier("dispatchExecutor") Executor dispatchExecutor,
             ExecutionActivityPersistenceService activityPersistenceService,
-            SandboxOrchestratorService sandboxOrchestratorService) {
+            SandboxOrchestratorService sandboxOrchestratorService,
+            SandboxProperties sandboxProperties) {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.finalizeUsageTransactionTemplate = new TransactionTemplate(transactionManager);
         this.sandboxExecutionRepository = sandboxExecutionRepository;
@@ -109,6 +112,7 @@ public class SandboxExecutionService {
         this.dispatchExecutor = dispatchExecutor;
         this.activityPersistenceService = activityPersistenceService;
         this.sandboxOrchestratorService = sandboxOrchestratorService;
+        this.sandboxProperties = sandboxProperties;
     }
 
     private void requireTeamMembership(UUID userId, UUID teamId) {
@@ -250,7 +254,8 @@ public class SandboxExecutionService {
             String newRepoName,
             ModelProvider modelProvider,
             CreateSandboxExecutionRequest request) {
-        String taskPrompt = ActiveTaskPrompt.buildTaskPrompt(canvas.getContent());
+        String taskPrompt =
+                ActiveTaskPrompt.buildTaskPrompt(canvas.getContent(), sandboxProperties.getActiveTaskFile());
 
         SandboxExecution execution = new SandboxExecution();
         execution.setEnvironment(environment);
@@ -384,7 +389,8 @@ public class SandboxExecutionService {
         if (canvas == null || isBlank(canvas.getContent())) {
             throw new IllegalStateException("Canvas must be provided for an execution");
         }
-        String taskPrompt = ActiveTaskPrompt.buildTaskPrompt(canvas.getContent());
+        String taskPrompt =
+                ActiveTaskPrompt.buildTaskPrompt(canvas.getContent(), sandboxProperties.getActiveTaskFile());
         dispatchAcpPrompt(execution, taskPrompt, true, false);
     }
 

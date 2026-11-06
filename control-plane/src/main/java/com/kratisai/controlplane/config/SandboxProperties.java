@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.config;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
@@ -8,7 +9,12 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "kratis.sandbox")
 public class SandboxProperties {
 
+    public static final String DEFAULT_WORKSPACE = "/kratis/workspace";
+
     private String connectUrl = "ws://localhost:8080/ws/env";
+
+    /** Workspace root inside the sandbox. Everything else derives from it so alternate providers cannot drift. */
+    private String workspace = DEFAULT_WORKSPACE;
 
     private final Docker docker = new Docker();
     private final Lifecycle lifecycle = new Lifecycle();
@@ -19,6 +25,36 @@ public class SandboxProperties {
 
     public void setConnectUrl(String connectUrl) {
         this.connectUrl = connectUrl;
+    }
+
+    public String getWorkspace() {
+        return workspace;
+    }
+
+    public void setWorkspace(String workspace) {
+        this.workspace = workspace;
+    }
+
+    public String getPlatformDir() {
+        return workspace + "/.kratis";
+    }
+
+    public String getActiveTaskFile() {
+        return getPlatformDir() + "/ACTIVE_TASK.md";
+    }
+
+    /** Kept inside the workspace because some harnesses cannot read outside it. */
+    public String getSkillsDir() {
+        return getPlatformDir() + "/skills";
+    }
+
+    public String getLogsDir() {
+        Path parent = Path.of(workspace).getParent();
+        return (parent != null ? parent : Path.of(workspace)) + "/logs";
+    }
+
+    public String getSidecarLog() {
+        return getLogsDir() + "/sidecar.log";
     }
 
     public Docker getDocker() {

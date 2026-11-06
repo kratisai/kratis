@@ -11,8 +11,8 @@ class HarnessCatalogInitializerTest {
 
     @Test
     void publishesTheConfiguredDirectory() {
-        HarnessesProperties properties = new HarnessesProperties();
-        properties.setDirectory(HarnessCatalogFixture.DIRECTORY.toString());
+        InstanceProperties properties = new InstanceProperties();
+        properties.setHarnessesDirectory(HarnessCatalogFixture.DIRECTORY.toString());
 
         new HarnessCatalogInitializer(properties);
 
@@ -21,18 +21,18 @@ class HarnessCatalogInitializerTest {
 
     @Test
     void rejectsBlankDirectory() {
-        HarnessesProperties properties = new HarnessesProperties();
-        properties.setDirectory(" ");
+        InstanceProperties properties = new InstanceProperties();
+        properties.setHarnessesDirectory(" ");
 
         assertThatThrownBy(() -> new HarnessCatalogInitializer(properties))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("kratis.harnesses.directory");
+                .hasMessageContaining("kratis.instance.harnesses-directory");
     }
 
     @Test
     void rejectsMissingDirectory() {
-        HarnessesProperties properties = new HarnessesProperties();
-        properties.setDirectory("does/not/exist");
+        InstanceProperties properties = new InstanceProperties();
+        properties.setHarnessesDirectory("does/not/exist");
 
         assertThatThrownBy(() -> new HarnessCatalogInitializer(properties))
                 .isInstanceOf(IllegalStateException.class)

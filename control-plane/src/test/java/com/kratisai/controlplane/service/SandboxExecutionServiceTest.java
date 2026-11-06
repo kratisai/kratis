@@ -28,9 +28,9 @@ import com.kratisai.controlplane.api.wsdto.HitlState;
 import com.kratisai.controlplane.api.wsdto.LaunchStatus;
 import com.kratisai.controlplane.api.wsdto.PromptStatus;
 import com.kratisai.controlplane.api.wsdto.StopReason;
-import com.kratisai.controlplane.config.HarnessesProperties;
 import com.kratisai.controlplane.config.InstanceProperties;
 import com.kratisai.controlplane.config.LiteLLMProperties;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.model.event.EnvironmentRegisteredEvent;
@@ -42,6 +42,7 @@ import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.testsupport.HarnessCatalogFixture;
 import com.kratisai.controlplane.testsupport.ResourcelessTransactionManager;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -58,6 +59,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -131,11 +133,18 @@ class SandboxExecutionServiceTest {
     @Mock
     private SandboxExecutionActivityRepository activityRepository;
 
+    @Mock
+    private SkillProvisioningService skillProvisioningService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private SandboxProvisioningService sandboxProvisioningService;
     private SandboxExecutionService sandboxExecutionService;
     private ExecutionActivityPersistenceService activityPersistenceService;
     private LiteLLMProperties litellmProperties;
+    private SandboxProperties sandboxProperties;
+
+    @TempDir
+    Path tempDir;
 
     private static final UUID TEAM_ID = UUID.fromString("11111111-2222-3333-4444-555555555555");
     private static final UUID CHAT_ID = UUID.fromString("99999999-9999-9999-9999-999999999999");
@@ -152,8 +161,11 @@ class SandboxExecutionServiceTest {
     void setUp() throws Exception {
         litellmProperties = new LiteLLMProperties();
         litellmProperties.setBaseUrl("http://localhost:4000");
+        sandboxProperties = new SandboxProperties();
+        sandboxProperties.setWorkspace(tempDir.resolve("workspace").toString());
         // No pause before the final usage fetch in unit tests; the delay is a production concern.
         litellmProperties.setUsageFinalizeDelay(Duration.ZERO);
+        lenient().when(skillProvisioningService.provisionSkills(any())).thenReturn(List.of());
         sandboxProvisioningService = new SandboxProvisioningService(
                 transactionManager,
                 sandboxOrchestratorService,
@@ -165,7 +177,8 @@ class SandboxExecutionServiceTest {
                 litellmProperties,
                 environmentRpcClient,
                 createInstanceProperties(),
-                createHarnessesProperties());
+                skillProvisioningService,
+                sandboxProperties);
 
         activityPersistenceService = new ExecutionActivityPersistenceService(
                 activityRepository, sandboxExecutionRepository, objectMapper, eventPublisher);
@@ -200,7 +213,8 @@ class SandboxExecutionServiceTest {
                 litellmProperties,
                 dispatchExecutor,
                 activityPersistenceService,
-                sandboxOrchestratorService);
+                sandboxOrchestratorService,
+                sandboxProperties);
     }
 
     private void stubSuccessfulExec() throws Exception {
@@ -218,12 +232,7 @@ class SandboxExecutionServiceTest {
     private InstanceProperties createInstanceProperties() {
         InstanceProperties properties = new InstanceProperties();
         properties.setHostname("control-plane.test");
-        return properties;
-    }
-
-    private static HarnessesProperties createHarnessesProperties() {
-        HarnessesProperties properties = new HarnessesProperties();
-        properties.setDirectory(HarnessCatalogFixture.DIRECTORY.toString());
+        properties.setHarnessesDirectory(HarnessCatalogFixture.DIRECTORY.toString());
         return properties;
     }
 
@@ -558,7 +567,8 @@ class SandboxExecutionServiceTest {
         execution.setCanvas(canvasEntity("# Canvas source\nDo stuff"));
         // Deliberately different from the canvas content: ACTIVE_TASK.md must be built from the
         // linked canvas, never reconstructed out of the rendered prompt audit field.
-        execution.setTaskPrompt(ActiveTaskPrompt.buildTaskPrompt("# Prompt only\nNot the source"));
+        execution.setTaskPrompt(ActiveTaskPrompt.buildTaskPrompt(
+                "# Prompt only\nNot the source", sandboxProperties.getActiveTaskFile()));
 
         when(litellmProvisioningService.buildLiteLLMModelName(provider, "gpt-4o"))
                 .thenReturn("openai-test-provider-gpt-4o-11111111");
@@ -1107,7 +1117,9 @@ class SandboxExecutionServiceTest {
             ArgumentCaptor<EnvironmentRpcPayload.AcpPrompt> captor =
                     ArgumentCaptor.forClass(EnvironmentRpcPayload.AcpPrompt.class);
             verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), captor.capture());
-            assertThat(captor.getValue().taskPrompt()).isEqualTo(ActiveTaskPrompt.buildTaskPrompt("# Plan\nDo stuff"));
+            assertThat(captor.getValue().taskPrompt())
+                    .isEqualTo(ActiveTaskPrompt.buildTaskPrompt(
+                            "# Plan\nDo stuff", sandboxProperties.getActiveTaskFile()));
             assertThat(captor.getValue().executionId()).isEqualTo(EXECUTION_ID.toString());
             assertThat(captor.getValue().promptId()).isNotBlank();
             assertThat(captor.getValue().isSteering()).isNull();
@@ -1527,7 +1539,8 @@ class SandboxExecutionServiceTest {
                 litellmProperties,
                 environmentRpcClient,
                 createInstanceProperties(),
-                createHarnessesProperties());
+                skillProvisioningService,
+                sandboxProperties);
 
         ModelProvider provider = createTestModelProvider();
         SandboxExecution execution = createTestExecution(AgentHarness.valueOf("OPENHANDS"), provider, "gpt-4o");

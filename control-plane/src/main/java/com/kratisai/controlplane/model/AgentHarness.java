@@ -19,7 +19,7 @@ import java.util.stream.Stream;
 
 /**
  * Agent harness identity and definition. The catalogue is the {@code FILENAME.json} files in the
- * directory named by {@code kratis.harnesses.directory}; deliberately not a classpath scan, which a
+ * directory named by {@code kratis.instance.harnesses-directory}; deliberately not a classpath scan, which a
  * native image cannot enumerate.
  *
  * <p>A definition with {@code "enabled": false} is omitted from {@link #values()} but stays
@@ -113,7 +113,7 @@ public final class AgentHarness {
         Map<String, Definition> definitions = DEFINITIONS.get();
         if (definitions == null) {
             throw new IllegalStateException("Agent harness catalogue is not loaded; set "
-                    + "kratis.harnesses.directory and let HarnessCatalogInitializer run first");
+                    + "kratis.instance.harnesses-directory and let HarnessCatalogInitializer run first");
         }
         return definitions;
     }

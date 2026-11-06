@@ -1,6 +1,5 @@
 package com.kratisai.controlplane.e2e;
 
-import static com.kratisai.controlplane.service.LocalDockerSandboxProvider.SIDECAR_LOG_LOC;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -18,6 +17,7 @@ import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.HitlState;
 import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.config.LiteLLMProperties;
+import com.kratisai.controlplane.config.SandboxProperties;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.repository.*;
@@ -90,6 +90,8 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 @SlowTest(slotGroup = "E2E_DOCKER_CONTAINER")
 @UseRealLlmClient
 public abstract class AbstractAgentExecutionRealTest {
+
+    private static final String SIDECAR_LOG_LOC = new SandboxProperties().getSidecarLog();
 
     private static final Logger logger = LoggerFactory.getLogger(AbstractAgentExecutionRealTest.class);
     protected TestDataFactory.TestContext testContext;
