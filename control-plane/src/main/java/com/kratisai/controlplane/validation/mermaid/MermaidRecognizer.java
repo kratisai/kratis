@@ -23,6 +23,7 @@ public final class MermaidRecognizer {
     private static final Pattern RAW_FORBIDDEN =
             Pattern.compile("[\"<>\\r\\n\\x00-\\x1f]|#(?:quot|\\d+);|&[#A-Za-z0-9]", Pattern.CASE_INSENSITIVE);
     private static final Pattern FLOW_HEADER = Pattern.compile("^(flowchart|graph)(?i:(?: (?:td|tb|bt|lr|rl)))?$");
+    private static final Pattern FLOW_HEADER_DIRECTION = Pattern.compile("^(?:flowchart|graph)(?: ([a-zA-Z]{2}))?$");
     private static final Pattern FLOW_AMBIGUOUS = Pattern.compile("[\"\\[\\]{}|]");
     private static final Pattern INLINE_SOLID = Pattern.compile("^--\\s*\"([^\"]*)\"\\s*(-->|---|--o|--x)");
     private static final Pattern INLINE_DOTTED = Pattern.compile("^-\\.\\s*\"([^\"]*)\"\\s*(\\.-?>|-?\\.-)");
@@ -348,7 +349,7 @@ public final class MermaidRecognizer {
     }
 
     private List<String> flow(List<String> lines, String header) {
-        List<String> out = new ArrayList<>(List.of(header.replaceFirst("^graph", "flowchart")));
+        List<String> out = new ArrayList<>(List.of(flowHeader(header)));
         List<String> stack = new ArrayList<>();
         List<Set<String>> scopedEndpoints = new ArrayList<>();
         Set<String> groups = new HashSet<>();
@@ -464,6 +465,12 @@ public final class MermaidRecognizer {
                 fail("missing or invalid closing arrow for inline edge label; e.g. -- \"label\" -->");
             }
         }
+    }
+
+    private static String flowHeader(String header) {
+        Matcher matcher = FLOW_HEADER_DIRECTION.matcher(header);
+        if (!matcher.matches() || matcher.group(1) == null) return "flowchart";
+        return "flowchart " + matcher.group(1).toUpperCase(Locale.ROOT);
     }
 
     private static void addGroup(String id, Set<String> groups, Set<String> nodes) {

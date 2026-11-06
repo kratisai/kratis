@@ -49,6 +49,15 @@ export interface SandboxExecutionDto {
   usageLastUpdatedAt?: null | string
 }
 
+export function canPublishChanges(
+  executionStatus?: ExecutionStatus,
+  environmentStatus?: EnvironmentStatus,
+): boolean {
+  const isEnvironmentAlive = !environmentStatus || environmentStatus === 'CONNECTED'
+  const isSettled = executionStatus === 'IDLE' || executionStatus === 'COMPLETED'
+  return isEnvironmentAlive && isSettled
+}
+
 export async function createSandboxExecution(
   chatId: string,
   data: CreateSandboxExecutionRequest,

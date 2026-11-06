@@ -1222,7 +1222,7 @@
     "type": "flowchart",
     "source": "flowchart lr\nA[\"Start\"] --> B[\"End\"]",
     "ok": true,
-    "renderText": "flowchart lr\nA[\"Start\"] --> B[\"End\"]"
+    "renderText": "flowchart LR\nA[\"Start\"] --> B[\"End\"]"
   },
   {
     "name": "flow inline edge label solid",

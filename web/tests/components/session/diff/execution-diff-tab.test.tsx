@@ -50,6 +50,78 @@ describe('ExecutionDiffTab', () => {
     expect(await screen.findByText(/No file changes in working tree yet/i)).toBeInTheDocument()
   })
 
+  it('hides the toolbar Publish button for a dead environment', async () => {
+    vi.spyOn(diffApi, 'fetchDiffSummary').mockResolvedValue({
+      baseCommit: 'commit-a',
+      files: [],
+      headCommit: 'commit-b',
+      totalAdditions: 0,
+      totalDeletions: 0,
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionDiffTab
+          chatId="chat-1"
+          environmentStatus="TERMINATED"
+          executionId="exec-1"
+          executionStatus="COMPLETED"
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText(/No file changes in working tree yet/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /publish changes/i })).not.toBeInTheDocument()
+  })
+
+  it('hides the toolbar Publish button while a turn is still running', async () => {
+    vi.spyOn(diffApi, 'fetchDiffSummary').mockResolvedValue({
+      baseCommit: 'commit-a',
+      files: [],
+      headCommit: 'commit-b',
+      totalAdditions: 0,
+      totalDeletions: 0,
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionDiffTab
+          chatId="chat-1"
+          environmentStatus="CONNECTED"
+          executionId="exec-1"
+          executionStatus="RUNNING"
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText(/No file changes in working tree yet/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /publish changes/i })).not.toBeInTheDocument()
+  })
+
+  it('shows the toolbar Publish button for a settled change set on a live environment', async () => {
+    vi.spyOn(diffApi, 'fetchDiffSummary').mockResolvedValue({
+      baseCommit: 'commit-a',
+      files: [],
+      headCommit: 'commit-b',
+      totalAdditions: 0,
+      totalDeletions: 0,
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionDiffTab
+          chatId="chat-1"
+          environmentStatus="CONNECTED"
+          executionId="exec-1"
+          executionStatus="COMPLETED"
+        />
+      </QueryClientProvider>,
+    )
+
+    const publishBtn = await screen.findByRole('button', { name: /publish changes/i })
+    expect(publishBtn).toHaveClass('bg-primary')
+  })
+
   it('renders file summary headers and expands/collapses all files', async () => {
     vi.spyOn(diffApi, 'fetchDiffSummary').mockResolvedValue({
       baseCommit: 'commit-a',

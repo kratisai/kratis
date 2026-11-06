@@ -1,12 +1,21 @@
 import { useSearch } from '@tanstack/react-router'
-import { Download, Loader2, Moon, MoreHorizontal, Play, Square, Terminal } from 'lucide-react'
+import {
+  FileDiff,
+  FileOutput,
+  Loader2,
+  Moon,
+  MoreHorizontal,
+  Play,
+  Square,
+  Terminal,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import type { Activity } from '@/types/execution-activity-types'
 
 import { ExecutionDiffTab } from '@/components/session/diff/execution-diff-tab'
-import { SteeringPublishBar } from '@/components/session/diff/steering-publish-bar'
+import { SteeringBar } from '@/components/session/diff/steering-bar'
 import { ExecutionActivityLog } from '@/components/session/execution-activity-log'
 import { ExecutionUsageSummary } from '@/components/session/execution-usage-summary'
 import { AllowAllPermissionsToggle } from '@/components/topic/allow-all-permissions-toggle'
@@ -22,6 +31,7 @@ import { useResumeEnvironment } from '@/hooks/use-environments'
 import { useChatExecutions, useHaltExecution } from '@/hooks/use-executions'
 import { useIsMobile } from '@/hooks/use-is-mobile'
 import { downloadActivityLog } from '@/lib/activity-log-export'
+import { downloadPatchFile } from '@/lib/publish-api'
 import { useActivityStore } from '@/store/activity-store'
 import { useDiffReviewStore } from '@/store/diff-review-store'
 import { useExecutionStore } from '@/store/execution-store'
@@ -124,6 +134,12 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
     haltExecution.mutate({ chatId, executionId: execution.id })
   }
 
+  const handleDownloadDiff = () => {
+    void downloadPatchFile(chatId, executionId)
+      .then(() => toast.success('Diff downloaded'))
+      .catch(() => toast.error('Failed to download diff'))
+  }
+
   const hasActiveExecution = execution?.status === 'RUNNING' || execution?.status === 'IDLE'
   const canHalt = Boolean(execution) && (isEnvironmentSleeping || isEnvironmentAwake)
   const canViewTerminal = hasActiveExecution && isEnvironmentAwake
@@ -187,8 +203,12 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
                   }
                 }}
               >
-                <Download className="mr-2 h-3.5 w-3.5" />
-                Download
+                <FileOutput className="mr-2 h-3.5 w-3.5" />
+                Export activity log
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleDownloadDiff}>
+                <FileDiff className="mr-2 h-3.5 w-3.5" />
+                Download diff (.patch)
               </DropdownMenuItem>
               {canHalt && (
                 <>
@@ -266,17 +286,17 @@ export function ExecutionStageView({ chatId, executionId, tab }: ExecutionStageV
             <div className="min-w-0 flex-1 overflow-visible md:overflow-hidden">
               <ExecutionDiffTab
                 chatId={chatId}
+                environmentStatus={environmentStatus}
                 executionId={executionId}
                 executionStatus={execution?.status}
                 onScroll={handleScroll}
-                showSteeringBar={false}
               />
             </div>
           </div>
         )}
 
         {/* Continuous Steering & Publish Bar */}
-        <SteeringPublishBar
+        <SteeringBar
           chatId={chatId}
           environmentStatus={environmentStatus}
           executionId={executionId}

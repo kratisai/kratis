@@ -64,6 +64,8 @@ public class SandboxExecutionPublishService {
     private static final Logger logger = LoggerFactory.getLogger(SandboxExecutionPublishService.class);
     private static final long GIT_PUSH_TIMEOUT_SECONDS = 60;
     private static final long GIT_DIFF_TIMEOUT_SECONDS = 15;
+    private static final String UNREADABLE_WORKSPACE_MESSAGE =
+            "Publishing is temporarily unavailable: the workspace state could not be read";
 
     private final SandboxExecutionRepository sandboxExecutionRepository;
     private final ChangeSetRepository changeSetRepository;
@@ -158,15 +160,9 @@ public class SandboxExecutionPublishService {
 
         ExecutionEnvironment env = execution.getEnvironment();
         if (env == null || env.getStatus() != EnvironmentStatus.CONNECTED) {
-            return zeroPublishCapabilities(
-                    execution,
-                    newRepo,
-                    supportsPr,
-                    repoType,
-                    defaultBranch,
-                    canCreateRepository,
-                    visibilityOptions,
-                    changeSets);
+            // A zeroed capabilities payload would masquerade unpublished work as "nothing to
+            // publish"; publishing is only answerable from a live workspace.
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Publishing needs a running environment");
         }
 
         String targetHeadBranch = execution.getPublishedBranch();
@@ -184,19 +180,10 @@ public class SandboxExecutionPublishService {
                     TimeUnit.SECONDS);
         } catch (Exception e) {
             logger.warn("Failed to observe git state for execution {}: {}", executionId, e.getMessage());
-            obsResult = null;
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, UNREADABLE_WORKSPACE_MESSAGE);
         }
-
         if (obsResult == null) {
-            return zeroPublishCapabilities(
-                    execution,
-                    newRepo,
-                    supportsPr,
-                    repoType,
-                    defaultBranch,
-                    canCreateRepository,
-                    visibilityOptions,
-                    changeSets);
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, UNREADABLE_WORKSPACE_MESSAGE);
         }
 
         PullRequestSnapshot prSnapshot = null;
@@ -310,41 +297,6 @@ public class SandboxExecutionPublishService {
                 csSummary,
                 target,
                 digest);
-    }
-
-    private PublishCapabilitiesDto zeroPublishCapabilities(
-            SandboxExecution execution,
-            boolean newRepo,
-            boolean supportsPr,
-            RepositoryType repoType,
-            String defaultBranch,
-            boolean canCreateRepository,
-            List<RepositoryVisibility> visibilityOptions,
-            List<ChangeSet> changeSets) {
-        PublishCapabilitiesDto.PublishStatsDto zeroStats =
-                new PublishCapabilitiesDto.PublishStatsDto(0, 0, 0, 0, 0, false, "There are no changes to publish");
-        return new PublishCapabilitiesDto(
-                supportsPr,
-                repoType,
-                defaultBranch,
-                zeroStats,
-                "",
-                "",
-                execution.getPublishedBranch(),
-                newRepo,
-                canCreateRepository,
-                newRepo ? execution.getNewRepoName() : null,
-                visibilityOptions,
-                List.of(),
-                false,
-                deriveSuggestedBranch(execution, changeSets.size() + 1),
-                PublishCapabilitiesDto.PublishStatus.UP_TO_DATE,
-                0,
-                0,
-                false,
-                new PublishCapabilitiesDto.ChangeSetSummaryDto(0, 0, List.of(), ""),
-                PublishCapabilitiesDto.TargetDto.openPr(defaultBranch),
-                "");
     }
 
     private String deriveSuggestedBranch(SandboxExecution execution, int iteration) {

@@ -110,7 +110,7 @@ describe('Chat View - Activity Log Download', () => {
     const { clickedAnchors, createObjectURL } = mockDownloads()
 
     await user.click(screen.getByRole('button', { name: /activity log options/i }))
-    await user.click(screen.getByRole('menuitem', { name: /download/i }))
+    await user.click(screen.getByRole('menuitem', { name: /export activity log/i }))
 
     expect(createObjectURL).toHaveBeenCalledTimes(1)
     const blob = createObjectURL.mock.calls[0][0]
@@ -140,7 +140,7 @@ describe('Chat View - Activity Log Download', () => {
     })
 
     await user.click(screen.getByRole('button', { name: /activity log options/i }))
-    await user.click(screen.getByRole('menuitem', { name: /download/i }))
+    await user.click(screen.getByRole('menuitem', { name: /export activity log/i }))
 
     await waitFor(() => {
       expect(screen.getByText('Failed to download activity log')).toBeInTheDocument()

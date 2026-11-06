@@ -10,7 +10,7 @@ Implementations must apply the grammar, semantic checks, text policies, and boun
 
 ## Data conventions
 
-`headers` maps the result type to accepted header tokens. Flowchart also accepts one space and an optional direction. `graph` returns type `flowchart` and renders as `flowchart`. Other headers must match exactly.
+`headers` maps the result type to accepted header tokens. Flowchart also accepts one space and an optional direction; the direction is accepted case-insensitively and canonicalized to uppercase. `graph` returns type `flowchart` and renders as `flowchart`. Other headers must match exactly.
 
 `productions` contains EBNF summaries per type. `common` and `c4` provide shared productions. Each statement occupies one trimmed line. Blank lines are ignored. Quoted and scanner-based tokens allow spaces or tabs where the scanner accepts them. The semantic constraints below and conformance cases complement these summaries.
 
