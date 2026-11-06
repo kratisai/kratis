@@ -151,18 +151,13 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                     List.of("docker", "inspect", "--format", "{{.State.Running}}", runnerRef), null, null);
             return result.exitCode() == 0 && "true".equals(new String(result.output()).trim());
         } catch (IOException | InterruptedException e) {
-            // The runtime state is unobservable; report running so callers keep the suspend path.
-            logger.warn(
-                    "Failed to inspect running state of container {} for environment {}: {}",
-                    runnerRef,
-                    envId,
-                    e.getMessage());
-            return true;
+            // Unobservable is not absent: let callers fail open instead of guessing.
+            throw new IllegalStateException("Failed to inspect running state of container " + runnerRef, e);
         }
     }
 
     @Override
-    public void suspend(UUID envId) {
+    public boolean suspend(UUID envId) {
         if (envId == null) {
             throw new IllegalArgumentException("Environment id is required to suspend a sandbox");
         }
@@ -174,12 +169,14 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         if (runnerRef == null) {
             if (isRetained(envId)) {
                 terminateSandboxResources(envKey);
-                return;
+                return true;
             }
-            throw new IllegalStateException("No runner container found for environment " + envId);
+            logger.info("No runner container or suspended state for environment {}; nothing to preserve", envId);
+            return false;
         }
         commitSnapshot(envKey, runnerRef);
         terminateSandboxResources(envKey);
+        return true;
     }
 
     @Override
@@ -435,6 +432,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         }
     }
 
+    /** Null only for a definite absence; failed docker executions raise so callers fail open. */
     private String imageIdOf(String imageRef) {
         try {
             ProcessExecutor.ProcessResult result =
@@ -445,8 +443,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             String output = new String(result.output()).trim();
             return output.isEmpty() ? null : output;
         } catch (IOException | InterruptedException e) {
-            logger.warn("Failed to inspect image {}: {}", imageRef, e.getMessage());
-            return null;
+            throw new IllegalStateException("Failed to inspect image " + imageRef, e);
         }
     }
 
@@ -815,17 +812,18 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         return name;
     }
 
+    /** False only for a definite absence; failed docker executions raise so callers fail open. */
     private boolean containerExists(String containerRef) {
         try {
             ProcessExecutor.ProcessResult result = processExecutor.execute(
                     List.of("docker", "inspect", "--format", "{{.Id}}", containerRef), null, null);
             return result.exitCode() == 0;
         } catch (IOException | InterruptedException e) {
-            logger.debug("Failed to inspect container {}: {}", containerRef, e.getMessage());
-            return false;
+            throw new IllegalStateException("Failed to inspect container " + containerRef, e);
         }
     }
 
+    /** False only for a definite non-ownership verdict; failed docker executions raise. */
     private boolean ownsContainer(String containerRef) {
         try {
             ProcessExecutor.ProcessResult result = processExecutor.execute(
@@ -842,8 +840,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             }
             return instanceId.equals(new String(result.output()).trim());
         } catch (IOException | InterruptedException e) {
-            logger.debug("Failed to inspect ownership of container {}: {}", containerRef, e.getMessage());
-            return false;
+            throw new IllegalStateException("Failed to inspect ownership of container " + containerRef, e);
         }
     }
 
@@ -876,6 +873,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         try {
             ProcessExecutor.ProcessResult result = processExecutor.execute(command, null, null);
             if (result.exitCode() != 0) {
+                logger.debug("Docker runner listing failed (exit {}); using deterministic name", result.exitCode());
                 return null;
             }
             String output = new String(result.output()).trim();

@@ -54,6 +54,7 @@ public class EnvironmentLifecycleService {
     // in-memory clock. A lost entry only delays the purge by one more grace.
     private final Map<UUID, Instant> orphanFirstSeen = new ConcurrentHashMap<>();
     private final Map<UUID, Instant> orphanSnapshotFirstSeen = new ConcurrentHashMap<>();
+    private final Map<UUID, Instant> lostRuntimeFirstSeen = new ConcurrentHashMap<>();
 
     public EnvironmentLifecycleService(
             ExecutionEnvironmentRepository environmentRepository,
@@ -96,8 +97,7 @@ public class EnvironmentLifecycleService {
     /**
      * A PENDING_CONNECT row past {@code connect-timeout} never registered, regardless of whether
      * its container is still running. Liveness is not connectivity: keeping a running container
-     * whose connector cannot reach the control plane leaks compute forever. Remove it and roll the
-     * row back inside its own transaction, keeping the snapshot when one exists.
+     * whose connector cannot reach the control plane leaks compute forever.
      */
     private void resolveStuckResumes(Instant now) {
         for (ExecutionEnvironment env : environmentRepository.findByTypeAndStatus(
@@ -109,28 +109,41 @@ public class EnvironmentLifecycleService {
             if (provider == null) {
                 continue;
             }
-            failRow("resolving stuck connect", () -> resolveStuckConnect(env, provider), env.getId());
+            failRow("resolving stuck connect", () -> reapWedgedConnector(env, provider, now), env.getId());
         }
     }
 
-    private void resolveStuckConnect(ExecutionEnvironment env, SandboxProvider provider) {
+    private void reapWedgedConnector(ExecutionEnvironment env, SandboxProvider provider, Instant now) {
         UUID envId = env.getId();
-        logger.warn("Environment {} never connected within {}; removing compute", envId, connectTimeout);
+        logger.warn("Connector of env {} cannot serve; capturing sidecar logs and removing compute", envId);
         provider.captureSidecarLogs(envId);
-        provider.terminateSandbox(envId);
-
-        // The connector may have registered while compute was being removed. The conditional
-        // transition fails in that case, so a CONNECTED row is never overwritten; the lost-runtime
-        // rule reconciles the now-missing runtime on a later sweep.
-        boolean retained = provider.isRetained(envId);
-        boolean claimed = retained
-                ? executionEnvironmentService.rollbackFailedResumeIfStillPending(envId, env.getStateChangedAt())
-                : executionEnvironmentService.reconcilePurgedEnvironmentIfStillPending(envId, env.getStateChangedAt());
-        if (!claimed) {
-            logger.debug(
-                    "Environment {} registered while its stuck runtime was removed;"
-                            + " the lost-runtime rule will reconcile it",
-                    envId);
+        boolean retained = provider.suspend(envId);
+        if (env.getStatus() == EnvironmentStatus.PENDING_CONNECT) {
+            // The connector may have registered while compute was being removed. The conditional
+            // transition fails in that case, so a CONNECTED row is never overwritten; the
+            // lost-runtime rule reconciles the now-missing runtime on a later sweep.
+            boolean claimed = retained
+                    ? executionEnvironmentService.rollbackFailedResumeIfStillPending(envId, env.getStateChangedAt())
+                    : executionEnvironmentService.reconcilePurgedEnvironmentIfStillPending(
+                            envId, env.getStateChangedAt());
+            if (!claimed) {
+                logger.debug(
+                        "Environment {} registered while its stuck runtime was removed;"
+                                + " the lost-runtime rule will reconcile it",
+                        envId);
+            }
+            return;
+        }
+        if (retained) {
+            lostRuntimeFirstSeen.remove(envId);
+            executionEnvironmentService.suspendAfterLostRuntime(env);
+            return;
+        }
+        // Nothing at all is left (no runner, no snapshot): confirm the absence over one window
+        // before calling it terminated, so a transient listing miss is never destructive.
+        if (elapsed(lostRuntimeFirstSeen.putIfAbsent(envId, now), now, connectTimeout)) {
+            lostRuntimeFirstSeen.remove(envId);
+            executionEnvironmentService.reconcilePurgedEnvironment(env);
         }
     }
 
@@ -171,10 +184,15 @@ public class EnvironmentLifecycleService {
     }
 
     /**
-     * Lost runtime rule. A CONNECTED row whose runner is absent past startup-grace has lost its
-     * runtime: remove owned compute without committing a snapshot, then SLEEPING when a snapshot
-     * exists, else TERMINATED. RUNNING executions move to UNKNOWN; IDLE executions are unchanged
-     * for SLEEPING and move to UNKNOWN for TERMINATED.
+     * Lost runtime rule. A CONNECTED row whose runner is absent went down mid-flight: remove
+     * owned compute only through {@code suspend}, so any remaining state is preserved and the row
+     * goes to SLEEPING with its turn history intact. A runner that is up is left alone until its
+     * heartbeat (its only liveness signal) has been absent one full reconnect window. Only a
+     * nothing-left CONNECTED row becomes TERMINATED, after that window. RUNNING executions move
+     * to UNKNOWN on suspend; IDLE ones are unchanged for SLEEPING and move to UNKNOWN for
+     * TERMINATED. PENDING_CONNECT and SLEEPING rows do not need the heartbeat: their
+     * state_changed_at is stamped on entry to that status, so the startup-grace gate above guards
+     * both against docker listing lag right after the status change.
      */
     private void applyLostRuntimeRule(Instant now) {
         List<ExecutionEnvironment> rows = environmentRepository.findByTypeAndStatusIn(
@@ -184,10 +202,19 @@ public class EnvironmentLifecycleService {
         Map<SandboxProvider, Set<UUID>> retained = new HashMap<>();
         for (ExecutionEnvironment env : rows) {
             SandboxProvider provider = providerFor(env);
-            if (provider == null || !elapsed(env.getStateChangedAt(), now, startupGrace)) {
+            if (provider == null) {
                 continue;
             }
-            failRow("checking row resources", () -> checkRowResources(env, provider, active, retained), env.getId());
+            // CONNECTED rows gate on their heartbeat, not on row age: state_changed_at holds the
+            // connect time, which is by construction older than any grace.
+            if (env.getStatus() != EnvironmentStatus.CONNECTED
+                    && !elapsed(env.getStateChangedAt(), now, startupGrace)) {
+                continue;
+            }
+            failRow(
+                    "checking row resources",
+                    () -> checkRowResources(env, provider, active, retained, now),
+                    env.getId());
         }
     }
 
@@ -195,7 +222,8 @@ public class EnvironmentLifecycleService {
             ExecutionEnvironment env,
             SandboxProvider provider,
             Map<SandboxProvider, Set<UUID>> active,
-            Map<SandboxProvider, Set<UUID>> retained) {
+            Map<SandboxProvider, Set<UUID>> retained,
+            Instant now) {
         boolean hasActive = active.computeIfAbsent(provider, SandboxProvider::listActiveEnvIds)
                 .contains(env.getId());
         boolean hasRetained = retained.computeIfAbsent(provider, SandboxProvider::listRetainedEnvIds)
@@ -213,15 +241,21 @@ public class EnvironmentLifecycleService {
             }
             case CONNECTED -> {
                 if (provider.isSandboxRunning(env.getId())) {
-                    return;
-                }
-                logger.warn("CONNECTED env {} lost its runtime; removing compute", env.getId());
-                provider.terminateSandbox(env.getId());
-                if (provider.isRetained(env.getId())) {
-                    executionEnvironmentService.suspendAfterLostRuntime(env);
+                    // Up but disconnected: give the connector its reconnect window before
+                    // parking the environment. A live container plus heartbeats means healthy.
+                    if (!elapsed(env.getLastHeartbeat(), now, connectTimeout)) {
+                        return;
+                    }
+                    logger.warn(
+                            "CONNECTED env {} runtime is up but its heartbeat has been gone for {}; suspending",
+                            env.getId(),
+                            connectTimeout);
                 } else {
-                    executionEnvironmentService.reconcilePurgedEnvironment(env);
+                    if (lostRuntimeFirstSeen.putIfAbsent(env.getId(), now) == null) {
+                        logger.info("CONNECTED env {} lost its runtime; preserving what remains", env.getId());
+                    }
                 }
+                reapWedgedConnector(env, provider, now);
             }
             case PENDING_CONNECT -> {
                 if (!hasActive && !hasRetained) {

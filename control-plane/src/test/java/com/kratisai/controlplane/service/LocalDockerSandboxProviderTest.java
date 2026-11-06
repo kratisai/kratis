@@ -935,7 +935,7 @@ class LocalDockerSandboxProviderTest {
             return defaultMockResult(cmd);
         });
 
-        provider.suspend(envUuid);
+        assertThat(provider.suspend(envUuid)).isTrue();
 
         String snapshotRef = "kratis-snapshot-" + envUuid + ":latest";
         verify(mockProcessExecutor)
@@ -963,11 +963,27 @@ class LocalDockerSandboxProviderTest {
     }
 
     @Test
-    void testSuspendFailsWhenNoRunnerContainerExists() throws Exception {
+    void testSuspendReturnsFalseWhenNothingIsLeftToPreserve() throws Exception {
+        UUID envUuid = UUID.randomUUID();
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("ps") || cmd.contains("images")) {
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            // Every inspect/listing of an absent resource answers with a nonzero exit.
+            return new ProcessExecutor.ProcessResult(1, "".getBytes());
+        });
+
+        assertThat(provider.suspend(envUuid)).isFalse();
+    }
+
+    @Test
+    void testSuspendThrowsWhenDockerExecutionFails() throws Exception {
         UUID envUuid = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any()))
                 .thenReturn(new ProcessExecutor.ProcessResult(1, "".getBytes()));
 
+        // A failed docker invocation is not an absence verdict: the caller must fail open.
         assertThatThrownBy(() -> provider.suspend(envUuid)).isInstanceOf(IllegalStateException.class);
     }
 
@@ -1006,7 +1022,7 @@ class LocalDockerSandboxProviderTest {
             return defaultMockResult(cmd);
         });
 
-        provider.suspend(envUuid);
+        assertThat(provider.suspend(envUuid)).isTrue();
 
         // The container-existence probe uses `docker inspect` on the deterministic name.
         verify(mockProcessExecutor, atLeastOnce())
@@ -1094,14 +1110,19 @@ class LocalDockerSandboxProviderTest {
     @Test
     void testIsSandboxRunningFalseWhenNoContainerExists() throws Exception {
         UUID envUuid = UUID.randomUUID();
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(1, "".getBytes()));
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (cmd.contains("ps")) {
+                return new ProcessExecutor.ProcessResult(0, "".getBytes());
+            }
+            return new ProcessExecutor.ProcessResult(1, "".getBytes());
+        });
 
         assertThat(provider.isSandboxRunning(envUuid)).isFalse();
     }
 
     @Test
-    void testIsSandboxRunningTrueWhenRuntimeStateUnobservable() throws Exception {
+    void testIsSandboxRunningThrowsWhenRuntimeStateUnobservable() throws Exception {
         UUID envUuid = UUID.randomUUID();
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
@@ -1132,7 +1153,8 @@ class LocalDockerSandboxProviderTest {
             return defaultMockResult(cmd);
         });
 
-        assertThat(provider.isSandboxRunning(envUuid)).isTrue();
+        // Unobservable is not absent (nor "running"): callers must fail open, not guess.
+        assertThatThrownBy(() -> provider.isSandboxRunning(envUuid)).isInstanceOf(IllegalStateException.class);
     }
 
     @Test

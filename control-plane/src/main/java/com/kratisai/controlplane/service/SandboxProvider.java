@@ -15,7 +15,7 @@ public interface SandboxProvider {
 
     boolean isSandboxRunning(UUID envId);
 
-    void suspend(UUID envId);
+    boolean suspend(UUID envId);
 
     void resume(ExecutionEnvironment environment);
 

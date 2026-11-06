@@ -68,6 +68,10 @@ public class IngestionWorkerIntegrationTest {
 
     private Path tempRepoDir;
 
+    // The shared single-thread ingestion executor queues behind earlier tests under load, so
+    // awaiting a terminal status only against wall time needs a generous window.
+    private static final int TERMINAL_AWAIT_SECONDS = 30;
+
     @BeforeEach
     void setUp() throws Exception {
         fakeChatModel.reset();
@@ -166,7 +170,7 @@ public class IngestionWorkerIntegrationTest {
         ingestionWorker.runIngestion(savedBatch.getId());
 
         // 3. Assertion: Verify batch transitions to SUCCESS
-        await().atMost(15, TimeUnit.SECONDS)
+        await().atMost(TERMINAL_AWAIT_SECONDS, TimeUnit.SECONDS)
                 .pollInterval(500, TimeUnit.MILLISECONDS)
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch = ingestionBatchRepository
@@ -191,7 +195,7 @@ public class IngestionWorkerIntegrationTest {
         ingestionWorker.runIngestion(savedBatch.getId());
 
         // 3. Assertion: Verify batch transitions to FAILED.
-        await().atMost(15, TimeUnit.SECONDS)
+        await().atMost(TERMINAL_AWAIT_SECONDS, TimeUnit.SECONDS)
                 .pollInterval(500, TimeUnit.MILLISECONDS)
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch = ingestionBatchRepository
@@ -241,7 +245,7 @@ public class IngestionWorkerIntegrationTest {
         ingestionWorker.runIngestion(savedBatch.getId());
 
         // 4. Assertion: Verify batch transitions to FAILED
-        await().atMost(15, TimeUnit.SECONDS)
+        await().atMost(TERMINAL_AWAIT_SECONDS, TimeUnit.SECONDS)
                 .pollInterval(500, TimeUnit.MILLISECONDS)
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch = ingestionBatchRepository
@@ -305,7 +309,7 @@ public class IngestionWorkerIntegrationTest {
         ingestionWorker.runIngestion(savedBatch.getId());
 
         // 4. Assertion: Verify batch transitions to FAILED
-        await().atMost(15, TimeUnit.SECONDS)
+        await().atMost(TERMINAL_AWAIT_SECONDS, TimeUnit.SECONDS)
                 .pollInterval(500, TimeUnit.MILLISECONDS)
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch = ingestionBatchRepository
@@ -341,7 +345,7 @@ public class IngestionWorkerIntegrationTest {
         ingestionWorker.runIngestion(savedBatch.getId());
 
         // 3. Assertion: Verify batch transitions to SUCCESS
-        await().atMost(15, TimeUnit.SECONDS)
+        await().atMost(TERMINAL_AWAIT_SECONDS, TimeUnit.SECONDS)
                 .pollInterval(500, TimeUnit.MILLISECONDS)
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch = ingestionBatchRepository
@@ -390,7 +394,7 @@ public class IngestionWorkerIntegrationTest {
         ingestionWorker.runIngestion(savedBatch.getId());
 
         // 3. Assertion: Verify batch transitions to FAILED
-        await().atMost(15, TimeUnit.SECONDS)
+        await().atMost(TERMINAL_AWAIT_SECONDS, TimeUnit.SECONDS)
                 .pollInterval(500, TimeUnit.MILLISECONDS)
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch = ingestionBatchRepository
@@ -427,7 +431,7 @@ public class IngestionWorkerIntegrationTest {
         ingestionWorker.runIngestion(savedBatch.getId());
 
         // 3. Assertion: Verify batch transitions to FAILED with appropriate error message
-        await().atMost(15, TimeUnit.SECONDS)
+        await().atMost(TERMINAL_AWAIT_SECONDS, TimeUnit.SECONDS)
                 .pollInterval(500, TimeUnit.MILLISECONDS)
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch = ingestionBatchRepository
@@ -458,7 +462,7 @@ public class IngestionWorkerIntegrationTest {
         ingestionWorker.runIngestion(savedBatch.getId());
 
         // 3. Assertion: Verify batch transitions to FAILED with appropriate error message
-        await().atMost(15, TimeUnit.SECONDS)
+        await().atMost(TERMINAL_AWAIT_SECONDS, TimeUnit.SECONDS)
                 .pollInterval(500, TimeUnit.MILLISECONDS)
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch = ingestionBatchRepository
