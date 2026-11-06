@@ -11,7 +11,8 @@ import org.springframework.util.StringUtils;
  * (container and network labels consumed by the zombie collector), so co-located instances never
  * reap each other's sandboxes. The hostname is the host the control plane runs on — used for
  * sandbox-side derived identities (e.g. the git author email of platform commits) — never the
- * sandbox guest hostname.
+ * sandbox guest hostname. The instance also owns the installation asset directories: the harness
+ * catalogue and the installation skills.
  */
 @Component
 @ConfigurationProperties(prefix = "kratis.instance")
@@ -19,6 +20,8 @@ public class InstanceProperties {
 
     private String id = "default";
     private String hostname = "";
+    private String harnessesDirectory = "harnesses";
+    private String skillsDirectory = "skills";
 
     public String getId() {
         return id;
@@ -34,6 +37,22 @@ public class InstanceProperties {
 
     public void setHostname(String hostname) {
         this.hostname = hostname;
+    }
+
+    public String getHarnessesDirectory() {
+        return harnessesDirectory;
+    }
+
+    public void setHarnessesDirectory(String harnessesDirectory) {
+        this.harnessesDirectory = harnessesDirectory;
+    }
+
+    public String getSkillsDirectory() {
+        return skillsDirectory;
+    }
+
+    public void setSkillsDirectory(String skillsDirectory) {
+        this.skillsDirectory = skillsDirectory;
     }
 
     /** Resolves the control-plane hostname, falling back to the environment or local host. */

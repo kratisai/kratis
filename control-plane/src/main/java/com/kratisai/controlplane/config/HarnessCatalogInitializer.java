@@ -14,15 +14,15 @@ import org.springframework.stereotype.Component;
 @Lazy(false)
 public class HarnessCatalogInitializer {
 
-    public HarnessCatalogInitializer(HarnessesProperties properties) {
+    public HarnessCatalogInitializer(InstanceProperties properties) {
         AgentHarness.load(directory(properties));
     }
 
-    private static Path directory(HarnessesProperties properties) {
-        String configured = properties.getDirectory();
+    private static Path directory(InstanceProperties properties) {
+        String configured = properties.getHarnessesDirectory();
         if (configured == null || configured.isBlank()) {
             throw new IllegalStateException(
-                    "kratis.harnesses.directory must name the directory holding the harness definitions");
+                    "kratis.instance.harnesses-directory must name the directory holding the harness definitions");
         }
         return Path.of(configured);
     }

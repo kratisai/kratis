@@ -55,6 +55,9 @@ public class Team {
     @OneToMany(mappedBy = "team", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ModelProvider> modelProviders = new ArrayList<>();
 
+    @OneToMany(mappedBy = "team", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<TeamSkill> skills = new ArrayList<>();
+
     @PrePersist
     protected void onCreate() {
         Instant now = Instant.now();
@@ -224,5 +227,23 @@ public class Team {
     public void removeModelProvider(ModelProvider provider) {
         modelProviders.remove(provider);
         provider.setTeam(null);
+    }
+
+    public List<TeamSkill> getSkills() {
+        return skills;
+    }
+
+    public void setSkills(List<TeamSkill> skills) {
+        this.skills = skills;
+    }
+
+    public void addSkill(TeamSkill skill) {
+        skills.add(skill);
+        skill.setTeam(this);
+    }
+
+    public void removeSkill(TeamSkill skill) {
+        skills.remove(skill);
+        skill.setTeam(null);
     }
 }

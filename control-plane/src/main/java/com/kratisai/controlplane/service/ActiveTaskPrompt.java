@@ -4,12 +4,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
-import java.util.UUID;
 
 public final class ActiveTaskPrompt {
-
-    public static final String ACTIVE_TASK_PATH = "/kratis/workspace/.kratis/ACTIVE_TASK.md";
-    private static final String ACTIVE_TASK_DIR = "/kratis/workspace/.kratis";
 
     private static final int WRITE_CHUNK_CHARS = 8000;
 
@@ -35,17 +31,17 @@ public final class ActiveTaskPrompt {
 
     private ActiveTaskPrompt() {}
 
-    public static String withTaskPointer(String promptText) {
+    public static String withTaskPointer(String promptText, String activeTaskPath) {
         String body = promptText != null ? promptText : "";
         return """
                 Before acting, re-read the canonical task file fresh: %s (§1 Task plus §3 Gates) and \
                 continue from the first gate whose exit is not yet evidenced in-session. Do not claim \
                 completion without that evidence.
 
-                %s""".formatted(ACTIVE_TASK_PATH, body);
+                %s""".formatted(activeTaskPath, body);
     }
 
-    public static String buildTaskPrompt(String canvasContent) {
+    public static String buildTaskPrompt(String canvasContent, String activeTaskPath) {
         //                Execute the user's task systematically: prepare, execute and verify.
         //                First, Prepare the environment.
         //                 - Inspect `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md` (repo root first, then the task
@@ -87,16 +83,20 @@ public final class ActiveTaskPrompt {
                 ### User Task follows - use the above structure to fully deliver this task
                 =====================================
                 %s
-                """.formatted(ACTIVE_TASK_PATH, OUTPUT_GUIDANCE, canvas);
+                """.formatted(activeTaskPath, OUTPUT_GUIDANCE, canvas);
     }
 
-    public static String buildActiveTaskDocument(UUID executionId, String canvasContent) {
+    public static String buildActiveTaskDocument(String canvasContent, List<SkillDefinition> skills, String skillsDir) {
         String canvas = canvasContent != null ? canvasContent : "";
         return """
                 > Source of truth. Re-read fresh at each gate below.
                 > PLATFORM sections: do not edit. AGENT section: you own.
 
                 ## USER TASK (platform, immutable)
+
+                %s
+
+                ## Available Skills
 
                 %s
 
@@ -119,15 +119,44 @@ public final class ActiveTaskPrompt {
                 - [ ] <check> — evidence:
 
                 ### Evidence log
-                """.formatted(canvas, DOCKER_GUIDANCE, OUTPUT_GUIDANCE);
+                """.formatted(canvas, buildAvailableSkillsSection(skills, skillsDir), DOCKER_GUIDANCE, OUTPUT_GUIDANCE);
     }
 
-    public static List<String> buildWriteCommands(String document) {
+    public static String buildAvailableSkillsSection(List<SkillDefinition> skills, String skillsDir) {
+        StringBuilder section = new StringBuilder();
+        section.append("Read the referenced `SKILL.md` file before performing a task that matches the "
+                + "skill's description. Do not read every skill up front.\n\n");
+        section.append("| Skill Name | Path | When to Use |\n");
+        section.append("| :--- | :--- | :--- |\n");
+        if (skills == null || skills.isEmpty()) {
+            section.append("| _None_ | | |\n");
+        } else {
+            for (SkillDefinition skill : skills) {
+                section.append("| ")
+                        .append(escapeTableCell(skill.name()))
+                        .append(" | `")
+                        .append(escapeTableCell(skill.catalogPath(skillsDir)))
+                        .append("` | ")
+                        .append(escapeTableCell(skill.description()))
+                        .append(" |\n");
+            }
+        }
+        section.append("\n");
+        section.append("Repository skills checked into this repository are not listed above. Perform your "
+                + "own discovery of repository-skills. Repository skills take precedence over the above skills.");
+        return section.toString();
+    }
+
+    private static String escapeTableCell(String value) {
+        return value == null ? "" : value.replace("|", "\\|").replace("\n", " ").replace("\r", " ");
+    }
+
+    public static List<String> buildWriteCommands(String document, String activeTaskPath, String platformDir) {
         String content = document != null ? document : "";
         String encoded = Base64.getEncoder().encodeToString(content.getBytes(StandardCharsets.UTF_8));
         List<String> commands = new ArrayList<>();
-        String quotedPath = "'" + ACTIVE_TASK_PATH + "'";
-        String quotedDir = "'" + ACTIVE_TASK_DIR + "'";
+        String quotedPath = "'" + activeTaskPath + "'";
+        String quotedDir = "'" + platformDir + "'";
         if (encoded.isEmpty()) {
             commands.add("mkdir -p " + quotedDir + " && test -s " + quotedPath);
             return List.copyOf(commands);

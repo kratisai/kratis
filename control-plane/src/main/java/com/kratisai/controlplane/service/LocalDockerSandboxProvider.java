@@ -26,10 +26,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class LocalDockerSandboxProvider implements SandboxProvider {
     private static final Logger logger = LoggerFactory.getLogger(LocalDockerSandboxProvider.class);
-    public static final String SIDECAR_LOG_LOC = "/kratis/logs/sidecar.log";
-
-    private static final List<String> REQUIRED_SANDBOX_DIRECTORIES = List.of("/kratis/workspace", "/kratis/logs");
-
     private static final Path APPARMOR_USERNS_RESTRICTION_SYSCTL =
             Path.of("/proc/sys/kernel/apparmor_restrict_unprivileged_userns");
 
@@ -45,6 +41,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
 
     private final ProcessExecutor processExecutor;
     private final String instanceId;
+    private final SandboxProperties sandboxProperties;
     private final String registryMirror;
     private final String runnerImage;
     private final boolean debug;
@@ -55,11 +52,16 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             SandboxProperties sandboxProperties,
             InstanceProperties instanceProperties) {
         this.processExecutor = processExecutor;
+        this.sandboxProperties = sandboxProperties;
         this.instanceId = instanceProperties.getId();
         this.registryMirror = sandboxProperties.getDocker().getRegistryMirror();
         this.runnerImage = sandboxProperties.getDocker().getRunnerImage();
         this.debug = sandboxProperties.getDocker().isDebug();
         this.connectUrl = sandboxProperties.getDocker().getConnectUrl();
+    }
+
+    private List<String> requiredSandboxDirectories() {
+        return List.of(sandboxProperties.getWorkspace(), sandboxProperties.getLogsDir());
     }
 
     public void setConnectUrl(String connectUrl) {
@@ -736,7 +738,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
 
         // Inject the kratis-connector binary via docker cp
         try {
-            for (String directory : REQUIRED_SANDBOX_DIRECTORIES) {
+            for (String directory : requiredSandboxDirectories()) {
                 verifySandboxDirectoryWritable(runnerRef, directory);
             }
 
@@ -765,7 +767,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                     "exec",
                     "-d",
                     "-w",
-                    "/kratis/workspace",
+                    sandboxProperties.getWorkspace(),
                     runnerRef,
                     "/usr/local/bin/kratis-connector",
                     "--mode=sidecar",
@@ -774,7 +776,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                     "--token",
                     token,
                     "--log-file",
-                    SIDECAR_LOG_LOC));
+                    sandboxProperties.getSidecarLog()));
             if (debug) {
                 execCommand.add("--debug");
             }
@@ -1046,7 +1048,13 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
             Path tempLog = Files.createTempFile("kratis-sidecar-", ".log");
             try {
                 ProcessExecutor.ProcessResult cpResult = processExecutor.execute(
-                        List.of("docker", "cp", runnerRef + ":" + SIDECAR_LOG_LOC, tempLog.toString()), null, null);
+                        List.of(
+                                "docker",
+                                "cp",
+                                runnerRef + ":" + sandboxProperties.getSidecarLog(),
+                                tempLog.toString()),
+                        null,
+                        null);
                 if (cpResult.exitCode() == 0) {
                     String logs = Files.readString(tempLog);
                     if (!logs.isBlank()) {

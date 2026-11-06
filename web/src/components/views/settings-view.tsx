@@ -13,6 +13,7 @@ import { ProviderList } from '@/components/settings/provider-list'
 import { TavilySettings } from '@/components/settings/tavily-settings'
 import { TeamGeneralSettings } from '@/components/settings/team-general-settings'
 import { TeamMembers } from '@/components/settings/team-members'
+import { TeamSkillsPanel } from '@/components/settings/team-skills-panel'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -97,6 +98,7 @@ export function SettingsView() {
                 </div>
                 <TeamGeneralSettings isOwner={isOwner} team={currentTeam} />
                 <TeamMembers isOwner={isOwner} teamId={currentTeam.id} />
+                <TeamSkillsPanel />
               </TabsContent>
 
               <TabsContent className="mt-6 space-y-6" value="models">

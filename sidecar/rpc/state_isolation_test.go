@@ -10,6 +10,8 @@ import (
 // TestStatePathsLiveUnderStateDir locks in the single-root rule: every file the
 // sidecar persists must derive from stateDir, so redirecting one field isolates
 // the whole client.
+const liveStateRoot = "/kratis"
+
 func TestStatePathsLiveUnderStateDir(t *testing.T) {
 	client := newTestClient(t, t.TempDir())
 	root := client.stateRoot()
@@ -28,7 +30,7 @@ func TestStatePathsLiveUnderStateDir(t *testing.T) {
 		if !pathWithin(root, path) {
 			t.Errorf("%s path %q is outside state root %q", name, path, root)
 		}
-		if strings.HasPrefix(path, productionStateDir+string(os.PathSeparator)) {
+		if strings.HasPrefix(path, liveStateRoot+string(os.PathSeparator)) {
 			t.Errorf("%s path %q leaks into the live sandbox state", name, path)
 		}
 	}
@@ -59,8 +61,8 @@ func TestNewClientUsesTestStateRoot(t *testing.T) {
 	if !pathWithin(os.TempDir(), client.stateRoot()) {
 		t.Fatalf("NewClient state root %q is not inside the test temp dir %s", client.stateRoot(), os.TempDir())
 	}
-	if strings.HasPrefix(client.stateRoot(), productionStateDir) {
-		t.Fatalf("NewClient state root %q leaks into %s", client.stateRoot(), productionStateDir)
+	if strings.HasPrefix(client.stateRoot(), liveStateRoot) {
+		t.Fatalf("NewClient state root %q leaks into %s", client.stateRoot(), liveStateRoot)
 	}
 }
 
@@ -79,13 +81,13 @@ func assertPanics(t *testing.T, want string, fn func()) {
 }
 
 // TestNoHardcodedSandboxPaths prevents production code from reintroducing
-// ambient /kratis paths outside the single state-root constant.
+// ambient /kratis paths; the state root derives from the workspace instead.
 func TestNoHardcodedSandboxPaths(t *testing.T) {
 	scanGoFiles(t, func(name string, lineNo int, line string) {
 		if strings.HasSuffix(name, "_test.go") {
 			return
 		}
-		if !strings.Contains(line, `"/kratis`) || strings.Contains(line, "productionStateDir =") {
+		if !strings.Contains(line, `"/kratis`) {
 			return
 		}
 		t.Errorf("%s:%d hardcodes a live sandbox path: %s", name, lineNo, strings.TrimSpace(line))
@@ -100,8 +102,7 @@ func TestNoTestClientUsesLivePaths(t *testing.T) {
 			return
 		}
 		for _, field := range []string{"stateDir:", "workspace:"} {
-			if strings.Contains(line, field+" productionStateDir") ||
-				strings.Contains(line, field+` "/kratis`) {
+			if strings.Contains(line, field+` "/kratis`) {
 				t.Errorf("%s:%d points a test Client at live sandbox state: %s",
 					name, lineNo, strings.TrimSpace(line))
 			}

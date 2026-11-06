@@ -13,12 +13,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// TestMain redirects the default state root (production: /kratis) to a temp
-// dir. The sidecar test-suite is regularly run INSIDE a live sandbox
-// (self-hosting development), where /kratis is the running daemon's real state.
-// Without this redirect, any test creating a Client via NewClient would write
-// into the live daemon's state. Clients built directly in tests must also set
-// stateDir; stateRoot/statePath and resolveWorkspace panic otherwise.
+// TestMain redirects the derived state root to a temp dir. The sidecar
+// test-suite is regularly run INSIDE a live sandbox (self-hosting development),
+// where the workspace parent is the running daemon's real state. Clients built
+// directly in tests must also set stateDir; stateRoot/statePath and
+// resolveWorkspace panic otherwise.
 func TestMain(m *testing.M) {
 	stateDir, err := os.MkdirTemp("", "kratis-test-state-*")
 	if err != nil {

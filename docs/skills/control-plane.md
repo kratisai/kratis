@@ -28,7 +28,7 @@ See [`control-plane/README.md`](../../control-plane/README.md). Do not use `-Pfa
 ## Harness catalogue
 
 Harness definitions are the `FILENAME.json` files (plus each harness's bundled files) in
-`control-plane/harnesses/`, loaded at startup from `kratis.harnesses.directory` by
+`control-plane/harnesses/`, loaded at startup from `kratis.instance.harnesses-directory` by
 `HarnessCatalogInitializer` (`@Lazy(false)` so it still runs under test lazy-initialization). Change
 a harness by editing that directory. Never reintroduce classpath scanning: a native image cannot
 enumerate classpath directories, so discovery must go through the filesystem. `HarnessResource.source`

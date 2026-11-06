@@ -65,6 +65,7 @@ To run from source without building a Docker image (JVM mode), use the dev quick
 | `KRATIS_GITHUB_PRIVATE_KEY_PATH` | `/data/config/gh-app.pem` | no | PEM path inside the container (supports PKCS#8 and PKCS#1). Place the file in the config volume, or override this to a path you mount. |
 | `KRATIS_TELEMETRY_DISABLED` | `0` | no | Set `1` to disable anonymous usage telemetry |
 | `KRATIS_HARNESSES_DIRECTORY` | `/opt/kratis/harnesses` | no | Directory of harness definitions inside the container. Set to `/data/config/harnesses` (with the catalogue in `KRATIS_CONFIG_DIR`) or another mounted directory to replace the built-in catalogue without rebuilding the image. |
+| `KRATIS_SKILLS_DIRECTORY` | `/opt/kratis/skills` | no | Directory of installation skills inside the container. Set to `/data/config/skills` or another mounted directory to replace the built-in skills. |
 | `MEM_LIMIT` | `512m` | no | Memory cap for the kratis container |
 | `LITELLM_MEM_LIMIT` | `2g` | no | Memory cap for the LiteLLM container |
 | `KRATIS_DB_DIR` | `kratis-data` (named volume) | no | Host directory for PostgreSQL data. Must be writable by uid/gid 1000. |
@@ -85,8 +86,9 @@ chown -R 1000:1000 /srv/kratis
 ```
 
 `KRATIS_CONFIG_DIR` is the one directory that carries files as well as state: the generated
-`encryption.key`, an optional GitHub App `gh-app.pem` (see `KRATIS_GITHUB_PRIVATE_KEY_PATH`), and an
-optional `harnesses/` catalogue (`KRATIS_HARNESSES_DIRECTORY=/data/config/harnesses`).
+`encryption.key`, an optional GitHub App `gh-app.pem` (see `KRATIS_GITHUB_PRIVATE_KEY_PATH`), and
+optional `harnesses/` and `skills/` catalogues (`KRATIS_HARNESSES_DIRECTORY=/data/config/harnesses`,
+`KRATIS_SKILLS_DIRECTORY=/data/config/skills`).
 
 
 ## Commands
@@ -128,5 +130,6 @@ and an authenticated /v2/model/info, and reads the litellm-worker-heartbeat dire
 Parser binaries are baked into the control-plane image. For local parser setup, see [`build/README.md`](../build/README.md).
 
 Harness definitions (`FILENAME.json` plus each harness's bundled files) are baked into the image at
-`/opt/kratis/harnesses`. Point `KRATIS_HARNESSES_DIRECTORY` at a mounted directory to use your own
+`/opt/kratis/harnesses`, and installation skills at `/opt/kratis/skills`. Point
+`KRATIS_HARNESSES_DIRECTORY` or `KRATIS_SKILLS_DIRECTORY` at a mounted directory to use your own
 catalogue instead — the directory is the single source, so a mount replaces the built-in set.
