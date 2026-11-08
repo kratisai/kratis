@@ -3,7 +3,7 @@
   "setupCommands": [
     "export PATH=$HOME/.local/bin:$PATH",
     "mkdir -p ~/.local/bin /tmp/goose-extract",
-    "curl -fsSL -o /tmp/goose.tar.bz2 \"https://github.com/aaif-goose/goose/releases/download/stable/goose-$(uname -m)-unknown-linux-gnu.tar.bz2\"",
+    "curl --retry 10 --retry-delay 2 --retry-connrefused --retry-all-errors -fsSL -o /tmp/goose.tar.bz2 \"https://github.com/aaif-goose/goose/releases/download/stable/goose-$(uname -m)-unknown-linux-gnu.tar.bz2\"",
     "tar -xjf /tmp/goose.tar.bz2 -C /tmp/goose-extract",
     "mv /tmp/goose-extract/goose ~/.local/bin/goose",
     "chmod +x ~/.local/bin/goose",

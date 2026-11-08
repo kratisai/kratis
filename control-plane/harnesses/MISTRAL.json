@@ -3,7 +3,7 @@
   "setupCommands": [
     "export PATH=$HOME/.local/bin:$PATH",
     "export MISTRAL_API_KEY=${VIRTUAL_KEY}",
-    "curl -LsSf https://mistral.ai/vibe/install.sh -o /tmp/mistral-install.sh",
+    "curl --retry 10 --retry-delay 2 --retry-connrefused --retry-all-errors -LsSf https://mistral.ai/vibe/install.sh -o /tmp/mistral-install.sh",
     "bash /tmp/mistral-install.sh",
     "uv tool install --force mistral-vibe==2.26.1",
     "vibe --version | grep -q \"2.26.1\"",
