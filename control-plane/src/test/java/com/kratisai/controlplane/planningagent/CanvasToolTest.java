@@ -263,8 +263,7 @@ class CanvasToolTest extends AgentTestHarness {
                 ```
                 ```mermaid
                 graph TD
-                    style A fill:#fff
-                    A --> B
+                    A -> B
                 ```
                 """;
 
@@ -304,8 +303,7 @@ class CanvasToolTest extends AgentTestHarness {
         String invalidMermaid = """
                 ```mermaid
                 graph TD
-                    style A fill:#fff
-                    A
+                    A -> B
                 ```
                 """;
         CanvasTool.ReplaceBlock patch = new CanvasTool.ReplaceBlock("MySQL database", "\n" + invalidMermaid);

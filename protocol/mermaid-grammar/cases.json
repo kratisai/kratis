@@ -168,11 +168,11 @@
     "rule": "input.header"
   },
   {
-    "name": "flow styling remains forbidden",
+    "name": "flow styling ignored",
     "type": "flowchart",
     "source": "flowchart LR\nA\nstyle A fill:red",
-    "ok": false,
-    "rule": "identifier.reserved"
+    "ok": true,
+    "renderText": "flowchart LR\nA"
   },
   {
     "name": "flow injected second statement",
@@ -749,6 +749,13 @@
     "rule": "syntax.statement"
   },
   {
+    "name": "state composite accepted",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\nstate A {\n[*] --> B\n}",
+    "ok": true,
+    "renderText": "stateDiagram-v2\nstate A {\n[*] --> B\n}"
+  },
+  {
     "name": "state composite excluded",
     "type": "stateDiagram-v2",
     "source": "stateDiagram-v2\nstate A {",
@@ -1305,6 +1312,260 @@
     "name": "flow unquoted inline edge label thick",
     "type": "flowchart",
     "source": "flowchart LR\nA == label ==> B",
+    "ok": false,
+    "rule": "syntax.statement"
+  },
+  {
+    "name": "flow direction statement",
+    "type": "flowchart",
+    "source": "flowchart LR\ndirection TB\nA --> B",
+    "ok": true,
+    "renderText": "flowchart LR\ndirection TB\nA --> B"
+  },
+  {
+    "name": "flow comments ignored",
+    "type": "flowchart",
+    "source": "flowchart LR\n%% comment\nA --> B",
+    "ok": true,
+    "renderText": "flowchart LR\nA --> B"
+  },
+  {
+    "name": "flow long arrow",
+    "type": "flowchart",
+    "source": "flowchart LR\nA ---> B",
+    "ok": true,
+    "renderText": "flowchart LR\nA ---> B"
+  },
+  {
+    "name": "flow classDef and linkStyle ignored",
+    "type": "flowchart",
+    "source": "flowchart LR\nA\nclassDef foo fill:red\nlinkStyle 0 stroke:red",
+    "ok": true,
+    "renderText": "flowchart LR\nA"
+  },
+  {
+    "name": "class relation colon spacing",
+    "type": "classDiagram",
+    "source": "classDiagram\nA --> B: label",
+    "ok": true,
+    "renderText": "classDiagram\nA --> B : label"
+  },
+  {
+    "name": "class reverse relations",
+    "type": "classDiagram",
+    "source": "classDiagram\nA --|> B\nC <-- D\nE --* F\nG --o H",
+    "ok": true,
+    "renderText": "classDiagram\nA --|> B\nC <-- D\nE --* F\nG --o H"
+  },
+  {
+    "name": "class member colon",
+    "type": "classDiagram",
+    "source": "classDiagram\nA : +foo()",
+    "ok": true,
+    "renderText": "classDiagram\nA : +foo()"
+  },
+  {
+    "name": "class dotted name",
+    "type": "classDiagram",
+    "source": "classDiagram\nclass Booking.Mapper {\n+foo()\n}\nBooking.Mapper --> A : label",
+    "ok": true,
+    "renderText": "classDiagram\nclass Booking.Mapper {\n+foo()\n}\nBooking.Mapper --> A : label"
+  },
+  {
+    "name": "class direction statement",
+    "type": "classDiagram",
+    "source": "classDiagram\ndirection LR\nA <|-- B",
+    "ok": true,
+    "renderText": "classDiagram\ndirection LR\nA <|-- B"
+  },
+  {
+    "name": "state standalone declaration",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\nstate Request_Received\n[*] --> Request_Received",
+    "ok": true,
+    "renderText": "stateDiagram-v2\nstate Request_Received\n[*] --> Request_Received"
+  },
+  {
+    "name": "state spaced identifier",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\n[*] --> Request Received\nRequest Received --> Active",
+    "ok": true,
+    "renderText": "stateDiagram-v2\nstate \"Request Received\" as Request_Received\n[*] --> Request_Received\nRequest_Received --> Active"
+  },
+  {
+    "name": "state numeric identifier",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\nNoSuchElementException --> 404_NOT_FOUND",
+    "ok": true,
+    "renderText": "stateDiagram-v2\nNoSuchElementException --> 404_NOT_FOUND"
+  },
+  {
+    "name": "state description",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\nDevDeploy : Push to main",
+    "ok": true,
+    "renderText": "stateDiagram-v2\nDevDeploy : Push to main"
+  },
+  {
+    "name": "state composite direction",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\nstate PRELOAD {\ndirection LR\n[*] --> A\n}\nA --> B",
+    "ok": true,
+    "renderText": "stateDiagram-v2\nstate PRELOAD {\ndirection LR\n[*] --> A\n}\nA --> B"
+  },
+  {
+    "name": "state direction statement",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\ndirection LR\n[*] --> A",
+    "ok": true,
+    "renderText": "stateDiagram-v2\ndirection LR\n[*] --> A"
+  },
+  {
+    "name": "sequence spaced participant names",
+    "type": "sequenceDiagram",
+    "source": "sequenceDiagram\nparticipant JWT Filter\nClient->>REST API: POST /bookings",
+    "ok": true,
+    "renderText": "sequenceDiagram\nparticipant JWT Filter\nClient->>REST API: POST #47;bookings"
+  },
+  {
+    "name": "sequence spaced message targets",
+    "type": "sequenceDiagram",
+    "source": "sequenceDiagram\nServer->>All Players: Transition to Play\nWebSocket->>All Clients: Update",
+    "ok": true,
+    "renderText": "sequenceDiagram\nServer->>All Players: Transition to Play\nWebSocket->>All Clients: Update"
+  },
+  {
+    "name": "sequence rect block",
+    "type": "sequenceDiagram",
+    "source": "sequenceDiagram\nA->>B: x\nrect rgb(1,2,3)\nA->>B: y\nend",
+    "ok": true,
+    "renderText": "sequenceDiagram\nA->>B: x\nrect rgb(1,2,3)\nA->>B: y\nend"
+  },
+  {
+    "name": "C4 container database element",
+    "type": "C4Container",
+    "source": "C4Container\nContainerDb(database, \"Database\", \"PostgreSQL\", \"Persistent storage\")",
+    "ok": true,
+    "renderText": "C4Container\nContainerDb(database, \"Database\", \"PostgreSQL\", \"Persistent storage\")"
+  },
+  {
+    "name": "C4 system database element",
+    "type": "C4Context",
+    "source": "C4Context\nSystemDb(db, \"PostgreSQL\", \"Persistent data storage\")",
+    "ok": true,
+    "renderText": "C4Context\nSystemDb(db, \"PostgreSQL\", \"Persistent data storage\")"
+  },
+  {
+    "name": "journey task without role",
+    "type": "journey",
+    "source": "journey\nsection A\nDeveloper pushes code: 5",
+    "ok": true,
+    "renderText": "journey\nsection A\nDeveloper pushes code: 5"
+  }
+,
+  {
+    "name": "state description with state keyword",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\nstate DevDeploy : Push to main",
+    "ok": true,
+    "renderText": "stateDiagram-v2\nDevDeploy : Push to main"
+  },
+  {
+    "name": "class relation cardinality and compact colon",
+    "type": "classDiagram",
+    "source": "classDiagram\nPortalUser \"1\" --> \"*\" Account: accountId",
+    "ok": true,
+    "renderText": "classDiagram\nPortalUser \"1\" --> \"*\" Account : accountId"
+  },
+  {
+    "name": "state repeated quoted display declaration",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\nstate \"Ready\"\nstate \"Ready\"",
+    "ok": true,
+    "renderText": "stateDiagram-v2\nstate \"Ready\" as Ready\nstate \"Ready\" as Ready"
+  },
+  {
+    "name": "state repeated spaced display declaration",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\nstate Request Received\nstate Request Received",
+    "ok": true,
+    "renderText": "stateDiagram-v2\nstate \"Request Received\" as Request_Received\nstate \"Request Received\" as Request_Received"
+  },
+  {
+    "name": "class member break-only text",
+    "type": "classDiagram",
+    "source": "classDiagram\nA : <br/>",
+    "ok": false,
+    "rule": "syntax.statement"
+  },
+  {
+    "name": "class member entity-only text",
+    "type": "classDiagram",
+    "source": "classDiagram\nA : #10;",
+    "ok": false,
+    "rule": "syntax.statement"
+  },
+  {
+    "name": "class member unicode space rejected",
+    "type": "classDiagram",
+    "source": "classDiagram\nA\u00a0:\u00a0+foo()",
+    "ok": false,
+    "rule": "syntax.statement"
+  },
+  {
+    "name": "journey unicode space rejected",
+    "type": "journey",
+    "source": "journey\nsection A\nTask:\u00a05: User",
+    "ok": false,
+    "rule": "syntax.statement"
+  },
+  {
+    "name": "state quoted transition rejected",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\nstate \"x --> y\" --> Z",
+    "ok": false,
+    "rule": "syntax.statement"
+  },
+  {
+    "name": "state quoted display transition rejected",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\nA \"x --> y\" --> B",
+    "ok": false,
+    "rule": "syntax.statement"
+  },
+  {
+    "name": "state quoted endpoint rejected",
+    "type": "stateDiagram-v2",
+    "source": "stateDiagram-v2\n\"Ready\" --> A",
+    "ok": false,
+    "rule": "syntax.statement"
+  },
+  {
+    "name": "flow ampersand grouping",
+    "type": "flowchart",
+    "source": "flowchart LR\nA & B --> C",
+    "ok": true,
+    "renderText": "flowchart LR\nA & B --> C"
+  }
+,
+  {
+    "name": "flow inline edge label invalid solid reverse close",
+    "type": "flowchart",
+    "source": "flowchart LR\nA -- \"label\" <--> B",
+    "ok": false,
+    "rule": "syntax.statement"
+  },
+  {
+    "name": "flow inline edge label invalid solid long close",
+    "type": "flowchart",
+    "source": "flowchart LR\nA -- \"label\" ---> B",
+    "ok": false,
+    "rule": "syntax.statement"
+  },
+  {
+    "name": "flow inline edge label invalid dotted thick close",
+    "type": "flowchart",
+    "source": "flowchart LR\nA -. \"label\" ==> B",
     "ok": false,
     "rule": "syntax.statement"
   }

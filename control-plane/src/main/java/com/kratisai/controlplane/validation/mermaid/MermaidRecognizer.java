@@ -16,43 +16,52 @@ import java.util.regex.Pattern;
 
 public final class MermaidRecognizer {
     private static final String ID = "[A-Za-z][A-Za-z0-9_]*";
+    private static final String CLASS_ID = ID + "(?:\\." + ID + ")*";
+    private static final Pattern CLASS_ID_PREFIX = Pattern.compile(CLASS_ID);
+    private static final List<String> CLASS_ARROWS = List.of(
+            "<|--", "*--", "o--", "-->", "..>", "..|>", "<|..", "<..", "o..", "..o", "--|>", "--*", "--o", "<--", "--");
+    private static final List<String> SEQUENCE_ARROWS = List.of("-->>", "->>", "-->", "->", "--)", "-)", "--x", "-x");
     private static final String NUM = "-?(?:\\d+(?:\\.\\d+)?|\\.\\d+)";
     private static final Pattern ENTITY = Pattern.compile("#quot;|#(\\d+);");
-    private static final Pattern BREAK = Pattern.compile("<br\\s*/?>|\\\\n", Pattern.CASE_INSENSITIVE);
+    private static final Pattern BREAK = Pattern.compile("<br[ \\t]*/?>|\\\\n", Pattern.CASE_INSENSITIVE);
     private static final Pattern HTML_ENTITY = Pattern.compile("&[#A-Za-z0-9]");
     private static final Pattern RAW_FORBIDDEN =
             Pattern.compile("[\"<>\\r\\n\\x00-\\x1f]|#(?:quot|\\d+);|&[#A-Za-z0-9]", Pattern.CASE_INSENSITIVE);
     private static final Pattern FLOW_HEADER = Pattern.compile("^(flowchart|graph)(?i:(?: (?:td|tb|bt|lr|rl)))?$");
     private static final Pattern FLOW_HEADER_DIRECTION = Pattern.compile("^(?:flowchart|graph)(?: ([a-zA-Z]{2}))?$");
     private static final Pattern FLOW_AMBIGUOUS = Pattern.compile("[\"\\[\\]{}|]");
-    private static final Pattern INLINE_SOLID = Pattern.compile("^--\\s*\"([^\"]*)\"\\s*(-->|---|--o|--x)");
-    private static final Pattern INLINE_DOTTED = Pattern.compile("^-\\.\\s*\"([^\"]*)\"\\s*(\\.-?>|-?\\.-)");
-    private static final Pattern INLINE_THICK = Pattern.compile("^==\\s*\"([^\"]*)\"\\s*(==>|===|===o|===x)");
-    private static final Pattern BROKEN_INLINE_SOLID = Pattern.compile("^--\\s*([^->\\n]+?)\\s*(-->|---|--o|--x)");
-    private static final Pattern BROKEN_INLINE_DOTTED = Pattern.compile("^-\\.\\s*([^-.\\n]+?)\\s*(\\.-?>|-?\\.-)");
-    private static final Pattern BROKEN_INLINE_THICK = Pattern.compile("^==\\s*([^=>\\n]+?)\\s*(==>|===|===o|===x)");
+    private static final Pattern INLINE_SOLID = Pattern.compile("^--[ \\t]*\"([^\"]*)\"[ \\t]*(-->|---|--o|--x)");
+    private static final Pattern INLINE_DOTTED = Pattern.compile("^-\\.[ \\t]*\"([^\"]*)\"[ \\t]*(\\.-?>|-?\\.-)");
+    private static final Pattern INLINE_THICK = Pattern.compile("^==[ \\t]*\"([^\"]*)\"[ \\t]*(==>|===|===o|===x)");
+    private static final Pattern INLINE_QUOTED_EDGE = Pattern.compile("^(?:--|-\\.|==)[ \\t]*\"");
+    private static final Pattern IGNORED_STYLE = Pattern.compile("^style [A-Za-z0-9_.]+ .+$");
+    private static final Pattern IGNORED_CLASS_DEF = Pattern.compile("^classDef [A-Za-z0-9_]+ .+$");
     private static final Pattern CARDINALITY = Pattern.compile("^(?:\\|\\||\\|o|o\\||}o|o\\{|}\\||\\|\\{)");
-    private static final Pattern KEY = Pattern.compile("^(?:PK|FK|UK)(?:,\\s*(?:PK|FK|UK))*");
+    private static final Pattern KEY = Pattern.compile("^(?:PK|FK|UK)(?:,[ \\t]*(?:PK|FK|UK))*");
     private static final Pattern ER_TYPE =
             Pattern.compile("^[A-Za-z][A-Za-z0-9_]*(?:\\([0-9]+(?:,[0-9]+)?\\))?(?:\\[\\])*");
     private static final Pattern C4_NAME = Pattern.compile("^[A-Za-z_]+");
     private static final Pattern NUMBER_PREFIX = Pattern.compile("^" + NUM);
     private static final Pattern SEQUENCE_SEPARATOR = Pattern.compile(
-            ";\\s*(?:[A-Za-z][A-Za-z0-9_]*\\s*(?:-->>|->>|-->|->|--\\)|-\\)|--x|-x|<<--|<<-|<--|<-)|(?:participant|actor|create|destroy|alt|loop|opt|par|par_over|else|and|rect|box|critical|option|break|end|note|activate|deactivate|title|links|link|properties|details|autonumber)\\b)",
+            ";[ \\t]*(?:[A-Za-z][A-Za-z0-9_]*[ \\t]*(?:-->>|->>|-->|->|--\\)|-\\)|--x|-x|<<--|<<-|<--|<-)|(?:participant|actor|create|destroy|alt|loop|opt|par|par_over|else|and|rect|box|critical|option|break|end|note|activate|deactivate|title|links|link|properties|details|autonumber)\\b)",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern CLASS_SEPARATOR = Pattern.compile(
-            ";\\s*(?:(?:class|classDef|namespace|style|link|click|note|direction)\\b|[A-Za-z][A-Za-z0-9_]*[^;\\n]*?(?:<\\|--|\\*--|o--|-->|\\.\\.>|\\.\\.\\|>|<\\|\\.\\.|<\\.\\.|o\\.\\.|\\.\\.o|--))",
+            ";[ \\t]*(?:(?:class|classDef|namespace|style|link|click|note|direction)\\b|[A-Za-z][A-Za-z0-9_]*[^;\\n]*?(?:<\\|--|\\*--|o--|-->|\\.\\.>|\\.\\.\\|>|<\\|\\.\\.|<\\.\\.|o\\.\\.|\\.\\.o|--\\|>|--\\*|--o|<--|--))",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern STATE_SEPARATOR = Pattern.compile(
-            ";\\s*(?:(?:\\[\\*\\]|[A-Za-z][A-Za-z0-9_]*)\\s*-->|(?:state|note|class|classDef|direction|end)(?:\\s|$))");
+            ";[ \\t]*(?:(?:\\[\\*\\]|[A-Za-z][A-Za-z0-9_]*)[ \\t]*-->|(?:state|note|class|classDef|direction|end)(?:[ \\t]|$))");
     private static final Pattern JOURNEY_SEPARATOR =
-            Pattern.compile(";\\s*(?:(?:title|section)\\s|[^:;]+:\\s*-?\\d+\\s*:)");
+            Pattern.compile(";[ \\t]*(?:(?:title|section)[ \\t]|[^:;]+:[ \\t]*-?\\d+[ \\t]*:)");
     private static final Pattern ENTITY_PREFIX = Pattern.compile("#(?:quot|\\d+)$");
     private static final Map<String, int[]> C4_ELEMENTS = Map.ofEntries(
             Map.entry("Boundary", new int[] {2, 3}),
             Map.entry("Component", new int[] {2, 4}),
+            Map.entry("ComponentDb", new int[] {2, 4}),
+            Map.entry("ComponentQueue", new int[] {2, 4}),
             Map.entry("Component_Ext", new int[] {2, 4}),
             Map.entry("Container", new int[] {2, 4}),
+            Map.entry("ContainerDb", new int[] {2, 4}),
+            Map.entry("ContainerQueue", new int[] {2, 4}),
             Map.entry("Container_Boundary", new int[] {2, 2}),
             Map.entry("Container_Ext", new int[] {2, 4}),
             Map.entry("Person", new int[] {2, 3}),
@@ -60,6 +69,8 @@ public final class MermaidRecognizer {
             Map.entry("Rel", new int[] {3, 4}),
             Map.entry("Rel_Neighbor", new int[] {3, 4}),
             Map.entry("System", new int[] {2, 3}),
+            Map.entry("SystemDb", new int[] {2, 4}),
+            Map.entry("SystemQueue", new int[] {2, 4}),
             Map.entry("System_Boundary", new int[] {2, 2}),
             Map.entry("System_Ext", new int[] {2, 3}));
     private static final ThreadLocal<LineCursor> LINE_CURSOR = new ThreadLocal<>();
@@ -113,6 +124,13 @@ public final class MermaidRecognizer {
             String header = lines.removeFirst();
             LINE_CURSOR.set(new LineCursor(normalized));
             advance(header);
+            for (String line : lines) {
+                if (line.startsWith("%%{")) {
+                    advance(line);
+                    fail("init directives are unsupported");
+                }
+            }
+            lines.removeIf(MermaidRecognizer::ignoredLine);
             String type;
             if (FLOW_HEADER.matcher(header).matches()) {
                 type = "flowchart";
@@ -186,9 +204,15 @@ public final class MermaidRecognizer {
     }
 
     private static String trim(String value) {
-        return value.replaceAll(
-                "^[\\s\\x{00a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}\\x{feff}]+|[\\s\\x{00a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}\\x{feff}]+$",
-                "");
+        int start = 0;
+        int end = value.length();
+        while (start < end && isTrimmedWhitespace(value.charAt(start))) start++;
+        while (end > start && isTrimmedWhitespace(value.charAt(end - 1))) end--;
+        return value.substring(start, end);
+    }
+
+    private static boolean isTrimmedWhitespace(char character) {
+        return Character.isWhitespace(character) || Character.isSpaceChar(character) || character == '\ufeff';
     }
 
     private static String text(String value) {
@@ -276,14 +300,25 @@ public final class MermaidRecognizer {
     private String identifier(String value, String reserved) {
         if (!grammar.identifier.matcher(value).matches()) fail("invalid identifier");
         if (reserved != null && grammar.reserved.get(reserved).contains(value.toLowerCase(Locale.ROOT)))
-            fail("identifier.reserved", "reserved identifier");
+            fail("identifier.reserved", "reserved identifier `" + value + "`; choose a non-keyword identifier");
+        return value;
+    }
+
+    private String classIdentifier(String value) {
+        for (String part : value.split("\\.", -1)) {
+            if (!grammar.identifier.matcher(part).matches()) fail("invalid class identifier");
+            if (grammar.reserved.get("classDiagram").contains(part.toLowerCase(Locale.ROOT)))
+                fail(
+                        "identifier.reserved",
+                        "reserved identifier `" + part + "`; choose a non-keyword class identifier");
+        }
         return value;
     }
 
     private String flowIdentifier(String value) {
         if (!grammar.flowIdentifier.matcher(value).matches()) fail("invalid flowchart identifier");
         if (grammar.reserved.get("flowchart").contains(value) || value.equals("classDef") || value.equals("linkStyle"))
-            fail("identifier.reserved", "reserved identifier");
+            fail("identifier.reserved", "reserved identifier `" + value + "`; choose a non-keyword identifier");
         return value;
     }
 
@@ -357,6 +392,10 @@ public final class MermaidRecognizer {
         int completedGroups = 0;
         for (String line : lines) {
             advance(line);
+            if (line.startsWith("direction ")) {
+                out.add("direction " + flowDirection(line.substring(10)));
+                continue;
+            }
             Scanner s = new Scanner(line);
             if (s.maybe("subgraph ")) {
                 FlowGroup group = flowGroup(s);
@@ -393,20 +432,17 @@ public final class MermaidRecognizer {
                     String remaining = s.line.substring(s.pos);
                     Matcher inlineMatcher;
                     if ((inlineMatcher = INLINE_SOLID.matcher(remaining)).lookingAt()) {
-                        String text = inlineMatcher.group(1);
                         arrow = inlineMatcher.group(2);
-                        label = "|" + quoted(text(text)) + "|";
+                        label = "|" + quoted(text(inlineMatcher.group(1))) + "|";
                         s.pos += inlineMatcher.end();
                     } else if ((inlineMatcher = INLINE_DOTTED.matcher(remaining)).lookingAt()) {
-                        String text = inlineMatcher.group(1);
                         String close = inlineMatcher.group(2);
                         arrow = close.contains(">") ? "-.->" : "-.-";
-                        label = "|" + quoted(text(text)) + "|";
+                        label = "|" + quoted(text(inlineMatcher.group(1))) + "|";
                         s.pos += inlineMatcher.end();
                     } else if ((inlineMatcher = INLINE_THICK.matcher(remaining)).lookingAt()) {
-                        String text = inlineMatcher.group(1);
                         arrow = inlineMatcher.group(2);
-                        label = "|" + quoted(text(text)) + "|";
+                        label = "|" + quoted(text(inlineMatcher.group(1))) + "|";
                         s.pos += inlineMatcher.end();
                     } else {
                         checkBrokenInlineEdge(remaining);
@@ -420,7 +456,7 @@ public final class MermaidRecognizer {
                             if (remaining.startsWith("--")
                                     || remaining.startsWith("-.")
                                     || remaining.startsWith("==")) {
-                                fail("invalid inline edge; expected quoted label, e.g. -- \"label\" -->");
+                                fail("unquoted inline edge label; quote it, e.g. -- \"label\" -->");
                             }
                             fail("expected an arrow such as -->, e.g. A --> B");
                         }
@@ -451,12 +487,7 @@ public final class MermaidRecognizer {
     }
 
     private static void checkBrokenInlineEdge(String remaining) {
-        if (BROKEN_INLINE_SOLID.matcher(remaining).lookingAt()
-                || BROKEN_INLINE_DOTTED.matcher(remaining).lookingAt()
-                || BROKEN_INLINE_THICK.matcher(remaining).lookingAt()) {
-            fail("unquoted inline edge label; edge labels must be quoted, e.g. -- \"label\" --> or -->|\"label\"|");
-        }
-        if (Pattern.compile("^(?:--|-\\.|==)\\s*\"").matcher(remaining).lookingAt()) {
+        if (INLINE_QUOTED_EDGE.matcher(remaining).lookingAt()) {
             int firstQuote = remaining.indexOf('"');
             int secondQuote = remaining.indexOf('"', firstQuote + 1);
             if (secondQuote < 0) {
@@ -473,6 +504,20 @@ public final class MermaidRecognizer {
         return "flowchart " + matcher.group(1).toUpperCase(Locale.ROOT);
     }
 
+    private static boolean ignoredLine(String line) {
+        return line.startsWith("%%")
+                || IGNORED_STYLE.matcher(line).matches()
+                || IGNORED_CLASS_DEF.matcher(line).matches()
+                || line.startsWith("linkStyle ");
+    }
+
+    private static String flowDirection(String value) {
+        String direction = trim(value).toUpperCase(Locale.ROOT);
+        if (!Set.of("TD", "TB", "BT", "LR", "RL").contains(direction))
+            fail("invalid direction; expected TD, TB, BT, LR or RL");
+        return direction;
+    }
+
     private static void addGroup(String id, Set<String> groups, Set<String> nodes) {
         if (groups.contains(id) || nodes.contains(id))
             fail("flow.subgraph-id-unique", "duplicate or conflicting subgraph id");
@@ -481,7 +526,7 @@ public final class MermaidRecognizer {
 
     private List<String> pie(List<String> lines, String header) {
         boolean strippedTitle = false;
-        if (header.matches("^pie\\s+title(?:\\s+.*)?$")) {
+        if (header.matches("^pie[ \\t]+title(?:[ \\t]+.*)?$")) {
             String titlePart = header.substring(9).trim();
             lines.add(0, "title " + titlePart);
             header = "pie";
@@ -530,7 +575,7 @@ public final class MermaidRecognizer {
             } else if ((m = match("^(quadrant-[1-4]) \"([^\"]+)\"$", line)) != null) {
                 if (!captions.add(m.group(1)) || points > 0) fail("duplicate or misplaced quadrant");
                 out.add(m.group(1) + " " + quoted(m.group(2)));
-            } else if ((m = match("^\"([^\"]+)\": \\[(" + NUM + "),\\s*(" + NUM + ")\\]$", line)) != null) {
+            } else if ((m = match("^\"([^\"]+)\": \\[(" + NUM + "),[ \\t]*(" + NUM + ")\\]$", line)) != null) {
                 if (!grammar.coordinate.matcher(m.group(2)).matches()
                         || !grammar.coordinate.matcher(m.group(3)).matches()
                         || !Double.isFinite(Double.parseDouble(m.group(2)))
@@ -602,7 +647,7 @@ public final class MermaidRecognizer {
 
     private List<String> journey(List<String> lines, String header) {
         boolean strippedTitle = false;
-        if (header.matches("^journey\\s+title(?:\\s+.*)?$")) {
+        if (header.matches("^journey[ \\t]+title(?:[ \\t]+.*)?$")) {
             String titlePart = header.substring(13).trim();
             lines.add(0, "title " + titlePart);
             header = "journey";
@@ -618,6 +663,7 @@ public final class MermaidRecognizer {
                 advance(line);
             }
             Matcher m;
+            JourneyTask task;
             if ((m = match("^title (.+)$", line)) != null) {
                 if (title || section) fail("duplicate or misplaced journey title");
                 title = true;
@@ -625,25 +671,47 @@ public final class MermaidRecognizer {
             } else if ((m = match("^section (.+)$", line)) != null) {
                 section = true;
                 out.add("section " + structuralText(m.group(1), JOURNEY_SEPARATOR));
-            } else if ((m = match("^(\"[^\"]*\"|[^:]+):\\s*(-?\\d+)\\s*:\\s*(.+)$", line)) != null) {
+            } else if ((task = journeyTask(line)) != null) {
                 if (!section) fail("journey task requires section");
-                double score = Double.parseDouble(m.group(2));
+                double score = Double.parseDouble(task.score());
                 if (!Double.isFinite(score)
                         || Math.abs(score) > 9007199254740991d
                         || score < grammar.journeyScoreMin
                         || score > grammar.journeyScoreMax) fail("journey.score", "journey score out of bounds");
                 List<String> roles = new ArrayList<>();
-                for (String role : splitRoles(m.group(3))) {
-                    if (decode(bareText(role)).contains(",")) fail("comma inside journey role is unsupported");
-                    roles.add(structuralText(role, JOURNEY_SEPARATOR));
+                if (task.roles() != null && !trim(task.roles()).isEmpty()) {
+                    for (String role : splitRoles(task.roles())) {
+                        if (decode(bareText(role)).contains(",")) fail("comma inside journey role is unsupported");
+                        roles.add(structuralText(role, JOURNEY_SEPARATOR));
+                    }
                 }
                 tasks++;
-                out.add(structuralText(m.group(1), JOURNEY_SEPARATOR) + ": " + (int) score + ": "
-                        + String.join(", ", roles));
+                out.add(structuralText(task.text(), JOURNEY_SEPARATOR) + ": " + (int) score
+                        + (roles.isEmpty() ? "" : ": " + String.join(", ", roles)));
             } else fail("unsupported journey statement; allowed: title, section, task with score and roles");
         }
         if (tasks == 0) fail("journey requires a task");
         return out;
+    }
+
+    private record JourneyTask(String text, String score, String roles) {}
+
+    private static JourneyTask journeyTask(String line) {
+        int colon = firstUnquotedColon(line);
+        if (colon < 0) return null;
+        String text = line.substring(0, colon);
+        String rest = line.substring(colon + 1);
+        int start = skipAsciiSpaces(rest, 0);
+        int pos = start;
+        if (pos < rest.length() && rest.charAt(pos) == '-') pos++;
+        int digits = pos;
+        while (pos < rest.length() && rest.charAt(pos) >= '0' && rest.charAt(pos) <= '9') pos++;
+        if (pos == digits) return null;
+        String score = rest.substring(start, pos);
+        pos = skipAsciiSpaces(rest, pos);
+        if (pos == rest.length()) return new JourneyTask(text, score, null);
+        if (rest.charAt(pos) != ':') return null;
+        return new JourneyTask(text, score, trim(rest.substring(pos + 1)));
     }
 
     private static List<String> splitRoles(String value) {
@@ -799,7 +867,8 @@ public final class MermaidRecognizer {
             String name = s.take(C4_NAME);
             int[] limits = C4_ELEMENTS.get(name);
             if (limits == null)
-                fail("unsupported C4 element; allowed: Person, System, Container, Component, boundaries, Rel");
+                fail(
+                        "unsupported C4 element; allowed: Person, System, Container, Component, ContainerDb, SystemDb, ContainerQueue, SystemQueue, ComponentDb, ComponentQueue, boundaries, Rel");
             s.literal("(");
             List<String> args = new ArrayList<>(List.of(s.id()));
             boolean relation = name.startsWith("Rel");
@@ -836,6 +905,8 @@ public final class MermaidRecognizer {
     private List<String> classDiagram(List<String> lines, String header) {
         List<String> out = new ArrayList<>(List.of(header));
         boolean body = false;
+        String member;
+        String relation;
         for (String line : lines) {
             advance(line);
             Matcher m;
@@ -852,37 +923,108 @@ public final class MermaidRecognizer {
                     continue;
                 }
                 out.add(classMember(line));
+            } else if (line.startsWith("direction ")) {
+                out.add("direction " + flowDirection(line.substring(10)));
             } else if ((m = match(
-                            "^class (" + ID
-                                    + ")(~[^~\\s][^~]*~)?(?:\\[\"([^\"]+)\"\\])?(<<[A-Za-z][A-Za-z0-9_-]*>>)?( \\{)?$",
+                            "^class (" + CLASS_ID
+                                    + ")(~[^~ \\t][^~]*~)?(?:\\[\"([^\"]+)\"\\])?(<<[A-Za-z][A-Za-z0-9_-]*>>)?( \\{)?$",
                             line))
                     != null) {
                 body = m.group(5) != null;
-                out.add("class " + identifier(m.group(1), "classDiagram")
+                out.add("class " + classIdentifier(m.group(1))
                         + (m.group(2) != null ? m.group(2) : "")
                         + (m.group(3) != null ? "[" + quoted(m.group(3)) + "]" : "")
                         + (m.group(4) != null ? m.group(4) : "")
                         + (body ? " {" : ""));
-            } else if ((m = match("^note for (" + ID + ") (.+)$", line)) != null) {
+            } else if ((m = match("^note for (" + CLASS_ID + ") (.+)$", line)) != null) {
                 String raw = m.group(2);
                 String note = raw.startsWith("\"") ? bareText(raw) : raw;
-                out.add("note for " + identifier(m.group(1), "classDiagram") + " " + quoted(note));
-            } else if ((m = match(
-                            "^(" + ID
-                                    + ")(?: \"([^\"]+)\")? (<\\|--|\\*--|o--|-->|\\.\\.>|\\.\\.\\|>|<\\|\\.\\.|<\\.\\.|o\\.\\.|\\.\\.o|--) (?:\"([^\"]+)\" )?("
-                                    + ID + ")(?: : (.+))?$",
-                            line))
-                    != null) {
-                out.add(identifier(m.group(1), "classDiagram") + (m.group(2) != null ? " " + quoted(m.group(2)) : "")
-                        + " " + m.group(3) + " " + (m.group(4) != null ? quoted(m.group(4)) + " " : "")
-                        + identifier(m.group(5), "classDiagram")
-                        + (m.group(6) != null ? " : " + structuralText(m.group(6), CLASS_SEPARATOR) : ""));
+                out.add("note for " + classIdentifier(m.group(1)) + " " + quoted(note));
+            } else if ((member = classMemberStatement(line)) != null) {
+                out.add(member);
+            } else if ((relation = classRelationStatement(line)) != null) {
+                out.add(relation);
             } else
                 fail(
-                        "unsupported class statement; allowed: class declaration/body, relation with <|-- *-- o-- --> ..> ..|> -- <|.. <.. o.. ..o, note for");
+                        "unsupported class statement; allowed: class ID, class ID { members }, ID : member, relation ID <arrow> ID [: label], note for ID");
         }
         if (body) fail("unclosed class body");
         return out;
+    }
+
+    private String classMemberStatement(String line) {
+        int idEnd = classIdEnd(line, 0);
+        if (idEnd < 0) return null;
+        int pos = skipAsciiSpaces(line, idEnd);
+        if (pos >= line.length() || line.charAt(pos) != ':') return null;
+        String id = line.substring(0, idEnd);
+        pos = skipAsciiSpaces(line, pos + 1);
+        return classIdentifier(id) + " : " + classMember(line.substring(pos));
+    }
+
+    private String classRelationStatement(String line) {
+        int leftEnd = classIdEnd(line, 0);
+        if (leftEnd < 0) return null;
+        int pos = skipAsciiSpaces(line, leftEnd);
+        if (pos == leftEnd) return null;
+        String leftId = line.substring(0, leftEnd);
+        String leftCard = null;
+        if (pos < line.length() && line.charAt(pos) == '"') {
+            int close = line.indexOf('"', pos + 1);
+            if (close < 0) return null;
+            leftCard = line.substring(pos + 1, close);
+            pos = skipAsciiSpaces(line, close + 1);
+            if (pos == close + 1) return null;
+        }
+        String arrow = null;
+        for (String candidate : CLASS_ARROWS)
+            if (line.startsWith(candidate, pos)) {
+                arrow = candidate;
+                break;
+            }
+        if (arrow == null) return null;
+        pos += arrow.length();
+        if (pos >= line.length() || !isAsciiSpace(line.charAt(pos))) return null;
+        pos = skipAsciiSpaces(line, pos);
+        String rightCard = null;
+        if (pos < line.length() && line.charAt(pos) == '"') {
+            int close = line.indexOf('"', pos + 1);
+            if (close < 0) return null;
+            rightCard = line.substring(pos + 1, close);
+            pos = skipAsciiSpaces(line, close + 1);
+            if (pos == close + 1) return null;
+        }
+        int rightEnd = classIdEnd(line, pos);
+        if (rightEnd < 0) return null;
+        String rightId = line.substring(pos, rightEnd);
+        int colon = skipAsciiSpaces(line, rightEnd);
+        String label = null;
+        if (colon < line.length() && line.charAt(colon) == ':') {
+            label = line.substring(skipAsciiSpaces(line, colon + 1));
+            if (label.isEmpty()) return null;
+        } else if (colon != line.length()) {
+            return null;
+        }
+        return classIdentifier(leftId) + (leftCard != null ? " " + quoted(leftCard) : "")
+                + " " + arrow + " " + (rightCard != null ? quoted(rightCard) + " " : "")
+                + classIdentifier(rightId)
+                + (label != null ? " : " + structuralText(label, CLASS_SEPARATOR) : "");
+    }
+
+    private static int classIdEnd(String line, int start) {
+        Matcher matcher = CLASS_ID_PREFIX.matcher(line);
+        matcher.region(start, line.length());
+        return matcher.lookingAt() ? matcher.end() : -1;
+    }
+
+    private static int skipAsciiSpaces(String line, int position) {
+        int pos = position;
+        while (pos < line.length() && isAsciiSpace(line.charAt(pos))) pos++;
+        return pos;
+    }
+
+    private static boolean isAsciiSpace(char character) {
+        return character == ' ' || character == '\t';
     }
 
     private static String classMember(String value) {
@@ -974,14 +1116,30 @@ public final class MermaidRecognizer {
         for (String line : lines) {
             advance(line);
             Matcher m;
+            SequenceMessage message;
             if (line.equals("autonumber")) {
                 out.add(line);
-            } else if ((m = match("^(participant|actor) (" + ID + ")(?: as (.+))?$", line)) != null) {
-                String id = identifier(m.group(2), "sequenceDiagram");
-                if (!declarations.add(id)) fail("sequence.declaration-unique", "duplicate sequence declaration");
-                participants.add(id);
-                out.add(m.group(1) + " " + id
-                        + (m.group(3) != null ? " as " + structuralText(m.group(3), SEQUENCE_SEPARATOR) : ""));
+            } else if ((m = match("^(participant|actor) (.+)$", line)) != null) {
+                String rest = trim(m.group(2));
+                int as = rest.lastIndexOf(" as ");
+                String name;
+                String alias = null;
+                if (as >= 0) {
+                    name = sequenceIdentifier(trim(rest.substring(0, as)));
+                    alias = structuralText(rest.substring(as + 4), SEQUENCE_SEPARATOR);
+                } else {
+                    name = sequenceName(rest);
+                }
+                if (!declarations.add(name)) fail("sequence.declaration-unique", "duplicate sequence declaration");
+                participants.add(name);
+                out.add(m.group(1) + " " + name + (alias != null ? " as " + alias : ""));
+            } else if ((m = match("^rect (.+)$", line)) != null) {
+                String argument = text(m.group(1));
+                if (argument.contains(";"))
+                    fail("text.statement-separator", "ambiguous multiple statements on one line");
+                stack.add("rect");
+                depth(stack.size());
+                out.add("rect " + argument);
             } else if ((m = match("^(alt|loop|opt|par) (.+)$", line)) != null) {
                 stack.add(m.group(1));
                 depth(stack.size());
@@ -997,37 +1155,98 @@ public final class MermaidRecognizer {
                 out.add("end");
             } else if ((m = match("^title (.+)$", line)) != null) {
                 out.add("title " + structuralText(m.group(1), SEQUENCE_SEPARATOR));
-            } else if ((m = match("^(?:Note|note) (over|left of|right of) (" + ID + ")(?:,(" + ID + "))?: (.+)$", line))
-                    != null) {
-                if (m.group(3) != null && !m.group(1).equals("over")) fail("invalid note participants");
-                String first = identifier(m.group(2), "sequenceDiagram");
-                String second = m.group(3) != null ? identifier(m.group(3), "sequenceDiagram") : null;
-                participants.add(first);
-                if (second != null) participants.add(second);
-                out.add("Note " + m.group(1) + " " + first + (second == null ? "" : "," + second) + ": "
-                        + structuralText(m.group(4), SEQUENCE_SEPARATOR));
-            } else if ((m = match("^(activate|deactivate) (" + ID + ")$", line)) != null) {
-                String id = identifier(m.group(2), "sequenceDiagram");
+            } else if (line.startsWith("Note ") || line.startsWith("note ")) {
+                String rest = line.substring(5);
+                String side;
+                if (rest.startsWith("over ")) {
+                    side = "over";
+                    rest = rest.substring(5);
+                } else if (rest.startsWith("left of ")) {
+                    side = "left of";
+                    rest = rest.substring(8);
+                } else if (rest.startsWith("right of ")) {
+                    side = "right of";
+                    rest = rest.substring(9);
+                } else {
+                    fail("invalid sequence note");
+                    return out;
+                }
+                int colon = rest.indexOf(": ");
+                if (colon < 0) fail("invalid sequence note");
+                List<String> names = new ArrayList<>();
+                for (String part : rest.substring(0, colon).split(",", -1)) names.add(sequenceName(part));
+                if (!side.equals("over") && names.size() != 1) fail("invalid note participants");
+                participants.addAll(names);
+                out.add("Note " + side + " " + String.join(",", names) + ": "
+                        + structuralText(rest.substring(colon + 2), SEQUENCE_SEPARATOR));
+            } else if ((m = match("^(activate|deactivate) (.+)$", line)) != null) {
+                String id = sequenceName(m.group(2));
                 activation(id, m.group(1).equals("activate") ? 1 : -1, references, active);
                 out.add(m.group(1) + " " + id);
-            } else if ((m = match("^(" + ID + ")(-->>|->>|-->|->|--\\)|-\\)|--x|-x)([+-]?)(" + ID + "): (.+)$", line))
-                    != null) {
-                String from = identifier(m.group(1), "sequenceDiagram");
-                String to = identifier(m.group(4), "sequenceDiagram");
+            } else if ((message = sequenceMessage(line)) != null) {
+                String from = sequenceName(message.from());
+                String to = sequenceName(message.to());
                 participants.add(from);
                 participants.add(to);
-                if (m.group(3).equals("+")) activation(to, 1, references, active);
-                if (m.group(3).equals("-")) activation(from, -1, references, active);
-                out.add(from + m.group(2) + m.group(3) + to + ": " + structuralText(m.group(5), SEQUENCE_SEPARATOR));
+                if (message.sign().equals("+")) activation(to, 1, references, active);
+                if (message.sign().equals("-")) activation(from, -1, references, active);
+                out.add(from + message.arrow() + message.sign() + to + ": "
+                        + structuralText(message.message(), SEQUENCE_SEPARATOR));
             } else
                 fail(
-                        "unsupported sequence statement; allowed: participant, actor, message, note, activate/deactivate, autonumber, alt/loop/opt/par, title");
+                        "unsupported sequence statement; allowed: participant, actor, message, note, activate/deactivate, autonumber, alt/loop/opt/par/rect, title");
         }
         if (!stack.isEmpty()) fail("unclosed sequence block");
         for (String id : references)
             if (!participants.contains(id))
                 fail("sequence.activation-participant", "activation references unknown participant");
         return out;
+    }
+
+    private record SequenceMessage(String from, String arrow, String sign, String to, String message) {}
+
+    private static SequenceMessage sequenceMessage(String line) {
+        int best = -1;
+        String arrow = null;
+        for (String candidate : SEQUENCE_ARROWS) {
+            int index = line.indexOf(candidate);
+            if (index >= 0 && (best < 0 || index < best || (index == best && candidate.length() > arrow.length()))) {
+                best = index;
+                arrow = candidate;
+            }
+        }
+        if (arrow == null) return null;
+        int pos = best + arrow.length();
+        String sign = "";
+        if (pos < line.length() && (line.charAt(pos) == '+' || line.charAt(pos) == '-')) {
+            sign = String.valueOf(line.charAt(pos));
+            pos++;
+        }
+        int colon = line.indexOf(": ", pos);
+        if (colon < 0) return null;
+        String from = trim(line.substring(0, best));
+        String to = trim(line.substring(pos, colon));
+        if (from.isEmpty() || to.isEmpty()) return null;
+        return new SequenceMessage(from, arrow, sign, to, trim(line.substring(colon + 2)));
+    }
+
+    private String sequenceName(String value) {
+        String name = trim(value);
+        if (name.startsWith("\"")) name = bareText(name);
+        if (!name.matches("[A-Za-z0-9_]+(?: [A-Za-z0-9_]+)*"))
+            fail("invalid sequence name; use words separated by spaces, e.g. participant API as \"REST API\"");
+        if (!name.contains(" ") && grammar.reserved.get("sequenceDiagram").contains(name.toLowerCase(Locale.ROOT)))
+            fail("identifier.reserved", "reserved identifier `" + name + "`; choose a non-keyword participant name");
+        return name;
+    }
+
+    private String sequenceIdentifier(String value) {
+        if (!grammar.identifier.matcher(value).matches()) fail("invalid sequence identifier");
+        if (grammar.reserved.get("sequenceDiagram").contains(value.toLowerCase(Locale.ROOT)))
+            fail(
+                    "identifier.reserved",
+                    "reserved identifier `" + value + "`; choose a non-keyword participant identifier");
+        return value;
     }
 
     private static void activation(String id, int delta, Set<String> references, Map<String, Integer> active) {
@@ -1046,12 +1265,13 @@ public final class MermaidRecognizer {
     private List<String> state(List<String> lines, String header) {
         List<String> out = new ArrayList<>(List.of(header.equals("stateDiagram") ? "stateDiagram-v2" : header));
         Set<String> states = new HashSet<>();
+        Map<String, String> aliases = new HashMap<>();
+        List<String> composites = new ArrayList<>();
         String noteId = null;
         String noteSide = null;
         List<String> noteParts = new ArrayList<>();
         for (String line : lines) {
             advance(line);
-            Matcher m;
             if (noteId != null) {
                 if (line.equalsIgnoreCase("end note")) {
                     if (noteParts.isEmpty()) fail("empty state note");
@@ -1060,27 +1280,205 @@ public final class MermaidRecognizer {
                     noteSide = null;
                     noteParts.clear();
                 } else noteParts.add(structuralText(line, STATE_SEPARATOR));
-            } else if ((m = match("^(?:note|Note) (left|right) of (" + ID + ")$", line)) != null) {
-                noteId = identifier(m.group(2), "stateDiagram-v2");
-                if (!states.contains(noteId)) fail("state.note-after-state", "note references unknown state");
-                noteSide = m.group(1);
-            } else if ((m = match("^state \"([^\"]+)\" as (" + ID + ")$", line)) != null) {
-                String id = identifier(m.group(2), "stateDiagram-v2");
-                states.add(id);
-                out.add("state " + quoted(m.group(1)) + " as " + id);
-            } else if ((m = match("^(\\[\\*\\]|" + ID + ")\\s*-->\\s*(\\[\\*\\]|" + ID + ")(?:\\s*:\\s*(.+))?$", line))
-                    != null) {
-                for (String id : List.of(m.group(1), m.group(2)))
-                    if (!id.equals("[*]")) states.add(identifier(id, "stateDiagram-v2"));
-                out.add(m.group(1) + " --> " + m.group(2)
-                        + (m.group(3) != null ? " : " + structuralText(m.group(3), STATE_SEPARATOR) : ""));
-            } else if ((m = match("^(?:note|Note) (left|right) of (" + ID + ") : (.+)$", line)) != null) {
-                String id = identifier(m.group(2), "stateDiagram-v2");
-                if (!states.contains(id)) fail("state.note-after-state", "note references unknown state");
-                out.add("note " + m.group(1) + " of " + id + " : " + structuralText(m.group(3), STATE_SEPARATOR));
-            } else fail("unsupported state statement; allowed: state alias, ID --> ID[: label], note left/right of ID");
+            } else if (line.startsWith("direction ")) {
+                out.add("direction " + flowDirection(line.substring(10)));
+            } else if (line.equals("}")) {
+                if (composites.isEmpty()) fail("unmatched }");
+                composites.removeLast();
+                out.add("}");
+            } else if (line.startsWith("note ") || line.startsWith("Note ")) {
+                String rest = line.substring(5);
+                String side;
+                if (rest.startsWith("left of ")) {
+                    side = "left";
+                    rest = rest.substring(8);
+                } else if (rest.startsWith("right of ")) {
+                    side = "right";
+                    rest = rest.substring(9);
+                } else {
+                    fail("unsupported state note; use note left/right of ID");
+                    return out;
+                }
+                int colon = firstUnquotedColon(rest);
+                if (colon >= 0) {
+                    String id = stateNoteTarget(rest.substring(0, colon), states, aliases);
+                    out.add("note " + side + " of " + id + " : "
+                            + structuralText(rest.substring(colon + 1), STATE_SEPARATOR));
+                } else {
+                    noteId = stateNoteTarget(rest, states, aliases);
+                    noteSide = side;
+                }
+            } else if (line.startsWith("state ")
+                    && (firstUnquotedColon(line.substring(6)) >= 0 || indexOfUnquoted(line, "-->") < 0)) {
+                String rest = line.substring(6);
+                int colon = firstUnquotedColon(rest);
+                if (colon >= 0) {
+                    String name = trim(rest.substring(0, colon));
+                    String description = trim(rest.substring(colon + 1));
+                    if (name.isEmpty() || description.isEmpty()) fail("invalid state description");
+                    StateRef ref = stateReference(name, states, aliases);
+                    if (ref.alias() != null) out.add(ref.alias());
+                    out.add(ref.id() + " : " + structuralText(description, STATE_SEPARATOR));
+                } else {
+                    stateDeclaration(line, states, aliases, composites, out);
+                }
+            } else if (indexOfUnquoted(line, "-->") >= 0) {
+                int arrow = indexOfUnquoted(line, "-->");
+                String left = line.substring(0, arrow);
+                String right = line.substring(arrow + 3);
+                int colon = firstUnquotedColon(right);
+                String to = colon >= 0 ? right.substring(0, colon) : right;
+                String label = colon >= 0 ? right.substring(colon + 1) : null;
+                if (trim(left).isEmpty() || trim(to).isEmpty()) fail("invalid state transition");
+                StateRef fromRef = stateReference(left, states, aliases);
+                StateRef toRef = stateReference(to, states, aliases);
+                if (fromRef.alias() != null) out.add(fromRef.alias());
+                if (toRef.alias() != null) out.add(toRef.alias());
+                out.add(fromRef.id() + " --> " + toRef.id()
+                        + (label != null ? " : " + structuralText(label, STATE_SEPARATOR) : ""));
+            } else if (firstUnquotedColon(line) >= 0) {
+                int colon = firstUnquotedColon(line);
+                String name = line.substring(0, colon);
+                String description = line.substring(colon + 1);
+                if (trim(name).isEmpty() || trim(description).isEmpty()) fail("invalid state description");
+                StateRef ref = stateReference(name, states, aliases);
+                if (ref.alias() != null) out.add(ref.alias());
+                out.add(ref.id() + " : " + structuralText(description, STATE_SEPARATOR));
+            } else
+                fail(
+                        "unsupported state statement; allowed: state ID, state \"Label\" as ID, state ID { ... }, ID --> ID [: label], ID : description, direction LR, note left/right of ID");
         }
         if (noteId != null) fail("unclosed state note");
+        if (!composites.isEmpty()) fail("unclosed state block");
         return out;
     }
+
+    private void stateDeclaration(
+            String line, Set<String> states, Map<String, String> aliases, List<String> composites, List<String> out) {
+        String rest = trim(line.substring(6));
+        boolean open = rest.endsWith("{");
+        if (open) rest = trim(rest.substring(0, rest.length() - 1));
+        int as = rest.lastIndexOf(" as ");
+        String display = as >= 0 ? trim(rest.substring(0, as)) : rest;
+        String explicitId = as >= 0 ? stateIdentifier(trim(rest.substring(as + 4))) : null;
+        if (display.isEmpty()) fail("state declaration requires a name");
+        String id;
+        String render;
+        if (explicitId != null) {
+            id = explicitId;
+            String displayText = display.startsWith("\"") ? bareText(display) : display;
+            states.add(id);
+            aliases.put(displayText, id);
+            render = "state " + quoted(displayText) + " as " + id;
+        } else if (display.startsWith("\"")) {
+            String displayText = bareText(display);
+            StateRef ref = stateDisplayReference(displayText, states, aliases);
+            id = ref.id();
+            render = ref.alias() != null ? ref.alias() : "state " + quoted(displayText) + " as " + id;
+        } else if (display.matches("[A-Za-z0-9_]+")) {
+            id = stateIdentifier(display);
+            states.add(id);
+            render = "state " + id;
+        } else {
+            if (display.contains("\"") || display.startsWith("state "))
+                fail("invalid state display; use a bare state name or a quoted display alias");
+            StateRef ref = stateDisplayReference(display, states, aliases);
+            id = ref.id();
+            render = ref.alias() != null ? ref.alias() : "state " + quoted(display) + " as " + id;
+        }
+        out.add(render + (open ? " {" : ""));
+        if (open) {
+            composites.add(id);
+            depth(composites.size());
+        }
+    }
+
+    private StateRef stateReference(String raw, Set<String> states, Map<String, String> aliases) {
+        String value = trim(raw);
+        if (value.equals("[*]")) return new StateRef(value, null);
+        if (value.contains("\"") || value.startsWith("state "))
+            fail("invalid state reference; use an alias declaration and a bare state name, not quotes or `state ...`");
+        if (value.matches("[A-Za-z0-9_]+")) {
+            if (stateReserved(value))
+                fail(
+                        "identifier.reserved",
+                        "reserved identifier `" + value + "`; choose a non-keyword state identifier");
+            states.add(value);
+            return new StateRef(value, null);
+        }
+        return stateDisplayReference(value, states, aliases);
+    }
+
+    private StateRef stateDisplayReference(String display, Set<String> states, Map<String, String> aliases) {
+        String existing = aliases.get(display);
+        if (existing != null) {
+            states.add(existing);
+            return new StateRef(existing, null);
+        }
+        String id = stateDisplayId(display, states);
+        aliases.put(display, id);
+        states.add(id);
+        return new StateRef(id, "state " + quoted(display) + " as " + id);
+    }
+
+    private String stateNoteTarget(String raw, Set<String> states, Map<String, String> aliases) {
+        String value = trim(raw);
+        String id;
+        if (value.startsWith("\"")) {
+            id = aliases.get(bareText(value));
+        } else if (value.matches("[A-Za-z0-9_]+")) {
+            if (stateReserved(value))
+                fail(
+                        "identifier.reserved",
+                        "reserved identifier `" + value + "`; choose a non-keyword state identifier");
+            id = value;
+        } else {
+            id = aliases.get(value);
+        }
+        if (id == null || !states.contains(id)) fail("state.note-after-state", "note references unknown state");
+        return id;
+    }
+
+    private String stateIdentifier(String value) {
+        if (!value.matches("[A-Za-z0-9_]+")) fail("invalid state identifier");
+        if (stateReserved(value))
+            fail("identifier.reserved", "reserved identifier `" + value + "`; choose a non-keyword state identifier");
+        return value;
+    }
+
+    private boolean stateReserved(String value) {
+        return grammar.reserved.get("stateDiagram-v2").contains(value.toLowerCase(Locale.ROOT));
+    }
+
+    private static int indexOfUnquoted(String value, String token) {
+        boolean quoted = false;
+        for (int i = 0; i <= value.length() - token.length(); i++) {
+            char character = value.charAt(i);
+            if (character == '"') quoted = !quoted;
+            else if (!quoted && value.startsWith(token, i)) return i;
+        }
+        return -1;
+    }
+
+    private static int firstUnquotedColon(String value) {
+        boolean quoted = false;
+        for (int i = 0; i < value.length(); i++) {
+            char character = value.charAt(i);
+            if (character == '"') quoted = !quoted;
+            else if (character == ':' && !quoted) return i;
+        }
+        return -1;
+    }
+
+    private String stateDisplayId(String display, Set<String> states) {
+        String base = display.replaceAll("[^A-Za-z0-9_]+", "_").replaceAll("^_+|_+$", "");
+        if (base.isEmpty()) base = "State";
+        if (!Character.isLetter(base.charAt(0))) base = "State_" + base;
+        String candidate = base;
+        int suffix = 2;
+        while (states.contains(candidate) || stateReserved(candidate)) candidate = base + "_" + suffix++;
+        return candidate;
+    }
+
+    private record StateRef(String id, String alias) {}
 }

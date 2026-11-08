@@ -42,16 +42,37 @@ const ER_RESERVED = new Set(grammar.reserved.erDiagram)
 const ER_ATTRIBUTE_RESERVED = new Set(grammar.reserved.erAttribute)
 const HEADERS = Object.values(grammar.headers).flat()
 const FLOW_HEADER = /^(flowchart|graph)(?: (?:[tT][dD]|[tT][bB]|[bB][tT]|[lL][rR]|[rR][lL]))?$/
-const INLINE_SOLID = /^--\s*"([^"]*)"\s*(-->|---|--o|--x)/
-const INLINE_DOTTED = /^-\.\s*"([^"]*)"\s*(\.-?>|-?\.-)/
-const INLINE_THICK = /^==\s*"([^"]*)"\s*(==>|===|===o|===x)/
-const BROKEN_INLINE_SOLID = /^--\s*([^->\n]+?)\s*(-->|---|--o|--x)/
-const BROKEN_INLINE_DOTTED = /^-\.\s*([^-.\n]+?)\s*(\.-?>|-?\.-)/
-const BROKEN_INLINE_THICK = /^==\s*([^=>\n]+?)\s*(==>|===|===o|===x)/
-const INLINE_QUOTED_EDGE = /^(?:--|-\.|==)\s*"/
+const INLINE_SOLID = /^--[ \t]*"([^"]*)"[ \t]*(-->|---|--o|--x)/
+const INLINE_DOTTED = /^-\.[ \t]*"([^"]*)"[ \t]*(\.-?>|-?\.-)/
+const INLINE_THICK = /^==[ \t]*"([^"]*)"[ \t]*(==>|===|===o|===x)/
+const INLINE_QUOTED_EDGE = /^(?:--|-\.|==)[ \t]*"/
+const CLASS_ID = '[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*'
+const CLASS_ID_PREFIX = new RegExp('^' + CLASS_ID)
+const CLASS_ARROWS = [
+  '<|--',
+  '*--',
+  'o--',
+  '-->',
+  '..>',
+  '..|>',
+  '<|..',
+  '<..',
+  'o..',
+  '..o',
+  '--|>',
+  '--*',
+  '--o',
+  '<--',
+  '--',
+]
+const SEQUENCE_ARROWS = ['-->>', '->>', '-->', '->', '--)', '-)', '--x', '-x']
+const CLASS_DECLARATION = new RegExp(
+  `^class (${CLASS_ID})(~[^~ \\t][^~]*~)?(?:\\["([^"]+)"\\])?(<<[A-Za-z][A-Za-z0-9_-]*>>)?( \\{)?$`,
+)
+const CLASS_NOTE = new RegExp(`^note for (${CLASS_ID}) (.+)$`)
 
 export function encode(value: string): string {
-  const decoded = decode(value).replace(/<br\s*\/?>|\\n/gi, '\n')
+  const decoded = decode(value).replace(/<br[ \t]*\/?>|\\n/gi, '\n')
   return Array.from(decoded, (character) => {
     if (character === '\n') return '<br/>'
     if (/^[A-Za-z0-9 .,!?$%*+=_-]$/.test(character)) return character
@@ -73,6 +94,18 @@ function bareText(value: string): string {
 
 function checkDepth(stack: readonly unknown[]): void {
   if (stack.length > grammar.bounds.maxDepth) fail('maximum nesting depth exceeded', 'input.depth')
+}
+
+function classIdentifier(value: string): string {
+  for (const part of value.split('.')) {
+    if (!IDENT.test(part)) fail(`invalid class identifier: ${value}`)
+    if (CLASS_RESERVED.has(part.toLowerCase()))
+      fail(
+        `reserved identifier: ${part}; choose a non-keyword class identifier`,
+        'identifier.reserved',
+      )
+  }
+  return value
 }
 
 function decode(value: string): string {
@@ -103,14 +136,14 @@ function fail(message: string, rule = 'syntax.statement'): never {
 function flowIdentifier(value: string): string {
   if (!FLOW_IDENT.test(value)) fail(`invalid identifier: ${value}`)
   if (FLOW_RESERVED.has(value) || value === 'classDef' || value === 'linkStyle')
-    fail(`reserved identifier: ${value}`, 'identifier.reserved')
+    fail(`reserved identifier: ${value}; choose a non-keyword identifier`, 'identifier.reserved')
   return value
 }
 
 function identifier(value: string, reserved?: ReadonlySet<string>): string {
   if (!IDENT.test(value)) fail(`invalid identifier: ${value}`)
   if (reserved?.has(value.toLowerCase()))
-    fail(`reserved identifier: ${value}`, 'identifier.reserved')
+    fail(`reserved identifier: ${value}; choose a non-keyword identifier`, 'identifier.reserved')
   return value
 }
 
@@ -189,14 +222,6 @@ class Scanner {
 }
 
 function checkBrokenInlineEdge(remaining: string): void {
-  if (
-    BROKEN_INLINE_SOLID.exec(remaining) ||
-    BROKEN_INLINE_DOTTED.exec(remaining) ||
-    BROKEN_INLINE_THICK.exec(remaining)
-  )
-    fail(
-      'unquoted inline edge label; edge labels must be quoted, e.g. -- "label" --> or -->|"label"|',
-    )
   if (INLINE_QUOTED_EDGE.exec(remaining))
     fail('missing or invalid closing arrow for inline edge label; e.g. -- "label" -->')
 }
@@ -214,6 +239,10 @@ function flow(lines: string[], header: string): string[] {
     groups.add(id)
   }
   for (const line of lines) {
+    if (line.startsWith('direction ')) {
+      out.push(`direction ${flowDirection(line.slice(10))}`)
+      continue
+    }
     const s = new Scanner(line)
     if (s.maybe('subgraph ')) {
       const group = flowGroup(s)
@@ -271,7 +300,7 @@ function flow(lines: string[], header: string): string[] {
               remaining.startsWith('-.') ||
               remaining.startsWith('==')
             )
-              fail('invalid inline edge; expected quoted label, e.g. -- "label" -->')
+              fail('unquoted inline edge label; quote it, e.g. -- "label" -->')
             fail('expected an arrow such as -->, e.g. A --> B')
           }
           arrow = found
@@ -304,6 +333,13 @@ function flowBareLabel(value: string): string {
   const label = text(value)
   if (/["[\]{}|]/.test(label)) fail('unsafe or ambiguous label; use plain text, e.g. A["API (v1)"]')
   return label
+}
+
+function flowDirection(value: string): string {
+  const direction = value.trim().toUpperCase()
+  if (!['BT', 'LR', 'RL', 'TB', 'TD'].includes(direction))
+    fail('invalid direction; expected TD, TB, BT, LR or RL')
+  return direction
 }
 
 function flowGroup(s: Scanner): { id: string; render: string } {
@@ -388,6 +424,15 @@ function flowSingleNode(s: Scanner): string {
   return `${id}${shape.open}${label}${close}`
 }
 
+function ignoredLine(line: string): boolean {
+  return (
+    line.startsWith('%%') ||
+    /^style [A-Za-z0-9_.]+ .+$/.test(line) ||
+    /^classDef [A-Za-z0-9_]+ .+$/.test(line) ||
+    /^linkStyle .+$/.test(line)
+  )
+}
+
 const IDENT_PREFIX = new RegExp(grammar.patterns.identifier.slice(0, -1))
 
 interface BoundaryState {
@@ -396,12 +441,35 @@ interface BoundaryState {
 
 type Handler = (lines: string[], header: string) => string[]
 
+interface JourneyTask {
+  roles: null | string
+  score: string
+  text: string
+}
+
+interface SequenceMessage {
+  arrow: string
+  from: string
+  message: string
+  sign: string
+  to: string
+}
+
+interface StateRef {
+  alias?: string
+  id: string
+}
+
 export function recognize(source: unknown): Recognition {
   try {
     const rawLines = scanLines(source, grammar.bounds.maxInputUtf16Units)
     const lines = rawLines.map((line) => line.trim()).filter(Boolean)
     const header = lines.shift()
     if (!header) fail('missing header', 'input.header')
+    for (const line of lines) {
+      if (line.startsWith('%%{')) fail('init directives are unsupported')
+    }
+    const content = lines.filter((line) => !ignoredLine(line))
     let type = header
     let handler: Handler
     if (FLOW_HEADER.test(header)) {
@@ -428,10 +496,10 @@ export function recognize(source: unknown): Recognition {
     else if (header === 'quadrantChart') handler = quadrant
     else if (header === 'xychart-beta') handler = xy
     else fail(`unsupported header; supported: ${HEADERS.join(', ')}`, 'input.header')
-    if (!lines.length) fail('empty diagram', 'input.empty-diagram')
+    if (!content.length) fail('empty diagram', 'input.empty-diagram')
     return {
       ok: true,
-      renderText: handler(lines, header).join('\n'),
+      renderText: handler(content, header).join('\n'),
       source: source as string,
       type,
     }
@@ -452,9 +520,13 @@ function c4(lines: string[], header: string): string[] {
     ['Boundary', [2, 3]],
     ['Component', [2, 4]],
     ['Component_Ext', [2, 4]],
+    ['ComponentDb', [2, 4]],
+    ['ComponentQueue', [2, 4]],
     ['Container', [2, 4]],
     ['Container_Boundary', [2, 2]],
     ['Container_Ext', [2, 4]],
+    ['ContainerDb', [2, 4]],
+    ['ContainerQueue', [2, 4]],
     ['Person', [2, 3]],
     ['Person_Ext', [2, 3]],
     ['Rel', [3, 4]],
@@ -462,6 +534,8 @@ function c4(lines: string[], header: string): string[] {
     ['System', [2, 3]],
     ['System_Boundary', [2, 2]],
     ['System_Ext', [2, 3]],
+    ['SystemDb', [2, 4]],
+    ['SystemQueue', [2, 4]],
   ])
   for (const line of lines) {
     if (line.startsWith('title ')) {
@@ -481,7 +555,9 @@ function c4(lines: string[], header: string): string[] {
     const name = s.take(/^[A-Za-z_]+/)
     const limits = elements.get(name)
     if (!limits)
-      fail('unsupported C4 element; allowed: Person, System, Container, Component, boundaries, Rel')
+      fail(
+        'unsupported C4 element; allowed: Person, System, Container, Component, ContainerDb, SystemDb, ContainerQueue, SystemQueue, ComponentDb, ComponentQueue, boundaries, Rel',
+      )
     s.literal('(')
     const args = [s.id()]
     const relation = name.startsWith('Rel')
@@ -520,6 +596,8 @@ function c4(lines: string[], header: string): string[] {
 function classDiagram(lines: string[], header: string): string[] {
   const out = [header]
   let body = false
+  let member: null | string
+  let relation: null | string
   for (const line of lines) {
     let match: null | RegExpMatchArray
     if (body) {
@@ -535,58 +613,107 @@ function classDiagram(lines: string[], header: string): string[] {
         continue
       }
       out.push(classMember(line))
-    } else if (
-      (match = line.match(
-        /^class ([A-Za-z][A-Za-z0-9_]*)(~[^~\s][^~]*~)?(?:\["([^"]+)"\])?(<<[A-Za-z][A-Za-z0-9_-]*>>)?( \{)?$/,
-      ))
-    ) {
+    } else if (line.startsWith('direction ')) {
+      out.push(`direction ${flowDirection(line.slice(10))}`)
+    } else if ((match = line.match(CLASS_DECLARATION))) {
       const generic = match[2] as string | undefined
       const annotation = match[4] as string | undefined
       body = Boolean(match[5])
       out.push(
-        `class ${identifier(match[1], CLASS_RESERVED)}${generic ?? ''}${match[3] ? `[${slots.quoted(match[3])}]` : ''}${annotation ?? ''}${body ? ' {' : ''}`,
+        `class ${classIdentifier(match[1])}${generic ?? ''}${match[3] ? `[${slots.quoted(match[3])}]` : ''}${annotation ?? ''}${body ? ' {' : ''}`,
       )
-    } else if ((match = line.match(/^note for ([A-Za-z][A-Za-z0-9_]*) (.+)$/))) {
+    } else if ((match = line.match(CLASS_NOTE))) {
       out.push(
-        `note for ${identifier(match[1], CLASS_RESERVED)} ${slots.quoted(match[2].startsWith('"') ? bareText(match[2]) : match[2])}`,
+        `note for ${classIdentifier(match[1])} ${slots.quoted(match[2].startsWith('"') ? bareText(match[2]) : match[2])}`,
       )
-    } else if (
-      (match = line.match(
-        /^([A-Za-z][A-Za-z0-9_]*)(?: "([^"]+)")? (<\|--|\*--|o--|-->|\.\.>|\.\.\|>|<\|\.\.|<\.\.|o\.\.|\.\.o|--) (?:"([^"]+)" )?([A-Za-z][A-Za-z0-9_]*)(?: : (.+))?$/,
-      ))
-    ) {
-      out.push(
-        `${identifier(match[1], CLASS_RESERVED)}${match[2] ? ` ${slots.quoted(match[2])}` : ''} ${match[3]} ${match[4] ? `${slots.quoted(match[4])} ` : ''}${identifier(match[5], CLASS_RESERVED)}${match[6] ? ` : ${classText(match[6])}` : ''}`,
-      )
+    } else if ((member = classMemberStatement(line)) !== null) {
+      out.push(member)
+    } else if ((relation = classRelationStatement(line)) !== null) {
+      out.push(relation)
     } else
       fail(
-        'unsupported class statement; allowed: class declaration/body, relation with <|-- *-- o-- --> ..> ..|> -- <|.. <.. o.. ..o, note for',
+        'unsupported class statement; allowed: class ID, class ID { members }, ID : member, relation ID <arrow> ID [: label], note for ID',
       )
   }
   if (body) fail('unclosed class body')
   return out
 }
 
+function classIdEnd(line: string, start: number): number {
+  const match = CLASS_ID_PREFIX.exec(line.slice(start))
+  return match ? start + match[0].length : -1
+}
+
 function classMember(value: string): string {
   const content = text(value.startsWith('"') ? bareText(value) : value)
   if (/[{}]/.test(content)) fail('nested class body')
   if (/&[#A-Za-z0-9]/.test(content)) fail('HTML-like entity is unsupported')
-  const decoded = decode(content).replace(/<br\s*\/?>|\\n/gi, '\n')
+  const decoded = decode(content).replace(/<br[ \t]*\/?>|\\n/gi, '\n')
   if (decoded.includes(';'))
     fail('ambiguous multiple statements on one line', 'text.statement-separator')
-  return decoded
+  const encoded = decoded
     .split('\n')
     .map((part) => part.trim())
     .join('')
     .replace(/[<>&"]/g, (character) =>
       character === '"' ? '#quot;' : `#${character.codePointAt(0)};`,
     )
+  return text(encoded)
+}
+
+function classMemberStatement(line: string): null | string {
+  const idEnd = classIdEnd(line, 0)
+  if (idEnd < 0) return null
+  let pos = skipAsciiSpaces(line, idEnd)
+  if (line[pos] !== ':') return null
+  const id = line.slice(0, idEnd)
+  pos = skipAsciiSpaces(line, pos + 1)
+  return `${classIdentifier(id)} : ${classMember(line.slice(pos))}`
+}
+
+function classRelationStatement(line: string): null | string {
+  const leftEnd = classIdEnd(line, 0)
+  if (leftEnd < 0) return null
+  let pos = skipAsciiSpaces(line, leftEnd)
+  if (pos === leftEnd) return null
+  const leftId = line.slice(0, leftEnd)
+  let leftCard: null | string = null
+  if (line[pos] === '"') {
+    const close = line.indexOf('"', pos + 1)
+    if (close < 0) return null
+    leftCard = line.slice(pos + 1, close)
+    pos = skipAsciiSpaces(line, close + 1)
+    if (pos === close + 1) return null
+  }
+  const arrow = CLASS_ARROWS.find((candidate) => line.startsWith(candidate, pos))
+  if (!arrow) return null
+  pos += arrow.length
+  if (!isAsciiSpace(line[pos])) return null
+  pos = skipAsciiSpaces(line, pos)
+  let rightCard: null | string = null
+  if (line[pos] === '"') {
+    const close = line.indexOf('"', pos + 1)
+    if (close < 0) return null
+    rightCard = line.slice(pos + 1, close)
+    pos = skipAsciiSpaces(line, close + 1)
+    if (pos === close + 1) return null
+  }
+  const rightEnd = classIdEnd(line, pos)
+  if (rightEnd < 0) return null
+  const rightId = line.slice(pos, rightEnd)
+  const colon = skipAsciiSpaces(line, rightEnd)
+  let label: null | string = null
+  if (line[colon] === ':') {
+    label = line.slice(skipAsciiSpaces(line, colon + 1))
+    if (!label) return null
+  } else if (colon !== line.length) return null
+  return `${classIdentifier(leftId)}${leftCard ? ` ${slots.quoted(leftCard)}` : ''} ${arrow} ${rightCard ? `${slots.quoted(rightCard)} ` : ''}${classIdentifier(rightId)}${label ? ` : ${classText(label)}` : ''}`
 }
 
 function classText(value: string): string {
   return structuralText(
     value,
-    /;\s*(?:(?:class|classDef|namespace|style|link|click|note|direction)\b|[A-Za-z][A-Za-z0-9_]*[^;\n]*?(?:<\|--|\*--|o--|-->|\.\.>|\.\.\|>|<\|\.\.|<\.\.|o\.\.|\.\.o|--))/gi,
+    /;[ \t]*(?:(?:class|classDef|namespace|style|link|click|note|direction)\b|[A-Za-z][A-Za-z0-9_]*[^;\n]*?(?:<\|--|\*--|o--|-->|\.\.>|\.\.\|>|<\|\.\.|<\.\.|o\.\.|\.\.o|--\|>|--\*|--o|<--|--))/gi,
   )
 }
 
@@ -608,7 +735,7 @@ function er(lines: string[], header: string): string[] {
       let comment = ''
       s.space()
       if (s.pos < line.length && line[s.pos] !== '"') {
-        key = s.take(/^(?:PK|FK|UK)(?:,\s*(?:PK|FK|UK))*/)
+        key = s.take(/^(?:PK|FK|UK)(?:,[ \t]*(?:PK|FK|UK))*/)
         if (new Set(key.split(',').map((part) => part.trim())).size !== key.split(',').length)
           fail('duplicate attribute key')
       }
@@ -654,8 +781,32 @@ function erName(s: Scanner): string {
   return identifier(s.id(), ER_RESERVED)
 }
 
+function firstUnquotedColon(value: string): number {
+  let quoted = false
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index]
+    if (character === '"') quoted = !quoted
+    else if (character === ':' && !quoted) return index
+  }
+  return -1
+}
+
+function indexOfUnquoted(value: string, token: string): number {
+  let quoted = false
+  for (let index = 0; index <= value.length - token.length; index++) {
+    const character = value[index]
+    if (character === '"') quoted = !quoted
+    else if (!quoted && value.startsWith(token, index)) return index
+  }
+  return -1
+}
+
+function isAsciiSpace(character: string | undefined): boolean {
+  return character === ' ' || character === '\t'
+}
+
 function journey(lines: string[], header: string): string[] {
-  if (/^journey\s+title(?:\s+.*)?$/.test(header)) {
+  if (/^journey[ \t]+title(?:[ \t]+.*)?$/.test(header)) {
     lines = [`title ${header.slice(13).trim()}`, ...lines]
     header = 'journey'
   }
@@ -665,6 +816,7 @@ function journey(lines: string[], header: string): string[] {
   let tasks = 0
   for (const line of lines) {
     let match: null | RegExpMatchArray
+    let task: JourneyTask | null
     if ((match = line.match(/^title (.+)$/))) {
       if (title || section) fail('duplicate or misplaced journey title')
       title = true
@@ -672,33 +824,55 @@ function journey(lines: string[], header: string): string[] {
     } else if ((match = line.match(/^section (.+)$/))) {
       section = true
       out.push(`section ${journeyText(match[1])}`)
-    } else if ((match = line.match(/^("[^"]*"|[^:]+):\s*(-?\d+)\s*:\s*(.+)$/))) {
+    } else if ((task = journeyTask(line))) {
       if (!section) fail('journey task requires section')
-      const score = Number(match[2])
+      const score = Number(task.score)
       if (
         !Number.isSafeInteger(score) ||
         score < grammar.bounds.journeyScoreMin ||
         score > grammar.bounds.journeyScoreMax
       )
         fail('journey score must be 1 to 5', 'journey.score')
-      const roles = splitRoles(match[3]).map((role) => {
-        if (decode(bareText(role)).includes(',')) fail('comma inside journey role is unsupported')
-        return journeyText(role)
-      })
+      const roles =
+        task.roles && task.roles.trim()
+          ? splitRoles(task.roles).map((role) => {
+              if (decode(bareText(role)).includes(','))
+                fail('comma inside journey role is unsupported')
+              return journeyText(role)
+            })
+          : []
       tasks++
-      out.push(`${journeyText(match[1])}: ${score}: ${roles.join(', ')}`)
+      out.push(`${journeyText(task.text)}: ${score}${roles.length ? `: ${roles.join(', ')}` : ''}`)
     } else fail('unsupported journey statement; allowed: title, section, task with score and roles')
   }
   if (!tasks) fail('journey requires a task')
   return out
 }
 
+function journeyTask(line: string): JourneyTask | null {
+  const colon = firstUnquotedColon(line)
+  if (colon < 0) return null
+  const text = line.slice(0, colon)
+  const rest = line.slice(colon + 1)
+  const start = skipAsciiSpaces(rest, 0)
+  let pos = start
+  if (rest[pos] === '-') pos++
+  const digits = pos
+  while (pos < rest.length && /\d/.test(rest[pos])) pos++
+  if (pos === digits) return null
+  const score = rest.slice(start, pos)
+  pos = skipAsciiSpaces(rest, pos)
+  if (pos === rest.length) return { roles: null, score, text }
+  if (rest[pos] !== ':') return null
+  return { roles: rest.slice(pos + 1).trim(), score, text }
+}
+
 function journeyText(value: string): string {
-  return structuralText(value, /;\s*(?:(?:title|section)\s|[^:;]+:\s*-?\d+\s*:)/g)
+  return structuralText(value, /;[ \t]*(?:(?:title|section)[ \t]|[^:;]+:[ \t]*-?\d+[ \t]*:)/g)
 }
 
 function pie(lines: string[], header: string): string[] {
-  if (/^pie\s+title(?:\s+.*)?$/.test(header)) {
+  if (/^pie[ \t]+title(?:[ \t]+.*)?$/.test(header)) {
     lines = [`title ${header.slice(9).trim()}`, ...lines]
     header = 'pie'
   }
@@ -745,7 +919,7 @@ function quadrant(lines: string[], header: string): string[] {
       out.push(`${match[1]} ${slots.quoted(match[2])}`)
     } else if (
       (match = line.match(
-        /^"([^"]+)": \[(-?(?:\d+(?:\.\d+)?|\.\d+)),\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\]$/,
+        /^"([^"]+)": \[(-?(?:\d+(?:\.\d+)?|\.\d+)),[ \t]*(-?(?:\d+(?:\.\d+)?|\.\d+))\]$/,
       ))
     ) {
       if ([match[2], match[3]].some((x) => !COORDINATE.test(x) || !Number.isFinite(Number(x))))
@@ -774,7 +948,6 @@ function sequence(lines: string[], header: string): string[] {
   const declarations = new Set<string>()
   const activationReferences = new Set<string>()
   const active = new Map<string, number>()
-  const seqId = (value: string): string => identifier(value, SEQUENCE_RESERVED)
   const activation = (id: string, delta: number): void => {
     activationReferences.add(id)
     const depth = (active.get(id) ?? 0) + delta
@@ -784,15 +957,26 @@ function sequence(lines: string[], header: string): string[] {
   }
   for (const line of lines) {
     let match: null | RegExpMatchArray
+    let message: null | SequenceMessage
     if (line === 'autonumber') {
       out.push(line)
-    } else if ((match = line.match(/^(participant|actor) ([A-Za-z][A-Za-z0-9_]*)(?: as (.+))?$/))) {
-      const id = seqId(match[2])
-      if (declarations.has(id))
-        fail(`duplicate sequence declaration: ${id}`, 'sequence.declaration-unique')
-      declarations.add(id)
-      participants.add(id)
-      out.push(`${match[1]} ${id}${match[3] ? ` as ${sequenceText(match[3])}` : ''}`)
+    } else if ((match = line.match(/^(participant|actor) (.+)$/))) {
+      const rest = text(match[2])
+      const as = rest.lastIndexOf(' as ')
+      const name = as >= 0 ? sequenceIdentifier(text(rest.slice(0, as))) : sequenceName(rest)
+      const alias = as >= 0 ? sequenceText(rest.slice(as + 4)) : undefined
+      if (declarations.has(name))
+        fail(`duplicate sequence declaration: ${name}`, 'sequence.declaration-unique')
+      declarations.add(name)
+      participants.add(name)
+      out.push(`${match[1]} ${name}${alias ? ` as ${alias}` : ''}`)
+    } else if ((match = line.match(/^rect (.+)$/))) {
+      const argument = text(match[1])
+      if (argument.includes(';'))
+        fail('ambiguous multiple statements on one line', 'text.statement-separator')
+      stack.push('rect')
+      checkDepth(stack)
+      out.push(`rect ${argument}`)
     } else if ((match = line.match(/^(alt|loop|opt|par) (.+)$/))) {
       stack.push(match[1])
       checkDepth(stack)
@@ -809,36 +993,43 @@ function sequence(lines: string[], header: string): string[] {
       out.push('end')
     } else if ((match = line.match(/^title (.+)$/))) {
       out.push(`title ${sequenceText(match[1])}`)
-    } else if (
-      (match = line.match(
-        /^(?:Note|note) (over|left of|right of) ([A-Za-z][A-Za-z0-9_]*)(?:,([A-Za-z][A-Za-z0-9_]*))?: (.+)$/,
-      ))
-    ) {
-      if (match[3] && match[1] !== 'over') fail('invalid note participants')
-      const first = seqId(match[2])
-      const second = match[3] ? seqId(match[3]) : undefined
-      participants.add(first)
-      if (second) participants.add(second)
-      out.push(`Note ${match[1]} ${first}${second ? `,${second}` : ''}: ${sequenceText(match[4])}`)
-    } else if ((match = line.match(/^(activate|deactivate) ([A-Za-z][A-Za-z0-9_]*)$/))) {
-      const id = seqId(match[2])
+    } else if (line.startsWith('Note ') || line.startsWith('note ')) {
+      let rest = line.slice(5)
+      let side: string
+      if (rest.startsWith('over ')) {
+        side = 'over'
+        rest = rest.slice(5)
+      } else if (rest.startsWith('left of ')) {
+        side = 'left of'
+        rest = rest.slice(8)
+      } else if (rest.startsWith('right of ')) {
+        side = 'right of'
+        rest = rest.slice(9)
+      } else fail('invalid sequence note')
+      const colon = rest.indexOf(': ')
+      if (colon < 0) fail('invalid sequence note')
+      const names = rest
+        .slice(0, colon)
+        .split(',')
+        .map((part) => sequenceName(part))
+      if (side !== 'over' && names.length !== 1) fail('invalid note participants')
+      for (const name of names) participants.add(name)
+      out.push(`Note ${side} ${names.join(',')}: ${sequenceText(rest.slice(colon + 2))}`)
+    } else if ((match = line.match(/^(activate|deactivate) (.+)$/))) {
+      const id = sequenceName(match[2])
       activation(id, match[1] === 'activate' ? 1 : -1)
       out.push(`${match[1]} ${id}`)
-    } else if (
-      (match = line.match(
-        /^([A-Za-z][A-Za-z0-9_]*)(-->>|->>|-->|->|--\)|-\)|--x|-x)([+-]?)([A-Za-z][A-Za-z0-9_]*): (.+)$/,
-      ))
-    ) {
-      const from = seqId(match[1])
-      const to = seqId(match[4])
+    } else if ((message = sequenceMessage(line))) {
+      const from = sequenceName(message.from)
+      const to = sequenceName(message.to)
       participants.add(from)
       participants.add(to)
-      if (match[3] === '+') activation(to, 1)
-      if (match[3] === '-') activation(from, -1)
-      out.push(`${from}${match[2]}${match[3]}${to}: ${sequenceText(match[5])}`)
+      if (message.sign === '+') activation(to, 1)
+      if (message.sign === '-') activation(from, -1)
+      out.push(`${from}${message.arrow}${message.sign}${to}: ${sequenceText(message.message)}`)
     } else
       fail(
-        'unsupported sequence statement; allowed: participant, actor, message, note, activate/deactivate, autonumber, alt/loop/opt/par, title',
+        'unsupported sequence statement; allowed: participant, actor, message, note, activate/deactivate, autonumber, alt/loop/opt/par/rect, title',
       )
   }
   if (stack.length) fail('unclosed sequence block')
@@ -849,11 +1040,67 @@ function sequence(lines: string[], header: string): string[] {
   return out
 }
 
+function sequenceIdentifier(value: string): string {
+  if (!IDENT.test(value)) fail(`invalid sequence identifier: ${value}`)
+  if (SEQUENCE_RESERVED.has(value.toLowerCase()))
+    fail(
+      `reserved identifier: ${value}; choose a non-keyword participant identifier`,
+      'identifier.reserved',
+    )
+  return value
+}
+
+function sequenceMessage(line: string): null | SequenceMessage {
+  let best = -1
+  let arrow: null | string = null
+  for (const candidate of SEQUENCE_ARROWS) {
+    const index = line.indexOf(candidate)
+    if (
+      index >= 0 &&
+      (best < 0 || index < best || (index === best && candidate.length > (arrow?.length ?? 0)))
+    ) {
+      best = index
+      arrow = candidate
+    }
+  }
+  if (!arrow) return null
+  let pos = best + arrow.length
+  let sign = ''
+  if (line[pos] === '+' || line[pos] === '-') {
+    sign = line[pos]
+    pos++
+  }
+  const colon = line.indexOf(': ', pos)
+  if (colon < 0) return null
+  const from = text(line.slice(0, best))
+  const to = text(line.slice(pos, colon))
+  return { arrow, from, message: text(line.slice(colon + 2)), sign, to }
+}
+
+function sequenceName(value: string): string {
+  let name = text(value)
+  if (name.startsWith('"')) name = bareText(name)
+  if (!/^[A-Za-z0-9_]+(?: [A-Za-z0-9_]+)*$/.test(name))
+    fail('invalid sequence name; use words separated by spaces, e.g. participant API as "REST API"')
+  if (!name.includes(' ') && SEQUENCE_RESERVED.has(name.toLowerCase()))
+    fail(
+      `reserved identifier: ${name}; choose a non-keyword participant name`,
+      'identifier.reserved',
+    )
+  return name
+}
+
 function sequenceText(value: string): string {
   return structuralText(
     value,
-    /;\s*(?:[A-Za-z][A-Za-z0-9_]*\s*(?:-->>|->>|-->|->|--\)|-\)|--x|-x|<<--|<<-|<--|<-)|(?:participant|actor|create|destroy|alt|loop|opt|par|par_over|else|and|rect|box|critical|option|break|end|note|activate|deactivate|title|links|link|properties|details|autonumber)\b)/gi,
+    /;[ \t]*(?:[A-Za-z][A-Za-z0-9_]*[ \t]*(?:-->>|->>|-->|->|--\)|-\)|--x|-x|<<--|<<-|<--|<-)|(?:participant|actor|create|destroy|alt|loop|opt|par|par_over|else|and|rect|box|critical|option|break|end|note|activate|deactivate|title|links|link|properties|details|autonumber)\b)/gi,
   )
+}
+
+function skipAsciiSpaces(line: string, position: number): number {
+  let pos = position
+  while (isAsciiSpace(line[pos])) pos++
+  return pos
 }
 
 function splitRoles(value: string): string[] {
@@ -875,53 +1122,211 @@ function splitRoles(value: string): string[] {
 function state(lines: string[], header: string): string[] {
   const out = [header === 'stateDiagram' ? 'stateDiagram-v2' : header]
   const states = new Set<string>()
+  const aliases = new Map<string, string>()
+  const composites: string[] = []
   let note: undefined | { id: string; parts: string[]; side: string }
   for (const line of lines) {
-    let match: null | RegExpMatchArray
     if (note) {
       if (/^end note$/i.test(line)) {
         if (!note.parts.length) fail('empty state note')
         out.push(`note ${note.side} of ${note.id} : ${note.parts.join('<br/>')}`)
         note = undefined
       } else note.parts.push(stateText(line))
-    } else if ((match = line.match(/^(?:note|Note) (left|right) of ([A-Za-z][A-Za-z0-9_]*)$/))) {
-      const id = identifier(match[2], STATE_RESERVED)
-      if (!states.has(id))
-        fail(`note references unknown or later state: ${id}`, 'state.note-after-state')
-      note = { id, parts: [], side: match[1] }
-    } else if ((match = line.match(/^state "([^"]+)" as ([A-Za-z][A-Za-z0-9_]*)$/))) {
-      const id = identifier(match[2], STATE_RESERVED)
-      states.add(id)
-      out.push(`state ${slots.quoted(match[1])} as ${id}`)
-    } else if (
-      (match = line.match(
-        /^(\[\*\]|[A-Za-z][A-Za-z0-9_]*)\s*-->\s*(\[\*\]|[A-Za-z][A-Za-z0-9_]*)(?:\s*:\s*(.+))?$/,
-      ))
-    ) {
-      for (const id of [match[1], match[2]]) {
-        if (id !== '[*]') states.add(identifier(id, STATE_RESERVED))
+    } else if (line.startsWith('direction ')) {
+      out.push(`direction ${flowDirection(line.slice(10))}`)
+    } else if (line === '}') {
+      if (!composites.length) fail('unmatched }')
+      composites.pop()
+      out.push('}')
+    } else if (line.startsWith('note ') || line.startsWith('Note ')) {
+      let rest = line.slice(5)
+      let side: string
+      if (rest.startsWith('left of ')) {
+        side = 'left'
+        rest = rest.slice(8)
+      } else if (rest.startsWith('right of ')) {
+        side = 'right'
+        rest = rest.slice(9)
+      } else fail('unsupported state note; use note left/right of ID')
+      const colon = firstUnquotedColon(rest)
+      if (colon >= 0) {
+        const id = stateNoteTarget(rest.slice(0, colon), states, aliases)
+        out.push(`note ${side} of ${id} : ${stateText(rest.slice(colon + 1))}`)
+      } else {
+        note = { id: stateNoteTarget(rest, states, aliases), parts: [], side }
       }
-      out.push(`${match[1]} --> ${match[2]}${match[3] ? ` : ${stateText(match[3])}` : ''}`)
     } else if (
-      (match = line.match(/^(?:note|Note) (left|right) of ([A-Za-z][A-Za-z0-9_]*) : (.+)$/))
+      line.startsWith('state ') &&
+      (firstUnquotedColon(line.slice(6)) >= 0 || indexOfUnquoted(line, '-->') < 0)
     ) {
-      const id = identifier(match[2], STATE_RESERVED)
-      if (!states.has(id))
-        fail(`note references unknown or later state: ${id}`, 'state.note-after-state')
-      out.push(`note ${match[1]} of ${id} : ${stateText(match[3])}`)
+      const rest = line.slice(6)
+      const colon = firstUnquotedColon(rest)
+      if (colon >= 0) {
+        const name = text(rest.slice(0, colon))
+        const description = text(rest.slice(colon + 1))
+        const ref = stateReference(name, states, aliases)
+        if (ref.alias) out.push(ref.alias)
+        out.push(`${ref.id} : ${stateText(description)}`)
+      } else {
+        stateDeclaration(line, states, aliases, composites, out)
+      }
+    } else if (indexOfUnquoted(line, '-->') >= 0) {
+      const arrow = indexOfUnquoted(line, '-->')
+      const leftText = text(line.slice(0, arrow))
+      const right = line.slice(arrow + 3)
+      const colon = firstUnquotedColon(right)
+      const toText = text(colon >= 0 ? right.slice(0, colon) : right)
+      const label = colon >= 0 ? right.slice(colon + 1) : undefined
+      const from = stateReference(leftText, states, aliases)
+      const toRef = stateReference(toText, states, aliases)
+      if (from.alias) out.push(from.alias)
+      if (toRef.alias) out.push(toRef.alias)
+      out.push(`${from.id} --> ${toRef.id}${label !== undefined ? ` : ${stateText(label)}` : ''}`)
+    } else if (firstUnquotedColon(line) >= 0) {
+      const colon = firstUnquotedColon(line)
+      const name = text(line.slice(0, colon))
+      const description = text(line.slice(colon + 1))
+      const ref = stateReference(name, states, aliases)
+      if (ref.alias) out.push(ref.alias)
+      out.push(`${ref.id} : ${stateText(description)}`)
     } else
       fail(
-        'unsupported state statement; allowed: state alias, ID --> ID[: label], note left/right of ID',
+        'unsupported state statement; allowed: state ID, state "Label" as ID, state ID { ... }, ID --> ID [: label], ID : description, direction LR, note left/right of ID',
       )
   }
   if (note) fail('unclosed state note')
+  if (composites.length) fail('unclosed state block')
   return out
+}
+
+function stateDeclaration(
+  line: string,
+  states: Set<string>,
+  aliases: Map<string, string>,
+  composites: string[],
+  out: string[],
+): void {
+  let rest = text(line.slice(6))
+  const open = rest.endsWith('{')
+  if (open) rest = text(rest.slice(0, -1))
+  const as = rest.lastIndexOf(' as ')
+  const display = as >= 0 ? text(rest.slice(0, as)) : rest
+  const explicitId = as >= 0 ? stateIdentifier(text(rest.slice(as + 4))) : undefined
+  if (!display) fail('state declaration requires a name')
+  let id: string
+  let render: string
+  if (explicitId) {
+    id = explicitId
+    const displayText = display.startsWith('"') ? bareText(display) : display
+    states.add(id)
+    aliases.set(displayText, id)
+    render = `state ${slots.quoted(displayText)} as ${id}`
+  } else if (display.startsWith('"')) {
+    const displayText = bareText(display)
+    const ref = stateDisplayReference(displayText, states, aliases)
+    id = ref.id
+    render = ref.alias ?? `state ${slots.quoted(displayText)} as ${id}`
+  } else if (/^[A-Za-z0-9_]+$/.test(display)) {
+    id = stateIdentifier(display)
+    states.add(id)
+    render = `state ${id}`
+  } else {
+    if (display.includes('"') || display.startsWith('state '))
+      fail('invalid state display; use a bare state name or a quoted display alias')
+    const ref = stateDisplayReference(display, states, aliases)
+    id = ref.id
+    render = ref.alias ?? `state ${slots.quoted(display)} as ${id}`
+  }
+  out.push(`${render}${open ? ' {' : ''}`)
+  if (open) {
+    composites.push(id)
+    checkDepth(composites)
+  }
+}
+
+function stateDisplayId(display: string, states: Set<string>): string {
+  let base = display.replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '')
+  if (!base) base = 'State'
+  if (!/^[A-Za-z]/.test(base)) base = `State_${base}`
+  let candidate = base
+  let suffix = 2
+  while (states.has(candidate) || stateReserved(candidate)) candidate = `${base}_${suffix++}`
+  return candidate
+}
+
+function stateDisplayReference(
+  display: string,
+  states: Set<string>,
+  aliases: Map<string, string>,
+): StateRef {
+  const existing = aliases.get(display)
+  if (existing) {
+    states.add(existing)
+    return { id: existing }
+  }
+  const id = stateDisplayId(display, states)
+  aliases.set(display, id)
+  states.add(id)
+  return { alias: `state ${slots.quoted(display)} as ${id}`, id }
+}
+
+function stateIdentifier(value: string): string {
+  if (!/^[A-Za-z0-9_]+$/.test(value)) fail(`invalid state identifier: ${value}`)
+  if (stateReserved(value))
+    fail(
+      `reserved identifier: ${value}; choose a non-keyword state identifier`,
+      'identifier.reserved',
+    )
+  return value
+}
+
+function stateNoteTarget(raw: string, states: Set<string>, aliases: Map<string, string>): string {
+  const value = text(raw)
+  let id: string | undefined
+  if (value.startsWith('"')) {
+    id = aliases.get(bareText(value))
+  } else if (/^[A-Za-z0-9_]+$/.test(value)) {
+    if (stateReserved(value))
+      fail(
+        `reserved identifier: ${value}; choose a non-keyword state identifier`,
+        'identifier.reserved',
+      )
+    id = value
+  } else {
+    id = aliases.get(value)
+  }
+  if (!id || !states.has(id))
+    fail(`note references unknown or later state: ${value}`, 'state.note-after-state')
+  return id
+}
+
+function stateReference(raw: string, states: Set<string>, aliases: Map<string, string>): StateRef {
+  const value = text(raw)
+  if (value === '[*]') return { id: value }
+  if (value.includes('"') || value.startsWith('state '))
+    fail(
+      'invalid state reference; use an alias declaration and a bare state name, not quotes or `state ...`',
+    )
+  if (/^[A-Za-z0-9_]+$/.test(value)) {
+    if (stateReserved(value))
+      fail(
+        `reserved identifier: ${value}; choose a non-keyword state identifier`,
+        'identifier.reserved',
+      )
+    states.add(value)
+    return { id: value }
+  }
+  return stateDisplayReference(value, states, aliases)
+}
+
+function stateReserved(value: string): boolean {
+  return STATE_RESERVED.has(value.toLowerCase())
 }
 
 function stateText(value: string): string {
   return structuralText(
     value,
-    /;\s*(?:(?:\[\*\]|[A-Za-z][A-Za-z0-9_]*)\s*-->|(?:state|note|class|classDef|direction|end)(?:\s|$))/g,
+    /;[ \t]*(?:(?:\[\*\]|[A-Za-z][A-Za-z0-9_]*)[ \t]*-->|(?:state|note|class|classDef|direction|end)(?:[ \t]|$))/g,
   )
 }
 

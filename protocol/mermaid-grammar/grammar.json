@@ -53,20 +53,37 @@
       "header = ( 'flowchart' | 'graph' ), [ ' ', direction ] ;",
       "direction = 'TD' | 'TB' | 'BT' | 'LR' | 'RL' | 'td' | 'tb' | 'bt' | 'lr' | 'rl' ;",
       "node = flow-id, [ shape-open, ( quoted | unquoted-label ), shape-close ] ;",
+      "unquoted-label = unwrapped-text ;",
+      "node-group = node, { ' & ', node } ;",
       "arrow = a token from flowchartSyntax.arrows ;",
-      "statement = node, { arrow, [ '|', ( quoted | unquoted-label ), '|' ], node } | 'subgraph ', id, [ '[', ( quoted | unquoted-label ), ']' ] | 'subgraph ', title-with-spaces | 'end' ;"
+      "inline-edge = inline-solid-edge | inline-dotted-edge | inline-thick-edge ;",
+      "inline-solid-edge = '--', optional-space, quoted, optional-space, inline-solid-close ;",
+      "inline-solid-close = '-->' | '---' | '--o' | '--x' ;",
+      "inline-dotted-edge = '-.', optional-space, quoted, optional-space, inline-dotted-close ;",
+      "inline-dotted-close = '.->' | '.>' | '.-' | '-.-' ;",
+      "inline-thick-edge = '==', optional-space, quoted, optional-space, inline-thick-close ;",
+      "inline-thick-close = '==>' | '===' | '===o' | '===x' ;",
+      "edge-label = '|', ( quoted | unquoted-label ), '|' ;",
+      "subgraph-title = '[', ( quoted | unquoted-label ), ']' ;",
+      "statement = node-group, { ( arrow, [ edge-label ] | inline-edge ), node-group } | 'subgraph ', id, [ subgraph-title ] | 'subgraph ', title-with-spaces | 'end' | 'direction ', direction ;"
     ],
     "sequenceDiagram": [
       "arrow = '->>' | '-->>' | '->' | '-->' | '-)' | '--)' | '-x' | '--x' ;",
-      "statement = ( 'participant' | 'actor' ), ' ', id, [ ' as ', bare ] | ( 'alt' | 'loop' | 'opt' | 'par' | 'else' | 'and' | 'title' ), ' ', bare | 'end' | 'autonumber' | ( 'Note ' | 'note ' ), ( 'over' | 'left of' | 'right of' ), ' ', id, [ ',', id ], ': ', bare | ( 'activate' | 'deactivate' ), ' ', id | id, arrow, [ '+' | '-' ], id, ': ', bare ;"
+      "sequence-name = id, { ' ', id } ;",
+      "statement = ( 'participant' | 'actor' ), ' ', sequence-name, [ ' as ', bare ] | ( 'alt' | 'loop' | 'opt' | 'par' | 'else' | 'and' | 'title' ), ' ', bare | 'rect ', bare | 'end' | 'autonumber' | ( 'Note ' | 'note ' ), ( 'over' | 'left of' | 'right of' ), ' ', sequence-name, [ ',', sequence-name ], ': ', bare | ( 'activate' | 'deactivate' ), ' ', sequence-name | sequence-name, arrow, [ '+' | '-' ], sequence-name, ': ', bare ;"
     ],
     "classDiagram": [
-      "arrow = '<|--' | '*--' | 'o--' | '-->' | '..>' | '..|>' | '<|..' | '<..' | 'o..' | '..o' | '--' ;",
-      "statement = 'class ', id, [ '~', bare, '~' ], [ '[', quoted, ']' ], [ annotation ], [ ' {' ] | bare-member | '}' | id, [ ' ', quoted ], ' ', arrow, ' ', [ quoted, ' ' ], id, [ ' : ', bare ] ;"
+      "arrow = '<|--' | '*--' | 'o--' | '-->' | '..>' | '..|>' | '<|..' | '<..' | 'o..' | '..o' | '--|>' | '--*' | '--o' | '<--' | '--' ;",
+      "statement = 'class ', class-id, [ '~', bare, '~' ], [ '[', quoted, ']' ], [ annotation ], [ ' {' ] | bare-member | '}' | class-id, [ ' ', quoted ], ' ', arrow, ' ', [ quoted, ' ' ], class-id, [ optional-space, ':', optional-space, bare ] | class-id, optional-space, ':', optional-space, bare-member | 'direction ', direction ;",
+      "class-id = id, { '.', id } ;"
     ],
     "stateDiagram-v2": [
-      "state-id = id | '[*]' ;",
-      "statement = 'state ', quoted, ' as ', id | state-id, ' --> ', state-id, [ ' : ', bare ] | ( 'note ' | 'Note ' ), ( 'left' | 'right' ), ' of ', id, ( ' : ', bare | newline, bare, { newline, bare }, newline, 'end note' ) ;"
+      "state-id = id | number-start-id | '[*]' ;",
+      "number-start-id = digit, { letter | digit | '_' } ;",
+      "state-ref = state-id | state-display-bare ;",
+      "statement = 'state ', quoted, [ ' as ', state-id ], [ ' {' ] | 'state ', state-display, [ ' {' ] | state-ref, ' --> ', state-ref, [ optional-space, ':', optional-space, bare ] | 'state ', state-ref, optional-space, ':', optional-space, bare | state-id, optional-space, ':', optional-space, bare | ( 'note ' | 'Note ' ), ( 'left' | 'right' ), ' of ', state-ref, ( optional-space, ':', optional-space, bare | newline, bare, { newline, bare }, newline, 'end note' ) | 'direction ', direction | '}' ;",
+      "state-display = quoted | state-display-bare ;",
+      "state-display-bare = id, { ' ', id } ;"
     ],
     "erDiagram": [
       "name = id | quoted ;",
@@ -85,7 +102,7 @@
       "statement = c4-statement ;"
     ],
     "c4": [
-      "element = 'Person' | 'Person_Ext' | 'System' | 'System_Ext' | 'Container' | 'Container_Ext' | 'Component' | 'Component_Ext' ;",
+      "element = 'Person' | 'Person_Ext' | 'System' | 'System_Ext' | 'SystemDb' | 'SystemQueue' | 'Container' | 'Container_Ext' | 'ContainerDb' | 'ContainerQueue' | 'Component' | 'Component_Ext' | 'ComponentDb' | 'ComponentQueue' ;",
       "boundary = 'System_Boundary' | 'Container_Boundary' | 'Boundary' ;",
       "relation = 'Rel' | 'Rel_Neighbor' ;",
       "c4-statement = element, '(', id, ',', c4raw, { ',', c4raw }, ')' | boundary, '(', id, ',', c4raw, [ ',', c4raw ], ')', '{' | relation, '(', id, ',', id, ',', c4raw, [ ',', c4raw ], ')' | '}' ;"
@@ -102,7 +119,7 @@
     ],
     "journey": [
       "header = 'journey', [ ' title ', ( quoted | bare ) ] ;",
-      "statement = 'title ', bare | 'section ', bare | task-text, ':', optional-space, integer, optional-space, ':', optional-space, role, { ',', role } ;"
+      "statement = 'title ', bare | 'section ', bare | task-text, ':', optional-space, integer, [ optional-space, ':', optional-space, role, { ',', role } ] ;"
     ]
   },
   "flowchartSyntax": {
@@ -194,6 +211,8 @@
       "===x",
       "-.-o",
       "-.-x",
+      "---->",
+      "--->",
       "-->",
       "---",
       "-.->",

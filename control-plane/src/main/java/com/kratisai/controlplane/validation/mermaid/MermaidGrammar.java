@@ -21,14 +21,19 @@ public final class MermaidGrammar {
         return String.join(
                 " ",
                 List.of(
-                        "Supported Mermaid types: flowchart, graph, sequenceDiagram, classDiagram, stateDiagram-v2, erDiagram, C4Context/Container/Component, pie, quadrantChart, xychart-beta, journey.",
-                        "Always quote display text and labels with double quotes.",
-                        "Flowchart rules: quote all node text, e.g. A[\"Node Label\"]; quote all edge labels, e.g. A -->|\"Edge Label\"| B or A -- \"Edge Label\" --> B; subgraphs must have explicit IDs and quoted names, e.g. subgraph ID[\"Title\"].",
-                        "Sequence diagram rules: left-to-right arrows only (->>, -->>); e.g. Alice->>Bob: \"Message\".",
-                        "State diagram rules: e.g. state \"State Label\" as S1, [*] --> S1.",
+                        "Write custom Kratis diagrams: a Mermaid-inspired subset, not full Mermaid. Supported types: flowchart, graph, sequenceDiagram, classDiagram, stateDiagram-v2, erDiagram, C4Context/Container/Component, pie, quadrantChart, xychart-beta, journey. Headers take a space, e.g. flowchart LR.",
+                        "Always quote display text and labels with double quotes; unquoted labels are not part of this format.",
+                        "Keep each line simple and unambiguous; quote all node, edge, subgraph, participant, state, and label text.",
+                        "Flowchart rules: quote all node text, e.g. A[\"Node Label\"]; quote all edge labels, e.g. A -->|\"Edge Label\"| B or A -- \"Edge Label\" --> B; subgraphs must have explicit IDs and quoted names, e.g. subgraph ID[\"Title\"]; keep subgraph and node IDs unique and do not use a subgraph ID as an edge endpoint inside its own subgraph; use direction TD/TB/BT/LR/RL.",
+                        "Class diagram rules: class IDs may contain letters, digits, underscores, or dots; quote relation labels with spaces around the colon, e.g. A --> B : \"Label\"; inheritance and reverse arrows are allowed, e.g. A <|-- B or A --|> B; members may be inside braces or written as A : +method().",
+                        "Sequence diagram rules: left-to-right arrows only (->>, -->>); declare each participant once; aliases use participant ID as \"Display Name\"; participant and message names may contain words separated by spaces; grouped messages use rect ... end.",
+                        "State diagram rules: e.g. state \"State Label\" as S1, [*] --> S1; composite states use state S1 { ... } and close with }; direction TD/TB/BT/LR/RL is allowed; state descriptions use S1 : \"text\".",
+                        "ER diagram rules: use ENTITY { attributes } and ENTITY ||--o{ ENTITY : \"label\"; do not use ER cardinality in a flowchart.",
+                        "C4 rules: use Person, System, Container, Component, ContainerDb, SystemDb, ContainerQueue, SystemQueue, ComponentDb, ComponentQueue, boundaries and Rel; C4 accepts one title statement.",
                         "Pie and journey headers support optional inline titles, e.g. pie title \"Distribution\".",
+                        "Journey tasks use task: score: role; the role is optional.",
                         "One statement per line; close every block.",
-                        "No front matter, init directives, styling directives, linkStyle, links, markdown click events, or HTML tags.",
+                        "No front matter, init directives, click/link/href directives, or HTML tags. Styling directives (style/classDef/linkStyle) are ignored. Do not use Mermaid keywords as IDs.",
                         "Preserve useful detail; correct reported syntax rather than simplifying.",
                         "Use varied supported types of diagram (including journey, C4, stateDiagram-v2 etc) or chart (including pie, quadrantChart) that best fits the content."));
     }

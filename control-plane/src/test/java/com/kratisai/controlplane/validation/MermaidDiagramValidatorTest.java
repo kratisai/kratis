@@ -255,8 +255,21 @@ class MermaidDiagramValidatorTest {
                 flowchart LR
                 A -- label --> B
                 """);
-        List<String> issues = validator.findIssues(unquotedInline);
-        assertThat(issues).singleElement().asString().contains("unquoted inline edge label", "-- \"label\" -->");
+        List<String> unquotedInlineIssues = validator.findIssues(unquotedInline);
+        assertThat(unquotedInlineIssues)
+                .singleElement()
+                .asString()
+                .contains("unquoted inline edge label", "-- \"label\" -->");
+    }
+
+    @Test
+    void unsafeLabelsTriggerActionableValidationErrors() {
+        String unquoted = fence("""
+                flowchart LR
+                A[bad | label] --> B
+                """);
+        List<String> issues = validator.findIssues(unquoted);
+        assertThat(issues).singleElement().asString().contains("unsafe or ambiguous label", "A[\"API (v1)\"]");
     }
 
     @Test

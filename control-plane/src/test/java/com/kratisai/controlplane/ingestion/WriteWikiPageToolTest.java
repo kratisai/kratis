@@ -146,7 +146,7 @@ class WriteWikiPageToolTest {
     }
 
     @Test
-    void writeWikiPage_withUnsafeSubgraphTitle_throwsToolException() {
+    void writeWikiPage_withInvalidMermaid_throwsToolException() {
         String content = """
                 ```mermaid
                 flowchart LR
@@ -154,8 +154,7 @@ class WriteWikiPageToolTest {
                 ```
                 ```mermaid
                 graph TD
-                    style A fill:#fff
-                    A --> B
+                    A -> B
                 ```
                 """;
 

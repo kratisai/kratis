@@ -63,16 +63,36 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
+      - name: Restore codebase-memory-mcp binary
+        id: cbm-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/build/bin/codebase-memory-mcp
+          key: cbm-linux-amd64-v0.12.1
+
       - name: Download codebase-memory-mcp binary
+        if: steps.cbm-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p ../build/bin
-          # GitHub release downloads occasionally return 503; retry with backoff.
-          wget --tries=8 --waitretry=5 --retry-connrefused \
+          rm -f ../build/bin/codebase-memory-mcp
+          # Same immutable v0.12.1 asset as build/Dockerfile.control-plane.
+          wget --tries=12 --waitretry=10 --retry-connrefused \
             https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.12.1/codebase-memory-mcp-linux-amd64.tar.gz \
             -O codebase-memory-mcp.tar.gz
           tar xzf codebase-memory-mcp.tar.gz -C ../build/bin/
           chmod +x ../build/bin/codebase-memory-mcp
           rm codebase-memory-mcp.tar.gz
+
+      - name: Cache codebase-memory-mcp binary
+        if: steps.cbm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/build/bin/codebase-memory-mcp
+          key: cbm-linux-amd64-v0.12.1
+
+      - name: Prepare codebase-memory-mcp binary
+        run: |
+          chmod +x ../build/bin/codebase-memory-mcp
 
       - name: Install scc
         run: |
