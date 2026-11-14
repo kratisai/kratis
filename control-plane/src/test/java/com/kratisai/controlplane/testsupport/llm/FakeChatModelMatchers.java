@@ -18,11 +18,68 @@ public class FakeChatModelMatchers {
     public static List<PromptMatcher> ingestionPipelineMatchers() {
         // Match a full ingestion pipeline - shared by many tests.
         return List.of(
+                assistedDiscoveryMatcher(),
+                synopsisMatcher(),
+                inferenceMatcher(),
                 dimensionDiscoveryMatcher(),
                 dimensionResearchMatcher(),
                 patternResearchMatcher(),
                 wikiGenerationMatcher(),
                 wikiCompleteMatcher());
+    }
+
+    public static final String SYNOPSIS_SYSTEM_PROMPT_MARKER =
+            "synthesize the synopsis of a repository for repo-intelligence tool";
+
+    private static final String INFERENCE_PROMPT_MARKER = "Compare the supplied surface pairs";
+
+    public static final String ASSISTED_DISCOVERY_PROMPT_MARKER =
+            "Discover contracts between this codebase and external code or infrastructure";
+
+    public static PromptMatcher assistedDiscoveryMatcher() {
+        return PromptMatcher.builder()
+                .contains(ASSISTED_DISCOVERY_PROMPT_MARKER)
+                .response("{\"surfaces\":[]}")
+                .build();
+    }
+
+    /** The synopsis JSON the shared pipeline matchers respond with; reused by phase-scoped tests. */
+    public static String synopsisJson() {
+        return """
+                {
+                  "repoRole": "SERVICE",
+                  "knownAs": ["booking-service"],
+                  "domain": "Core booking business capability for the team's booking workflows.",
+                  "interfaces": "Provides the booking REST API; consumes the user management API.",
+                  "deployment": "Builds a container and deploys to ECS as booking.teamvine.io.",
+                  "citations": {"dimensionIds": [], "wikiSlug": "user-management-overview", "filePaths": [], "surfaceIds": [], "attributeIds": []}
+                }
+                """;
+    }
+
+    public static PromptMatcher synopsisMatcher() {
+        return PromptMatcher.builder()
+                .contains(SYNOPSIS_SYSTEM_PROMPT_MARKER)
+                .response("""
+                        {
+                          "repoRole": "SERVICE",
+                          "knownAs": ["booking-service"],
+                          "domain": "Core booking business capability for the team's booking workflows.",
+                          "interfaces": "Provides the booking REST API; consumes the user management API.",
+                          "deployment": "Builds a container and deploys to ECS as booking.teamvine.io.",
+                          "citations": {"dimensionIds": [], "wikiSlug": "user-management-overview", "filePaths": [], "surfaceIds": [], "attributeIds": []}
+                        }
+                        """)
+                .build();
+    }
+
+    public static PromptMatcher inferenceMatcher() {
+        return PromptMatcher.builder()
+                .contains(INFERENCE_PROMPT_MARKER)
+                .response("""
+                        {"matches": []}
+                        """)
+                .build();
     }
 
     public static PromptMatcher dimensionDiscoveryMatcher() {

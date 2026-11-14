@@ -4,6 +4,7 @@ import com.kratisai.controlplane.model.CtxEmbedding;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -28,5 +29,7 @@ public interface CtxEmbeddingRepository extends JpaRepository<CtxEmbedding, UUID
             @Param("dimSize") int dimSize,
             @Param("limit") int limit);
 
-    void deleteByBatchId(UUID batchId);
+    @Modifying
+    @Query("DELETE FROM CtxEmbedding e WHERE e.batch.id = :batchId")
+    void deleteByBatchId(@Param("batchId") UUID batchId);
 }

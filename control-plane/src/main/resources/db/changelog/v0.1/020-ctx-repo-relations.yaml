@@ -1,0 +1,98 @@
+databaseChangeLog:
+- changeSet:
+    id: 020-ctx-repo-relations-001
+    author: kratis
+    changes:
+    - createTable:
+        tableName: ctx_repo_relations
+        columns:
+        - column:
+            name: id
+            type: UUID
+            defaultValueComputed: gen_random_uuid()
+            constraints:
+              primaryKey: true
+              primaryKeyName: ctx_repo_relations_pkey
+              nullable: false
+        - column:
+            name: team_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: repository_a_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: repository_b_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: batch_a_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: batch_b_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: nature
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: direction
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: confidence
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: rationale
+            type: TEXT
+        - column:
+            name: citations
+            type: JSONB
+        - column:
+            name: state
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: created_at
+            type: TIMESTAMPTZ
+            defaultValueComputed: now()
+            constraints:
+              nullable: false
+    - sql:
+        dbms: postgresql
+        endDelimiter: ;
+        splitStatements: true
+        sql: >-
+          ALTER TABLE ctx_repo_relations
+            ADD CONSTRAINT ck_ctx_repo_relations_pair CHECK (repository_a_id < repository_b_id);
+    - addForeignKeyConstraint:
+        baseTableName: ctx_repo_relations
+        baseColumnNames: batch_a_id
+        constraintName: fk_ctx_repo_relations_batch_a
+        referencedTableName: ingestion_batches
+        referencedColumnNames: id
+        onDelete: CASCADE
+    - addForeignKeyConstraint:
+        baseTableName: ctx_repo_relations
+        baseColumnNames: batch_b_id
+        constraintName: fk_ctx_repo_relations_batch_b
+        referencedTableName: ingestion_batches
+        referencedColumnNames: id
+        onDelete: CASCADE
+    - addUniqueConstraint:
+        tableName: ctx_repo_relations
+        columnNames: batch_a_id, batch_b_id, nature
+        constraintName: uq_ctx_repo_relations_pair_nature

@@ -1,0 +1,67 @@
+databaseChangeLog:
+- changeSet:
+    id: 021-ctx-repo-synopses-001
+    author: kratis
+    changes:
+    - createTable:
+        tableName: ctx_repo_synopses
+        columns:
+        - column:
+            name: id
+            type: UUID
+            defaultValueComputed: gen_random_uuid()
+            constraints:
+              primaryKey: true
+              primaryKeyName: ctx_repo_synopses_pkey
+              nullable: false
+        - column:
+            name: batch_id
+            type: UUID
+            constraints:
+              nullable: false
+              unique: true
+              uniqueConstraintName: uq_ctx_repo_synopses_batch
+        - column:
+            name: repository_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: team_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: repo_role
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: known_as
+            type: JSONB
+            constraints:
+              nullable: false
+        - column:
+            name: synopsis
+            type: TEXT
+            constraints:
+              nullable: false
+        - column:
+            name: citations
+            type: JSONB
+        - column:
+            name: model_ref
+            type: TEXT
+        - column:
+            name: created_at
+            type: TIMESTAMPTZ
+            defaultValueComputed: now()
+            constraints:
+              nullable: false
+    - addForeignKeyConstraint:
+        baseTableName: ctx_repo_synopses
+        baseColumnNames: batch_id
+        constraintName: fk_ctx_repo_synopses_batch
+        referencedTableName: ingestion_batches
+        referencedColumnNames: id
+        onDelete: CASCADE

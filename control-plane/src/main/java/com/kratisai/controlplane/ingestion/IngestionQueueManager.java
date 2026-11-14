@@ -38,6 +38,9 @@ public class IngestionQueueManager {
     private final CtxEmbeddingRepository ctxEmbeddingRepository;
     private final CtxWikiPageRepository ctxWikiPageRepository;
     private final CtxArchitecturePatternRepository ctxArchitecturePatternRepository;
+    private final CtxSurfaceRepository ctxSurfaceRepository;
+    private final CtxRepoRelationRepository ctxRepoRelationRepository;
+    private final CtxRepoSynopsisRepository ctxRepoSynopsisRepository;
     private final IngestionBatchLogRepository ingestionBatchLogRepository;
 
     public IngestionQueueManager(
@@ -49,6 +52,9 @@ public class IngestionQueueManager {
             CtxEmbeddingRepository ctxEmbeddingRepository,
             CtxWikiPageRepository ctxWikiPageRepository,
             CtxArchitecturePatternRepository ctxArchitecturePatternRepository,
+            CtxSurfaceRepository ctxSurfaceRepository,
+            CtxRepoRelationRepository ctxRepoRelationRepository,
+            CtxRepoSynopsisRepository ctxRepoSynopsisRepository,
             IngestionBatchLogRepository ingestionBatchLogRepository) {
         this.ingestionBatchRepository = ingestionBatchRepository;
         this.ingestionWorker = ingestionWorker;
@@ -57,6 +63,9 @@ public class IngestionQueueManager {
         this.ctxEmbeddingRepository = ctxEmbeddingRepository;
         this.ctxWikiPageRepository = ctxWikiPageRepository;
         this.ctxArchitecturePatternRepository = ctxArchitecturePatternRepository;
+        this.ctxSurfaceRepository = ctxSurfaceRepository;
+        this.ctxRepoRelationRepository = ctxRepoRelationRepository;
+        this.ctxRepoSynopsisRepository = ctxRepoSynopsisRepository;
         this.ingestionBatchLogRepository = ingestionBatchLogRepository;
 
         TransactionTemplate tt = new TransactionTemplate(transactionManager);
@@ -77,10 +86,14 @@ public class IngestionQueueManager {
             List<UUID> processingBatchIds = ingestionBatchRepository.findProcessingBatchIds();
             for (UUID batchId : processingBatchIds) {
                 logger.info("Clearing data for orphaned PROCESSING batch {}", batchId);
-                // Delete in reverse order of dependencies to respect foreign key constraints
+                // Bulk deletes run immediately in FK-safe order: scheduled per-entity removals would
+                // interact with the node delete's DB cascade and the context-clearing reset update.
                 ctxEmbeddingRepository.deleteByBatchId(batchId);
                 ctxArchitecturePatternRepository.deleteByBatchId(batchId);
                 ctxEdgeRepository.deleteByBatchId(batchId);
+                ctxSurfaceRepository.deleteByBatchId(batchId);
+                ctxRepoRelationRepository.deleteByBatchId(batchId);
+                ctxRepoSynopsisRepository.deleteByBatchId(batchId);
                 ctxWikiPageRepository.deleteByBatchId(batchId);
                 ctxNodeRepository.deleteByBatchId(batchId);
                 ingestionBatchLogRepository.deleteByBatchId(batchId);

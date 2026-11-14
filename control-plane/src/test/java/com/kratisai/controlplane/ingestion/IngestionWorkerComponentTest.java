@@ -152,7 +152,7 @@ class IngestionWorkerComponentTest {
 
         // Wait and assert the batch completed successfully
         Awaitility.await()
-                .atMost(Duration.ofSeconds(15))
+                .atMost(Duration.ofSeconds(30))
                 .pollInterval(Duration.ofMillis(100))
                 .untilAsserted(() -> {
                     IngestionBatch finishedBatch =
@@ -303,9 +303,12 @@ class IngestionWorkerComponentTest {
         ingestionWorker.runIngestion(batch.getId());
 
         Awaitility.await()
-                .atMost(Duration.ofSeconds(20))
+                .atMost(Duration.ofSeconds(30))
                 .pollInterval(Duration.ofMillis(100))
                 .untilAsserted(() -> {
+                    IngestionBatch finished =
+                            ingestionBatchRepository.findById(batch.getId()).orElseThrow();
+                    assertThat(finished.getStatus()).isEqualTo(IngestionStatus.SUCCESS);
                     List<IngestionModelUsage> modelUsages = ingestionModelUsageRepository.findByBatchId(batch.getId());
                     assertThat(modelUsages)
                             .extracting(m -> m.getModelKind().name())

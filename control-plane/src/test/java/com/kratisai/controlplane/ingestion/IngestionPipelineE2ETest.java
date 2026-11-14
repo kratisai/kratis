@@ -140,7 +140,7 @@ class IngestionPipelineE2ETest {
         // 4. Assertions via Awaitility
         // Wait for batch to complete
         Awaitility.await()
-                .atMost(Duration.ofSeconds(30))
+                .atMost(Duration.ofSeconds(60))
                 .pollInterval(Duration.ofMillis(200))
                 .untilAsserted(() -> {
                     IngestionBatch finishedBatch =

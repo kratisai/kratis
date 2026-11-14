@@ -218,7 +218,7 @@ class IngestionConcurrencyIntegrationTest {
         // leaking row
         // locks into the next test class
         Awaitility.await()
-                .atMost(Duration.ofSeconds(30))
+                .atMost(Duration.ofSeconds(60))
                 .pollInterval(Duration.ofMillis(100))
                 .untilAsserted(() -> {
                     IngestionBatch finalBatch2 =

@@ -1,0 +1,8 @@
+databaseChangeLog:
+- changeSet:
+    id: 022-clean-legacy-cross-repo-call-edges-001
+    author: kratis
+    changes:
+    - sql:
+        dbms: postgresql
+        sql: DELETE FROM ctx_edges WHERE relation_type = 'CROSS_REPO_CALL'

@@ -63,7 +63,24 @@ public final class LiteLLMDto {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ModelCostEntry(
             @JsonProperty("input_cost_per_token") Double inputCostPerToken,
-            @JsonProperty("output_cost_per_token") Double outputCostPerToken) {}
+            @JsonProperty("output_cost_per_token") Double outputCostPerToken,
+            @JsonProperty("max_input_tokens") Object rawMaxInputTokens,
+            @JsonProperty("max_tokens") Object rawMaxTokens) {
+        public Long maxInputTokens() {
+            return positiveLong(rawMaxInputTokens);
+        }
+
+        public Long maxTokens() {
+            return positiveLong(rawMaxTokens);
+        }
+
+        private static Long positiveLong(Object raw) {
+            if (raw instanceof Number number && number.longValue() > 0) {
+                return number.longValue();
+            }
+            return null;
+        }
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ModelConfig(

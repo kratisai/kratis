@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.testsupport.llm;
 
 import java.util.List;
+import java.util.Locale;
 import org.jspecify.annotations.NonNull;
 import org.mockito.Mockito;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -54,10 +55,11 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .condition(prompt -> {
                     String text = prompt.getContents().toLowerCase();
-                    return text.contains("architectural patterns")
-                            || text.contains("wiki documentation")
-                            || text.contains("markdown documentation")
-                            || text.contains("you are kratis");
+                    return !isIngestionStructuredPrompt(text)
+                            && (text.contains("architectural patterns")
+                                    || text.contains("wiki documentation")
+                                    || text.contains("markdown documentation")
+                                    || text.contains("you are kratis"));
                 })
                 .responses(prompt -> {
                     boolean hasToolResponse =
@@ -81,7 +83,10 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
 
         // 2. Architecture pattern matcher
         fakeChatModel.addMatcher(PromptMatcher.builder()
-                .contains("architecture pattern")
+                .condition(prompt -> {
+                    String text = prompt.getContents().toLowerCase();
+                    return !isIngestionStructuredPrompt(text) && text.contains("architecture pattern");
+                })
                 .response("""
                         [
                           {
@@ -96,7 +101,8 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .condition(prompt -> {
                     String text = prompt.getContents().toLowerCase();
-                    return text.contains("architect") || text.contains("dimension") || text.contains("file tree");
+                    return !isIngestionStructuredPrompt(text)
+                            && (text.contains("architect") || text.contains("dimension") || text.contains("file tree"));
                 })
                 .response("""
                         {
@@ -114,7 +120,8 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .condition(prompt -> {
                     String text = prompt.getContents().toLowerCase();
-                    return text.contains("pull request") || text.contains("commit summary");
+                    return !isIngestionStructuredPrompt(text)
+                            && (text.contains("pull request") || text.contains("commit summary"));
                 })
                 .response("""
                         {
@@ -125,6 +132,17 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
                 .build());
     }
 
+    private static final String DISCOVERY_MARKER_LOWER =
+            FakeChatModelMatchers.ASSISTED_DISCOVERY_PROMPT_MARKER.toLowerCase(Locale.ROOT);
+    private static final String SYNOPSIS_MARKER_LOWER =
+            FakeChatModelMatchers.SYNOPSIS_SYSTEM_PROMPT_MARKER.toLowerCase(Locale.ROOT);
+
+    private static boolean isIngestionStructuredPrompt(String text) {
+        return text.contains(DISCOVERY_MARKER_LOWER)
+                || text.contains("compare the supplied surface pairs")
+                || text.contains(SYNOPSIS_MARKER_LOWER);
+    }
+
     private void reapplyDefaultStubbing(ChatModel chatModel) {
         Mockito.doAnswer(invocation -> {
                     Prompt prompt = invocation.getArgument(0);
@@ -132,7 +150,14 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
                     boolean hasToolResponse =
                             prompt.getInstructions().stream().anyMatch(ToolResponseMessage.class::isInstance);
 
-                    if (text.contains("architectural patterns")
+                    if (text.contains(DISCOVERY_MARKER_LOWER)) {
+                        return new ChatResponse(List.of(new Generation(new AssistantMessage("{\"surfaces\":[]}"))));
+                    } else if (text.contains("compare the supplied surface pairs")) {
+                        return new ChatResponse(List.of(new Generation(new AssistantMessage("{\"matches\":[]}"))));
+                    } else if (text.contains(SYNOPSIS_MARKER_LOWER)) {
+                        return new ChatResponse(
+                                List.of(new Generation(new AssistantMessage(FakeChatModelMatchers.synopsisJson()))));
+                    } else if (text.contains("architectural patterns")
                             || text.contains("wiki documentation")
                             || text.contains("markdown documentation")
                             || text.contains("you are kratis")) {

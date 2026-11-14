@@ -178,6 +178,9 @@ public class IngestionWorkerIntegrationTest {
                             .orElseThrow();
                     assertThat(updatedBatch.getStatus()).isEqualTo(IngestionStatus.SUCCESS);
                 });
+        assertThat(fakeChatModel.getInvocations())
+                .anySatisfy(invocation -> assertThat(invocation.prompt().getContents())
+                        .contains("Discover contracts between this codebase and external code or infrastructure"));
     }
 
     @Test

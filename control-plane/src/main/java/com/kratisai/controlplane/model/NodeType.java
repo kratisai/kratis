@@ -12,8 +12,10 @@ public enum NodeType {
     VARIABLE,
     MODULE,
     PROJECT,
-    ENDPOINT,
-    CLIENT;
+    RESOURCE,
+    ARTIFACT,
+    ROUTE,
+    CHANNEL;
 
     @JsonValue
     public String toLowerCase() {

@@ -4,14 +4,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.model.AttributeKind;
+import com.kratisai.controlplane.model.Ceiling;
 import com.kratisai.controlplane.model.CtxNode;
+import com.kratisai.controlplane.model.CtxRepoRelation;
+import com.kratisai.controlplane.model.CtxRepoSynopsis;
+import com.kratisai.controlplane.model.CtxSurface;
+import com.kratisai.controlplane.model.CtxSurfaceAttribute;
+import com.kratisai.controlplane.model.Direction;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionStatus;
+import com.kratisai.controlplane.model.Nature;
 import com.kratisai.controlplane.model.NodeType;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
+import com.kratisai.controlplane.model.SurfaceDetection;
+import com.kratisai.controlplane.model.SurfaceRole;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.repository.CtxNodeRepository;
+import com.kratisai.controlplane.repository.CtxRepoRelationRepository;
+import com.kratisai.controlplane.repository.CtxRepoSynopsisRepository;
+import com.kratisai.controlplane.repository.CtxSurfaceRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.service.BatchResolutionService;
@@ -50,6 +64,15 @@ class RepositoryToolTest {
     @Mock
     private CtxNodeRepository ctxNodeRepository;
 
+    @Mock
+    private CtxRepoRelationRepository relationRepository;
+
+    @Mock
+    private CtxSurfaceRepository surfaceRepository;
+
+    @Mock
+    private CtxRepoSynopsisRepository synopsisRepository;
+
     private RepositoryTool repositoryTool;
 
     private UUID teamId;
@@ -65,7 +88,11 @@ class RepositoryToolTest {
                 remoteFileReaderService,
                 batchResolutionService,
                 graphQueryService,
-                ctxNodeRepository);
+                ctxNodeRepository,
+                relationRepository,
+                surfaceRepository,
+                synopsisRepository,
+                new ObjectMapper());
 
         teamId = UUID.randomUUID();
         batchId = UUID.randomUUID();
@@ -244,6 +271,156 @@ class RepositoryToolTest {
         assertThatThrownBy(() -> repositoryTool.getDependencies("nonexistent", "file.txt", 2, toolContext))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("not found");
+    }
+
+    @Test
+    void relatedRepositoriesReturnsMatchesAndNavigableEvidence() {
+        UUID repoId = UUID.randomUUID();
+        UUID otherId = UUID.randomUUID();
+        UUID relationId = UUID.randomUUID();
+        Repository repo = new Repository("subject", "url", "main", RepositoryType.GENERIC);
+        repo.setId(repoId);
+        Repository other = new Repository("other", "url", "main", RepositoryType.GENERIC);
+        other.setId(otherId);
+        IngestionBatch subjectBatch = new IngestionBatch(repo);
+        subjectBatch.setId(batchId);
+        IngestionBatch otherBatch = new IngestionBatch(other);
+        otherBatch.setId(UUID.randomUUID());
+        CtxRepoRelation relation = mock(CtxRepoRelation.class);
+        when(relation.getId()).thenReturn(relationId);
+        when(relation.getBatchA()).thenReturn(subjectBatch);
+        when(relation.getBatchB()).thenReturn(otherBatch);
+        when(relation.getNature()).thenReturn(Nature.CALLS);
+        when(relation.getDirection()).thenReturn(Direction.A_TO_B);
+        when(relation.getConfidence()).thenReturn(Ceiling.SUGGESTED);
+        when(relation.getTeamId()).thenReturn(teamId);
+        UUID subjectSurfaceId = UUID.randomUUID();
+        UUID providerSurfaceId = UUID.randomUUID();
+        String citations = """
+                {"matches":[
+                  {"subjectSurfaceId":"%s","otherSurfaceId":"%s","confidence":"SUGGESTED",
+                   "rationale":"Client calls server","evidence":{"subjectSynopsisIds":["f1"],"direction":"A_TO_B"}},
+                  {"subjectSurfaceId":"%s","otherSurfaceId":"%s","confidence":"CONFIRMED",
+                   "rationale":"Second pair","evidence":{"otherSynopsisIds":["f2"]}}
+                ],"previous":{"rationale":"Prior rationale","citations":{"fragments":["old-f1"]}}}
+                """.formatted(subjectSurfaceId, providerSurfaceId, providerSurfaceId, subjectSurfaceId);
+        when(relation.getCitations()).thenReturn(citations);
+        when(relation.getRationale()).thenReturn("Legacy rationale");
+        CtxSurface subject = new CtxSurface(
+                subjectBatch, repoId, teamId, SurfaceRole.REQUIRES, "Calls orders", SurfaceDetection.CMM);
+        subject.addAttribute(new CtxSurfaceAttribute(subject, AttributeKind.FILE, "client.java", SurfaceDetection.CMM));
+        CtxSurface provider = new CtxSurface(
+                otherBatch, otherId, teamId, SurfaceRole.PROVIDES, "Serves orders", SurfaceDetection.MODEL);
+        CtxRepoSynopsis synopsis = mock(CtxRepoSynopsis.class);
+        when(synopsis.getSynopsis()).thenReturn("Domain: Orders. Handles payments.");
+        when(synopsis.getCitations()).thenReturn(Map.of("filePaths", List.of("client.java")));
+        when(batchResolutionService.resolveRepository(teamId, "subject")).thenReturn(repo);
+        when(relationRepository.findCurrentForRepository(teamId, repoId)).thenReturn(List.of(relation));
+        when(surfaceRepository.findById(subjectSurfaceId)).thenReturn(Optional.of(subject));
+        when(surfaceRepository.findById(providerSurfaceId)).thenReturn(Optional.of(provider));
+        when(synopsisRepository.findByBatchId(batchId)).thenReturn(Optional.of(synopsis));
+
+        var result = repositoryTool.getRelatedRepos("subject", toolContext);
+
+        assertThat(result).singleElement().satisfies(related -> {
+            assertThat(related.repositoryA()).isEqualTo("subject");
+            assertThat(related.repositoryB()).isEqualTo("other");
+            assertThat(related.direction()).isEqualTo(Direction.A_TO_B);
+            assertThat(related.rationale()).isEqualTo("Legacy rationale");
+            assertThat(related.citations()).isEqualTo(citations);
+            assertThat(related.matches()).hasSize(2);
+            var first = related.matches().getFirst();
+            assertThat(first.evidence())
+                    .isEqualTo(Map.of(
+                            "subjectSurfaceId", subjectSurfaceId.toString(),
+                            "otherSurfaceId", providerSurfaceId.toString(),
+                            "confidence", "SUGGESTED",
+                            "rationale", "Client calls server",
+                            "evidence", Map.of("subjectSynopsisIds", List.of("f1"), "direction", "A_TO_B")));
+            assertThat(first.subjectSurface().attributes())
+                    .singleElement()
+                    .satisfies(attribute -> assertThat(attribute.value()).isEqualTo("client.java"));
+            assertThat(first.subjectSurface().synopsis()).contains("f1: Orders.", "f2: Handles payments.");
+            assertThat(first.subjectSurface().synopsisCitations()).containsKey("filePaths");
+            assertThat(first.otherSurface().synopsis()).isNull();
+            var second = related.matches().get(1);
+            assertThat(second.evidence().toString()).contains("Second pair", "f2");
+            assertThat(second.subjectSurface().description()).isEqualTo("Serves orders");
+            assertThat(second.otherSurface().description()).isEqualTo("Calls orders");
+        });
+    }
+
+    @Test
+    void relatedRepositoriesPreservesLegacyRationaleAndCitationsWithoutInventingPairs() {
+        Repository repo = new Repository("subject", "url", "main", RepositoryType.GENERIC);
+        repo.setId(UUID.randomUUID());
+        IngestionBatch repoBatch = new IngestionBatch(repo);
+        Repository other = new Repository("other", "url", "main", RepositoryType.GENERIC);
+        IngestionBatch otherBatch = new IngestionBatch(other);
+        CtxRepoRelation relation = mock(CtxRepoRelation.class);
+        when(relation.getBatchA()).thenReturn(repoBatch);
+        when(relation.getBatchB()).thenReturn(otherBatch);
+        when(relation.getRationale()).thenReturn("Legacy explanation");
+        when(relation.getCitations()).thenReturn("{\"fragments\":[\"legacy-f1\"]}");
+        when(batchResolutionService.resolveRepository(teamId, "subject")).thenReturn(repo);
+        when(relationRepository.findCurrentForRepository(teamId, repo.getId())).thenReturn(List.of(relation));
+
+        assertThat(repositoryTool.getRelatedRepos("subject", toolContext))
+                .singleElement()
+                .satisfies(related -> {
+                    assertThat(related.rationale()).isEqualTo("Legacy explanation");
+                    assertThat(related.citations()).isEqualTo("{\"fragments\":[\"legacy-f1\"]}");
+                    assertThat(related.matches()).isEmpty();
+                });
+        verifyNoInteractions(surfaceRepository, synopsisRepository);
+    }
+
+    @Test
+    void relatedRepositoriesRetainsEvidenceWhenSurfaceIsUnavailableOrOutsideTeam() {
+        Repository repo = new Repository("subject", "url", "main", RepositoryType.GENERIC);
+        repo.setId(UUID.randomUUID());
+        IngestionBatch repoBatch = new IngestionBatch(repo);
+        repoBatch.setId(UUID.randomUUID());
+        Repository other = new Repository("other", "url", "main", RepositoryType.GENERIC);
+        IngestionBatch otherBatch = new IngestionBatch(other);
+        otherBatch.setId(UUID.randomUUID());
+        UUID surfaceId = UUID.randomUUID();
+        UUID missingSurfaceId = UUID.randomUUID();
+        CtxSurface foreignSurface = new CtxSurface(
+                repoBatch, repo.getId(), UUID.randomUUID(), SurfaceRole.UNKNOWN, "Foreign", SurfaceDetection.MODEL);
+        CtxRepoRelation relation = mock(CtxRepoRelation.class);
+        when(relation.getBatchA()).thenReturn(repoBatch);
+        when(relation.getBatchB()).thenReturn(otherBatch);
+        when(relation.getTeamId()).thenReturn(teamId);
+        when(relation.getCitations()).thenReturn("""
+                {"matches":[{"subjectSurfaceId":"%s","otherSurfaceId":"%s","rationale":"retained"},
+                            {"subjectSurfaceId":"invalid","otherSurfaceId":null,"rationale":"also retained"}]}
+                """.formatted(surfaceId, missingSurfaceId));
+        when(surfaceRepository.findById(surfaceId)).thenReturn(Optional.of(foreignSurface));
+        when(surfaceRepository.findById(missingSurfaceId)).thenReturn(Optional.empty());
+        when(batchResolutionService.resolveRepository(teamId, "subject")).thenReturn(repo);
+        when(relationRepository.findCurrentForRepository(teamId, repo.getId())).thenReturn(List.of(relation));
+
+        assertThat(repositoryTool.getRelatedRepos("subject", toolContext))
+                .singleElement()
+                .satisfies(related -> {
+                    assertThat(related.matches()).hasSize(2);
+                    assertThat(related.matches()).allSatisfy(pair -> {
+                        assertThat(pair.evidence().toString()).contains("retained");
+                        assertThat(pair.subjectSurface()).isNull();
+                        assertThat(pair.otherSurface()).isNull();
+                    });
+                });
+        verifyNoInteractions(synopsisRepository);
+    }
+
+    @Test
+    void relatedRepositoriesWithNoCurrentRelationsReturnsEmpty() {
+        Repository repo = new Repository("subject", "url", "main", RepositoryType.GENERIC);
+        repo.setId(UUID.randomUUID());
+        when(batchResolutionService.resolveRepository(teamId, "subject")).thenReturn(repo);
+        assertThat(repositoryTool.getRelatedRepos("subject", toolContext)).isEmpty();
+        verifyNoInteractions(surfaceRepository, synopsisRepository);
     }
 
     @Test

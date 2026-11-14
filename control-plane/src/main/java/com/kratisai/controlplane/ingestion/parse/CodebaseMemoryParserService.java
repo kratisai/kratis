@@ -4,6 +4,7 @@ import static org.apache.commons.lang3.StringUtils.isEmpty;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kratisai.controlplane.config.ParserProperties;
 import com.kratisai.controlplane.model.CtxEdge;
 import com.kratisai.controlplane.model.CtxNode;
@@ -34,8 +35,21 @@ public class CodebaseMemoryParserService {
     private static final int MAX_CAPTURED_OUTPUT_CHARS = 4000;
 
     // All node labels to import from codebase-memory SQLite
-    private static final Set<String> IMPORT_NODE_LABELS =
-            Set.of("File", "Class", "Struct", "Method", "Field", "Interface", "Function", "Module", "Variable");
+    private static final Set<String> IMPORT_NODE_LABELS = Set.of(
+            "File",
+            "Class",
+            "Struct",
+            "Method",
+            "Field",
+            "Interface",
+            "Function",
+            "Module",
+            "Variable",
+            "Resource",
+            "Image",
+            "EnvVar",
+            "Route",
+            "Channel");
     // Containment and documentation references; neither is a code dependency
     private static final Set<String> EXCLUDED_EDGE_TYPES =
             Set.of("CONTAINS_FILE", "CONTAINS_FOLDER", "CONTAINS_PACKAGE", "HAS_BRANCH", "MENTIONS", "REFERENCES_FILE");
@@ -146,7 +160,11 @@ public class CodebaseMemoryParserService {
         return path;
     }
 
-    private static String projectName(IngestionBatch batch) {
+    public Path sqlitePathFor(IngestionBatch batch) {
+        return resolveCacheDir(dbTempDir).resolve(projectName(batch) + ".db");
+    }
+
+    public static String projectName(IngestionBatch batch) {
         return PROJECT_NAME_PREFIX + batch.getId();
     }
 
@@ -199,6 +217,7 @@ public class CodebaseMemoryParserService {
         String sql = "SELECT id, label, name, qualified_name, file_path, start_line, end_line, properties "
                 + "FROM nodes WHERE project = ?";
 
+        Map<String, String> languages = readLanguages(conn);
         Map<Integer, CtxNode> nodeIdMap = new HashMap<>();
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, projectName);
@@ -247,6 +266,13 @@ public class CodebaseMemoryParserService {
                             }
                         }
                     }
+                    metadata = withMetadataProperty(metadata, "cmmLabel", label);
+                    if (nodeType == NodeType.FILE && filePath != null) {
+                        String language = languages.get(normalizePath(filePath));
+                        if (language != null) {
+                            metadata = withMetadataProperty(metadata, "language", language);
+                        }
+                    }
                     node.setMetadata(metadata);
 
                     nodeIdMap.put(id, node);
@@ -256,6 +282,49 @@ public class CodebaseMemoryParserService {
         return nodeIdMap;
     }
 
+    private Map<String, String> readLanguages(Connection conn) {
+        Map<String, String> languages = new HashMap<>();
+        try (PreparedStatement stmt = conn.prepareStatement("SELECT rel_path, defs_json FROM lsp_surface")) {
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    try {
+                        JsonNode defs = objectMapper.readTree(rs.getString("defs_json"));
+                        String language = CmmLanguage.name(defs.path("lang").asInt(-1));
+                        if (language != null) {
+                            languages.put(normalizePath(rs.getString("rel_path")), language.toLowerCase(Locale.ROOT));
+                        }
+                    } catch (Exception e) {
+                        logger.debug("Could not read lsp_surface language: {}", e.getMessage());
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            logger.debug("lsp_surface language metadata unavailable: {}", e.getMessage());
+        }
+        return languages;
+    }
+
+    private String withMetadataProperty(String metadata, String key, String value) {
+        try {
+            JsonNode node = objectMapper.readTree(metadata);
+            if (node instanceof ObjectNode object) {
+                object.put(key, value);
+                return objectMapper.writeValueAsString(object);
+            }
+        } catch (Exception e) {
+            logger.debug("Could not add {} to node metadata: {}", key, e.getMessage());
+        }
+        return metadata;
+    }
+
+    private static String normalizePath(String path) {
+        String value = path == null ? "" : path.replace('\\', '/');
+        while (value.startsWith("./") || value.startsWith("/")) {
+            value = value.startsWith("./") ? value.substring(2) : value.substring(1);
+        }
+        return value;
+    }
+
     private NodeType mapNodeType(@NotNull String label) {
         return switch (label.toLowerCase()) {
             case "file" -> NodeType.FILE;
@@ -263,6 +332,11 @@ public class CodebaseMemoryParserService {
             case "interface" -> NodeType.INTERFACE;
             case "function" -> NodeType.FUNCTION;
             case "variable" -> NodeType.VARIABLE;
+            case "envvar" -> NodeType.VARIABLE;
+            case "resource" -> NodeType.RESOURCE;
+            case "image" -> NodeType.ARTIFACT;
+            case "route" -> NodeType.ROUTE;
+            case "channel" -> NodeType.CHANNEL;
             case "class", "struct" -> NodeType.CLASS;
             case "method" -> NodeType.METHOD;
             case "field" -> NodeType.FIELD;
@@ -313,10 +387,13 @@ public class CodebaseMemoryParserService {
         return switch (codebaseMemoryType.toUpperCase()) {
             case "CALLS", "CALL_REFERENCE", "HTTP_CALLS", "ASYNC_CALLS", "SPAWNS" -> RelationType.CALLS;
             case "USAGE", "IMPORTS", "DEPENDS_ON" -> RelationType.IMPORTS;
+            case "INFRA_MAPS" -> RelationType.INFRA_MAPS;
             case "INHERITS", "EXTENDS", "INHERITS_FROM" -> RelationType.INHERITS;
             case "IMPLEMENTS", "OVERRIDE", "USES_TYPE" -> RelationType.IMPLEMENTS;
             case "MEMBER_OF", "DEFINES_METHOD", "DEFINES", "CONTAINS" -> RelationType.DEFINES;
             case "HANDLES" -> RelationType.HANDLES;
+            case "EMITS" -> RelationType.PUBLISHES;
+            case "LISTENS_ON" -> RelationType.SUBSCRIBES;
             case "THROWS", "RAISES" -> RelationType.THROWS;
             case "CONFIGURES" -> RelationType.CONFIGURES;
             case "WRITES" -> RelationType.WRITES;

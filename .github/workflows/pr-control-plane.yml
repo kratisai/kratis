@@ -103,6 +103,15 @@ jobs:
           chmod +x ../build/bin/scc
           rm scc.tar.gz
 
+      - name: Download syft binary
+        run: |
+          mkdir -p ../build/bin
+          wget --tries=8 --waitretry=5 --retry-connrefused -qO syft.tar.gz \
+            https://github.com/anchore/syft/releases/download/v1.56.0/syft_1.56.0_linux_amd64.tar.gz
+          tar xzf syft.tar.gz -C ../build/bin syft
+          chmod +x ../build/bin/syft
+          rm syft.tar.gz
+
       - name: Setup Go 1.22
         uses: actions/setup-go@v5
         with:

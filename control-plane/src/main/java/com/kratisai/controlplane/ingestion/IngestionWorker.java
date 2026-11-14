@@ -3,11 +3,14 @@ package com.kratisai.controlplane.ingestion;
 import com.kratisai.controlplane.api.wsdto.IngestionStatusEvent;
 import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.ingestion.parse.CodebaseMemoryParserService;
-import com.kratisai.controlplane.ingestion.parse.DependencyLinkerService;
 import com.kratisai.controlplane.ingestion.parse.DimensionDiscoveryService;
+import com.kratisai.controlplane.ingestion.relations.BatchActivator;
+import com.kratisai.controlplane.ingestion.relations.SynopsisService;
 import com.kratisai.controlplane.ingestion.research.DimensionResearchService;
 import com.kratisai.controlplane.ingestion.research.PatternResearchService;
 import com.kratisai.controlplane.ingestion.research.SubgraphRankingService;
+import com.kratisai.controlplane.ingestion.surfaces.AssistedSurfaceService;
+import com.kratisai.controlplane.ingestion.surfaces.SurfaceExtractionService;
 import com.kratisai.controlplane.ingestion.write.SemanticIndexingService;
 import com.kratisai.controlplane.ingestion.write.WikiGenerationService;
 import com.kratisai.controlplane.model.IngestionBatch;
@@ -19,6 +22,7 @@ import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.VirtualKeyService;
 import java.io.IOException;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +46,10 @@ public class IngestionWorker {
     private final IngestionBatchRepository ingestionBatchRepository;
     private final GitCloneService gitCloneService;
     private final CodebaseMemoryParserService codebaseMemoryParserService;
-    private final DependencyLinkerService dependencyLinkerService;
+    private final SurfaceExtractionService surfaceExtractionService;
+    private final AssistedSurfaceService assistedSurfaceService;
+    private final SynopsisService synopsisService;
+    private final BatchActivator batchActivator;
     private final ApplicationEventPublisher eventPublisher;
     private final TransactionTemplate transactionTemplate;
     private final IngestionBatchLogService ingestionBatchLogService;
@@ -61,7 +68,10 @@ public class IngestionWorker {
             IngestionBatchRepository ingestionBatchRepository,
             GitCloneService gitCloneService,
             CodebaseMemoryParserService codebaseMemoryParserService,
-            DependencyLinkerService dependencyLinkerService,
+            SurfaceExtractionService surfaceExtractionService,
+            AssistedSurfaceService assistedSurfaceService,
+            SynopsisService synopsisService,
+            BatchActivator batchActivator,
             ApplicationEventPublisher eventPublisher,
             PlatformTransactionManager transactionManager,
             IngestionBatchLogService ingestionBatchLogService,
@@ -78,7 +88,10 @@ public class IngestionWorker {
         this.ingestionBatchRepository = ingestionBatchRepository;
         this.gitCloneService = gitCloneService;
         this.codebaseMemoryParserService = codebaseMemoryParserService;
-        this.dependencyLinkerService = dependencyLinkerService;
+        this.surfaceExtractionService = surfaceExtractionService;
+        this.assistedSurfaceService = assistedSurfaceService;
+        this.synopsisService = synopsisService;
+        this.batchActivator = batchActivator;
         this.eventPublisher = eventPublisher;
         this.ingestionBatchLogService = ingestionBatchLogService;
         this.dimensionResearchService = dimensionResearchService;
@@ -186,11 +199,13 @@ public class IngestionWorker {
         executePhase(
                 batchId,
                 batchLogger,
-                "PREPARE_LINKS",
-                "Resolving structural and cross-repository symbol dependencies.",
-                "Symbol linking completed successfully.",
+                "EXTRACT_SURFACES",
+                "Extracting cross-repository surfaces from the parser graph and manifests.",
+                "Surface extraction completed successfully.",
                 batch -> {
-                    dependencyLinkerService.prepareLinks(batch);
+                    SurfaceExtractionService.Result result =
+                            surfaceExtractionService.extract(batch, cloneResult.cloneDirectory());
+                    batchLogger.info("EXTRACT_SURFACES", result.summary());
                     return null;
                 });
 
@@ -215,6 +230,9 @@ public class IngestionWorker {
                     subgraphRankingService.rankDimensions(batch);
                     return null;
                 });
+
+        // Assist surfaces outside executePhase so the ReAct LLM loop never pins a JDBC connection.
+        assistedSurfaceService.assist(batchId, batchLogger);
 
         executePhase(
                 batchId,
@@ -261,28 +279,12 @@ public class IngestionWorker {
                     return null;
                 });
 
-        executePhase(
-                batchId,
-                batchLogger,
-                "SUCCESS",
-                "Finalizing ingestion batch.",
-                "Repository ingestion and intelligence extraction completed successfully!",
-                batch -> {
-                    batch.setStatus(IngestionStatus.SUCCESS);
-                    batch.setCommitHash(cloneResult.commitHash());
-                    batch.setCompletedAt(Instant.now());
-                    batch.setActive(true);
-                    ingestionBatchRepository.saveAndFlush(batch);
-
-                    ingestionBatchRepository.deactivateOtherBatches(
-                            batch.getRepository().getId(), batch.getId());
-
-                    IngestionWorker.logger.info(
-                            "Ingestion batch {} succeeded. Commit hash: {}. Atomic active swap completed.",
-                            batchId,
-                            cloneResult.commitHash());
-                    return null;
-                });
+        synopsisService.synthesize(batchId, batchLogger);
+        try {
+            batchActivator.activate(batchId, batchLogger, cloneResult.commitHash());
+        } catch (SQLException e) {
+            throw new RuntimeException("Activation failed for batch " + batchId + ": " + e.getMessage(), e);
+        }
 
         return cloneResult;
     }
@@ -408,6 +410,8 @@ public class IngestionWorker {
                 LiteLLMProvisioningService.VirtualKeyScope.INGESTION, batchId);
         String token = virtualKeyService.generateKey(keyAlias, List.of(chatAlias, embeddingAlias));
 
+        batch.getModelUsage().clear();
+        ingestionBatchRepository.flush();
         IngestionModelUsage chatUsage = new IngestionModelUsage(batch, ModelKind.CHAT, chatModel, chatAlias);
         chatUsage.setVirtualKey(token);
         batch.getModelUsage().add(chatUsage);

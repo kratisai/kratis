@@ -309,7 +309,11 @@
 						<exclude>com/kratisai/controlplane/model/CtxEdge.class</exclude>
 						<exclude>com/kratisai/controlplane/model/CtxEmbedding.class</exclude>
 						<exclude>com/kratisai/controlplane/model/CtxNode.class</exclude>
+						<exclude>com/kratisai/controlplane/model/CtxRepoSynopsis.class</exclude>
+						<exclude>com/kratisai/controlplane/model/CtxSurfaceAttribute.class</exclude>
 						<exclude>com/kratisai/controlplane/model/CtxNodeDimension.class</exclude>
+						<exclude>com/kratisai/controlplane/model/CtxRepoRelation.class</exclude>
+						<exclude>com/kratisai/controlplane/model/CtxSurface.class</exclude>
 						<exclude>com/kratisai/controlplane/model/CtxWikiPage.class</exclude>
 						<exclude>com/kratisai/controlplane/model/EnvironmentProvider.class</exclude>
 						<exclude>com/kratisai/controlplane/model/ExecutionDiffSnapshot.class</exclude>

@@ -27,6 +27,13 @@ public class IngestionProperties {
      */
     private DimensionResearch dimensionResearch = new DimensionResearch();
 
+    private Matching matching = new Matching();
+
+    /**
+     * SBOM binary configuration used during surface extraction.
+     */
+    private Sbom sbom = new Sbom();
+
     public int getMaxConcurrent() {
         return maxConcurrent;
     }
@@ -49,6 +56,22 @@ public class IngestionProperties {
 
     public void setDimensionResearch(DimensionResearch dimensionResearch) {
         this.dimensionResearch = dimensionResearch;
+    }
+
+    public Matching getMatching() {
+        return matching;
+    }
+
+    public void setMatching(Matching matching) {
+        this.matching = matching;
+    }
+
+    public Sbom getSbom() {
+        return sbom;
+    }
+
+    public void setSbom(Sbom sbom) {
+        this.sbom = sbom;
     }
 
     /**
@@ -105,6 +128,49 @@ public class IngestionProperties {
 
         public void setMaxBackoffMs(long maxBackoffMs) {
             this.maxBackoffMs = maxBackoffMs;
+        }
+    }
+
+    public static class Matching {
+        private int maxConcurrency = 16;
+        private int maxRetries = 2;
+        private long initialBackoffMs = 500;
+
+        public int getMaxConcurrency() {
+            return maxConcurrency;
+        }
+
+        public void setMaxConcurrency(int maxConcurrency) {
+            this.maxConcurrency = maxConcurrency;
+        }
+
+        public int getMaxRetries() {
+            return maxRetries;
+        }
+
+        public void setMaxRetries(int maxRetries) {
+            this.maxRetries = maxRetries;
+        }
+
+        public long getInitialBackoffMs() {
+            return initialBackoffMs;
+        }
+
+        public void setInitialBackoffMs(long initialBackoffMs) {
+            this.initialBackoffMs = initialBackoffMs;
+        }
+    }
+
+    /** External SBOM binary used during ingestion. */
+    public static class Sbom {
+        private String syftPath = "../build/bin/syft";
+
+        public String getSyftPath() {
+            return syftPath;
+        }
+
+        public void setSyftPath(String syftPath) {
+            this.syftPath = syftPath;
         }
     }
 }

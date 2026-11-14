@@ -63,17 +63,6 @@ public interface CtxNodeRepository extends JpaRepository<CtxNode, UUID> {
             @Param("path") String path,
             @Param("maxDepth") int maxDepth);
 
-    @Query("""
-        SELECT n FROM CtxNode n
-        JOIN IngestionBatch b ON n.batch.id = b.id
-        WHERE n.teamId = :teamId
-          AND n.repoName != :currentRepoName
-          AND n.symbolName = :path
-          AND b.isActive = true
-        """)
-    List<CtxNode> findTargetCrossRepoNodes(
-            @Param("teamId") UUID teamId, @Param("currentRepoName") String currentRepoName, @Param("path") String path);
-
     List<CtxNode> findByBatchId(UUID batchId);
 
     @Query("""
@@ -93,6 +82,14 @@ public interface CtxNodeRepository extends JpaRepository<CtxNode, UUID> {
     @Query(
             "SELECT n FROM CtxNode n WHERE n.batch.id = :batchId AND n.nodeType IN (com.kratisai.controlplane.model.NodeType.CLASS, com.kratisai.controlplane.model.NodeType.INTERFACE, com.kratisai.controlplane.model.NodeType.FUNCTION)")
     List<CtxNode> findSymbolChildrenByBatchId(@Param("batchId") UUID batchId);
+
+    @Query(
+            "SELECT n FROM CtxNode n WHERE n.batch.id = :batchId AND n.nodeType IN (com.kratisai.controlplane.model.NodeType.CLASS, com.kratisai.controlplane.model.NodeType.INTERFACE, com.kratisai.controlplane.model.NodeType.FUNCTION, com.kratisai.controlplane.model.NodeType.RESOURCE, com.kratisai.controlplane.model.NodeType.CHANNEL, com.kratisai.controlplane.model.NodeType.ROUTE)")
+    List<CtxNode> findSurfaceSymbolsByBatchId(@Param("batchId") UUID batchId);
+
+    @Query(
+            "SELECT n FROM CtxNode n WHERE n.batch.id = :batchId AND n.nodeType IN (com.kratisai.controlplane.model.NodeType.RESOURCE, com.kratisai.controlplane.model.NodeType.CHANNEL, com.kratisai.controlplane.model.NodeType.ROUTE, com.kratisai.controlplane.model.NodeType.ARTIFACT)")
+    List<CtxNode> findBoundaryNodesByBatchId(@Param("batchId") UUID batchId);
 
     List<CtxNode> findByBatchIdAndPath(UUID batchId, String path);
 

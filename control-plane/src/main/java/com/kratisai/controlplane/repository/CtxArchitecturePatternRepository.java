@@ -4,6 +4,7 @@ import com.kratisai.controlplane.model.CtxArchitecturePattern;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -17,5 +18,7 @@ public interface CtxArchitecturePatternRepository extends JpaRepository<CtxArchi
             "SELECT DISTINCT p FROM CtxArchitecturePattern p LEFT JOIN FETCH p.exemplarNodes WHERE p.batch.id = :batchId")
     List<CtxArchitecturePattern> findByBatchIdWithExemplarNodes(@Param("batchId") UUID batchId);
 
-    void deleteByBatchId(UUID batchId);
+    @Modifying
+    @Query("DELETE FROM CtxArchitecturePattern p WHERE p.batch.id = :batchId")
+    void deleteByBatchId(@Param("batchId") UUID batchId);
 }

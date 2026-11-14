@@ -239,6 +239,23 @@ class AotHintsTest {
     }
 
     @Test
+    @DisplayName("registers binding hints for assisted discovery records")
+    void registersAssistedResponseBindingHints() {
+        RuntimeHints hints = new RuntimeHints();
+        AotHints aotHints = new AotHints();
+
+        aotHints.registerHints(hints, getClass().getClassLoader());
+
+        for (String name : new String[] {"Discovery", "Observation", "Fact"}) {
+            assertThat(RuntimeHintsPredicates.reflection()
+                            .onType(TypeReference.of(
+                                    "com.kratisai.controlplane.ingestion.surfaces.AssistedResponse$" + name))
+                            .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
+                    .accepts(hints);
+        }
+    }
+
+    @Test
     @DisplayName("registers resource hints for OkHttp PublicSuffixDatabase")
     void registersResourceHints() {
         RuntimeHints hints = new RuntimeHints();

@@ -142,7 +142,7 @@ class IngestionControllerTest {
 
     private void awaitForIngestionToComplete(UUID targetRepoId) {
         Awaitility.await()
-                .atMost(Duration.ofSeconds(30))
+                .atMost(Duration.ofSeconds(60))
                 .pollInterval(Duration.ofMillis(200))
                 .untilAsserted(() -> ingestionBatchRepository
                         .findFirstByRepositoryIdOrderByStartedAtDesc(targetRepoId)

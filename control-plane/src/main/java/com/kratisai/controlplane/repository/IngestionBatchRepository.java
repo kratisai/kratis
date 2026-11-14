@@ -18,6 +18,9 @@ public interface IngestionBatchRepository extends JpaRepository<IngestionBatch, 
 
     List<IngestionBatch> findByRepositoryId(UUID repositoryId);
 
+    @Query("SELECT ib FROM IngestionBatch ib WHERE ib.repository.team.id = :teamId AND ib.isActive = true")
+    List<IngestionBatch> findActiveByTeamId(@Param("teamId") UUID teamId);
+
     Optional<IngestionBatch> findByRepositoryIdAndIsActiveTrue(UUID repositoryId);
 
     Optional<IngestionBatch> findFirstByRepositoryIdOrderByStartedAtDesc(UUID repositoryId);

@@ -4,7 +4,6 @@ import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
 import java.util.*;
-import java.util.stream.Collectors;
 import org.jgrapht.Graph;
 import org.jgrapht.alg.scoring.PageRank;
 import org.jgrapht.graph.AsUndirectedGraph;
@@ -54,16 +53,26 @@ public class SubgraphRankingService {
         int totalRanked = 0;
 
         for (CtxDimension dim : dimensions) {
-            List<CtxNodeDimension> nodeDims = ctxNodeDimensionRepository.findByDimensionId(dim.getId());
+            List<CtxNodeDimension> nodeDims = ctxNodeDimensionRepository.findByDimensionIdWithNode(dim.getId());
             if (nodeDims.isEmpty()) {
                 continue;
             }
 
-            Set<UUID> nodeIds =
-                    nodeDims.stream().map(nd -> nd.getNode().getId()).collect(Collectors.toSet());
+            Map<String, List<UUID>> fileIdsByPath = new LinkedHashMap<>();
+            Set<UUID> nodeIds = new LinkedHashSet<>();
+            for (CtxNodeDimension nd : nodeDims) {
+                CtxNode node = nd.getNode();
+                nodeIds.add(node.getId());
+                if (node.getNodeType() == NodeType.FILE
+                        && node.getPath() != null
+                        && !node.getPath().isBlank()) {
+                    fileIdsByPath
+                            .computeIfAbsent(node.getPath(), ignored -> new ArrayList<>())
+                            .add(node.getId());
+                }
+            }
 
-            // Subgraph is freed for GC once ranking this dimension is complete
-            Graph<UUID, DefaultWeightedEdge> subgraph = buildSubgraph(batch.getId(), nodeIds);
+            Graph<UUID, DefaultWeightedEdge> subgraph = buildSubgraph(batch.getId(), nodeIds, fileIdsByPath);
             for (CtxNodeDimension nd : nodeDims) {
                 if (subgraph.containsVertex(nd.getNode().getId())) {
                     nd.setRankScore(0.0);
@@ -95,28 +104,39 @@ public class SubgraphRankingService {
     }
 
     /**
-     * Builds one dimension's ranking graph from bounded source-id chunks, so parser output several times
-     * the current repository size never has to be resident as a single JPA result set or global graph.
+     * Projects cross-file symbol/module edges onto their owning FILE vertices in bounded path chunks,
+     * so languages where CMM attaches CALLS/IMPORTS/IMPLEMENTS to Module, Function, or Interface nodes
+     * rank files by actual architectural centrality rather than uniform 1/N scores.
      */
-    private Graph<UUID, DefaultWeightedEdge> buildSubgraph(UUID batchId, Set<UUID> subgraphVertices) {
+    private Graph<UUID, DefaultWeightedEdge> buildSubgraph(
+            UUID batchId, Set<UUID> subgraphVertices, Map<String, List<UUID>> fileIdsByPath) {
         Graph<UUID, DefaultWeightedEdge> subgraph = new DirectedWeightedMultigraph<>(DefaultWeightedEdge.class);
         for (UUID vertex : subgraphVertices) {
             subgraph.addVertex(vertex);
         }
+        if (fileIdsByPath.size() < 2) {
+            return subgraph;
+        }
 
-        List<UUID> sources = new ArrayList<>(subgraphVertices);
-        for (int start = 0; start < sources.size(); start += EDGE_CHUNK_SIZE) {
-            List<UUID> chunk = sources.subList(start, Math.min(start + EDGE_CHUNK_SIZE, sources.size()));
-            for (CtxEdgeRepository.FileDependency edge :
-                    ctxEdgeRepository.findFileDependenciesByBatchIdAndSourceIds(batchId, chunk)) {
-                UUID source = edge.getSourceId();
-                UUID target = edge.getTargetId();
-                if (source.equals(target) || !subgraphVertices.contains(target)) {
-                    continue;
-                }
-                DefaultWeightedEdge subgraphEdge = subgraph.addEdge(source, target);
-                if (subgraphEdge != null) {
-                    subgraph.setEdgeWeight(subgraphEdge, edgeWeight(edge.getRelationType()));
+        List<String> paths = new ArrayList<>(fileIdsByPath.keySet());
+        Set<String> allPaths = fileIdsByPath.keySet();
+        for (int start = 0; start < paths.size(); start += EDGE_CHUNK_SIZE) {
+            List<String> chunk = paths.subList(start, Math.min(start + EDGE_CHUNK_SIZE, paths.size()));
+            for (CtxEdgeRepository.PathDependency edge :
+                    ctxEdgeRepository.findCrossFileDependenciesByBatchIdAndPaths(batchId, chunk, allPaths)) {
+                List<UUID> sources = fileIdsByPath.getOrDefault(edge.getSourcePath(), List.of());
+                List<UUID> targets = fileIdsByPath.getOrDefault(edge.getTargetPath(), List.of());
+                double weight = edgeWeight(edge.getRelationType());
+                for (UUID source : sources) {
+                    for (UUID target : targets) {
+                        if (source.equals(target)) {
+                            continue;
+                        }
+                        DefaultWeightedEdge subgraphEdge = subgraph.addEdge(source, target);
+                        if (subgraphEdge != null) {
+                            subgraph.setEdgeWeight(subgraphEdge, weight);
+                        }
+                    }
                 }
             }
         }
@@ -127,7 +147,7 @@ public class SubgraphRankingService {
         return switch (relationType) {
             case INHERITS, IMPLEMENTS -> 3.0;
             case CALLS, IMPORTS, CONFIGURES, TESTS, FILE_CHANGES_WITH -> 2.0;
-            case HANDLES, DECORATES, CROSS_REPO_CALL -> 1.5;
+            case HANDLES, DECORATES, INFRA_MAPS, PUBLISHES, SUBSCRIBES -> 1.5;
             case DEFINES, WRITES, THROWS, SEMANTICALLY_SIMILAR -> 1.0;
         };
     }

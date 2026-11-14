@@ -14,6 +14,7 @@ import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.TestIngestionExecutorConfig;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModelConfig;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModelMatchers;
 import com.kratisai.controlplane.testsupport.llm.HttpRequestMatcher;
 import com.kratisai.controlplane.testsupport.llm.LlmMockScenarios;
 import com.kratisai.controlplane.testsupport.llm.LlmResponseBuilders;
@@ -85,6 +86,14 @@ class IngestionUsageAttributionTest {
         // Every chat-completions shape the pipeline emits: single-shot JSON answers and
         // the ReAct tool-call turns in wiki/pattern research.
         wireMock.addMatchers(List.of(
+                HttpRequestMatcher.builder()
+                        .contains("Discover contracts between this codebase and external code or infrastructure")
+                        .sseResponse(LlmResponseBuilders.openAiSseText("{\"surfaces\":[]}"))
+                        .build(),
+                HttpRequestMatcher.builder()
+                        .contains(FakeChatModelMatchers.SYNOPSIS_SYSTEM_PROMPT_MARKER)
+                        .sseResponse(LlmResponseBuilders.openAiSseText(FakeChatModelMatchers.synopsisJson()))
+                        .build(),
                 HttpRequestMatcher.builder()
                         .contains("write_wiki_page")
                         .sseResponse(LlmResponseBuilders.openAiSseToolCall(

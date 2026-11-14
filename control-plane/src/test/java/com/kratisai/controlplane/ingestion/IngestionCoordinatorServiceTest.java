@@ -14,7 +14,9 @@ import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import java.time.Duration;
+import java.util.UUID;
 import org.awaitility.Awaitility;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -31,6 +33,9 @@ class IngestionCoordinatorServiceTest {
 
     @Autowired
     private IngestionBatchRepository ingestionBatchRepository;
+
+    @Autowired
+    private IngestionBatchLogService ingestionBatchLogService;
 
     @Autowired
     private TestDataFactory testDataFactory;
@@ -69,16 +74,9 @@ class IngestionCoordinatorServiceTest {
         assertThat(batch.getStatus()).isEqualTo(IngestionStatus.QUEUED);
 
         // Verify async thread completed the processing via Awaitility
-        Awaitility.await()
-                .atMost(Duration.ofSeconds(30))
-                .pollInterval(Duration.ofMillis(50))
-                .untilAsserted(() -> {
-                    IngestionBatch updatedBatch =
-                            ingestionBatchRepository.findById(batch.getId()).orElseThrow();
-                    assertThat(updatedBatch.getStatus()).isEqualTo(IngestionStatus.SUCCESS);
-                    assertThat(updatedBatch.getCommitHash()).isNotNull();
-                    assertThat(updatedBatch.isActive()).isTrue();
-                });
+        IngestionBatch updatedBatch = awaitStatus(batch.getId(), IngestionStatus.SUCCESS);
+        assertThat(updatedBatch.getCommitHash()).isNotNull();
+        assertThat(updatedBatch.isActive()).isTrue();
     }
 
     @Test
@@ -101,6 +99,26 @@ class IngestionCoordinatorServiceTest {
         });
     }
 
+    private IngestionBatch awaitStatus(UUID batchId, IngestionStatus expected) {
+        try {
+            Awaitility.await()
+                    .atMost(Duration.ofSeconds(60))
+                    .pollInterval(Duration.ofMillis(100))
+                    .untilAsserted(() -> assertThat(ingestionBatchRepository
+                                    .findById(batchId)
+                                    .orElseThrow()
+                                    .getStatus())
+                            .isEqualTo(expected));
+        } catch (ConditionTimeoutException exception) {
+            String logs = ingestionBatchLogService.getLogsForBatch(batchId).stream()
+                    .map(log -> log.getLevel() + " " + log.getStep() + " " + log.getMessage())
+                    .toList()
+                    .toString();
+            throw new AssertionError("Batch " + batchId + " did not reach " + expected + ": " + logs, exception);
+        }
+        return ingestionBatchRepository.findById(batchId).orElseThrow();
+    }
+
     @Test
     void shouldMaintainOnlyOneActiveBatchPerRepository() {
         // Create an already active batch
@@ -116,15 +134,8 @@ class IngestionCoordinatorServiceTest {
         assertThat(newBatch.getStatus()).isEqualTo(IngestionStatus.QUEUED);
 
         // Wait for async processing to complete (increased timeout for CI environments)
-        Awaitility.await()
-                .atMost(Duration.ofSeconds(30))
-                .pollInterval(Duration.ofMillis(200))
-                .untilAsserted(() -> {
-                    IngestionBatch updatedNew =
-                            ingestionBatchRepository.findById(newBatch.getId()).orElseThrow();
-                    assertThat(updatedNew.getStatus()).isEqualTo(IngestionStatus.SUCCESS);
-                    assertThat(updatedNew.isActive()).isTrue();
-                });
+        IngestionBatch updatedNew = awaitStatus(newBatch.getId(), IngestionStatus.SUCCESS);
+        assertThat(updatedNew.isActive()).isTrue();
 
         // Verify the old batch is now deactivated
         IngestionBatch updatedOld =

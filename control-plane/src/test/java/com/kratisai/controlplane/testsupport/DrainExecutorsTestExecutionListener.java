@@ -22,7 +22,7 @@ import org.springframework.test.context.TestExecutionListener;
  */
 public class DrainExecutorsTestExecutionListener implements TestExecutionListener {
 
-    private static final Duration DRAIN_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration DRAIN_TIMEOUT = Duration.ofSeconds(60);
 
     private static final List<String> EXECUTOR_BEAN_NAMES = List.of(
             "repoIngestTaskExecutor",

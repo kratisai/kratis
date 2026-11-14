@@ -73,7 +73,11 @@ RUN apk add --no-cache git curl tar gcompat libgcc libstdc++ zlib scc docker-cli
     && curl -fsSL https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.12.1/codebase-memory-mcp-linux-${TARGETARCH}-portable.tar.gz -o cbm.tar.gz \
     && tar -xzf cbm.tar.gz -C /usr/local/bin/ \
     && chmod +x /usr/local/bin/codebase-memory-mcp \
-    && rm cbm.tar.gz
+    && rm cbm.tar.gz \
+    && curl -fsSL https://github.com/anchore/syft/releases/download/v1.56.0/syft_1.56.0_linux_${TARGETARCH}.tar.gz -o syft.tar.gz \
+    && tar -xzf syft.tar.gz -C /usr/local/bin/ syft \
+    && chmod +x /usr/local/bin/syft \
+    && rm syft.tar.gz
 
 COPY --from=builder /app/target/kratis /usr/local/bin/kratis
 COPY --from=sidecar-builder /sidecar/kratis-connector /usr/local/bin/kratis-connector
@@ -84,6 +88,7 @@ COPY control-plane/skills /opt/kratis/skills
 
 ENV KRATIS_PARSER_BINARY_PATH=/usr/local/bin/codebase-memory-mcp
 ENV KRATIS_SCC_BINARY_PATH=/usr/bin/scc
+ENV KRATIS_SYFT_PATH=/usr/local/bin/syft
 ENV KRATIS_HARNESSES_DIRECTORY=/opt/kratis/harnesses
 ENV KRATIS_SKILLS_DIRECTORY=/opt/kratis/skills
 ENV KRATIS_VERSION=$VERSION

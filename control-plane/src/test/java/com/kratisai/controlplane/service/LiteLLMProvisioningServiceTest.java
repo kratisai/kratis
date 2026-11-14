@@ -302,7 +302,8 @@ class LiteLLMProvisioningServiceTest {
         provider.setTeam(testTeam);
         provider.setModels(List.of(new ProviderModel("minimax.minimax-m2.5", ModelKind.CHAT)));
         when(liteLLMClient.modelCostMap())
-                .thenReturn(Map.of("bedrock/eu-west-2/minimax.minimax-m2.5", new ModelCostEntry(4.7e-07, 1.86e-06)));
+                .thenReturn(Map.of(
+                        "bedrock/eu-west-2/minimax.minimax-m2.5", new ModelCostEntry(4.7e-07, 1.86e-06, null, null)));
 
         provisioningService.provisionModel(provider);
 
@@ -327,7 +328,7 @@ class LiteLLMProvisioningServiceTest {
         provider.setTeam(testTeam);
         provider.setModels(List.of(new ProviderModel("minimax.minimax-m2.1", ModelKind.CHAT)));
         when(liteLLMClient.modelCostMap())
-                .thenReturn(Map.of("minimax.minimax-m2.1", new ModelCostEntry(3.0e-07, 1.2e-06)));
+                .thenReturn(Map.of("minimax.minimax-m2.1", new ModelCostEntry(3.0e-07, 1.2e-06, null, null)));
 
         provisioningService.provisionModel(provider);
 
@@ -345,7 +346,7 @@ class LiteLLMProvisioningServiceTest {
         provider.setTeam(testTeam);
         provider.setModels(List.of(new ProviderModel("minimax.minimax-m2.5", ModelKind.CHAT)));
         when(liteLLMClient.modelCostMap())
-                .thenReturn(Map.of("minimax.minimax-m2.5", new ModelCostEntry(3.0e-07, 1.2e-06)));
+                .thenReturn(Map.of("minimax.minimax-m2.5", new ModelCostEntry(3.0e-07, 1.2e-06, null, null)));
 
         provisioningService.provisionModel(provider);
 
@@ -364,7 +365,8 @@ class LiteLLMProvisioningServiceTest {
         provider.setTeam(testTeam);
         provider.setModels(List.of(new ProviderModel("us.anthropic.claude-sonnet-4-6", ModelKind.CHAT)));
         when(liteLLMClient.modelCostMap())
-                .thenReturn(Map.of("bedrock/eu-west-2/minimax.minimax-m2.5", new ModelCostEntry(4.7e-07, 1.86e-06)));
+                .thenReturn(Map.of(
+                        "bedrock/eu-west-2/minimax.minimax-m2.5", new ModelCostEntry(4.7e-07, 1.86e-06, null, null)));
 
         provisioningService.provisionModel(provider);
 
@@ -385,7 +387,8 @@ class LiteLLMProvisioningServiceTest {
         provider.setTeam(testTeam);
         provider.setModels(List.of(new ProviderModel("claude-sonnet-4-20250514", ModelKind.CHAT)));
         when(liteLLMClient.modelCostMap())
-                .thenReturn(Map.of("anthropic.claude-sonnet-4-20250514-v1:0", new ModelCostEntry(3.0e-06, 1.5e-05)));
+                .thenReturn(Map.of(
+                        "anthropic.claude-sonnet-4-20250514-v1:0", new ModelCostEntry(3.0e-06, 1.5e-05, null, null)));
 
         provisioningService.provisionModel(provider);
 
@@ -405,7 +408,8 @@ class LiteLLMProvisioningServiceTest {
         provider.setTeam(testTeam);
         provider.setModels(List.of(new ProviderModel("claude-3-5-sonnet-20241022", ModelKind.CHAT)));
         when(liteLLMClient.modelCostMap())
-                .thenReturn(Map.of("anthropic.claude-3-5-sonnet-20241022-v2:0", new ModelCostEntry(3.0e-06, 1.5e-05)));
+                .thenReturn(Map.of(
+                        "anthropic.claude-3-5-sonnet-20241022-v2:0", new ModelCostEntry(3.0e-06, 1.5e-05, null, null)));
 
         provisioningService.provisionModel(provider);
 
@@ -421,7 +425,7 @@ class LiteLLMProvisioningServiceTest {
         provider.setTeam(testTeam);
         provider.setModels(List.of(new ProviderModel("claude-sonnet-4-5-20250929", ModelKind.CHAT)));
         when(liteLLMClient.modelCostMap())
-                .thenReturn(Map.of("claude-sonnet-4-5-20250929", new ModelCostEntry(3.0e-06, 1.5e-05)));
+                .thenReturn(Map.of("claude-sonnet-4-5-20250929", new ModelCostEntry(3.0e-06, 1.5e-05, null, null)));
 
         provisioningService.provisionModel(provider);
 
@@ -458,7 +462,7 @@ class LiteLLMProvisioningServiceTest {
                 new ProviderModel("minimax.minimax-m2.5", ModelKind.CHAT),
                 new ProviderModel("qwen.qwen3-coder-480b-a35b-instruct", ModelKind.CHAT)));
         when(liteLLMClient.modelCostMap())
-                .thenReturn(Map.of("minimax.minimax-m2.5", new ModelCostEntry(3.0e-07, 1.2e-06)));
+                .thenReturn(Map.of("minimax.minimax-m2.5", new ModelCostEntry(3.0e-07, 1.2e-06, null, null)));
 
         provisioningService.provisionModel(provider);
 
@@ -860,7 +864,8 @@ class LiteLLMProvisioningServiceTest {
                         litellmName,
                         new LiteLLMParams("minimax.minimax-m2.5", "bedrock-bearer-token", "openai", null)))));
         when(liteLLMClient.modelCostMap())
-                .thenReturn(Map.of("bedrock/eu-west-2/minimax.minimax-m2.5", new ModelCostEntry(4.7e-07, 1.86e-06)));
+                .thenReturn(Map.of(
+                        "bedrock/eu-west-2/minimax.minimax-m2.5", new ModelCostEntry(4.7e-07, 1.86e-06, null, null)));
         when(modelProviderRepository.findAll()).thenReturn(List.of(bedrockProvider));
         when(teamRepository.findAllWithIngestionAndEmbeddingProviders()).thenReturn(List.of());
 
@@ -883,7 +888,8 @@ class LiteLLMProvisioningServiceTest {
                 .thenReturn(new ListModelsResponse(List.of(new ModelConfig(
                         litellmName, new LiteLLMParams("claude-sonnet-4-20250514", "sk-ant", "anthropic", null)))));
         when(liteLLMClient.modelCostMap())
-                .thenReturn(Map.of("anthropic.claude-sonnet-4-20250514-v1:0", new ModelCostEntry(3.0e-06, 1.5e-05)));
+                .thenReturn(Map.of(
+                        "anthropic.claude-sonnet-4-20250514-v1:0", new ModelCostEntry(3.0e-06, 1.5e-05, null, null)));
         when(modelProviderRepository.findAll()).thenReturn(List.of(anthropicProvider));
         when(teamRepository.findAllWithIngestionAndEmbeddingProviders()).thenReturn(List.of());
 
@@ -906,7 +912,7 @@ class LiteLLMProvisioningServiceTest {
                 .thenReturn(new ListModelsResponse(List.of(new ModelConfig(
                         litellmName, new LiteLLMParams("claude-sonnet-4-5-20250929", "sk-ant", "anthropic", null)))));
         when(liteLLMClient.modelCostMap())
-                .thenReturn(Map.of("claude-sonnet-4-5-20250929", new ModelCostEntry(3.0e-06, 1.5e-05)));
+                .thenReturn(Map.of("claude-sonnet-4-5-20250929", new ModelCostEntry(3.0e-06, 1.5e-05, null, null)));
         when(modelProviderRepository.findAll()).thenReturn(List.of(anthropicProvider));
         when(teamRepository.findAllWithIngestionAndEmbeddingProviders()).thenReturn(List.of());
 

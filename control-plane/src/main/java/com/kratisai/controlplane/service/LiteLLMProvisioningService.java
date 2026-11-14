@@ -14,6 +14,7 @@ import com.kratisai.controlplane.repository.TeamRepository;
 import com.kratisai.controlplane.service.ProviderPricing.Rate;
 import jakarta.annotation.PostConstruct;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
@@ -40,6 +41,7 @@ public class LiteLLMProvisioningService {
 
     // bedrock-runtime.us-east-1.amazonaws.com, bedrock-mantle.eu-west-2.api.aws, ...
     private static final Pattern AWS_REGION_PATTERN = Pattern.compile("[a-z]{2}-[a-z]+-[0-9]+");
+    static final long DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000L;
 
     public enum VirtualKeyScope {
         SANDBOX,
@@ -54,6 +56,7 @@ public class LiteLLMProvisioningService {
 
     private final AtomicBoolean reconciliationSettled = new AtomicBoolean(false);
     private final AtomicInteger reconcileFailures = new AtomicInteger(0);
+    private final ConcurrentHashMap<String, Long> contextWindowCache = new ConcurrentHashMap<>();
 
     public LiteLLMProvisioningService(
             LiteLLMClient liteLLMClient,
@@ -405,7 +408,7 @@ public class LiteLLMProvisioningService {
         Optional<Rate> published = providerPricing.rateFor(provider, modelName);
         if (published.isPresent()) {
             return new ModelCostEntry(
-                    published.get().inputCostPerToken(), published.get().outputCostPerToken());
+                    published.get().inputCostPerToken(), published.get().outputCostPerToken(), null, null);
         }
         if (provider.getProviderType().getPricingSource() == PricingSource.PROVIDER_API) {
             logger.warn(
@@ -459,6 +462,69 @@ public class LiteLLMProvisioningService {
         }
         candidates.add("bedrock/" + modelName);
         candidates.add(modelName);
+        return candidates;
+    }
+
+    public long resolveContextWindowTokens(@Nullable ModelProvider provider, @Nullable String modelName) {
+        if (provider == null || modelName == null || modelName.isBlank()) {
+            return DEFAULT_CONTEXT_WINDOW_TOKENS;
+        }
+        Optional<ProviderModel> configured = provider.getModels().stream()
+                .filter(model -> modelName.equals(model.getModelName()))
+                .findFirst();
+        if (configured.isPresent()
+                && configured.get().getContextWindowTokens() != null
+                && configured.get().getContextWindowTokens() > 0) {
+            return configured.get().getContextWindowTokens();
+        }
+        String cacheKey = (provider.getId() != null
+                        ? provider.getId().toString()
+                        : provider.getProviderType().name()) + "|" + modelName;
+        Long cached = contextWindowCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        Map<String, ModelCostEntry> entries = fetchModelCostMap();
+        if (entries.isEmpty()) {
+            return DEFAULT_CONTEXT_WINDOW_TOKENS;
+        }
+        for (String candidate : contextWindowCandidates(provider, modelName, configured.orElse(null))) {
+            ModelCostEntry entry = entries.get(candidate);
+            if (entry != null) {
+                Long tokens = entry.maxInputTokens() != null && entry.maxInputTokens() > 0
+                        ? entry.maxInputTokens()
+                        : entry.maxTokens();
+                if (tokens != null && tokens > 0) {
+                    contextWindowCache.put(cacheKey, tokens);
+                    return tokens;
+                }
+            }
+        }
+        return DEFAULT_CONTEXT_WINDOW_TOKENS;
+    }
+
+    private List<String> contextWindowCandidates(
+            ModelProvider provider, String modelName, @Nullable ProviderModel configured) {
+        List<String> candidates = new ArrayList<>(6);
+        if (provider.getProviderType() == ProviderType.BEDROCK) {
+            candidates.addAll(bedrockPricingCandidates(provider, modelName));
+        } else {
+            String litellmProvider = provider.getProviderType().getLiteLlmType();
+            candidates.add(litellmProvider + "/" + modelName);
+            candidates.add(modelName);
+            if (provider.getProviderType() == ProviderType.ANTHROPIC) {
+                candidates.add("anthropic." + modelName + "-v1:0");
+                candidates.add("anthropic." + modelName + "-v2:0");
+                candidates.add("anthropic." + modelName);
+            }
+        }
+        if (configured != null
+                && configured.getBaseModel() != null
+                && !configured.getBaseModel().isBlank()) {
+            String base = configured.getBaseModel();
+            candidates.add(provider.getProviderType().getLiteLlmType() + "/" + base);
+            candidates.add(base);
+        }
         return candidates;
     }
 

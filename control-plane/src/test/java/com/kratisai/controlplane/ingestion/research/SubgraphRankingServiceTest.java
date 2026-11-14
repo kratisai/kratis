@@ -105,6 +105,40 @@ class SubgraphRankingServiceTest {
     }
 
     @Test
+    void projectsCrossFileSymbolAndModuleEdgesOntoFilePageRank() {
+        // Simulate TypeScript/Python/Terraform CMM graphs where IMPORTS is File->Module and CALLS is Function->Function
+        CtxNode hubModule =
+                new CtxNode(batch, team.getId(), "test-repo", NodeType.MODULE, "src/main/java/com/example/Utils.java");
+        CtxNode fn1 = new CtxNode(
+                batch, team.getId(), "test-repo", NodeType.FUNCTION, "src/main/java/com/example/OrderService.java");
+        CtxNode fn2 = new CtxNode(
+                batch, team.getId(), "test-repo", NodeType.FUNCTION, "src/main/java/com/example/UserService.java");
+        CtxNode hubFn = new CtxNode(
+                batch, team.getId(), "test-repo", NodeType.FUNCTION, "src/main/java/com/example/Utils.java");
+        ctxNodeRepository.saveAll(List.of(hubModule, fn1, fn2, hubFn));
+
+        ctxEdgeRepository.saveAll(List.of(
+                new CtxEdge(batch, team.getId(), businessNode1, hubModule, RelationType.IMPORTS),
+                new CtxEdge(batch, team.getId(), fn1, hubFn, RelationType.CALLS),
+                new CtxEdge(batch, team.getId(), fn2, hubFn, RelationType.CALLS)));
+
+        subgraphRankingService.rankDimensions(batch);
+
+        List<CtxNodeDimension> ranked = ctxNodeDimensionRepository.findByDimensionIdWithNode(domainDimension.getId());
+        double hubScore = ranked.stream()
+                .filter(nd -> nd.getNode().getId().equals(hubNode.getId()))
+                .findFirst()
+                .orElseThrow()
+                .getRankScore();
+        double biz1Score = ranked.stream()
+                .filter(nd -> nd.getNode().getId().equals(businessNode1.getId()))
+                .findFirst()
+                .orElseThrow()
+                .getRankScore();
+        assertThat(hubScore).isGreaterThan(biz1Score);
+    }
+
+    @Test
     void happyPath_calculatesPageRankWithinSubgraph() {
         // Create edges: businessNode1 -> hubNode, businessNode2 -> hubNode
         // This makes hubNode a cross-cutting utility that both business nodes depend on

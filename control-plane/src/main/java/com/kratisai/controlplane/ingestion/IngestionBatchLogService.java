@@ -47,6 +47,10 @@ public class IngestionBatchLogService {
             service.log(batchId, teamId, "INFO", step, message);
         }
 
+        public void warn(String step, String message) {
+            service.log(batchId, teamId, "WARN", step, message);
+        }
+
         public void error(String step, String message) {
             service.log(batchId, teamId, "ERROR", step, message);
         }

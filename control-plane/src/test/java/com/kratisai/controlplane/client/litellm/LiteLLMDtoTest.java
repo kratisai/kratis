@@ -197,9 +197,11 @@ class LiteLLMDtoTest {
     }
 
     @Test
-    void modelCostEntry_mapsRatesByKeyFromCostMapResponse() throws Exception {
+    void modelCostEntry_mapsRatesAndIgnoresStringSampleSpecTokens() throws Exception {
         String json = """
-                {"bedrock/eu-west-2/minimax.minimax-m2.5":
+                {"sample_spec":{"input_cost_per_token":0.0,"output_cost_per_token":0.0,
+                  "max_input_tokens":"max input tokens, if the provider specifies it"},
+                 "bedrock/eu-west-2/minimax.minimax-m2.5":
                  {"input_cost_per_token":4.7E-7,"output_cost_per_token":1.86E-6,
                   "litellm_provider":"bedrock_converse","mode":"chat","max_tokens":1000000}}""";
         ObjectMapper objectMapper = new ObjectMapper();
@@ -207,10 +209,13 @@ class LiteLLMDtoTest {
         Map<String, ModelCostEntry> map =
                 objectMapper.readValue(json, new TypeReference<Map<String, ModelCostEntry>>() {});
 
-        assertThat(map).containsOnlyKeys("bedrock/eu-west-2/minimax.minimax-m2.5");
+        assertThat(map).containsOnlyKeys("sample_spec", "bedrock/eu-west-2/minimax.minimax-m2.5");
+        assertThat(map.get("sample_spec").maxInputTokens()).isNull();
         assertThat(map.get("bedrock/eu-west-2/minimax.minimax-m2.5").inputCostPerToken())
                 .isEqualTo(4.7e-07);
         assertThat(map.get("bedrock/eu-west-2/minimax.minimax-m2.5").outputCostPerToken())
                 .isEqualTo(1.86e-06);
+        assertThat(map.get("bedrock/eu-west-2/minimax.minimax-m2.5").maxTokens())
+                .isEqualTo(1_000_000L);
     }
 }

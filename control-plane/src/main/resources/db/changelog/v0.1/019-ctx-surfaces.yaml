@@ -1,0 +1,122 @@
+databaseChangeLog:
+- changeSet:
+    id: 019-ctx-surfaces-001
+    author: kratis
+    changes:
+    - createTable:
+        tableName: ctx_surfaces
+        columns:
+        - column:
+            name: id
+            type: UUID
+            defaultValueComputed: gen_random_uuid()
+            constraints:
+              primaryKey: true
+              primaryKeyName: ctx_surfaces_pkey
+              nullable: false
+        - column:
+            name: batch_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: repository_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: team_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: role
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: description
+            type: TEXT
+            constraints:
+              nullable: false
+        - column:
+            name: detected_by
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+    - addForeignKeyConstraint:
+        baseTableName: ctx_surfaces
+        baseColumnNames: batch_id
+        constraintName: fk_ctx_surfaces_batch
+        referencedTableName: ingestion_batches
+        referencedColumnNames: id
+        onDelete: CASCADE
+    - addForeignKeyConstraint:
+        baseTableName: ctx_surfaces
+        baseColumnNames: repository_id
+        constraintName: fk_ctx_surfaces_repository
+        referencedTableName: repositories
+        referencedColumnNames: id
+        onDelete: CASCADE
+    - createIndex:
+        tableName: ctx_surfaces
+        indexName: idx_ctx_surfaces_batch
+        columns:
+        - column:
+            name: batch_id
+    - createTable:
+        tableName: ctx_surface_attributes
+        columns:
+        - column:
+            name: id
+            type: UUID
+            defaultValueComputed: gen_random_uuid()
+            constraints:
+              primaryKey: true
+              primaryKeyName: ctx_surface_attributes_pkey
+              nullable: false
+        - column:
+            name: surface_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: kind
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: value
+            type: TEXT
+            constraints:
+              nullable: false
+        - column:
+            name: detected_by
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+    - addForeignKeyConstraint:
+        baseTableName: ctx_surface_attributes
+        baseColumnNames: surface_id
+        constraintName: fk_ctx_surface_attributes_surface
+        referencedTableName: ctx_surfaces
+        referencedColumnNames: id
+        onDelete: CASCADE
+    - addUniqueConstraint:
+        tableName: ctx_surface_attributes
+        columnNames: surface_id, kind, value, detected_by
+        constraintName: uq_ctx_surface_attribute_value
+    - createIndex:
+        tableName: ctx_surface_attributes
+        indexName: ix_ctx_surface_attributes_kind_value
+        columns:
+        - column:
+            name: kind
+        - column:
+            name: value
+    - createIndex:
+        tableName: ctx_surface_attributes
+        indexName: ix_ctx_surface_attributes_surface
+        columns:
+        - column:
+            name: surface_id

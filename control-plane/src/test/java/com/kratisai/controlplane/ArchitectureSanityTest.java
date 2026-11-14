@@ -8,6 +8,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
 
 import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.config.AsyncConfig;
+import com.kratisai.controlplane.ingestion.relations.CrossRepoMatchingService;
 import com.kratisai.controlplane.ingestion.research.DimensionResearchService;
 import com.kratisai.controlplane.service.ClientRealtimeEventListeners;
 import com.kratisai.controlplane.service.ClientSessionRegistry;
@@ -136,10 +137,11 @@ public class ArchitectureSanityTest {
             .that()
             .doNotHaveFullyQualifiedName(AsyncConfig.class.getName())
             .should(new ArchCondition<JavaClass>("not create executors or schedulers directly") {
-                // researchDimensions joins every Future before the block exits and ExecutorService.close()
-                // blocks until all tasks complete, so no thread outlives the call.
-                private static final Set<String> ALLOWED_ORIGINS =
-                        Set.of(DimensionResearchService.class.getName() + "#researchDimensions");
+                // researchDimensions and CrossRepoMatchingService#infer join every Future before the block exits and
+                // ExecutorService.close() blocks until all tasks complete, so no thread outlives the call.
+                private static final Set<String> ALLOWED_ORIGINS = Set.of(
+                        DimensionResearchService.class.getName() + "#researchDimensions",
+                        CrossRepoMatchingService.class.getName() + "#infer");
 
                 @Override
                 public void check(JavaClass javaClass, ConditionEvents events) {
@@ -198,6 +200,8 @@ public class ArchitectureSanityTest {
     @ArchTest
     public static final ArchRule RESEARCH_EXECUTOR_MUST_STAY_SCOPED = fields().that()
             .areDeclaredIn(DimensionResearchService.class)
+            .or()
+            .areDeclaredIn(CrossRepoMatchingService.class)
             .should(new ArchCondition<JavaField>("not hold executors or schedulers") {
                 @Override
                 public void check(JavaField field, ConditionEvents events) {

@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -19,5 +22,7 @@ public interface CtxWikiPageRepository extends JpaRepository<CtxWikiPage, UUID> 
 
     Optional<CtxWikiPage> findByBatchIdAndPageSlug(UUID batchId, String pageSlug);
 
-    void deleteByBatchId(UUID batchId);
+    @Modifying
+    @Query("DELETE FROM CtxWikiPage p WHERE p.batch.id = :batchId")
+    void deleteByBatchId(@Param("batchId") UUID batchId);
 }

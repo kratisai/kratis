@@ -15,8 +15,10 @@ public enum RelationType {
     TESTS,
     FILE_CHANGES_WITH,
     DECORATES,
-    CROSS_REPO_CALL,
-    SEMANTICALLY_SIMILAR;
+    SEMANTICALLY_SIMILAR,
+    INFRA_MAPS,
+    PUBLISHES,
+    SUBSCRIBES;
 
     @JsonValue
     public String toLowerCase() {

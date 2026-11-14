@@ -349,12 +349,13 @@ public final class ReActLoop<T> {
         if (converter == null) {
             return (T) message.getText();
         }
+        String text = message.getText() != null ? message.getText() : "";
         try {
-            String text = message.getText() != null ? message.getText() : "";
             T result = converter.convert(text);
             Objects.requireNonNull(validator).accept(result);
             return result;
         } catch (RuntimeException e) {
+            log.debug("Structured output rejected. Raw reply: {}", text);
             throw new StructuredOutputValidationException(
                     "Your response did not match the required format or is incomplete. Error: Validation failed: "
                             + e.getMessage()

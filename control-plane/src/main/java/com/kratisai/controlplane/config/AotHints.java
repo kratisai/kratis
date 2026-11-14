@@ -30,6 +30,7 @@ public class AotHints implements RuntimeHintsRegistrar {
     @Override
     public void registerHints(RuntimeHints hints, ClassLoader classLoader) {
         hints.resources().registerPattern("mermaid-grammar/grammar.json");
+        hints.resources().registerPattern("cmm-languages.txt");
         hints.proxies().registerJdkProxy(ModelDiscoveryClient.class);
 
         registerWebSocketPayloadHints(hints, classLoader);
