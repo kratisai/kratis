@@ -3,9 +3,14 @@ package com.kratisai.controlplane.planningagent;
 import com.kratisai.controlplane.agentloop.ReActLoop;
 import com.kratisai.controlplane.agentloop.ReActLoop.ToolPhase;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
+import com.kratisai.controlplane.api.wsdto.ClientPayloadType;
+import com.kratisai.controlplane.api.wsdto.MessageRole;
 import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
 import com.kratisai.controlplane.service.ScratchpadService;
+import com.kratisai.controlplane.validation.MermaidDiagramValidator;
+import com.kratisai.controlplane.validation.MermaidDiagramValidator.DiagramRepairRequest;
 import com.kratisai.controlplane.validation.mermaid.MermaidGrammar;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -34,19 +39,25 @@ public class PlanningAgentLoop {
     private final ScratchpadService scratchpadService;
     private final ToolCallback[] toolCallbacks;
     private final int maxIterations;
-    private final Executor executor;
+    private final Executor toolExecutor;
+    private final Executor mermaidRepairExecutor;
+    private final MermaidDiagramValidator mermaidDiagramValidator;
 
     public PlanningAgentLoop(
             ChatMemory chatMemory,
             ScratchpadService scratchpadService,
             ToolCallback[] toolCallbacks,
             int maxIterations,
-            Executor executor) {
+            Executor toolExecutor,
+            Executor mermaidRepairExecutor,
+            MermaidDiagramValidator mermaidDiagramValidator) {
         this.chatMemory = chatMemory;
         this.scratchpadService = scratchpadService;
         this.toolCallbacks = toolCallbacks;
         this.maxIterations = maxIterations;
-        this.executor = executor;
+        this.toolExecutor = toolExecutor;
+        this.mermaidRepairExecutor = mermaidRepairExecutor;
+        this.mermaidDiagramValidator = mermaidDiagramValidator;
     }
 
     /** Run the ReAct loop for a chat. Emits chat stream payload chunks to a sink. */
@@ -69,7 +80,7 @@ public class PlanningAgentLoop {
 
         String output = ReActLoop.text(chatClient, toolCallbacks)
                 .maxIterations(maxIterations)
-                .executor(executor)
+                .executor(toolExecutor)
                 .onThought((attempt, text) ->
                         emitTelemetry(sink, context.chatId(), attempt, new TelemetryEvent.Thought(text)))
                 .onAnswerChunk((attempt, text) -> emitToSink(
@@ -85,7 +96,51 @@ public class PlanningAgentLoop {
             log.warn("Agent: No assistant response.");
             return;
         }
-        chatMemory.add(context.chatId().toString(), new AssistantMessage(output));
+        String finalOutput = finalizeMermaidOutput(chatClient, output);
+        if (!finalOutput.equals(output)) {
+            emitToSink(
+                    sink,
+                    new ClientPayload.MessageResult(
+                            ClientPayloadType.MESSAGE,
+                            finalOutput,
+                            context.chatId(),
+                            context.messageId(),
+                            MessageRole.ASSISTANT,
+                            Instant.now().toString()));
+        }
+        chatMemory.add(context.chatId().toString(), new AssistantMessage(finalOutput));
+    }
+
+    private String finalizeMermaidOutput(ChatClient chatClient, String output) {
+        String normalized = mermaidDiagramValidator.normalizeFences(output);
+        if (mermaidDiagramValidator.findIssues(normalized).isEmpty()) {
+            return normalized;
+        }
+        return mermaidDiagramValidator.repairDiagrams(
+                normalized, request -> requestDiagramRepair(chatClient, request), mermaidRepairExecutor);
+    }
+
+    private String requestDiagramRepair(ChatClient chatClient, DiagramRepairRequest request) {
+        String system = "You fix Kratis Mermaid diagrams. "
+                + MermaidGrammar.GUIDANCE
+                + " Return ONLY the corrected diagram inside a single fenced code block with language mermaid, with no surrounding prose.";
+        String source = request.source().stripTrailing();
+        String fence = source.contains("```") ? "````" : "```";
+        String user = """
+                Fix this diagram so it passes validation.
+                Issues:
+                %s
+
+                Broken diagram:
+                %smermaid
+                %s
+                %s""".formatted(String.join("\n", request.issues()), fence, source, fence);
+        try {
+            return chatClient.prompt().system(system).user(user).call().content();
+        } catch (RuntimeException e) {
+            log.warn("Out-of-band Mermaid repair failed for diagram #{}", request.diagramNumber(), e);
+            return null;
+        }
     }
 
     private void emitToolEvent(

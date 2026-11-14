@@ -76,6 +76,39 @@ describe('chat-store protocol determinism and deduplication', () => {
     expect(messages).toHaveLength(1)
   })
 
+  it('handleMessageResult replaces streamed content and cancels pending flush timers', () => {
+    const chatId = 'chat-102'
+    useChatStore.setState({ currentChatId: chatId })
+
+    useChatStore.getState().handleMessageChunkResult({
+      attempt: 1,
+      chatId,
+      content: '```flowchart LR\nA["Client"] --> B["API"]\n```',
+      messageId: 'msg-repair-1',
+      role: 'assistant',
+      timestamp: '2026-07-26T12:00:01Z',
+      type: 'message_chunk',
+    })
+
+    useChatStore.getState().handleMessageResult({
+      chatId,
+      content: '```mermaid\nflowchart LR\nA["Client"] --> B["API"]\n```',
+      messageId: 'msg-repair-1',
+      role: 'assistant',
+      timestamp: '2026-07-26T12:00:02Z',
+      type: 'message',
+    })
+
+    vi.advanceTimersByTime(100)
+
+    const messages = useChatStore.getState().messages[chatId]
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({
+      content: '```mermaid\nflowchart LR\nA["Client"] --> B["API"]\n```',
+      role: 'assistant',
+    })
+  })
+
   it('handleMessageChunkResult incrementally appends text to single assistant message card', async () => {
     const chatId = 'chat-200'
     useChatStore.setState({ currentChatId: chatId })
@@ -141,5 +174,35 @@ describe('chat-store protocol determinism and deduplication', () => {
 
     messages = useChatStore.getState().messages[chatId]
     expect(messages).toHaveLength(1)
+  })
+
+  it('ignores late message chunks after handleMessageResult finalizes a messageId', async () => {
+    const chatId = 'chat-400'
+    const messageId = 'msg-final-1'
+
+    useChatStore.getState().handleMessageResult({
+      chatId,
+      content: 'Authoritative final content',
+      messageId,
+      role: 'assistant',
+      timestamp: '2026-07-26T12:00:00Z',
+      type: 'message',
+    })
+
+    useChatStore.getState().handleMessageChunkResult({
+      attempt: 1,
+      chatId,
+      content: 'stale trailing chunk',
+      messageId,
+      role: 'assistant',
+      timestamp: '2026-07-26T12:00:01Z',
+      type: 'message_chunk',
+    })
+
+    await vi.advanceTimersByTimeAsync(100)
+
+    const messages = useChatStore.getState().messages[chatId]
+    expect(messages).toHaveLength(1)
+    expect(getTextContent(messages[0])).toBe('Authoritative final content')
   })
 })

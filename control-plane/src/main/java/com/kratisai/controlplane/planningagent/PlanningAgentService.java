@@ -15,10 +15,12 @@ import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ChatUsageSessionService;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ScratchpadService;
+import com.kratisai.controlplane.validation.MermaidDiagramValidator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.Executor;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -80,7 +82,9 @@ public class PlanningAgentService {
             ScratchpadService scratchpadService,
             PlanningProperties planningProperties,
             ChatFluxRegistry chatFluxRegistry,
-            @Qualifier("agentTaskExecutor") AsyncTaskExecutor agentTaskExecutor) {
+            MermaidDiagramValidator mermaidDiagramValidator,
+            @Qualifier("agentTaskExecutor") AsyncTaskExecutor agentTaskExecutor,
+            @Qualifier("mermaidRepairExecutor") Executor mermaidRepairExecutor) {
 
         this.modelProviderRepository = modelProviderRepository;
         this.chatModelFactory = chatModelFactory;
@@ -94,7 +98,13 @@ public class PlanningAgentService {
         ToolCallback[] toolCallbacks =
                 getWrappedTools(canvasTool, repositoryTool, dimensionTool, wikiTool, scratchpadTool, webSearchTool);
         this.orchestrationLoop = new PlanningAgentLoop(
-                chatMemory, scratchpadService, toolCallbacks, planningProperties.getMaxIterations(), agentTaskExecutor);
+                chatMemory,
+                scratchpadService,
+                toolCallbacks,
+                planningProperties.getMaxIterations(),
+                agentTaskExecutor,
+                mermaidRepairExecutor,
+                mermaidDiagramValidator);
     }
 
     /** Add AgentThinking to our tool-callbacks * */

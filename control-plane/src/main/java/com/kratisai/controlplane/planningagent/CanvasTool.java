@@ -105,6 +105,7 @@ public class CanvasTool {
         UUID teamId = (UUID) toolContext.getContext().get("teamId");
 
         validateWriteCanvasRequest(canvasType, repoName, newRepoName);
+        content = mermaidDiagramValidator.normalizeFences(content);
         List<String> mermaidIssues = mermaidDiagramValidator.findIssues(content);
         if (!mermaidIssues.isEmpty()) {
             return "ERROR: Invalid Mermaid diagram syntax in content. Fix and retry:\n"
@@ -209,6 +210,7 @@ public class CanvasTool {
                 patchedContent = patchedContent.replace(target, replacement);
             }
 
+            patchedContent = mermaidDiagramValidator.normalizeFences(patchedContent);
             List<String> mermaidIssues = mermaidDiagramValidator.findIssues(patchedContent);
             if (!mermaidIssues.isEmpty()) {
                 return "ERROR: Invalid Mermaid diagram syntax after patching. Fix and retry:\n"

@@ -43,7 +43,7 @@ public sealed interface ClientPayload {
 
     record MessageResult(
             ClientPayloadType type, String content, UUID chatId, String messageId, MessageRole role, String timestamp)
-            implements ClientPayload, ChatHistoryPayload {
+            implements ClientPayload, ChatStreamPayload, ChatHistoryPayload {
 
         public MessageResult {
             Objects.requireNonNull(type, "type is required");

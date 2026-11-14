@@ -29,7 +29,8 @@ public class DrainExecutorsTestExecutionListener implements TestExecutionListene
             "agentTaskExecutor",
             "envMessageExecutor",
             "clientBroadcastExecutor",
-            "dispatchExecutor");
+            "dispatchExecutor",
+            "mermaidRepairExecutor");
 
     private static final List<String> SCHEDULER_BEAN_NAMES = List.of("usageRefreshScheduler", "wsCleanupScheduler");
 

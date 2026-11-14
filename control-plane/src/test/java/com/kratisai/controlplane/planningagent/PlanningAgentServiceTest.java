@@ -27,6 +27,7 @@ import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ScratchpadService;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
+import com.kratisai.controlplane.validation.MermaidDiagramValidator;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -89,7 +90,9 @@ class PlanningAgentServiceTest {
                 mock(ScratchpadService.class),
                 new PlanningProperties(),
                 chatFluxRegistry,
-                agentTaskExecutor);
+                new MermaidDiagramValidator(),
+                agentTaskExecutor,
+                Runnable::run);
     }
 
     @Test

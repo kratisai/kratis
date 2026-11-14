@@ -326,6 +326,21 @@ class CanvasToolTest extends AgentTestHarness {
                 .isEqualTo(original.replace("Start & go", "Finish & go"));
     }
 
+    @Test
+    void writeCanvas_normalizesHeaderFenceAndPersistsMermaidFence() {
+        String docId = UUID.randomUUID().toString();
+        String input = """
+                ```flowchart TB
+                A["Client"] --> B["API"]
+                ```
+                """;
+
+        String result = canvasTool.writeCanvas(docId, "Arch", input, CanvasType.DOCUMENT, null, null, toolContext);
+
+        assertThat(result).contains("Document successfully written");
+        assertThat(canvasTool.retrieveFromCanvas(docId, toolContext)).contains("```mermaid\nflowchart TB\n");
+    }
+
     private Repository saveRepository(String name, Team team) {
         Repository repo = new Repository(name, "https://example.com/" + name + ".git", "main", RepositoryType.GENERIC);
         repo.setTeam(team);

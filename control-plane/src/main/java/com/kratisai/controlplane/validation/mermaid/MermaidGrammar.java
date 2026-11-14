@@ -21,7 +21,8 @@ public final class MermaidGrammar {
         return String.join(
                 " ",
                 List.of(
-                        "Write custom Kratis diagrams: a Mermaid-inspired subset, not full Mermaid. Supported types: flowchart, graph, sequenceDiagram, classDiagram, stateDiagram-v2, erDiagram, C4Context/Container/Component, pie, quadrantChart, xychart-beta, journey. Headers take a space, e.g. flowchart LR.",
+                        "Write custom Kratis diagrams: a Mermaid-inspired subset, not full Mermaid. Supported types: flowchart, graph, sequenceDiagram, classDiagram, stateDiagram-v2, erDiagram, C4Context/Container/Component, pie, quadrantChart, xychart-beta, journey.",
+                        "Always wrap every diagram in a fenced code block with language mermaid (never use a diagram type such as flowchart, sequenceDiagram, or C4Context as the fence language, and never omit the fence language); put the diagram header on the first line inside the block, e.g. flowchart LR.",
                         "Always quote display text and labels with double quotes; unquoted labels are not part of this format.",
                         "Keep each line simple and unambiguous; quote all node, edge, subgraph, participant, state, and label text.",
                         "Flowchart rules: quote all node text, e.g. A[\"Node Label\"]; quote all edge labels, e.g. A -->|\"Edge Label\"| B or A -- \"Edge Label\" --> B; subgraphs must have explicit IDs and quoted names, e.g. subgraph ID[\"Title\"]; keep subgraph and node IDs unique and do not use a subgraph ID as an edge endpoint inside its own subgraph; use direction TD/TB/BT/LR/RL.",
@@ -90,6 +91,18 @@ public final class MermaidGrammar {
         maxDepth = bounds.required("maxDepth").asInt();
         journeyScoreMin = bounds.required("journeyScoreMin").asInt();
         journeyScoreMax = bounds.required("journeyScoreMax").asInt();
+    }
+
+    public boolean isHeaderKeyword(String token) {
+        if (token == null || token.isEmpty()) {
+            return false;
+        }
+        for (Set<String> keywords : headers.values()) {
+            if (keywords.contains(token)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static List<String> readList(JsonNode node) {

@@ -18,6 +18,7 @@ import org.springframework.context.annotation.Bean;
 public class TestAsyncExecutorConfig {
 
     public static final String DISPATCH_EXECUTOR_BEAN_NAME = "dispatchExecutor";
+    public static final String MERMAID_REPAIR_EXECUTOR_BEAN_NAME = "mermaidRepairExecutor";
     public static final String USAGE_REFRESH_SCHEDULER_BEAN_NAME = "usageRefreshScheduler";
     public static final String WS_CLEANUP_SCHEDULER_BEAN_NAME = "wsCleanupScheduler";
 
@@ -29,6 +30,11 @@ public class TestAsyncExecutorConfig {
                 replace(
                         registry,
                         DISPATCH_EXECUTOR_BEAN_NAME,
+                        BeanDefinitionBuilder.genericBeanDefinition(TrackingVirtualThreadExecutor.class)
+                                .setDestroyMethodName("close"));
+                replace(
+                        registry,
+                        MERMAID_REPAIR_EXECUTOR_BEAN_NAME,
                         BeanDefinitionBuilder.genericBeanDefinition(TrackingVirtualThreadExecutor.class)
                                 .setDestroyMethodName("close"));
                 replace(

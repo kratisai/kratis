@@ -63,6 +63,7 @@ public class WriteWikiPageTool {
             throw new KratisToolException("content must not be blank.");
         }
 
+        content = mermaidDiagramValidator.normalizeFences(content);
         List<String> mermaidIssues = mermaidDiagramValidator.findIssues(content);
         if (!mermaidIssues.isEmpty()) {
             throw new KratisToolException(

@@ -248,4 +248,22 @@ class WriteWikiPageToolTest {
                 .hasMessageContaining("Fix and retry");
         verify(ctxWikiPageRepository, never()).saveAndFlush(any());
     }
+
+    @Test
+    void writeWikiPage_normalizesHeaderFenceAndPersistsMermaidFence() {
+        when(ingestionBatchRepository.findById(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "arch")).thenReturn(Optional.empty());
+        String input = """
+                ```flowchart LR
+                A["Client"] --> B["Server"]
+                ```
+                """;
+
+        String result = writeWikiPageTool.writeWikiPage("arch", "Arch", input, null, toolContext);
+
+        assertThat(result).isEqualTo("SUCCESS: Wiki page 'arch' created successfully.");
+        ArgumentCaptor<CtxWikiPage> captor = ArgumentCaptor.forClass(CtxWikiPage.class);
+        verify(ctxWikiPageRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getContent()).contains("```mermaid\nflowchart LR\n");
+    }
 }

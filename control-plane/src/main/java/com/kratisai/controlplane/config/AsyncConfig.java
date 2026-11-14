@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.config;
 
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,6 +16,12 @@ public class AsyncConfig {
 
     @Bean(name = "dispatchExecutor")
     public ExecutorService dispatchExecutor() {
+        return Executors.newVirtualThreadPerTaskExecutor();
+    }
+
+    /** Dedicated virtual-thread executor for out-of-band Mermaid diagram repairs so agent turns never block on {@code agentTaskExecutor}. */
+    @Bean(name = "mermaidRepairExecutor")
+    public Executor mermaidRepairExecutor() {
         return Executors.newVirtualThreadPerTaskExecutor();
     }
 

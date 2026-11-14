@@ -16,6 +16,7 @@ import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
 import com.kratisai.controlplane.service.ScratchpadService;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
+import com.kratisai.controlplane.validation.MermaidDiagramValidator;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.ArrayList;
 import java.util.List;
@@ -196,8 +197,14 @@ class PlanningAgentLoopTest {
 
     @Test
     void transientFailure_emitsRetractBeforeRetry() {
-        PlanningAgentLoop loop =
-                new PlanningAgentLoop(chatMemory, mock(ScratchpadService.class), noTools(), 25, Runnable::run);
+        PlanningAgentLoop loop = new PlanningAgentLoop(
+                chatMemory,
+                mock(ScratchpadService.class),
+                noTools(),
+                25,
+                Runnable::run,
+                Runnable::run,
+                new MermaidDiagramValidator());
 
         loop.run(ChatClient.builder(new FlakyStreamingChatModel()).build(), context, sink);
 
@@ -218,6 +225,73 @@ class PlanningAgentLoopTest {
         assertThatThrownBy(() -> nullDirectiveContext(context)).isInstanceOf(NullPointerException.class);
     }
 
+    @Test
+    void streamedDiagramWithMissingMermaidFence_normalizesAndEmitsMessageResult() {
+        String streamed = """
+                Here is the flow:
+                ```flowchart LR
+                A["Client"] --> B["API"]
+                ```""";
+        ChatClient client =
+                ChatClient.builder(new MermaidRepairChatModel(streamed, null)).build();
+
+        loop(noTools()).run(client, context, sink);
+
+        String expected = """
+                Here is the flow:
+                ```mermaid
+                flowchart LR
+                A["Client"] --> B["API"]
+                ```""";
+        assertThat(emissions)
+                .filteredOn(ClientPayload.MessageRetractResult.class::isInstance)
+                .isEmpty();
+        assertThat(emissions)
+                .filteredOn(ClientPayload.MessageResult.class::isInstance)
+                .map(ClientPayload.MessageResult.class::cast)
+                .singleElement()
+                .satisfies(msg -> {
+                    assertThat(msg.messageId()).isEqualTo(context.messageId());
+                    assertThat(msg.content()).isEqualTo(expected);
+                });
+        verify(chatMemory).add(eq(chatId.toString()), argThat(isAssistantText(expected)));
+    }
+
+    @Test
+    void streamedInvalidMermaidDiagram_repairsOutOfBandWithoutRetractingTurn() {
+        String streamed = """
+                Architecture:
+                ```mermaid
+                flowchart LR
+                A -> B
+                ```""";
+        String repaired = """
+                ```mermaid
+                flowchart LR
+                A["quoted"] --> B["API"]
+                ```""";
+        ChatClient client = ChatClient.builder(new MermaidRepairChatModel(streamed, repaired))
+                .build();
+
+        loop(noTools()).run(client, context, sink);
+
+        String expected = """
+                Architecture:
+                ```mermaid
+                flowchart LR
+                A["quoted"] --> B["API"]
+                ```""";
+        assertThat(emissions)
+                .filteredOn(ClientPayload.MessageRetractResult.class::isInstance)
+                .isEmpty();
+        assertThat(emissions)
+                .filteredOn(ClientPayload.MessageResult.class::isInstance)
+                .map(ClientPayload.MessageResult.class::cast)
+                .singleElement()
+                .satisfies(msg -> assertThat(msg.content()).isEqualTo(expected));
+        verify(chatMemory).add(eq(chatId.toString()), argThat(isAssistantText(expected)));
+    }
+
     @SuppressFBWarnings({"NP_NULL_PARAM_DEREF_ALL_TARGETS_DANGEROUS", "NP_NULL_PARAM_DEREF_NONVIRTUAL"})
     private static void nullDirectiveContext(PlanningContext context) {
         PlanningContext.continuation(context.teamId(), context.chatId(), null);
@@ -232,7 +306,14 @@ class PlanningAgentLoopTest {
     }
 
     private PlanningAgentLoop loop(ToolCallback[] tools) {
-        return new PlanningAgentLoop(chatMemory, mock(ScratchpadService.class), tools, 25, Runnable::run);
+        return new PlanningAgentLoop(
+                chatMemory,
+                mock(ScratchpadService.class),
+                tools,
+                25,
+                Runnable::run,
+                Runnable::run,
+                new MermaidDiagramValidator());
     }
 
     private static org.mockito.ArgumentMatcher<Message> isAssistantText(String text) {
@@ -259,6 +340,32 @@ class PlanningAgentLoopTest {
                 return Flux.concat(Flux.just(partial), Flux.error(new TransientAiException("503")));
             }
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage("recovered")))));
+        }
+
+        @Override
+        public ChatOptions getDefaultOptions() {
+            return delegate.getDefaultOptions();
+        }
+    }
+
+    private static final class MermaidRepairChatModel implements ChatModel {
+        private final ChatModel delegate = new FakeChatModel();
+        private final String streamedText;
+        private final String repairedText;
+
+        private MermaidRepairChatModel(String streamedText, String repairedText) {
+            this.streamedText = streamedText;
+            this.repairedText = repairedText;
+        }
+
+        @Override
+        public ChatResponse call(Prompt prompt) {
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(repairedText))));
+        }
+
+        @Override
+        public Flux<ChatResponse> stream(Prompt prompt) {
+            return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(streamedText)))));
         }
 
         @Override

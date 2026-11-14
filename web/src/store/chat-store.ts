@@ -90,6 +90,7 @@ interface TextChatMessage {
 const streamingSegments = new Map<string, Map<number, string>>()
 const pendingFlushTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const pendingMessageIds = new Set<string>()
+const finalizedMessageIds = new Set<string>()
 
 // Returns a new Set with chatId removed (same reference when it is absent).
 function withoutChatId(chatIds: Set<string>, chatId: string): Set<string> {
@@ -230,6 +231,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     streamingSegments.clear()
     pendingMessageIds.clear()
+    finalizedMessageIds.clear()
     thoughtCounter = 0
 
     for (const timer of pendingFlushTimers.values()) {
@@ -342,6 +344,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     streamingSegments.delete(messageId)
     pendingMessageIds.delete(messageId)
+    finalizedMessageIds.add(messageId)
 
     get().addMessage(activeChatId, {
       content: message,
@@ -476,6 +479,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Clear streaming accumulators
     streamingSegments.clear()
     pendingMessageIds.clear()
+    finalizedMessageIds.clear()
 
     // Clear canvas
     useCanvasStore.getState().clearCanvases()
@@ -504,6 +508,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     streamingSegments.clear()
     pendingMessageIds.clear()
+    finalizedMessageIds.clear()
 
     // Add error message to chat
     const errorMessage: ChatMessage = {
@@ -524,6 +529,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { attempt, chatId, content, messageId, timestamp } = messageChunkResult
     const activeChatId = chatId || get().currentChatId
     if (!activeChatId) return
+    if (finalizedMessageIds.has(messageId)) return
 
     appendStreamingSegment(messageId, attempt, content)
     const newContent = streamingContentFor(messageId)
@@ -578,6 +584,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   handleMessageResult: (messageResult: MessageResult) => {
     const { chatId, content, messageId, role, timestamp } = messageResult
     if (!chatId) return
+
+    const pendingTimer = pendingFlushTimers.get(messageId)
+    if (pendingTimer) {
+      clearTimeout(pendingTimer)
+      pendingFlushTimers.delete(messageId)
+    }
+    streamingSegments.delete(messageId)
+    pendingMessageIds.delete(messageId)
+    finalizedMessageIds.add(messageId)
 
     const msg: ChatMessage = {
       content,

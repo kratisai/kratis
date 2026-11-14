@@ -43,6 +43,7 @@ The build is the formatter: Spotless (Palantir Java Format), Checkstyle, PMD, ES
 - Never skip tests for a missing tool, binary, Docker, or config. Fail with a clear assertion. Never treat a failing test as flaky.
 - Use `git mv` when renaming. Do not delete-and-rewrite.
 - Prefer enums and sealed/closed records over stringly-typed options. Cover every value.
+- Do not add compatibility/convenience overloads or telescoping constructors just to avoid updating existing callers or tests. Update all call sites directly instead.
 - Comment concisely and only non-obvious why. Do not narrate what the code already says, what the code did previously, or your thinking.
 - Java: import types; do not use fully-qualified names in code (except JVM descriptor strings). Constructor injection. Record compact constructors (`Objects.requireNonNull`) for DTO/RPC validation. Add a `RuntimeHintsRegistrar` only when a third-party library needs reflection. Details: [`docs/skills/control-plane.md`](docs/skills/control-plane.md).
 - Liquibase: never edit historical changelogs.
