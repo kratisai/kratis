@@ -150,7 +150,7 @@ public class ReadFileTool {
         }
         Object logger = toolContext.getContext().get("batchLogger");
         if (logger instanceof IngestionBatchLogService.BatchLogger batchLogger) {
-            batchLogger.info("ASSIST_SURFACES_READ_FILE", message);
+            batchLogger.debug("ASSIST_SURFACES_READ_FILE", message);
         }
     }
 

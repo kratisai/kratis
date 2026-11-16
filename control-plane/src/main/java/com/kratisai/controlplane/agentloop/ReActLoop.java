@@ -355,7 +355,8 @@ public final class ReActLoop<T> {
             Objects.requireNonNull(validator).accept(result);
             return result;
         } catch (RuntimeException e) {
-            log.debug("Structured output rejected. Raw reply: {}", text);
+            String preview = text != null && text.length() > 500 ? text.substring(0, 500) + "... [truncated]" : text;
+            log.debug("Structured output rejected. Raw reply: {}", preview);
             throw new StructuredOutputValidationException(
                     "Your response did not match the required format or is incomplete. Error: Validation failed: "
                             + e.getMessage()

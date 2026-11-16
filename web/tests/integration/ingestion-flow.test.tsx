@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { mockDownloads, restoreDownloads } from '../support/test-download'
 import {
   createMockRepository,
   createMockTeam,
@@ -197,6 +198,10 @@ describe('Ingestion Flow', () => {
     })
   })
 
+  afterEach(() => {
+    restoreDownloads()
+  })
+
   it('enables "Ingest Now" button when ingestion status is FAILED', async () => {
     mockListTeams([createMockTeam()])
     mockListRepositories([
@@ -217,5 +222,64 @@ describe('Ingestion Flow', () => {
 
     const ingestButton = screen.getByRole('button', { name: /ingest now/i })
     expect(ingestButton).not.toBeDisabled()
+  })
+
+  it('hides DEBUG logs by default, toggles them on, and exports all levels to CSV', async () => {
+    mockListTeams([createMockTeam()])
+    mockListRepositories([
+      createMockRepository({
+        ingestionStatus: 'SUCCESS',
+        latestBatchId: 'batch-1',
+        name: 'my-repo',
+      }),
+    ])
+    addFetchHandler((url) => {
+      if (url.includes('/batches/batch-1/logs')) {
+        return jsonResponse([
+          {
+            batchId: 'batch-1',
+            createdAt: '2026-11-14T10:00:00Z',
+            id: 'log-1',
+            level: 'INFO',
+            message: 'CLONE completed in 1.2s',
+            step: 'CLONE',
+          },
+          {
+            batchId: 'batch-1',
+            createdAt: '2026-11-14T10:00:01Z',
+            id: 'log-2',
+            level: 'DEBUG',
+            message: 'Excluded self-call HTTP_CALLS /health',
+            step: 'EXTRACT_SURFACES',
+          },
+        ])
+      }
+      if (url.includes('/batches/') && url.includes('/stats')) {
+        return jsonResponse(null, 404)
+      }
+      if (url.includes('/batches')) {
+        return jsonResponse([])
+      }
+      return null
+    })
+
+    setAuthenticated({ teamId: 'team-1' })
+    const { user } = renderWithRouter(['/repos/repo-1'])
+
+    await waitFor(() => {
+      expect(screen.getByText('CLONE completed in 1.2s')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('Excluded self-call HTTP_CALLS /health')).not.toBeInTheDocument()
+
+    const toggle = screen.getByRole('button', { name: /show debug \(1\)/i })
+    await user.click(toggle)
+    expect(screen.getByText('Excluded self-call HTTP_CALLS /health')).toBeInTheDocument()
+
+    const { createObjectURL } = mockDownloads()
+    await user.click(screen.getByRole('button', { name: /download csv/i }))
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    const csvText = await createObjectURL.mock.calls[0][0].text()
+    expect(csvText).toContain('CLONE completed in 1.2s')
+    expect(csvText).toContain('Excluded self-call HTTP_CALLS /health')
   })
 })

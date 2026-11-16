@@ -3,13 +3,11 @@ package com.kratisai.controlplane.model;
 import com.fasterxml.jackson.annotation.JsonCreator;
 
 public enum AttributeKind {
-    TECHNOLOGY,
-    IDENTIFIER,
     ENDPOINT,
-    NAME,
-    REF,
-    FILE,
-    METHOD;
+    IDENTIFIER,
+    METHOD,
+    TECHNOLOGY,
+    FILE;
 
     @JsonCreator
     public static AttributeKind from(String value) {

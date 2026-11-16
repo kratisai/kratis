@@ -115,8 +115,7 @@ public class SynopsisService {
     record Prepared(ChatClient chatClient, String repoName, String modelRef, SynopsisInputs inputs) {}
 
     public void synthesize(UUID batchId, IngestionBatchLogService.BatchLogger batchLogger) {
-        batchLogger.info("SYNTHESIZE_SYNOPSIS", "Generating the repository synopsis.");
-
+        long startNanos = System.nanoTime();
         Prepared prepared = transactionTemplate.execute(status -> prepare(batchId));
         ReActLoop<SynopsisResponse> loop = ReActLoop.structured(
                         prepared.chatClient(),
@@ -133,7 +132,8 @@ public class SynopsisService {
         SynopsisResponse response = runLoop(loop, history, batchId, batchLogger);
 
         persist(batchId, response, prepared.modelRef(), prepared.inputs(), batchLogger);
-        batchLogger.info("SYNTHESIZE_SYNOPSIS", "Repository synopsis written.");
+        String elapsed = String.format(Locale.ROOT, "%.1fs", (System.nanoTime() - startNanos) / 1_000_000_000.0);
+        batchLogger.info("SYNTHESIZE_SYNOPSIS", "SYNTHESIZE_SYNOPSIS completed in " + elapsed + ".");
     }
 
     private Prepared prepare(UUID batchId) {
@@ -162,7 +162,6 @@ public class SynopsisService {
     static List<SurfaceEvidence> evidenceSurfaces(List<CtxSurface> surfaces) {
         return surfaces.stream()
                 .filter(surface -> surface.getDetectedBy() != SurfaceDetection.UNKNOWN)
-                .filter(surface -> surface.getRole() != SurfaceRole.UNKNOWN)
                 .map(surface -> new SurfaceEvidence(
                         surface.getId(),
                         surface.getRole(),
@@ -319,8 +318,7 @@ public class SynopsisService {
         return inputs.evidenceSurfaces().stream()
                 .filter(surface -> surface.role() == SurfaceRole.PROVIDES)
                 .flatMap(surface -> surface.attributes().stream())
-                .filter(attribute ->
-                        attribute.kind().equals("name") || attribute.kind().equals("identifier"))
+                .filter(attribute -> "identifier".equals(attribute.kind()))
                 .map(AttributeEvidence::value)
                 .distinct()
                 .limit(8)

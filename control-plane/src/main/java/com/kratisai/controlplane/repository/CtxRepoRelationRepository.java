@@ -16,7 +16,15 @@ public interface CtxRepoRelationRepository extends JpaRepository<CtxRepoRelation
 
     Optional<CtxRepoRelation> findByBatchAIdAndBatchBIdAndNature(UUID batchAId, UUID batchBId, Nature nature);
 
-    @Query("SELECT r FROM CtxRepoRelation r WHERE r.teamId = :teamId AND r.state = 'CURRENT' "
+    @Query("SELECT r FROM CtxRepoRelation r JOIN FETCH r.batchA a JOIN FETCH a.repository "
+            + "JOIN FETCH r.batchB b JOIN FETCH b.repository "
+            + "WHERE r.teamId = :teamId AND r.state = 'CURRENT' "
+            + "AND r.batchA.isActive = true AND r.batchB.isActive = true")
+    List<CtxRepoRelation> findCurrentByTeamId(@Param("teamId") UUID teamId);
+
+    @Query("SELECT r FROM CtxRepoRelation r JOIN FETCH r.batchA a JOIN FETCH a.repository "
+            + "JOIN FETCH r.batchB b JOIN FETCH b.repository "
+            + "WHERE r.teamId = :teamId AND r.state = 'CURRENT' "
             + "AND r.batchA.isActive = true AND r.batchB.isActive = true "
             + "AND (r.repositoryAId = :repositoryId OR r.repositoryBId = :repositoryId)")
     List<CtxRepoRelation> findCurrentForRepository(

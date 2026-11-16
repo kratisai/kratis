@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 public enum SurfaceRole {
     PROVIDES,
     REQUIRES,
+    BIDIRECTIONAL,
     UNKNOWN;
 
     @JsonCreator

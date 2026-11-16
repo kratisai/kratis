@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 import static org.assertj.core.groups.Tuple.tuple;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.assertArg;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -44,6 +43,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.PlatformTransactionManager;
 
 @SuppressFBWarnings(value = "NP_NULL_PARAM_DEREF_NONVIRTUAL", justification = "Tests required-field validation")
@@ -80,39 +80,38 @@ class AssistedSurfaceServiceTest {
                         "existing",
                         List.of(
                                 new AssistedResponse.Fact(AttributeKind.ENDPOINT, "endpoint", "source.txt"),
-                                new AssistedResponse.Fact(AttributeKind.NAME, "message", "source.txt"))),
+                                new AssistedResponse.Fact(AttributeKind.IDENTIFIER, "message", "source.txt"))),
                 new AssistedResponse.Observation(
                         UUID.randomUUID(),
                         SurfaceRole.REQUIRES,
                         "wrong",
-                        List.of(new AssistedResponse.Fact(AttributeKind.NAME, "wrong", "source.txt"))),
+                        List.of(new AssistedResponse.Fact(AttributeKind.IDENTIFIER, "wrong", "source.txt"))),
                 new AssistedResponse.Observation(
                         null,
                         SurfaceRole.UNKNOWN,
                         "unestablished",
-                        List.of(new AssistedResponse.Fact(AttributeKind.NAME, "ambiguous", "source.txt"))),
+                        List.of(new AssistedResponse.Fact(AttributeKind.IDENTIFIER, "ambiguous", "source.txt"))),
                 new AssistedResponse.Observation(
                         null,
                         SurfaceRole.UNKNOWN,
                         "invalid",
-                        List.of(new AssistedResponse.Fact(AttributeKind.NAME, "invented", "missing.txt")))));
+                        List.of(new AssistedResponse.Fact(AttributeKind.IDENTIFIER, "invented", "missing.txt")))));
         var logger = mock(IngestionBatchLogService.BatchLogger.class);
         assertThat(service.persist(batch, root, Map.of(id, existing), response, logger, List.of(), Set.of()))
-                .isEqualTo(2);
+                .isEqualTo(3);
         assertThat(existing.getAttributeRows()).hasSize(3).allSatisfy(row -> assertThat(row.getDetectedBy())
                 .isEqualTo(SurfaceDetection.MODEL));
         verify(attributes).saveAll(any());
-        verify(extraction).persist(assertArg(created -> assertThat(created)
-                .singleElement()
-                .satisfies(surface -> {
-                    assertThat(surface.getDescription()).isEqualTo("wrong");
-                    assertThat(surface.getRole()).isEqualTo(SurfaceRole.REQUIRES);
-                    assertThat(surface.getDetectedBy()).isEqualTo(SurfaceDetection.MODEL);
-                    assertThat(surface.getAttributeRows())
-                            .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
-                            .contains(tuple(AttributeKind.NAME, "wrong"), tuple(AttributeKind.FILE, "source.txt"));
-                })));
-        verify(logger).info("ASSIST_SURFACES", "Skipped 1 UNKNOWN-role observations and 0 test-anchored observations.");
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CtxSurface>> persistedCaptor = ArgumentCaptor.forClass(List.class);
+        verify(extraction, times(2)).persist(persistedCaptor.capture());
+        List<CtxSurface> created =
+                persistedCaptor.getAllValues().stream().flatMap(List::stream).toList();
+        assertThat(created)
+                .extracting(CtxSurface::getDescription, CtxSurface::getRole)
+                .containsExactlyInAnyOrder(
+                        tuple("wrong", SurfaceRole.REQUIRES), tuple("unestablished", SurfaceRole.UNKNOWN));
+        verify(logger, never()).info(any(), any());
     }
 
     @Test
@@ -156,17 +155,18 @@ class AssistedSurfaceServiceTest {
                                     fact(AttributeKind.TECHNOLOGY, "NewBroker", "src/config.yaml"),
                                     fact(AttributeKind.IDENTIFIER, "orders", "src/config.yaml"),
                                     fact(AttributeKind.IDENTIFIER, "orders", "src/config.yaml"))),
-                    observation("test", List.of(fact(AttributeKind.NAME, "fake", "tests/config.yaml"))),
+                    observation("test", List.of(fact(AttributeKind.IDENTIFIER, "fake", "tests/config.yaml"))),
                     observation(
                             "mixed",
                             List.of(
-                                    fact(AttributeKind.NAME, "real", "src/config.yaml"),
-                                    fact(AttributeKind.NAME, "fake", "tests/config.yaml"))),
-                    observation("traversal", List.of(fact(AttributeKind.NAME, "bad", "../" + outside.getFileName()))),
-                    observation("symlink", List.of(fact(AttributeKind.NAME, "bad", "src/link"))),
-                    observation("empty", List.of(fact(AttributeKind.NAME, " ", "src/config.yaml"))),
-                    observation("invalid", List.of(fact(AttributeKind.NAME, "bad", String.valueOf((char) 0)))),
-                    observation(" ", List.of(fact(AttributeKind.NAME, "valid", "src/config.yaml")))));
+                                    fact(AttributeKind.IDENTIFIER, "real", "src/config.yaml"),
+                                    fact(AttributeKind.IDENTIFIER, "fake", "tests/config.yaml"))),
+                    observation(
+                            "traversal", List.of(fact(AttributeKind.IDENTIFIER, "bad", "../" + outside.getFileName()))),
+                    observation("symlink", List.of(fact(AttributeKind.IDENTIFIER, "bad", "src/link"))),
+                    observation("empty", List.of(fact(AttributeKind.IDENTIFIER, " ", "src/config.yaml"))),
+                    observation("invalid", List.of(fact(AttributeKind.IDENTIFIER, "bad", String.valueOf((char) 0)))),
+                    observation(" ", List.of(fact(AttributeKind.IDENTIFIER, "valid", "src/config.yaml")))));
             var logger = mock(IngestionBatchLogService.BatchLogger.class);
 
             assertThat(service.persist(batch, root, Map.of(), response, logger, List.of(), Set.of()))
@@ -188,15 +188,13 @@ class AssistedSurfaceServiceTest {
                 assertThat(surface.getAttributeRows())
                         .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
                         .containsExactlyInAnyOrder(
-                                tuple(AttributeKind.NAME, "real"), tuple(AttributeKind.FILE, "src/config.yaml"));
+                                tuple(AttributeKind.IDENTIFIER, "real"), tuple(AttributeKind.FILE, "src/config.yaml"));
             });
             assertThat(createdSurfaces)
                     .extracting(CtxSurface::getDescription)
                     .containsExactlyInAnyOrder("queue", "mixed");
             verify(attributes, never()).saveAll(any());
-            verify(logger)
-                    .info("ASSIST_SURFACES", "Skipped 0 UNKNOWN-role observations and 1 test-anchored observations.");
-            verify(logger).info("ASSIST_SURFACES", "Model observations with no independent scope classification: 8");
+            verify(logger).info("ASSIST_SURFACES", "Skipped 1 test-anchored observations.");
         } finally {
             Files.deleteIfExists(outside);
         }
@@ -216,15 +214,16 @@ class AssistedSurfaceServiceTest {
                 SurfaceRole.UNKNOWN,
                 "package",
                 SurfaceDetection.SYFT);
-        surface.addAttribute(new CtxSurfaceAttribute(surface, AttributeKind.NAME, "orders", SurfaceDetection.SYFT));
+        surface.addAttribute(
+                new CtxSurfaceAttribute(surface, AttributeKind.IDENTIFIER, "orders", SurfaceDetection.SYFT));
         UUID id = UUID.randomUUID();
         var response = new AssistedResponse.Discovery(List.of(new AssistedResponse.Observation(
                 id,
                 SurfaceRole.PROVIDES,
                 "ignored",
                 List.of(
-                        fact(AttributeKind.NAME, "orders", "config.yaml"),
-                        fact(AttributeKind.NAME, "orders", "config.yaml")))));
+                        fact(AttributeKind.IDENTIFIER, "orders", "config.yaml"),
+                        fact(AttributeKind.IDENTIFIER, "orders", "config.yaml")))));
         var logger = mock(IngestionBatchLogService.BatchLogger.class);
 
         assertThat(service.persist(batch, root, Map.of(id, surface), response, logger, List.of(), Set.of()))
@@ -237,8 +236,8 @@ class AssistedSurfaceServiceTest {
                 .extracting(
                         CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue, CtxSurfaceAttribute::getDetectedBy)
                 .containsExactlyInAnyOrder(
-                        tuple(AttributeKind.NAME, "orders", SurfaceDetection.SYFT),
-                        tuple(AttributeKind.NAME, "orders", SurfaceDetection.MODEL),
+                        tuple(AttributeKind.IDENTIFIER, "orders", SurfaceDetection.SYFT),
+                        tuple(AttributeKind.IDENTIFIER, "orders", SurfaceDetection.MODEL),
                         tuple(AttributeKind.FILE, "config.yaml", SurfaceDetection.MODEL));
         verify(extraction, never()).persist(any());
     }
@@ -246,19 +245,26 @@ class AssistedSurfaceServiceTest {
     @Test
     void responseRejectsMissingRequiredFieldsAndCopiesLists() {
         var mutable = new ArrayList<AssistedResponse.Fact>();
-        mutable.add(fact(AttributeKind.NAME, "orders", "config.yaml"));
+        mutable.add(fact(AttributeKind.IDENTIFIER, "orders", "config.yaml"));
         var observation = observation("orders", mutable);
         mutable.clear();
         assertThat(observation.attributes()).hasSize(1);
         assertThatNullPointerException().isThrownBy(() -> new AssistedResponse.Discovery(null));
-        assertThatNullPointerException().isThrownBy(() -> new AssistedResponse.Observation(null, null, "x", List.of()));
+        assertThat(new AssistedResponse.Observation(null, null, "x", List.of()).role())
+                .isEqualTo(SurfaceRole.UNKNOWN);
         assertThatNullPointerException()
                 .isThrownBy(() -> new AssistedResponse.Observation(null, SurfaceRole.UNKNOWN, null, List.of()));
         assertThatNullPointerException()
                 .isThrownBy(() -> new AssistedResponse.Observation(null, SurfaceRole.UNKNOWN, "x", null));
-        assertThatNullPointerException().isThrownBy(() -> new AssistedResponse.Fact(null, "x", "f"));
-        assertThatNullPointerException().isThrownBy(() -> new AssistedResponse.Fact(AttributeKind.NAME, null, "f"));
-        assertThatNullPointerException().isThrownBy(() -> new AssistedResponse.Fact(AttributeKind.NAME, "x", null));
+        assertThatIllegalArgumentException().isThrownBy(() -> new AssistedResponse.Fact(null, "x", "f"));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new AssistedResponse.Fact(AttributeKind.IDENTIFIER, null, "f"));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new AssistedResponse.Fact(AttributeKind.IDENTIFIER, "x", null));
+        assertThat(new AssistedResponse.Fact(AttributeKind.FILE, "path/a.txt", null).file())
+                .isEqualTo("path/a.txt");
+        assertThat(new AssistedResponse.Fact(AttributeKind.FILE, null, "path/a.txt").value())
+                .isEqualTo("path/a.txt");
     }
 
     @Test
@@ -355,7 +361,7 @@ class AssistedSurfaceServiceTest {
                         "WebSocket client",
                         List.of(
                                 fact(AttributeKind.TECHNOLOGY, "WebSocket", "src/client.ts"),
-                                fact(AttributeKind.NAME, "game events", "src/client.ts")))));
+                                fact(AttributeKind.IDENTIFIER, "game events", "src/client.ts")))));
         SurfaceExtractionService extraction = mock(SurfaceExtractionService.class);
         List<CtxSurface> persisted = new ArrayList<>();
         doAnswer(invocation -> {
@@ -384,13 +390,15 @@ class AssistedSurfaceServiceTest {
                 .containsExactlyInAnyOrder("HTTP client to game service", "WebSocket client");
         assertThat(candidate.getRole()).isEqualTo(SurfaceRole.UNKNOWN);
         verify(logger)
-                .warn(
+                .debug(
                         "ASSIST_SURFACES",
-                        "Treating unknown model surface ID " + unknownId + " as a new, source-anchored surface.");
+                        "Treating unknown model surface ID " + unknownId
+                                + " (role=REQUIRES, desc=\"HTTP client to game service\", files=[src/client.ts]) as a new, source-anchored surface.");
         verify(logger)
-                .info(
+                .debug(
                         "ASSIST_SURFACES",
-                        "Treating grouped CMM candidate " + candidateId + " as evidence for a separate model surface.");
+                        "Treating grouped CMM candidate " + candidateId
+                                + " (role=REQUIRES, desc=\"WebSocket client\", files=[src/client.ts]) as evidence for a separate model surface.");
     }
 
     @Test
@@ -499,8 +507,7 @@ class AssistedSurfaceServiceTest {
                 .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
                 .containsExactlyInAnyOrder(
                         tuple(AttributeKind.ENDPOINT, "/orders"), tuple(AttributeKind.FILE, "api.yaml"));
-        verify(fileOnlyLogger, never())
-                .info("ASSIST_SURFACES", "Skipped 0 UNKNOWN-role observations and 1 test-anchored observations.");
+        verify(fileOnlyLogger, never()).info("ASSIST_SURFACES", "Skipped 1 test-anchored observations.");
 
         // Updating an existing non-SYFT surface caps total attributes at MAX_NON_SYFT_ATTRIBUTES (30).
         CtxSurface cappedTarget = new CtxSurface(
@@ -520,8 +527,8 @@ class AssistedSurfaceServiceTest {
                 SurfaceRole.PROVIDES,
                 "capped",
                 List.of(
-                        fact(AttributeKind.NAME, "extra-1", "api.yaml"),
-                        fact(AttributeKind.NAME, "extra-2", "api.yaml")))));
+                        fact(AttributeKind.IDENTIFIER, "extra-1", "api.yaml"),
+                        fact(AttributeKind.IDENTIFIER, "extra-2", "api.yaml")))));
 
         assertThat(service.persist(
                         batch,
@@ -533,6 +540,20 @@ class AssistedSurfaceServiceTest {
                         Set.of()))
                 .isEqualTo(1);
         assertThat(cappedTarget.getAttributeRows()).hasSize(GraphSurfaceTranslator.MAX_NON_SYFT_ATTRIBUTES);
+    }
+
+    @Test
+    void promptDocumentsPayloadIdentifiersAndWorkloadVsInfraRoles() {
+        assertThat(AssistedSurfaceService.prompt())
+                .contains("when visible, request/response payload or schema names")
+                .contains("always emit TWO separate observations")
+                .contains("payload/schema alongside superclass, event-family")
+                .contains("BIDIRECTIONAL observation for the runtime communication contract")
+                .contains("Repo-local internals that do not cross repository boundaries")
+                .contains("defines deployable application build/workload manifests")
+                .contains("Focus on external communication, dependency, and deployment interfaces")
+                .contains("Batch multiple read_file, search_files, and list_files calls")
+                .contains("event/message/payload/schema/channel names");
     }
 
     private static AssistedSurfaceService testService(

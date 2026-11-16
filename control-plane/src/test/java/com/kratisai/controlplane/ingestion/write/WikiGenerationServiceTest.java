@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.agentloop.LlmErrorCategory;
 import com.kratisai.controlplane.agentloop.ReActLoopFatalException;
+import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.ingestion.IngestionUsageTracker;
 import com.kratisai.controlplane.model.CtxDimension;
 import com.kratisai.controlplane.model.CtxWikiPage;
@@ -76,6 +77,7 @@ class WikiGenerationServiceTest {
 
     private IngestionBatch batch;
     private File cloneDir;
+    private IngestionBatchLogService.BatchLogger batchLogger;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -90,6 +92,8 @@ class WikiGenerationServiceTest {
         batch = ctx.batch();
         batch.setActive(true);
         ingestionBatchRepository.saveAndFlush(batch);
+        batchLogger = new IngestionBatchLogService.BatchLogger(
+                batch.getId(), ctx.team().getId(), Mockito.mock(IngestionBatchLogService.class));
 
         cloneDir = Path.of(
                         System.getProperty("java.io.tmpdir"),
@@ -126,7 +130,7 @@ class WikiGenerationServiceTest {
         fakeChatModel.addMatcher(
                 PromptMatcher.builder().response(turn2Message).maxMatches(1).build());
 
-        wikiGenerationService.generateWiki(batch);
+        wikiGenerationService.generateWiki(batch, batchLogger);
 
         List<CtxWikiPage> pages = ctxWikiPageRepository.findByBatchId(batch.getId());
         assertThat(pages).hasSize(1);
@@ -165,7 +169,7 @@ class WikiGenerationServiceTest {
         fakeChatModel.addMatcher(
                 PromptMatcher.builder().response(turn3Message).maxMatches(1).build());
 
-        wikiGenerationService.generateWiki(batch);
+        wikiGenerationService.generateWiki(batch, batchLogger);
 
         List<CtxWikiPage> pages = ctxWikiPageRepository.findByBatchId(batch.getId());
         assertThat(pages).hasSize(2);
@@ -185,7 +189,8 @@ class WikiGenerationServiceTest {
         fakeChatModel.addMatcher(
                 PromptMatcher.builder().response(infiniteMessage).build());
 
-        var message = assertThrows(RuntimeException.class, () -> wikiGenerationService.generateWiki(batch));
+        var message =
+                assertThrows(RuntimeException.class, () -> wikiGenerationService.generateWiki(batch, batchLogger));
 
         assertThat(message)
                 .hasMessageContaining("Exceeded maximum iterations (30) without yielding final completion message.");
@@ -197,7 +202,7 @@ class WikiGenerationServiceTest {
                 .throwsException(new NonTransientAiException("401 - invalid api key"))
                 .build());
 
-        assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch))
+        assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch, batchLogger))
                 .isInstanceOf(ReActLoopFatalException.class)
                 .satisfies(e -> assertThat(((ReActLoopFatalException) e).category())
                         .isEqualTo(LlmErrorCategory.AUTHENTICATION));
@@ -240,7 +245,7 @@ class WikiGenerationServiceTest {
                 .maxMatches(1)
                 .build());
 
-        wikiGenerationService.generateWiki(batch);
+        wikiGenerationService.generateWiki(batch, batchLogger);
 
         assertThat(capturedToolResponse.get()).isNotNull();
         assertThatCode(() -> new ObjectMapper().readTree(capturedToolResponse.get()))
@@ -285,7 +290,7 @@ class WikiGenerationServiceTest {
         fakeChatModel.addMatcher(
                 PromptMatcher.builder().response(turn2Message).maxMatches(1).build());
 
-        wikiGenerationService.generateWiki(batch);
+        wikiGenerationService.generateWiki(batch, batchLogger);
 
         List<CtxWikiPage> pages = ctxWikiPageRepository.findByBatchId(batch.getId());
         assertThat(pages).hasSize(1);
@@ -379,7 +384,7 @@ class WikiGenerationServiceTest {
         fakeChatModel.addMatcher(
                 PromptMatcher.builder().response(turn2Message).maxMatches(1).build());
 
-        wikiGenerationService.generateWiki(batch);
+        wikiGenerationService.generateWiki(batch, batchLogger);
 
         List<CtxWikiPage> pages = ctxWikiPageRepository.findByBatchId(batch.getId());
         assertThat(pages).hasSize(1);
@@ -391,7 +396,7 @@ class WikiGenerationServiceTest {
                 .when(processExecutor)
                 .execute(Mockito.anyList(), Mockito.any(File.class), Mockito.any());
 
-        assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch))
+        assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch, batchLogger))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Repository metrics analysis failed because scc is missing or failed");
     }
@@ -401,7 +406,7 @@ class WikiGenerationServiceTest {
         // Ensure it doesn't exist
         deleteDirectoryRecursively(cloneDir);
 
-        assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch))
+        assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch, batchLogger))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Repository metrics analysis failed because scc is missing or failed");
     }
@@ -463,7 +468,7 @@ class WikiGenerationServiceTest {
         fakeChatModel.addMatcher(
                 PromptMatcher.builder().response(turn2Message).maxMatches(1).build());
 
-        wikiGenerationService.generateWiki(batch);
+        wikiGenerationService.generateWiki(batch, batchLogger);
 
         var counters = usageTracker.snapshotAndClear(batch.getId());
         assertThat(counters).isPresent();
@@ -477,7 +482,7 @@ class WikiGenerationServiceTest {
         fakeChatModel.addMatcher(
                 PromptMatcher.builder().response(turn1Message).maxMatches(1).build());
 
-        assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch))
+        assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch, batchLogger))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("produced no wiki pages");
 
@@ -532,7 +537,7 @@ class WikiGenerationServiceTest {
                 .maxMatches(1)
                 .build());
 
-        wikiGenerationService.generateWiki(batch);
+        wikiGenerationService.generateWiki(batch, batchLogger);
 
         assertThat(capturedError.get()).contains("does not exist").contains("Fix and retry");
         List<CtxWikiPage> pages = ctxWikiPageRepository.findByBatchId(batch.getId());
@@ -559,7 +564,7 @@ class WikiGenerationServiceTest {
                 .maxMatches(1)
                 .build());
 
-        wikiGenerationService.generateWiki(batch);
+        wikiGenerationService.generateWiki(batch, batchLogger);
 
         assertThat(ctxWikiPageRepository.findByBatchId(batch.getId())).hasSize(1);
     }

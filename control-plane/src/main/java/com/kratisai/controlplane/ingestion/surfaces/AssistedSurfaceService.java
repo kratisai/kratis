@@ -36,6 +36,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -67,50 +68,78 @@ public class AssistedSurfaceService {
             process, deployment, or resource boundaries.
 
             INCLUDE (one grouped surface per contract or resource family, grounded in present-state source files):
-            - Network APIs and endpoints served or called (HTTP, gRPC, GraphQL, RPC), preserving static paths or
-              runtime-composed URL/address expressions as ENDPOINT or REF, plus HTTP/RPC methods as METHOD.
-            - Runtime message, event, or bidirectional stream contracts (WebSocket, Socket.IO, pub/sub topics, queues,
-              brokers) — including domain event or command payloads sent or received over a connection hook or client
-              SDK imported from a shared library. Describe the surface as the runtime contract with the external server
-              or broker (mediated by the library), separate from any package dependency surface, recording event/payload
-              types, channel/topic names, or endpoints as NAME, IDENTIFIER, or ENDPOINT attributes (and SDK connection
-              hooks as REF; reserve METHOD for HTTP/RPC verbs).
-            - Deployed services, container images, static-site/cloud targets, data stores, provisioned infrastructure
-              resources, and build/package outputs owned or targeted by this repository.
+            - Synchronous network APIs and endpoints served or called, preserving static paths or runtime-composed
+              target expressions, plus HTTP/RPC methods and, when visible, request/response payload or schema names.
+            - Runtime asynchronous messaging, event, or bidirectional stream contracts — including domain events,
+              commands, or messages sent or received directly or via an imported client library. When messaging uses a
+              shared library or SDK, always emit TWO separate observations: (1) a REQUIRES observation for the library
+              or package dependency itself (identifying the library and imported boundary symbols), and (2) a separate
+              BIDIRECTIONAL observation for the runtime communication contract with the external peer or server
+              (inspecting message/event handlers, publishers, subscribers, and payload/event schemas where present,
+              recording event, message, payload/schema alongside superclass, event-family, channel, and client/SDK hook
+              names as IDENTIFIER attributes, and describing the application-level runtime message/event exchange —
+              never framing the runtime messaging surface as a "library" or "hidden infrastructure").
+            - Persistent backing stores read or written by the codebase (databases, schemas, tables, caches, buckets,
+              shared filesystems), recording concrete store/table/bucket/path identifiers.
+            - Deployable artifacts, container definitions, static bundles, and runtime hosting or infrastructure
+              provisioning targets owned or targeted by this repository. Describe infrastructure provisioning
+              definitions (such as IaC templates, orchestration manifests, or cloud resource declarations creating
+              managed databases, caches, brokers, topics, queues, registries, compute hosts, or ingress routes)
+              strictly as provisioned infrastructure resources (role PROVIDES) — never describe an infrastructure
+              declaration as actively publishing, sending, or receiving runtime messages.
+
+            ATTRIBUTES (each entry in `attributes` has `kind`, `value`, `file`):
+            - ENDPOINT: network URLs, route paths, or runtime-composed target address expressions.
+            - IDENTIFIER: package/artifact coordinates, service/resource/bucket/queue/topic/store names,
+              event/message/payload/schema/channel names, config keys, or client/SDK hook names.
+            - METHOD: HTTP/RPC verbs (or client send/receive hook methods where applicable).
+            - TECHNOLOGY: frameworks, protocols, runtimes, or cloud resource/platform types.
+            - FILE: exact repository-relative source file path (also placed in `fact.file`).
 
             EXCLUDE:
-            - Standard third-party UI, rendering, state, utility, framework, bundler, linter, or test libraries (Syft
-              already records dependency manifests; only report a dependency surface when it mediates an internal or
-              cross-repository contract, and do not attach package.json or lockfile third-party version strings to
-              runtime HTTP/WebSocket/messaging surfaces).
-            - Internal classes, hooks, components, state stores, helpers, individual config flags or credentials,
-              hypothetical future integrations, and test-only code or mocks.
+            - Third-party dependencies already captured by dependency manifests (report a dependency/library surface
+              only when it mediates an internal or cross-repository contract within a multi-repository system, and do
+              not attach third-party manifest version strings to runtime HTTP/messaging surfaces).
+            - Repo-local internals that do not cross repository boundaries: internal classes, helpers, domain models,
+              data shapes, local static asset/media catalogs, build/bundling toolchains, self-contained UI or rendering
+              engines, individual config flags or credentials, hypothetical future integrations, and local
+              developer/test-runner configurations, test-only code, or mocks.
 
-            ROLE (decide by boundary ownership, never by symbol names or the word "publish"):
-            - PROVIDES: this repository hosts or serves the network endpoint, WebSocket server, build/package artifact,
-              or provisioned infrastructure resource, or owns an outbound domain event topic/bus subscribed to by
-              downstream services.
-            - REQUIRES: this repository connects as a client to an external API, WebSocket server, broker, or resource
-              — including when client code sends or publishes commands, actions, or events to an external server
-              (directly or via an imported client SDK).
-            - Omit observations whose PROVIDES or REQUIRES boundary role is not established.
+            ROLE (do not guess PROVIDES vs REQUIRES for symmetric or bidirectional concepts):
+            - PROVIDES: hosts or serves a synchronous API, publishes a reusable library/package, or declares/provisions
+              shared runtime infrastructure or hosting platforms (clusters, registries, load balancers, DNS, CDNs,
+              storage buckets, managed databases/brokers) that host workloads.
+            - REQUIRES: invokes an external synchronous API, consumes a package dependency, reads/writes a persistent
+              backing store, or defines deployable application build/workload manifests (Dockerfiles, container task
+              definitions, Kubernetes workload manifests, CI deploy scripts) that require external runtime
+              infrastructure, registries, or hosting to run.
+            - BIDIRECTIONAL: actively sends and/or receives asynchronous messages, events, commands, or streams, or
+              participates in a symmetric boundary contract where PROVIDES/REQUIRES does not apply.
+            - UNKNOWN: use when boundary ownership or direction cannot be established from the source.
 
             TOOLS AND OUTPUT:
-            - Read candidate manifests, specs, entrypoints, and boundary files shown in the surface index with read_file
-              (batch up to ten paths in parallel; page long files if needed). When a directory holds multiple
-              per-service, per-app, or per-environment infrastructure, deployment, or route manifests, inspect the
-              sibling files rather than sampling one file.
-            - Large directories collapse leaf filenames in the index. Use search_files(pattern, pathGlob) specifically
-              to locate call sites of boundary SDKs, client classes, hooks, channels, or config keys identified in
-              manifests or entrypoints (do not run broad keyword fishing), or list_files(glob) to list filenames in a
-              collapsed directory.
+            - Focus on external communication, dependency, and deployment interfaces rather than internal domain
+              models or internal data shapes; read candidate manifests, specs, entrypoints, and boundary files shown in
+              the surface index with read_file. Batch multiple read_file, search_files, and list_files calls in
+              parallel per turn (up to ten paths) so discovery finishes well within the turn budget. When a directory
+              holds multiple per-service, per-app, or per-environment infrastructure, deployment, or route manifests,
+              inspect the sibling files rather than sampling one file.
+            - Do not stop at configuration files or dependency manifests: whenever an environment/config variable
+              contains a template, placeholder, or external target, or when an imported internal library mediates a
+              runtime interface, use search_files(pattern, pathGlob) and read_file on its call sites in source code to
+              resolve how the target is constructed, invoked, or used to send/receive messages or events. Use
+              list_files(glob) to list filenames in a collapsed directory.
             - Retain distinct contract-identifying values — including each target service/repository, bucket/queue/topic
               name, endpoint path, or domain event type (up to ~15–25 per surface) — while omitting repetitive
               boilerplate. Every surface needs at least one identifying attribute beyond FILE, with surfaceId set to
               null and every fact citing the exact repository-relative file path where it is implemented or wired.
             """;
 
-    private static final int MAX_TURNS = 20;
+    private static final int MAX_TURNS = 25;
+
+    static String prompt() {
+        return PROMPT;
+    }
 
     private final IngestionBatchRepository ingestionBatchRepository;
     private final CtxSurfaceRepository ctxSurfaceRepository;
@@ -167,7 +196,7 @@ public class AssistedSurfaceService {
             ChatClient chatClient) {}
 
     public void assist(UUID batchId, IngestionBatchLogService.BatchLogger logger) {
-        logger.info(PHASE, "Discovering and enriching repository surfaces.");
+        long startNanos = System.nanoTime();
         Path root = Path.of(ingestionProperties.getCloneDir(), batchId.toString())
                 .toAbsolutePath()
                 .normalize();
@@ -183,7 +212,7 @@ public class AssistedSurfaceService {
                             try {
                                 validateDiscoveryResponse(response, root, prepared.existingById(), inventory);
                             } catch (IllegalArgumentException e) {
-                                logger.error(PHASE, "Rejected discovery response: " + e.getMessage());
+                                logger.warn(PHASE, "Discovery response rejected (retrying): " + e.getMessage());
                                 throw e;
                             }
                         })
@@ -226,8 +255,8 @@ public class AssistedSurfaceService {
             ctxSurfaceRepository.findByBatchId(batchId).forEach(surface -> byId.put(surface.getId(), surface));
             return persist(batch, root, byId, finalResponse, logger, inventory, prepared.testFiles());
         });
-        logger.info(PHASE, "Accepted " + accepted + " assisted observations; scope is model-assessed.");
-        logger.info(PHASE, "Assisted surface discovery completed successfully.");
+        String elapsed = String.format(Locale.ROOT, "%.1fs", (System.nanoTime() - startNanos) / 1_000_000_000.0);
+        logger.info(PHASE, "ASSIST_SURFACES completed in " + elapsed + ": accepted " + accepted + " observations.");
     }
 
     private Prepared prepare(UUID batchId) {
@@ -256,14 +285,11 @@ public class AssistedSurfaceService {
                 .anyMatch(callback -> callback.getToolDefinition().name().equals(toolName));
         String safeToolName = known ? toolName : "unregistered tool";
         switch (phase) {
-            case START -> {
-                LOG.debug("{}: calling tool {}", PHASE, safeToolName);
-                batchLogger.info(PHASE, "Calling tool: " + safeToolName);
-            }
+            case START -> LOG.debug("{}: calling tool {}", PHASE, safeToolName);
             case COMPLETE -> LOG.debug("{}: tool {} completed", PHASE, safeToolName);
             case ERROR -> {
                 LOG.debug("{}: tool {} failed", PHASE, safeToolName);
-                batchLogger.error(PHASE, "Tool execution failed: " + safeToolName);
+                batchLogger.warn(PHASE, "Tool execution failed (retrying): " + safeToolName);
             }
         }
     }
@@ -275,7 +301,7 @@ public class AssistedSurfaceService {
             IngestionBatchLogService.BatchLogger logger) {
         String input = "Surface index (no prior surface inventory):\n"
                 + SurfaceIndex.build(nodes, inventory, testFiles, SurfaceIndex.DEFAULT_MAX_CHARS);
-        logger.info(
+        logger.debug(
                 PHASE,
                 "Discovery index contains " + inventory.size() + " file paths and " + input.length() + " characters.");
         return input;
@@ -338,11 +364,9 @@ public class AssistedSurfaceService {
             List<String> inventory,
             Set<String> testFiles) {
         int accepted = 0;
-        int unknownScope = 0;
-        int skippedUnknownRole = 0;
         int skippedTestAnchored = 0;
         for (AssistedResponse.Observation observation : response.surfaces()) {
-            unknownScope++;
+            String summary = observationSummary(observation);
             List<AssistedResponse.Fact> validFacts = observation.attributes().stream()
                     .map(fact -> {
                         String resolved = resolveFile(fact.file(), inventory);
@@ -363,16 +387,14 @@ public class AssistedSurfaceService {
                         .map(AssistedResponse.Fact::file)
                         .distinct()
                         .toList();
-                logger.warn(
+                logger.debug(
                         PHASE,
-                        "Rejected observation facts with invalid source anchors for surface " + observation.surfaceId()
-                                + ": " + rejectedFiles);
+                        "Rejected observation facts with invalid source anchors (" + summary + "): " + rejectedFiles);
             }
             if (validFacts.isEmpty()) {
-                logger.error(
+                logger.debug(
                         PHASE,
-                        "Observation has no valid source anchor: surface=" + observation.surfaceId()
-                                + ", files="
+                        "Skipped observation with no valid source anchor (" + summary + "), files="
                                 + observation.attributes().stream()
                                         .map(AssistedResponse.Fact::file)
                                         .distinct()
@@ -384,35 +406,39 @@ public class AssistedSurfaceService {
                     .toList();
             if (facts.isEmpty()) {
                 skippedTestAnchored++;
+                logger.debug(PHASE, "Skipped test-anchored observation (" + summary + ").");
                 continue;
             }
             CtxSurface surface = observation.surfaceId() == null ? null : existing.get(observation.surfaceId());
             if (observation.surfaceId() != null && surface == null) {
-                logger.warn(
+                logger.debug(
                         PHASE,
-                        "Treating unknown model surface ID " + observation.surfaceId()
-                                + " as a new, source-anchored surface.");
+                        "Treating unknown model surface ID " + observation.surfaceId() + " (" + summary
+                                + ") as a new, source-anchored surface.");
             }
             if (surface != null
                     && surface.getDetectedBy() == SurfaceDetection.CMM
                     && surface.getRole() == SurfaceRole.UNKNOWN) {
-                logger.info(
+                logger.debug(
                         PHASE,
-                        "Treating grouped CMM candidate " + observation.surfaceId()
-                                + " as evidence for a separate model surface.");
+                        "Treating grouped CMM candidate " + observation.surfaceId() + " (" + summary
+                                + ") as evidence for a separate model surface.");
                 surface = null;
             }
             boolean created = surface == null;
-            if (created && (observation.role() == null || observation.role() == SurfaceRole.UNKNOWN)) {
-                skippedUnknownRole++;
-                continue;
-            }
             if (created && facts.stream().noneMatch(fact -> fact.kind() != AttributeKind.FILE)) {
-                logger.warn(PHASE, "Skipping new observation with only FILE attributes.");
+                logger.debug(PHASE, "Skipping new observation with only FILE attributes (" + summary + ").");
                 continue;
             }
             if (created && observation.description().isBlank()) {
-                logger.error(PHASE, "Rejecting new observation without a description.");
+                logger.debug(
+                        PHASE,
+                        "Skipping new observation without a description (files="
+                                + facts.stream()
+                                        .map(AssistedResponse.Fact::file)
+                                        .distinct()
+                                        .toList()
+                                + ").");
                 continue;
             }
             if (created) {
@@ -457,14 +483,24 @@ public class AssistedSurfaceService {
             }
             accepted++;
         }
-        if (skippedUnknownRole > 0 || skippedTestAnchored > 0) {
-            logger.info(
-                    PHASE,
-                    "Skipped " + skippedUnknownRole + " UNKNOWN-role observations and " + skippedTestAnchored
-                            + " test-anchored observations.");
+        if (skippedTestAnchored > 0) {
+            logger.info(PHASE, "Skipped " + skippedTestAnchored + " test-anchored observations.");
         }
-        logger.info(PHASE, "Model observations with no independent scope classification: " + unknownScope);
         return accepted;
+    }
+
+    private static String observationSummary(AssistedResponse.Observation observation) {
+        String desc =
+                observation.description() == null || observation.description().isBlank()
+                        ? "(no description)"
+                        : observation.description();
+        List<String> files = observation.attributes().stream()
+                .map(AssistedResponse.Fact::file)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        String role = observation.role() == null ? "null" : observation.role().name();
+        return "role=" + role + ", desc=\"" + desc + "\", files=" + files;
     }
 
     private static boolean isTestFile(String file, Set<String> testFiles) {

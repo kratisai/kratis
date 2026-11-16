@@ -15,6 +15,7 @@ import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.ingestion.BatchChatClientFactory;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService.BatchLogger;
+import com.kratisai.controlplane.model.AttributeKind;
 import com.kratisai.controlplane.model.Ceiling;
 import com.kratisai.controlplane.model.Direction;
 import com.kratisai.controlplane.model.IngestionBatch;
@@ -24,10 +25,7 @@ import com.kratisai.controlplane.model.SurfaceRole;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -64,23 +62,23 @@ class CrossRepoMatchingServiceTest {
         UUID s2AttrId = UUID.randomUUID();
         UUID o2Id = UUID.randomUUID();
         UUID o2AttrId = UUID.randomUUID();
-        var s1 = surface(leftSurface, leftAttribute, "s3://${{ secrets.BUCKET }}", SurfaceRole.REQUIRES, "REF");
-        var s2 = surface(s2Id, s2AttrId, "shared-cache", SurfaceRole.REQUIRES, "REF");
-        var o1 = surface(rightSurface, rightAttribute, "repo:glark-newco/app:*", SurfaceRole.REQUIRES, "REF");
-        var o2 = surface(o2Id, o2AttrId, "shared-cache", SurfaceRole.REQUIRES, "NAME");
+        var s1 = surface(leftSurface, leftAttribute, "s3://${{ secrets.BUCKET }}", SurfaceRole.REQUIRES, "IDENTIFIER");
+        var s2 = surface(s2Id, s2AttrId, "shared-cache", SurfaceRole.REQUIRES, "IDENTIFIER");
+        var o1 = surface(rightSurface, rightAttribute, "repo:glark-newco/app:*", SurfaceRole.REQUIRES, "IDENTIFIER");
+        var o2 = surface(o2Id, o2AttrId, "shared-cache", SurfaceRole.REQUIRES, "IDENTIFIER");
         var subjectView = new CrossRepoMatchingService.RepoView(
                 subject.batchId(), leftRepo, "app", subject.synopsis(), List.of(s1, s2));
         var otherView = new CrossRepoMatchingService.RepoView(
                 other.batchId(), rightRepo, "infra", other.synopsis(), List.of(o1, o2));
 
-        // 1) Multi-surface "s1, s2" expands; s1<->o1 succeeds, redundant invalid s2<->o1 DEPLOYS is suppressed by
+        // 1) Multi-surface "s1, s2" expands; s1<->o1 succeeds, redundant invalid s2<->o1 HOSTS is suppressed by
         // covered nature.
         // 2) Off-by-one surface "s1" with ["s2.a2"] is forward-rescued to s2 for SHARES_STATE and normalized to
         // BIDIRECTIONAL.
         // 3) Unsatisfiable CALLS (no PROVIDES surface in either repo) is discarded in 0 retries!
         String singleRoundResponse = """
                 {"matches":[
-                  {"subjectRepositoryId":"A","subjectSurfaceId":"s1, s2","otherRepositoryId":"B","otherSurfaceId":"o1","nature":"DEPLOYS","direction":"A_TO_B","confidence":"CONFIRMED","rationale":"App deploys to S3/OIDC","subjectAttributeIds":["s1.a1"],"otherAttributeIds":["o1.b1, o2.b2"],"subjectSynopsisIds":["f1, f1"],"otherSynopsisIds":["f1"]},
+                  {"subjectRepositoryId":"A","subjectSurfaceId":"s1, s2","otherRepositoryId":"B","otherSurfaceId":"o1","nature":"HOSTS","direction":"A_TO_B","confidence":"CONFIRMED","rationale":"App deploys to S3/OIDC","subjectAttributeIds":["s1.a1"],"otherAttributeIds":["o1.b1, o2.b2"],"subjectSynopsisIds":["f1, f1"],"otherSynopsisIds":["f1"]},
                   {"subjectRepositoryId":"A","subjectSurfaceId":"s1","otherRepositoryId":"B","otherSurfaceId":"o2","nature":"SHARES_STATE","direction":"A_TO_B","confidence":"CONFIRMED","rationale":"Shared cache","subjectAttributeIds":["s2.a2"],"otherAttributeIds":["o2.b2"],"subjectSynopsisIds":[],"otherSynopsisIds":[]},
                   {"subjectRepositoryId":"A","subjectSurfaceId":"s1","otherRepositoryId":"B","otherSurfaceId":"o1","nature":"CALLS","direction":"A_TO_B","confidence":"SUGGESTED","rationale":"Invalid role pair","subjectAttributeIds":["s1.a1"],"otherAttributeIds":["o1.b1"],"subjectSynopsisIds":[],"otherSynopsisIds":[]}
                 ]}
@@ -97,7 +95,7 @@ class CrossRepoMatchingServiceTest {
         assertThat(result.discarded()).isEqualTo(1);
         assertThat(result.accepted()).hasSize(2);
         assertThat(result.accepted()).anySatisfy(item -> {
-            assertThat(item.proposal().nature()).isEqualTo(Nature.DEPLOYS);
+            assertThat(item.proposal().nature()).isEqualTo(Nature.HOSTS);
             assertThat(item.proposal().direction()).isEqualTo(Direction.A_TO_B);
             assertThat(item.proposal().otherAttributeIds()).containsExactly(rightAttribute.toString());
         });
@@ -112,13 +110,14 @@ class CrossRepoMatchingServiceTest {
         harness.model.reset();
         String withRecoverable = """
                 {"matches":[
-                  {"subjectRepositoryId":"A","subjectSurfaceId":"s1","otherRepositoryId":"B","otherSurfaceId":"o1","nature":"DEPLOYS","direction":"A_TO_B","confidence":"CONFIRMED","rationale":"App deploys","subjectAttributeIds":["s1.a1"],"otherAttributeIds":["o1.b1"],"subjectSynopsisIds":[],"otherSynopsisIds":[]},
+                  {"subjectRepositoryId":"A","subjectSurfaceId":"s1","otherRepositoryId":"B","otherSurfaceId":"o1","nature":"HOSTS","direction":"A_TO_B","confidence":"CONFIRMED","rationale":"App deploys","subjectAttributeIds":["s1.a1"],"otherAttributeIds":["o1.b1"],"subjectSynopsisIds":[],"otherSynopsisIds":[]},
                   {"subjectRepositoryId":"A","subjectSurfaceId":"s2","otherRepositoryId":"B","otherSurfaceId":"o2","nature":"MESSAGES","direction":"B_TO_A","confidence":"CONFIRMED","rationale":"Events","subjectAttributeIds":[],"otherAttributeIds":["o2.b2"],"subjectSynopsisIds":[],"otherSynopsisIds":[]}
                 ]}
                 """;
-        String fixedMessages = """
+        String fixedMessagesAndMissed = """
                 {"matches":[
-                  {"subjectRepositoryId":"A","subjectSurfaceId":"s2","otherRepositoryId":"B","otherSurfaceId":"o2","nature":"MESSAGES","direction":"B_TO_A","confidence":"CONFIRMED","rationale":"Events","subjectAttributeIds":["s2.a2"],"otherAttributeIds":["o2.b2"],"subjectSynopsisIds":[],"otherSynopsisIds":[]}
+                  {"subjectRepositoryId":"A","subjectSurfaceId":"s2","otherRepositoryId":"B","otherSurfaceId":"o2","nature":"MESSAGES","direction":"B_TO_A","confidence":"CONFIRMED","rationale":"Events","subjectAttributeIds":["s2.a2"],"otherAttributeIds":["o2.b2"],"subjectSynopsisIds":[],"otherSynopsisIds":[]},
+                  {"subjectRepositoryId":"A","subjectSurfaceId":"s2","otherRepositoryId":"B","otherSurfaceId":"o2","nature":"SHARES_STATE","direction":"BIDIRECTIONAL","confidence":"CONFIRMED","rationale":"Shared cache","subjectAttributeIds":["s2.a2"],"otherAttributeIds":["o2.b2"],"subjectSynopsisIds":[],"otherSynopsisIds":[]}
                 ]}
                 """;
         harness.model.addMatcher(PromptMatcher.builder()
@@ -128,27 +127,35 @@ class CrossRepoMatchingServiceTest {
                 .build());
         harness.model.addMatcher(PromptMatcher.builder()
                 .contains("Previous matches rejected by validation:")
-                .response(fixedMessages)
+                .response(fixedMessagesAndMissed)
                 .maxMatches(1)
                 .build());
 
         var retriedResult = harness.service.infer(subject.batchId(), subjectView, List.of(otherView), harness.logger);
         assertThat(harness.model.getInvocations()).hasSize(2);
+        String correctionPrompt = harness.model.getInvocations().get(1).prompt().getContents();
+        assertThat(correctionPrompt)
+                .contains("Already accepted from your previous pass")
+                .contains("- HOSTS: s1 <-> o1")
+                .contains("proposed: subject=s2 attrs=[], other=o2 attrs=[o2.b2]")
+                .contains(
+                        "Repair and return all rejected matches above, plus any additional valid relationships that were missed on the first pass")
+                .doesNotContain("Omit any unsupported match");
         assertThat(retriedResult.discarded()).isZero();
         assertThat(retriedResult.accepted())
                 .extracting(item -> item.proposal().nature())
-                .containsExactlyInAnyOrder(Nature.DEPLOYS, Nature.MESSAGES);
+                .containsExactlyInAnyOrder(Nature.HOSTS, Nature.MESSAGES, Nature.SHARES_STATE);
     }
 
     @Test
-    void acceptsMessagesAcrossSameRoleSurfacesWithRefEvidenceAndPreservesSynopsisChallengedDirection() {
-        var clientEvents = surface(leftSurface, leftAttribute, "assignLink", SurfaceRole.PROVIDES, "IDENTIFIER");
-        var wsServer = surface(rightSurface, rightAttribute, "/events", SurfaceRole.PROVIDES, "ENDPOINT");
+    void acceptsMessagesAcrossAnyRolesAndNormalizesDirectionToBidirectional() {
+        var clientEvents = surface(leftSurface, leftAttribute, "assignLink", SurfaceRole.BIDIRECTIONAL, "IDENTIFIER");
+        var wsServer = surface(rightSurface, rightAttribute, "/events", SurfaceRole.UNKNOWN, "ENDPOINT");
         var sameRoleMessages = detailed(
                 Nature.MESSAGES,
                 Direction.B_TO_A,
                 Ceiling.CONFIRMED,
-                "SupplyChain sends player events to GameService WebSocket server",
+                "SupplyChain exchanges player events with GameService",
                 List.of(leftAttribute),
                 List.of(rightAttribute),
                 List.of("f1"),
@@ -157,54 +164,42 @@ class CrossRepoMatchingServiceTest {
         assertThat(CrossRepoMatchingService.normalizeDirection(
                                 sameRoleMessages, List.of(clientEvents), List.of(wsServer))
                         .direction())
-                .isEqualTo(Direction.B_TO_A);
+                .isEqualTo(Direction.BIDIRECTIONAL);
 
-        var snsPublisher = surface(leftSurface, leftAttribute, "game-service-events", SurfaceRole.REQUIRES, "REF");
-        var sqsSubscriber = surface(rightSurface, rightAttribute, "game-service-events", SurfaceRole.REQUIRES, "REF");
+        var snsPublisher =
+                surface(leftSurface, leftAttribute, "game-service-events", SurfaceRole.REQUIRES, "IDENTIFIER");
+        var sqsSubscriber =
+                surface(rightSurface, rightAttribute, "game-service-events", SurfaceRole.REQUIRES, "IDENTIFIER");
         var brokerMessages = detailed(
                 Nature.MESSAGES,
-                Direction.A_TO_B,
+                null,
                 Ceiling.CONFIRMED,
-                "GameService publishes to SNS topic consumed by BookingService SQS",
+                "Services exchange events over shared topic",
                 List.of(leftAttribute),
                 List.of(rightAttribute),
                 List.of("f1"),
                 List.of("f1"));
-        assertThat(validate(brokerMessages, snsPublisher, sqsSubscriber)).isNull();
         assertThat(CrossRepoMatchingService.normalizeDirection(
                                 brokerMessages, List.of(snsPublisher), List.of(sqsSubscriber))
                         .direction())
-                .isEqualTo(Direction.A_TO_B);
-
-        // When opposite roles were mislabeled at extraction, citing synopses on both sides preserves LLM direction.
-        var mislabeledClient = surface(leftSurface, leftAttribute, "assignLink", SurfaceRole.PROVIDES, "NAME");
-        var mislabeledServer = surface(rightSurface, rightAttribute, "/events", SurfaceRole.REQUIRES, "ENDPOINT");
-        var synopsisChallenged = detailed(
-                Nature.MESSAGES,
-                Direction.B_TO_A,
-                Ceiling.CONFIRMED,
-                "Synopses confirm right repo hosts the WebSocket server",
-                List.of(leftAttribute),
-                List.of(rightAttribute),
-                List.of("f1"),
-                List.of("f1"));
-        assertThat(CrossRepoMatchingService.normalizeDirection(
-                                synopsisChallenged, List.of(mislabeledClient), List.of(mislabeledServer))
-                        .direction())
-                .isEqualTo(Direction.B_TO_A);
+                .isEqualTo(Direction.BIDIRECTIONAL);
 
         var methodHookClient =
                 surface(leftSurface, leftAttribute, "publishPlayerAction", SurfaceRole.REQUIRES, "METHOD");
         var methodMessages = detailed(
                 Nature.MESSAGES,
-                Direction.B_TO_A,
+                Direction.UNKNOWN,
                 Ceiling.CONFIRMED,
-                "Signlines publishes player actions over WebSocket server",
+                "Signlines exchanges player actions with GameService",
                 List.of(leftAttribute),
                 List.of(rightAttribute),
                 List.of(),
                 List.of());
         assertThat(validate(methodMessages, methodHookClient, wsServer)).isNull();
+        assertThat(CrossRepoMatchingService.normalizeDirection(
+                                methodMessages, List.of(methodHookClient), List.of(wsServer))
+                        .direction())
+                .isEqualTo(Direction.BIDIRECTIONAL);
     }
 
     @Test
@@ -332,7 +327,7 @@ class CrossRepoMatchingServiceTest {
                 List.of());
         assertThat(CrossRepoMatchingService.validate(
                         match, repo(leftRepo, withoutAttributes), List.of(withoutAttributes), other, List.of(right)))
-                .contains("CALLS requires cited endpoint");
+                .contains("CALLS requires cited non-FILE evidence");
     }
 
     @Test
@@ -385,17 +380,23 @@ class CrossRepoMatchingServiceTest {
                         List.of()))) {
             assertThat(validate(invalid)).contains("required");
         }
-        for (Nature nature : List.of(Nature.PEER, Nature.SHARES_STATE)) {
-            assertThat(validate(detailed(
-                            nature,
-                            Direction.A_TO_B,
-                            Ceiling.CONFIRMED,
-                            "supported",
-                            List.of(leftAttribute),
-                            List.of(rightAttribute),
-                            List.of("f1"),
-                            List.of("f1"))))
-                    .contains("must be bidirectional");
+        for (Nature nature : List.of(Nature.MESSAGES, Nature.PEER, Nature.SHARES_STATE)) {
+            for (Direction llmDirection :
+                    new Direction[] {Direction.A_TO_B, Direction.B_TO_A, Direction.UNKNOWN, null}) {
+                var normalized = CrossRepoMatchingService.normalizeDirection(
+                        detailed(
+                                nature,
+                                llmDirection,
+                                Ceiling.CONFIRMED,
+                                "supported",
+                                List.of(leftAttribute),
+                                List.of(rightAttribute),
+                                List.of("f1"),
+                                List.of("f1")),
+                        List.of(left),
+                        List.of(right));
+                assertThat(normalized.direction()).isEqualTo(Direction.BIDIRECTIONAL);
+            }
         }
     }
 
@@ -507,15 +508,15 @@ class CrossRepoMatchingServiceTest {
     }
 
     @Test
-    void acceptsDeploysBetweenTwoProvidingSurfacesAndDoesNotNormalizeItsDirection() {
+    void acceptsHostsBetweenAnyClassifiedOrUnknownSurfacesAndFallsBackToUnknownDirection() {
         var infrastructure =
                 surface(leftSurface, leftAttribute, "resource-provider", SurfaceRole.PROVIDES, "TECHNOLOGY");
         var artifact = surface(rightSurface, rightAttribute, "Dockerfile", SurfaceRole.PROVIDES, "FILE");
         var match = detailed(
-                Nature.DEPLOYS,
+                Nature.HOSTS,
                 Direction.A_TO_B,
                 Ceiling.CONFIRMED,
-                "Infrastructure provisions the service artifact",
+                "Infrastructure hosts the service artifact",
                 List.of(leftAttribute),
                 List.of(rightAttribute),
                 List.of(),
@@ -525,6 +526,36 @@ class CrossRepoMatchingServiceTest {
         assertThat(CrossRepoMatchingService.normalizeDirection(match, List.of(infrastructure), List.of(artifact))
                         .direction())
                 .isEqualTo(Direction.A_TO_B);
+
+        var ambiguousHosts = detailed(
+                Nature.HOSTS,
+                Direction.BIDIRECTIONAL,
+                Ceiling.SUGGESTED,
+                "Hosting link without clear upstream side",
+                List.of(leftAttribute),
+                List.of(rightAttribute),
+                List.of(),
+                List.of());
+        var normalizedHosts =
+                CrossRepoMatchingService.normalizeDirection(ambiguousHosts, List.of(infrastructure), List.of(artifact));
+        assertThat(normalizedHosts.direction()).isEqualTo(Direction.UNKNOWN);
+        assertThat(validate(normalizedHosts, infrastructure, artifact)).isNull();
+
+        var unknownSubject = surface(leftSurface, leftAttribute, "/orders", SurfaceRole.UNKNOWN, "ENDPOINT");
+        var unknownOther = surface(rightSurface, rightAttribute, "/orders", SurfaceRole.UNKNOWN, "ENDPOINT");
+        var unknownCalls = detailed(
+                Nature.CALLS,
+                null,
+                Ceiling.SUGGESTED,
+                "Synchronous HTTP call with unknown direction",
+                List.of(leftAttribute),
+                List.of(rightAttribute),
+                List.of(),
+                List.of());
+        var normalizedCalls = CrossRepoMatchingService.normalizeDirection(
+                unknownCalls, List.of(unknownSubject), List.of(unknownOther));
+        assertThat(normalizedCalls.direction()).isEqualTo(Direction.UNKNOWN);
+        assertThat(validate(normalizedCalls, unknownSubject, unknownOther)).isNull();
     }
 
     @Test
@@ -631,7 +662,7 @@ class CrossRepoMatchingServiceTest {
                 List.of("f1"),
                 List.of("f1"));
         assertThat(validate(peer, libraryUser, otherLibraryUser))
-                .contains("PEER cannot be supported by technical endpoints");
+                .contains("PEER requires cited non-package domain IDENTIFIER");
 
         var openAiClient = surface(
                 leftSurface,
@@ -660,8 +691,8 @@ class CrossRepoMatchingServiceTest {
 
     @Test
     void peerAndSharedStateRequireDomainAndResourceEvidence() {
-        var peerLeft = surface(leftSurface, leftAttribute, "orders platform", SurfaceRole.PROVIDES, "NAME");
-        var peerRight = surface(rightSurface, rightAttribute, "commerce platform", SurfaceRole.PROVIDES, "NAME");
+        var peerLeft = surface(leftSurface, leftAttribute, "orders platform", SurfaceRole.PROVIDES, "IDENTIFIER");
+        var peerRight = surface(rightSurface, rightAttribute, "commerce platform", SurfaceRole.PROVIDES, "IDENTIFIER");
         var peer = detailed(
                 Nature.PEER,
                 Direction.BIDIRECTIONAL,
@@ -673,8 +704,45 @@ class CrossRepoMatchingServiceTest {
                 List.of("f1"));
         assertThat(validate(peer, peerLeft, peerRight)).isNull();
 
-        var stateLeft = surface(leftSurface, leftAttribute, "orders-db", SurfaceRole.REQUIRES, "NAME");
-        var stateRight = surface(rightSurface, rightAttribute, "orders-db", SurfaceRole.REQUIRES, "NAME");
+        UUID leftTechAttr = UUID.randomUUID();
+        UUID rightPkgAttr = UUID.randomUUID();
+        UUID rightEndpointAttr = UUID.randomUUID();
+        var peerLeftCoCited = new CrossRepoMatchingService.SurfaceView(
+                leftSurface,
+                SurfaceRole.PROVIDES,
+                "Orders domain frontend",
+                SurfaceDetection.MODEL,
+                List.of(
+                        new CrossRepoMatchingService.AttributeView(
+                                leftAttribute, "IDENTIFIER", "orders-game", SurfaceDetection.MODEL),
+                        new CrossRepoMatchingService.AttributeView(
+                                leftTechAttr, "TECHNOLOGY", "React", SurfaceDetection.MODEL)));
+        var peerRightCoCited = new CrossRepoMatchingService.SurfaceView(
+                rightSurface,
+                SurfaceRole.PROVIDES,
+                "Commerce domain frontend",
+                SurfaceDetection.MODEL,
+                List.of(
+                        new CrossRepoMatchingService.AttributeView(
+                                rightAttribute, "IDENTIFIER", "commerce-game", SurfaceDetection.MODEL),
+                        new CrossRepoMatchingService.AttributeView(
+                                rightPkgAttr, "IDENTIFIER", "pkg:npm/react@19.0.0", SurfaceDetection.SYFT),
+                        new CrossRepoMatchingService.AttributeView(
+                                rightEndpointAttr, "ENDPOINT", "/play", SurfaceDetection.MODEL)));
+        var peerWithCoCitedIgnoredEvidence = detailed(
+                Nature.PEER,
+                Direction.BIDIRECTIONAL,
+                Ceiling.SUGGESTED,
+                "Both serve the same game domain",
+                List.of(leftAttribute, leftTechAttr),
+                List.of(rightAttribute, rightPkgAttr, rightEndpointAttr),
+                List.of("f1"),
+                List.of("f1"));
+        assertThat(validate(peerWithCoCitedIgnoredEvidence, peerLeftCoCited, peerRightCoCited))
+                .isNull();
+
+        var stateLeft = surface(leftSurface, leftAttribute, "orders-db", SurfaceRole.BIDIRECTIONAL, "IDENTIFIER");
+        var stateRight = surface(rightSurface, rightAttribute, "orders-db", SurfaceRole.UNKNOWN, "IDENTIFIER");
         var state = detailed(
                 Nature.SHARES_STATE,
                 Direction.BIDIRECTIONAL,
@@ -685,6 +753,9 @@ class CrossRepoMatchingServiceTest {
                 List.of(),
                 List.of());
         assertThat(validate(state, stateLeft, stateRight)).isNull();
+
+        var infraProvisioner = surface(leftSurface, leftAttribute, "orders-db", SurfaceRole.PROVIDES, "IDENTIFIER");
+        assertThat(validate(state, infraProvisioner, stateRight)).contains("use HOSTS for infrastructure provisioning");
     }
 
     @Test
@@ -722,7 +793,7 @@ class CrossRepoMatchingServiceTest {
                         Direction.A_TO_B,
                         Ceiling.CONFIRMED,
                         "supported",
-                        Arrays.asList((UUID) null),
+                        Collections.singletonList(null),
                         List.of(rightAttribute),
                         List.of(),
                         List.of()),
@@ -742,7 +813,7 @@ class CrossRepoMatchingServiceTest {
                         "supported",
                         List.of(leftAttribute),
                         List.of(rightAttribute),
-                        Arrays.asList((String) null),
+                        Collections.singletonList(null),
                         List.of()),
                 detailed(
                         Nature.CALLS,
@@ -906,7 +977,15 @@ class CrossRepoMatchingServiceTest {
                         eq(harness.teamId),
                         eq("INFO"),
                         eq("ACTIVATE_BATCH"),
-                        contains("No surfaces in repository"));
+                        contains("0 eligible surfaces: [empty]"));
+        verify(harness.logs)
+                .log(
+                        eq(subject.batchId()),
+                        eq(harness.teamId),
+                        eq("INFO"),
+                        eq("ACTIVATE_BATCH"),
+                        contains(
+                                "Compared left (21 surfaces) vs right (21 surfaces): direct=0, accepted=1, rejected=1, retries=0."));
 
         // Now force overflow group splitting by deriving a tight model prompt budget
         harness.model.reset();
@@ -994,11 +1073,12 @@ class CrossRepoMatchingServiceTest {
 
         assertThat(harness.model.getInvocations()).hasSize(3);
         assertThat(result.accepted()).hasSize(2);
-        assertThat(result.accepted().get(0).otherBatchId()).isEqualTo(peer1.batchId());
-        assertThat(result.accepted().get(0).proposal().subjectRepositoryId()).isEqualTo(leftRepo.toString());
-        assertThat(result.accepted().get(0).proposal().otherRepositoryId()).isEqualTo(peerRepo1.toString());
-        assertThat(result.accepted().get(0).proposal().otherSurfaceId()).isEqualTo(peerSurface1.toString());
-        assertThat(result.accepted().get(0).proposal().direction()).isEqualTo(Direction.A_TO_B);
+        assertThat(result.accepted().getFirst().otherBatchId()).isEqualTo(peer1.batchId());
+        assertThat(result.accepted().getFirst().proposal().subjectRepositoryId())
+                .isEqualTo(leftRepo.toString());
+        assertThat(result.accepted().getFirst().proposal().otherRepositoryId()).isEqualTo(peerRepo1.toString());
+        assertThat(result.accepted().getFirst().proposal().otherSurfaceId()).isEqualTo(peerSurface1.toString());
+        assertThat(result.accepted().getFirst().proposal().direction()).isEqualTo(Direction.A_TO_B);
         assertThat(result.accepted().get(1).otherBatchId()).isEqualTo(peer2.batchId());
     }
 
@@ -1034,11 +1114,13 @@ class CrossRepoMatchingServiceTest {
                         "- o1 REQUIRES: Runtime interface",
                         "o1.b1 ENDPOINT other technology",
                         "current, implemented relationships that exist between the two repositories as they stand today",
-                        "ALWAYS use MESSAGES (never CALLS)",
-                        "imperfect single-repository estimates:",
+                        "CALLS (directional: A_TO_B or B_TO_A):",
+                        "MESSAGES (non-directional: BIDIRECTIONAL):",
+                        "HOSTS (directional: A_TO_B or B_TO_A):",
+                        "Surface roles are single-repository estimates",
                         "Shared use of the same external third-party\nservice",
-                        "Sharing a CI platform",
-                        "package type, namespace, and name",
+                        "sharing a CI tool",
+                        "namespace, and name",
                         "versions may differ")
                 .doesNotContain("AttributeView[", leftAttribute.toString(), leftSurface.toString(), "detectedBy=");
     }
@@ -1117,6 +1199,182 @@ class CrossRepoMatchingServiceTest {
         assertThatThrownBy(() -> harness.service.infer(subject.batchId(), subject, List.of(other), harness.logger))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Ingestion batch not found");
+    }
+
+    @Test
+    void logsDebugNoticeWhenPeerSurfacesTrimToEmptyAndNoDirectMatchesExist() {
+        Harness harness = new Harness();
+        UUID unmatchedOnlyId = UUID.randomUUID();
+        CrossRepoMatchingService.RepoView syftOnlySubject = new CrossRepoMatchingService.RepoView(
+                subject.batchId(),
+                leftRepo,
+                "sbom-consumer",
+                new CrossRepoMatchingService.SynopsisView(
+                        subject.batchId(), "SERVICE", List.of(), new SynopsisFragments("Consumer.")),
+                List.of(new CrossRepoMatchingService.SurfaceView(
+                        unmatchedOnlyId,
+                        SurfaceRole.REQUIRES,
+                        "Dependencies",
+                        SurfaceDetection.SYFT,
+                        List.of(new CrossRepoMatchingService.AttributeView(
+                                UUID.randomUUID(), "IDENTIFIER", "pkg:npm/lodash@4.17.21", SurfaceDetection.SYFT)))));
+        CrossRepoMatchingService.InferenceResult result =
+                harness.service.infer(subject.batchId(), syftOnlySubject, List.of(other), harness.logger);
+
+        assertThat(result.accepted()).isEmpty();
+        verify(harness.logs)
+                .log(
+                        eq(subject.batchId()),
+                        eq(harness.teamId),
+                        eq("DEBUG"),
+                        eq("ACTIVATE_BATCH"),
+                        contains(
+                                "Skipped LLM comparison for sbom-consumer vs repo: all surfaces trimmed as unmatched SBOM dependencies."));
+        verify(harness.logs)
+                .log(
+                        eq(subject.batchId()),
+                        eq(harness.teamId),
+                        eq("INFO"),
+                        eq("ACTIVATE_BATCH"),
+                        contains(
+                                "Compared sbom-consumer (1 surfaces) vs repo (1 surfaces): direct=0, accepted=0, rejected=0, retries=0."));
+    }
+
+    @Test
+    void logsRecoverableRejectionReasonsWhenRequestingValidationCorrectionPass() {
+        Harness harness = new Harness();
+        harness.model.addMatcher(PromptMatcher.builder()
+                .contains("Previous matches rejected by validation:")
+                .response("""
+                        {"matches":[]}
+                        """)
+                .maxMatches(1)
+                .build());
+        harness.model.addMatcher(PromptMatcher.builder()
+                .contains("Compare the supplied surface pairs")
+                .response("""
+                        {"matches":[
+                          {"subjectRepositoryId":"A","subjectSurfaceId":"s1",
+                           "otherRepositoryId":"B","otherSurfaceId":"o1",
+                           "nature":"CALLS","direction":"A_TO_B","confidence":"CONFIRMED",
+                           "rationale":"Endpoint match","subjectAttributeIds":[],
+                           "otherAttributeIds":[],"subjectSynopsisIds":[],"otherSynopsisIds":[]}
+                        ]}
+                        """)
+                .maxMatches(1)
+                .build());
+
+        CrossRepoMatchingService.InferenceResult result =
+                harness.service.infer(subject.batchId(), subject, List.of(other), harness.logger);
+
+        assertThat(result.accepted()).isEmpty();
+        verify(harness.logs)
+                .log(
+                        eq(subject.batchId()),
+                        eq(harness.teamId),
+                        eq("DEBUG"),
+                        eq("ACTIVATE_BATCH"),
+                        contains(
+                                "Requesting 1 validation-correction pass for repo vs repo (1 recoverable candidate(s)): Rejected CALLS candidate"));
+    }
+
+    @Test
+    void hostsAlignsExplicitOppositeRolesAndPreservesLlmDirectionWhenRolesMatch() {
+        var infraDb = surface(leftSurface, leftAttribute, "orders-db", SurfaceRole.PROVIDES, "IDENTIFIER");
+        var appDb = surface(rightSurface, rightAttribute, "orders-db", SurfaceRole.REQUIRES, "IDENTIFIER");
+        var invertedByLlm = detailed(
+                Nature.HOSTS,
+                Direction.B_TO_A,
+                Ceiling.CONFIRMED,
+                "App connects to DB provisioned by infra",
+                List.of(leftAttribute),
+                List.of(rightAttribute),
+                List.of(),
+                List.of());
+        assertThat(CrossRepoMatchingService.normalizeDirection(invertedByLlm, List.of(infraDb), List.of(appDb))
+                        .direction())
+                .isEqualTo(Direction.A_TO_B);
+    }
+
+    @Test
+    void attributeKindIsCollapsedToFiveKindsAndValidationDecouplesKindsForHostsAndMessages() {
+        assertThat(AttributeKind.values())
+                .containsExactly(
+                        AttributeKind.ENDPOINT,
+                        AttributeKind.IDENTIFIER,
+                        AttributeKind.METHOD,
+                        AttributeKind.TECHNOLOGY,
+                        AttributeKind.FILE);
+        assertThat(AttributeKind.from("NAME")).isNull();
+        assertThat(AttributeKind.from("REF")).isNull();
+
+        var s3Host = surface(leftSurface, leftAttribute, "s3://app-bucket", SurfaceRole.PROVIDES, "ENDPOINT");
+        var deployTarget =
+                surface(rightSurface, rightAttribute, "https://app.example", SurfaceRole.REQUIRES, "ENDPOINT");
+        var hostsWithEndpoints = detailed(
+                Nature.HOSTS,
+                Direction.A_TO_B,
+                Ceiling.CONFIRMED,
+                "Static hosting bucket serves app",
+                List.of(leftAttribute),
+                List.of(rightAttribute),
+                List.of(),
+                List.of());
+        assertThat(validate(hostsWithEndpoints, s3Host, deployTarget)).isNull();
+
+        var techLeft = surface(leftSurface, leftAttribute, "WebSocket", SurfaceRole.BIDIRECTIONAL, "TECHNOLOGY");
+        var techRight = surface(rightSurface, rightAttribute, "WebSocket", SurfaceRole.BIDIRECTIONAL, "TECHNOLOGY");
+        var messagesWithTech = detailed(
+                Nature.MESSAGES,
+                Direction.BIDIRECTIONAL,
+                Ceiling.SUGGESTED,
+                "Exchanges messages over WebSocket",
+                List.of(leftAttribute),
+                List.of(rightAttribute),
+                List.of(),
+                List.of());
+        assertThat(validate(messagesWithTech, techLeft, techRight)).isNull();
+
+        var callsProvideTech = surface(leftSurface, leftAttribute, "gRPC", SurfaceRole.PROVIDES, "TECHNOLOGY");
+        var callsRequireMethod = surface(rightSurface, rightAttribute, "POST", SurfaceRole.REQUIRES, "METHOD");
+        var callsWithNonFile = detailed(
+                Nature.CALLS,
+                Direction.A_TO_B,
+                Ceiling.SUGGESTED,
+                "Synchronous RPC call",
+                List.of(leftAttribute),
+                List.of(rightAttribute),
+                List.of(),
+                List.of());
+        assertThat(validate(callsWithNonFile, callsProvideTech, callsRequireMethod))
+                .isNull();
+    }
+
+    @Test
+    void systemPromptDefinesHolisticNaturesAndOmitsUnknownDirectionFromSchema() {
+        assertThat(CrossRepoMatchingService.systemPrompt())
+                .contains("synchronous REST, RPC, GraphQL, or HTTP request/response interface")
+                .contains("BUILDS_AGAINST (directional: A_TO_B or B_TO_A)")
+                .contains("HOSTS (directional: A_TO_B or B_TO_A)")
+                .contains("Never point workload ->")
+                .contains("MESSAGES (non-directional: BIDIRECTIONAL)")
+                .contains("Prefer MESSAGES for persistent bidirectional")
+                .contains("Multiple client repositories may each independently hold MESSAGES relationships")
+                .contains("independent synchronous HTTP/REST CALLS to the same third service")
+                .contains("SHARES_STATE (non-directional: BIDIRECTIONAL)")
+                .contains("save or load data directly from the same shared persistent storage resource")
+                .contains("share an API base-URL configuration key")
+                .contains("non-package domain IDENTIFIER attributes on both sides")
+                .contains("overall repository synopses")
+                .contains("including if DTO/payload matches are inexact")
+                .contains("payload names are helpful supporting evidence")
+                .contains("rather than mandatory");
+        String format = CrossRepoMatchingService.createConverter().getFormat();
+        assertThat(format)
+                .contains("A_TO_B")
+                .contains("B_TO_A")
+                .contains("BIDIRECTIONAL")
+                .doesNotContain("UNKNOWN");
     }
 
     private InferenceResponse.RelationProposal detailed(

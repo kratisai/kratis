@@ -83,7 +83,7 @@ class ReadFileToolComponentTest {
         var result = tool.readFileInput("src/client.ts", null, 2, 1, context);
 
         assertThat(result.content()).isEqualTo("2: two\n[lines 2-2 of 3; continue with offset=3]");
-        verify(batchLogger).info("ASSIST_SURFACES_READ_FILE", "path=src/client.ts offset=2 limit=1 lines=3");
+        verify(batchLogger).debug("ASSIST_SURFACES_READ_FILE", "path=src/client.ts offset=2 limit=1 lines=3");
     }
 
     @Test

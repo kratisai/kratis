@@ -37,9 +37,7 @@ public class GitCloneService {
 
     public record CloneResult(Path cloneDirectory, String commitHash) {}
 
-    public CloneResult cloneRepository(
-            Repository repository, UUID batchId, IngestionBatchLogService.BatchLogger batchLogger)
-            throws IOException, InterruptedException {
+    public CloneResult cloneRepository(Repository repository, UUID batchId) throws IOException, InterruptedException {
         Path destination = Path.of(baseCloneDir, batchId.toString());
 
         // Clean up existing directory if it exists (e.g., from a previous failed or interrupted run)
@@ -123,7 +121,6 @@ public class GitCloneService {
 
             // Resolve commit hash
             String commitHash = resolveCommitHash(destination);
-            batchLogger.info("CLONE", "Cloned at Commit hash: " + commitHash);
             return new CloneResult(destination, commitHash);
         }
     }

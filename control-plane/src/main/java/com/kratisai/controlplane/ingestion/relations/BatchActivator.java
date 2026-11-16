@@ -13,7 +13,6 @@ import com.kratisai.controlplane.model.IngestionStatus;
 import com.kratisai.controlplane.model.Nature;
 import com.kratisai.controlplane.model.RelationState;
 import com.kratisai.controlplane.model.SurfaceDetection;
-import com.kratisai.controlplane.model.SurfaceRole;
 import com.kratisai.controlplane.repository.CtxRepoRelationRepository;
 import com.kratisai.controlplane.repository.CtxRepoSynopsisRepository;
 import com.kratisai.controlplane.repository.CtxSurfaceRepository;
@@ -67,8 +66,7 @@ public class BatchActivator {
     record Prepared(
             CrossRepoMatchingService.RepoView subject,
             List<CrossRepoMatchingService.RepoView> others,
-            long excludedLegacy,
-            long excludedUnknownRole) {}
+            long excludedLegacy) {}
 
     record RelationKey(UUID otherBatchId, Nature nature) {}
 
@@ -78,8 +76,7 @@ public class BatchActivator {
             Prepared prepared = transactionTemplate.execute(status -> prepare(batchId, teamId));
             batchLogger.info(
                     "ACTIVATE_BATCH",
-                    "Excluded " + prepared.excludedLegacy() + " legacy UNKNOWN-provenance surfaces and "
-                            + prepared.excludedUnknownRole() + " unclassified surfaces from matching.");
+                    "Excluded " + prepared.excludedLegacy() + " legacy UNKNOWN-provenance surfaces from matching.");
             CrossRepoMatchingService.InferenceResult result =
                     crossRepoMatchingService.infer(batchId, prepared.subject(), prepared.others(), batchLogger);
             Activation activation =
@@ -112,13 +109,8 @@ public class BatchActivator {
         long excludedLegacy = observedSurfaces.stream()
                 .filter(surface -> surface.getDetectedBy() == SurfaceDetection.UNKNOWN)
                 .count();
-        long excludedUnknownRole = observedSurfaces.stream()
-                .filter(surface -> surface.getDetectedBy() != SurfaceDetection.UNKNOWN)
-                .filter(surface -> surface.getRole() == SurfaceRole.UNKNOWN)
-                .count();
         observedSurfaces.stream()
                 .filter(surface -> surface.getDetectedBy() != SurfaceDetection.UNKNOWN)
-                .filter(surface -> surface.getRole() != SurfaceRole.UNKNOWN)
                 .forEach(surface -> surfaceByBatch
                         .computeIfAbsent(surface.getBatch().getId(), unused -> new ArrayList<>())
                         .add(new CrossRepoMatchingService.SurfaceView(
@@ -138,8 +130,7 @@ public class BatchActivator {
                 active.stream()
                         .map(batch -> view(batch, synopsisByBatch, surfaceByBatch))
                         .toList(),
-                excludedLegacy,
-                excludedUnknownRole);
+                excludedLegacy);
     }
 
     private static CrossRepoMatchingService.RepoView view(
@@ -190,8 +181,11 @@ public class BatchActivator {
             Ceiling confidence = Ceiling.CONFIRMED;
             for (CrossRepoMatchingService.AcceptedProposal item : entry.getValue()) {
                 Direction candidate = canonicalDirection(item.proposal().direction(), subjectFirst);
-                direction =
-                        direction == null ? candidate : direction == candidate ? direction : Direction.BIDIRECTIONAL;
+                if (direction == null) {
+                    direction = candidate;
+                } else if (candidate != Direction.UNKNOWN && direction != candidate) {
+                    direction = direction == Direction.UNKNOWN ? candidate : Direction.BIDIRECTIONAL;
+                }
                 if (item.proposal().confidence() == Ceiling.SUGGESTED) confidence = Ceiling.SUGGESTED;
             }
             CtxRepoRelation relation = ctxRepoRelationRepository
@@ -224,7 +218,7 @@ public class BatchActivator {
         List<Map<String, Object>> evidence = proposals.stream()
                 .map(item -> {
                     InferenceResponse.RelationProposal proposal = item.proposal();
-                    return Map.<String, Object>of(
+                    return Map.of(
                             "subjectSurfaceId", proposal.subjectSurfaceId(),
                             "otherSurfaceId", proposal.otherSurfaceId(),
                             "confidence", proposal.confidence(),
@@ -273,7 +267,12 @@ public class BatchActivator {
     }
 
     private static Direction canonicalDirection(Direction direction, boolean subjectFirst) {
-        if (subjectFirst || direction == Direction.BIDIRECTIONAL) return direction;
+        if (subjectFirst
+                || direction == null
+                || direction == Direction.BIDIRECTIONAL
+                || direction == Direction.UNKNOWN) {
+            return direction;
+        }
         return direction == Direction.A_TO_B ? Direction.B_TO_A : Direction.A_TO_B;
     }
 

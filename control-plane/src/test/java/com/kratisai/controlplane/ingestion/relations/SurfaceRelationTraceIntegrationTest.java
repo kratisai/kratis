@@ -226,32 +226,23 @@ class SurfaceRelationTraceIntegrationTest {
                         consumer.getName(),
                         new ToolContext(Map.of("teamId", context.team().getId()))))
                 .singleElement()
-                .satisfies(
-                        related -> assertThat(related.matches()).singleElement().satisfies(pair -> {
-                            assertThat(pair.subjectSurface().id()).isEqualTo(subject.surfaceId());
-                            assertThat(pair.subjectSurface().batchId()).isEqualTo(consumerBatch.getId());
-                            assertThat(pair.subjectSurface().attributes()).anySatisfy(attribute -> {
-                                assertThat(attribute.kind()).isEqualTo(AttributeKind.FILE);
-                                assertThat(attribute.value()).isEqualTo("client.conf");
-                            });
-                            assertThat(pair.otherSurface().id()).isEqualTo(provider.surfaceId());
-                            assertThat(pair.otherSurface().batchId()).isEqualTo(providerBatch.getId());
-                            assertThat(pair.otherSurface().synopsis()).contains("f1");
-                            JsonNode pairEvidence = objectMapper.valueToTree(pair.evidence());
-                            assertThat(pairEvidence
-                                            .path("evidence")
-                                            .path("subjectSynopsisIds")
-                                            .get(0)
-                                            .asText())
-                                    .isEqualTo("f1");
-                        }));
+                .satisfies(related -> {
+                    assertThat(related.otherRepoName())
+                            .isEqualTo(context.repository().getName());
+                    assertThat(related.synopsis()).contains("f1");
+                    assertThat(related.relations()).singleElement().satisfies(rel -> {
+                        assertThat(rel.relation())
+                                .isEqualTo(consumer.getName() + " CALLS "
+                                        + context.repository().getName());
+                        assertThat(rel.currentRepoFiles()).containsExactly("client.conf");
+                    });
+                });
         assertThat(logs.getLogsForBatch(consumerBatch.getId()))
                 .extracting(IngestionBatchLog::getMessage)
-                .anySatisfy(message -> assertThat(message)
-                        .contains("Compared repository")
-                        .contains(
-                                subject.surfaceId().toString(),
-                                provider.surfaceId().toString()));
+                .anySatisfy(
+                        message -> assertThat(message)
+                                .contains(
+                                        "Compared consumer (1 surfaces) vs provider (1 surfaces): direct=0, accepted=1, rejected=0, retries=0."));
         assertThat(fakeChatModel.getInvocations())
                 .anySatisfy(invocation -> assertThat(invocation.prompt().getContents())
                         .contains(

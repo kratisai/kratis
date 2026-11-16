@@ -6,7 +6,7 @@ public enum Nature {
     CALLS,
     MESSAGES,
     BUILDS_AGAINST,
-    DEPLOYS,
+    HOSTS,
     SHARES_STATE,
     PEER;
 

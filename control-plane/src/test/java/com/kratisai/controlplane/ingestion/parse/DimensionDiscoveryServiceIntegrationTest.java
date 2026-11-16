@@ -1,7 +1,9 @@
 package com.kratisai.controlplane.ingestion.parse;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
+import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
@@ -51,11 +53,14 @@ class DimensionDiscoveryServiceIntegrationTest {
     private CtxNode controllerNode;
     private CtxNode serviceNode;
     private CtxNode untaggedNode;
+    private IngestionBatchLogService.BatchLogger batchLogger;
 
     @BeforeEach
     void setUp() {
         fakeChatModel.reset();
         databaseCleaner.cleanAll();
+        batchLogger = new IngestionBatchLogService.BatchLogger(
+                UUID.randomUUID(), UUID.randomUUID(), mock(IngestionBatchLogService.class));
 
         // Shot 1: Request additional context
         fakeChatModel.addMatcher(PromptMatcher.builder()
@@ -120,7 +125,7 @@ class DimensionDiscoveryServiceIntegrationTest {
     @Test
     void happyPath_discoversDimensionsAndTagsNodes() {
         // Execute
-        dimensionDiscoveryService.discoverDimensions(batch);
+        dimensionDiscoveryService.discoverDimensions(batch, batchLogger);
 
         // Verify dimensions were created
         List<CtxDimension> dimensions = ctxDimensionRepository.findByBatchId(batch.getId());
@@ -139,7 +144,7 @@ class DimensionDiscoveryServiceIntegrationTest {
     @Test
     void secondShotPromptRetainsTreeAndDimensionCategories() {
         // Execute
-        dimensionDiscoveryService.discoverDimensions(batch);
+        dimensionDiscoveryService.discoverDimensions(batch, batchLogger);
 
         List<String> prompts = fakeChatModel.getInvocations().stream()
                 .map(invocation -> invocation.prompt().getContents())
@@ -163,7 +168,7 @@ class DimensionDiscoveryServiceIntegrationTest {
         ctxEdgeRepository.saveAndFlush(edge);
 
         // Execute
-        dimensionDiscoveryService.discoverDimensions(batch);
+        dimensionDiscoveryService.discoverDimensions(batch, batchLogger);
 
         // Verify both nodes are tagged with the same dimension (via propagation)
         List<CtxNodeDimension> controllerDims = ctxNodeDimensionRepository.findByNodeId(controllerNode.getId());
@@ -192,7 +197,7 @@ class DimensionDiscoveryServiceIntegrationTest {
                 new CtxEdge(batch, team.getId(), controllerNode, sharedClass, RelationType.DEFINES),
                 new CtxEdge(batch, team.getId(), untaggedNode, sharedClass, RelationType.IMPORTS)));
 
-        dimensionDiscoveryService.discoverDimensions(batch);
+        dimensionDiscoveryService.discoverDimensions(batch, batchLogger);
 
         List<CtxNodeDimension> controllerDims = ctxNodeDimensionRepository.findByNodeId(controllerNode.getId());
         List<CtxNodeDimension> untaggedDims = ctxNodeDimensionRepository.findByNodeId(untaggedNode.getId());
@@ -211,7 +216,7 @@ class DimensionDiscoveryServiceIntegrationTest {
         ctxNodeRepository.deleteAll();
 
         // Execute - should not throw
-        dimensionDiscoveryService.discoverDimensions(batch);
+        dimensionDiscoveryService.discoverDimensions(batch, batchLogger);
 
         // Verify no dimensions were created
         List<CtxDimension> dimensions = ctxDimensionRepository.findByBatchId(batch.getId());
@@ -251,7 +256,8 @@ class DimensionDiscoveryServiceIntegrationTest {
                 .build());
 
         // Execute and verify exception
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> dimensionDiscoveryService.discoverDimensions(batch))
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> dimensionDiscoveryService.discoverDimensions(batch, batchLogger))
                 .isInstanceOf(DimensionDiscoveryService.DimensionDiscoveryException.class)
                 .hasMessageContaining("Insufficient dimensions discovered");
     }
@@ -271,7 +277,7 @@ class DimensionDiscoveryServiceIntegrationTest {
                                 """)
                 .build());
 
-        dimensionDiscoveryService.discoverDimensions(batch);
+        dimensionDiscoveryService.discoverDimensions(batch, batchLogger);
 
         List<CtxNodeDimension> controllerDims = ctxNodeDimensionRepository.findByNodeId(controllerNode.getId());
         assertThat(controllerDims).isNotEmpty();
@@ -303,10 +309,42 @@ class DimensionDiscoveryServiceIntegrationTest {
                                 """)
                 .build());
 
-        dimensionDiscoveryService.discoverDimensions(batch);
+        dimensionDiscoveryService.discoverDimensions(batch, batchLogger);
 
         assertThat(ctxNodeDimensionRepository.findByNodeId(controllerNode.getId()))
                 .isNotEmpty();
+        assertThat(fakeChatModel.getInvocations()).hasSize(2);
+    }
+
+    @Test
+    void incompleteCategories_retriesDiscoveryOnceWithGuidance_thenSucceeds() {
+        fakeChatModel.reset();
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains("If you lack sufficient context")
+                .response("""
+                                {
+                                  "domains": [{"name": "User Management", "globPatterns": ["*User*.java"]}],
+                                  "archetypes": [{"name": "Controller", "globPatterns": ["*Controller.java"]}],
+                                  "crossCutting": [],
+                                  "additionalContextRequest": null
+                                }
+                                """)
+                .build());
+        fakeChatModel.addMatcherFirst(PromptMatcher.builder()
+                .contains("Your previous response left one or more required dimension categories empty")
+                .response("""
+                                {
+                                  "domains": [{"name": "User Management", "globPatterns": ["*User*.java"]}],
+                                  "archetypes": [{"name": "Controller", "globPatterns": ["*Controller.java"]}],
+                                  "crossCutting": [{"name": "Utils", "globPatterns": ["*util*.java"]}],
+                                  "additionalContextRequest": null
+                                }
+                                """)
+                .build());
+
+        dimensionDiscoveryService.discoverDimensions(batch, batchLogger);
+
+        assertThat(ctxDimensionRepository.findByBatchId(batch.getId())).hasSize(3);
         assertThat(fakeChatModel.getInvocations()).hasSize(2);
     }
 
@@ -330,7 +368,8 @@ class DimensionDiscoveryServiceIntegrationTest {
                 .response(noMatchResponse)
                 .build());
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> dimensionDiscoveryService.discoverDimensions(batch))
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> dimensionDiscoveryService.discoverDimensions(batch, batchLogger))
                 .isInstanceOf(DimensionDiscoveryService.DimensionDiscoveryException.class)
                 .hasMessageContaining("matched no files");
     }

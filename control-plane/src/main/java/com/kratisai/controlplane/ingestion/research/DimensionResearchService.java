@@ -24,23 +24,17 @@ public class DimensionResearchService {
     private final CtxDimensionRepository ctxDimensionRepository;
     private final ResearchDimensionWorker researchDimensionWorker;
     private final IngestionProperties ingestionProperties;
-    private final IngestionBatchLogService ingestionBatchLogService;
 
     public DimensionResearchService(
             CtxDimensionRepository ctxDimensionRepository,
             ResearchDimensionWorker researchDimensionWorker,
-            IngestionProperties ingestionProperties,
-            IngestionBatchLogService ingestionBatchLogService) {
+            IngestionProperties ingestionProperties) {
         this.ctxDimensionRepository = ctxDimensionRepository;
         this.researchDimensionWorker = researchDimensionWorker;
         this.ingestionProperties = ingestionProperties;
-        this.ingestionBatchLogService = ingestionBatchLogService;
     }
 
-    public void researchDimensions(IngestionBatch batch) {
-        var batchLogger = new IngestionBatchLogService.BatchLogger(
-                batch.getId(), batch.getRepository().getTeam().getId(), ingestionBatchLogService);
-
+    public String researchDimensions(IngestionBatch batch, IngestionBatchLogService.BatchLogger batchLogger) {
         List<CtxDimension> dimensions = ctxDimensionRepository.findByBatchId(batch.getId());
         if (dimensions.isEmpty()) {
             throw new IllegalStateException("No dimensions found for batch.");
@@ -72,6 +66,7 @@ public class DimensionResearchService {
                 }));
             }
 
+            int failed = 0;
             for (Future<Map.Entry<CtxDimension, DimensionSynopsisResult>> future : futures) {
                 try {
                     Map.Entry<CtxDimension, DimensionSynopsisResult> entry = future.get();
@@ -82,6 +77,7 @@ public class DimensionResearchService {
                         dimension.setSynopsis(result.synopsis());
                         ctxDimensionRepository.save(dimension);
                     } else {
+                        failed++;
                         batchLogger.error(
                                 "RESEARCH_DIMENSIONS",
                                 "Failed to generate synopsis for dimension: " + dimension.getName());
@@ -98,7 +94,7 @@ public class DimensionResearchService {
                 }
             }
 
-            // Completed successfully
+            return "researched " + dimensions.size() + " dimensions" + (failed > 0 ? " (" + failed + " blank)" : "");
         }
     }
 }

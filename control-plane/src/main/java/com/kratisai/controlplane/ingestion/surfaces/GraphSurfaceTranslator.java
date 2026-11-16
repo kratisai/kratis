@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.ingestion.surfaces;
 
+import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.model.AttributeKind;
 import com.kratisai.controlplane.model.CtxSurface;
 import com.kratisai.controlplane.model.CtxSurfaceAttribute;
@@ -27,11 +28,37 @@ import org.slf4j.LoggerFactory;
 final class GraphSurfaceTranslator {
     private static final Logger log = LoggerFactory.getLogger(GraphSurfaceTranslator.class);
     private static final Set<String> IN_PROCESS_TRANSPORTS = Set.of("event_emitter", "in_process", "local", "memory");
+    private static final Set<String> INTERNAL_GRAPH_EDGES = Set.of(
+            "USAGE",
+            "CONFIGURES",
+            "DEFINES",
+            "DEFINES_METHOD",
+            "IMPORTS",
+            "DECORATES",
+            "WRITES",
+            "READS",
+            "CONTAINS_FILE",
+            "CONTAINS_FOLDER",
+            "TESTS",
+            "SIMILAR_TO",
+            "SEMANTICALLY_RELATED",
+            "MENTIONS",
+            "REFERENCES_FILE",
+            "OVERRIDE",
+            "IMPLEMENTS",
+            "INHERITS",
+            "CALL_REFERENCE",
+            "SPAWNS",
+            "HAS_BRANCH",
+            "DIAGRAM_ARROW",
+            "RAISES",
+            "THROWS");
     private static final Pattern LINE_SUFFIX = Pattern.compile("^(.+):([1-9][0-9]*)$");
     private static final Pattern NAMED_PLACEHOLDER = Pattern.compile("\\{[^{}]+\\}");
     static final int MAX_NON_SYFT_ATTRIBUTES = 30;
 
-    List<CtxSurface> translate(IngestionBatch batch, ParserGraph graph, SurfaceCounters counters) {
+    List<CtxSurface> translate(
+            IngestionBatch batch, ParserGraph graph, IngestionBatchLogService.BatchLogger batchLogger) {
         Set<Long> ownRoutes = new HashSet<>();
         Set<String> ownRoutePaths = new HashSet<>();
         Set<Long> linkedRoutes = new HashSet<>();
@@ -58,69 +85,82 @@ final class GraphSurfaceTranslator {
 
         Map<GroupKey, List<CtxSurface>> groups = new LinkedHashMap<>();
         for (ParserGraph.Edge edge : graph.edges()) {
-            if ("USAGE".equals(edge.type()) || "CONFIGURES".equals(edge.type())) {
+            if (INTERNAL_GRAPH_EDGES.contains(edge.type())) {
                 continue;
             }
             ParserGraph.Node source = graph.nodes().get(edge.sourceId());
             ParserGraph.Node target = graph.nodes().get(edge.targetId());
             if (source == null || target == null) {
-                counters.increment("dropped.dangling_edge:" + edge.type());
+                debug(
+                        batchLogger,
+                        "Dropped dangling " + edge.type() + " edge (source=" + edge.sourceId() + ", target="
+                                + edge.targetId() + ")");
                 continue;
             }
             boolean registration = "CALLS".equals(edge.type())
                     && "Route".equals(target.label())
                     && "route_registration".equals(text(edge.props(), "via"));
             if ("CALLS".equals(edge.type()) && !registration) {
-                if ("Route".equals(target.label())) {
-                    counters.increment("ignored.edge:CALLS");
-                } else if (source.filePath().equals(target.filePath())) {
-                    counters.increment("cmm.ignored_same_file_call");
-                } else if (!shouldSkip(source, target, counters)) {
-                    counters.increment("cmm.unclassified_cross_file_call");
-                }
                 continue;
             }
             if ("ASYNC_CALLS".equals(edge.type())) {
-                if (shouldSkip(source, target, counters)) {
+                if (shouldSkip(source, target)) {
                     continue;
                 }
                 String asyncTransport =
                         firstText(edge.props(), target.props(), "transport", "broker", "framework", "protocol");
                 if (asyncTransport != null && IN_PROCESS_TRANSPORTS.contains(asyncTransport.toLowerCase(Locale.ROOT))) {
-                    counters.increment("cmm.excluded_in_process");
+                    debug(
+                            batchLogger,
+                            "Excluded in-process ASYNC_CALLS (" + asyncTransport + ") " + target.name() + " at "
+                                    + nodeLocation(source));
                 } else {
-                    counters.increment("cmm.unclassified_async_call");
+                    debug(
+                            batchLogger,
+                            "Ignored unclassified ASYNC_CALLS to " + target.name() + " at " + nodeLocation(source));
                 }
                 continue;
             }
             SurfaceRole role =
                     switch (edge.type()) {
                         case "HANDLES" -> SurfaceRole.PROVIDES;
-                        case "EMITS" -> SurfaceRole.PROVIDES;
-                        case "HTTP_CALLS", "LISTENS_ON" -> SurfaceRole.REQUIRES;
+                        case "EMITS", "LISTENS_ON" -> SurfaceRole.BIDIRECTIONAL;
+                        case "HTTP_CALLS" -> SurfaceRole.REQUIRES;
                         case "CALLS" -> SurfaceRole.PROVIDES;
                         case "DEPENDS_ON" -> "Image".equals(target.label()) ? SurfaceRole.REQUIRES : null;
                         default -> null;
                     };
             if (role == null) {
-                counters.increment("ignored.edge:" + edge.type());
+                debug(
+                        batchLogger,
+                        "Ignored " + edge.type() + " edge to " + target.label() + " " + target.name() + " at "
+                                + nodeLocation(source));
                 continue;
             }
             if ("HANDLES".equals(edge.type()) && !"Route".equals(target.label())) {
-                counters.increment("ignored.edge:HANDLES_non_route");
+                debug(
+                        batchLogger,
+                        "Ignored HANDLES edge to non-Route " + target.label() + " " + target.name() + " at "
+                                + nodeLocation(source));
                 continue;
             }
-            if (shouldSkip(source, target, counters)) {
+            if (shouldSkip(source, target)) {
                 continue;
             }
             String transport = firstText(edge.props(), target.props(), "transport", "broker", "framework", "protocol");
             if (transport != null && IN_PROCESS_TRANSPORTS.contains(transport.toLowerCase(Locale.ROOT))) {
-                counters.increment("cmm.excluded_in_process");
+                debug(
+                        batchLogger,
+                        "Excluded in-process " + edge.type() + " (" + transport + ") " + target.name() + " at "
+                                + nodeLocation(source));
                 continue;
             }
             String url = firstText(edge.props(), target.props(), "url_path", "path");
             if ("HTTP_CALLS".equals(edge.type()) && selfCall(url, edge.targetId(), ownRoutes, ownRoutePaths)) {
-                counters.increment("cmm.excluded_self_call");
+                debug(
+                        batchLogger,
+                        "Excluded self-call HTTP_CALLS " + firstNonBlank(url, target.name()) + " at "
+                                + nodeLocation(source));
                 continue;
             }
             if ("Route".equals(target.label())) {
@@ -136,7 +176,7 @@ final class GraphSurfaceTranslator {
                 if (endpoint == null || endpoint.isBlank()) {
                     addPrefixed(
                             surface,
-                            AttributeKind.REF,
+                            AttributeKind.IDENTIFIER,
                             "target",
                             firstText(edge.props(), target.props(), "args", "callee"));
                 }
@@ -146,7 +186,7 @@ final class GraphSurfaceTranslator {
             add(surface, AttributeKind.TECHNOLOGY, transport);
             add(surface, AttributeKind.FILE, anchor(source));
             add(surface, AttributeKind.FILE, anchor(target));
-            GroupKey groupKey = edgeGroup(edge.type(), role, source, url, transport, channel);
+            GroupKey groupKey = edgeGroup(edge.type(), source, url, transport, channel);
             groups.computeIfAbsent(groupKey, ignored -> new ArrayList<>()).add(surface);
         }
 
@@ -155,53 +195,56 @@ final class GraphSurfaceTranslator {
                 continue;
             }
             if (isTest(node.props(), node.filePath())) {
-                counters.increment("cmm.excluded_test");
                 continue;
             }
             String routeSource = text(node.props(), "source");
             if (!isSpecificationSource(routeSource)) {
-                counters.increment("cmm.unclassified_route");
+                debug(batchLogger, "Ignored unclassified Route " + node.name() + " at " + nodeLocation(node));
                 continue;
-            }
-            if (!bool(node.props(), "is_test").equals(Optional.of(Boolean.FALSE))) {
-                counters.increment("cmm.unknown_scope");
             }
             CtxSurface surface = newSurface(batch, SurfaceRole.PROVIDES, "Route");
             add(surface, AttributeKind.ENDPOINT, node.name());
             add(surface, AttributeKind.METHOD, text(node.props(), "method"));
             add(surface, AttributeKind.FILE, anchor(node));
-            addSpecificationHandler(surface, node, handlersByName, counters);
+            addSpecificationHandler(surface, node, handlersByName);
             GroupKey groupKey = specificationRouteGroup(node);
             groups.computeIfAbsent(groupKey, ignored -> new ArrayList<>()).add(surface);
         }
-        addResourceNodes(batch, graph, counters, groups);
-        addBuildDefinitionNodes(batch, graph, counters, groups);
+        addResourceNodes(batch, graph, batchLogger, groups);
+        addBuildDefinitionNodes(batch, graph, groups);
         logGroups(groups);
         return merge(groups, batch);
+    }
+
+    private static void debug(IngestionBatchLogService.BatchLogger batchLogger, String message) {
+        if (batchLogger != null) {
+            batchLogger.debug("EXTRACT_SURFACES", message);
+        }
+    }
+
+    private static String nodeLocation(ParserGraph.Node node) {
+        String loc = anchor(node);
+        return loc != null ? loc : node.name();
     }
 
     private static boolean isSpecificationSource(String source) {
         return "openapi".equals(source) || "proto".equals(source);
     }
 
-    private static boolean shouldSkip(ParserGraph.Node source, ParserGraph.Node target, SurfaceCounters counters) {
+    private static boolean shouldSkip(ParserGraph.Node source, ParserGraph.Node target) {
         Optional<Boolean> sourceTest = bool(source.props(), "is_test");
         Optional<Boolean> targetTest = bool(target.props(), "is_test");
-        if (sourceTest.equals(Optional.of(Boolean.TRUE))
+        return sourceTest.equals(Optional.of(Boolean.TRUE))
                 || targetTest.equals(Optional.of(Boolean.TRUE))
                 || isTestPath(source.filePath())
-                || isTestPath(target.filePath())) {
-            counters.increment("cmm.excluded_test");
-            return true;
-        }
-        if (sourceTest.isEmpty() && targetTest.isEmpty()) {
-            counters.increment("cmm.unknown_scope");
-        }
-        return false;
+                || isTestPath(target.filePath());
     }
 
     private static void addResourceNodes(
-            IngestionBatch batch, ParserGraph graph, SurfaceCounters counters, Map<GroupKey, List<CtxSurface>> groups) {
+            IngestionBatch batch,
+            ParserGraph graph,
+            IngestionBatchLogService.BatchLogger batchLogger,
+            Map<GroupKey, List<CtxSurface>> groups) {
         Map<Long, List<ParserGraph.Edge>> outgoing = new LinkedHashMap<>();
         for (ParserGraph.Edge edge : graph.edges()) {
             outgoing.computeIfAbsent(edge.sourceId(), ignored -> new ArrayList<>())
@@ -212,26 +255,25 @@ final class GraphSurfaceTranslator {
                 continue;
             }
             if (isTest(node.props(), node.filePath())) {
-                counters.increment("cmm.excluded_test");
                 continue;
             }
             CtxSurface surface = newSurface(batch, SurfaceRole.PROVIDES, "Resource");
-            add(surface, AttributeKind.NAME, node.name());
+            add(surface, AttributeKind.IDENTIFIER, node.name());
             String serviceName = text(node.props(), "service");
             if (serviceName != null && !serviceName.isBlank() && !serviceName.equals(node.name())) {
-                add(surface, AttributeKind.NAME, serviceName);
+                add(surface, AttributeKind.IDENTIFIER, serviceName);
             }
             add(surface, AttributeKind.TECHNOLOGY, firstText(node.props(), Map.of(), "ecosystem", "source"));
-            addPrefixed(surface, AttributeKind.REF, "kind", text(node.props(), "kind"));
-            addPrefixed(surface, AttributeKind.REF, "group", text(node.props(), "group"));
-            addPrefixed(surface, AttributeKind.REF, "version", text(node.props(), "version"));
-            addPrefixed(surface, AttributeKind.REF, "obj_key", text(node.props(), "obj_key"));
+            addPrefixed(surface, AttributeKind.IDENTIFIER, "kind", text(node.props(), "kind"));
+            addPrefixed(surface, AttributeKind.IDENTIFIER, "group", text(node.props(), "group"));
+            addPrefixed(surface, AttributeKind.IDENTIFIER, "version", text(node.props(), "version"));
+            addPrefixed(surface, AttributeKind.IDENTIFIER, "obj_key", text(node.props(), "obj_key"));
             add(surface, AttributeKind.FILE, anchor(node));
-            addInfrastructureReferences(surface, outgoing.getOrDefault(node.id(), List.of()), graph.nodes(), counters);
+            addInfrastructureReferences(
+                    surface, outgoing.getOrDefault(node.id(), List.of()), graph.nodes(), batchLogger);
             GroupKey key = new GroupKey(
                     SurfaceRole.PROVIDES, "resource|" + file(node), "Resources declared in " + display(node));
             groups.computeIfAbsent(key, ignored -> new ArrayList<>()).add(surface);
-            counters.increment("cmm.resource_node");
         }
     }
 
@@ -239,64 +281,60 @@ final class GraphSurfaceTranslator {
             CtxSurface surface,
             List<ParserGraph.Edge> edges,
             Map<Long, ParserGraph.Node> nodes,
-            SurfaceCounters counters) {
+            IngestionBatchLogService.BatchLogger batchLogger) {
         for (ParserGraph.Edge edge : edges) {
             ParserGraph.Node target = nodes.get(edge.targetId());
             if (target == null) {
-                counters.increment("dropped.dangling_edge:" + edge.type());
+                debug(
+                        batchLogger,
+                        "Dropped dangling " + edge.type() + " edge on Resource (target=" + edge.targetId() + ")");
                 continue;
             }
             if (isTest(target.props(), target.filePath())) {
-                counters.increment("cmm.excluded_test");
                 continue;
             }
             if ("USAGE".equals(edge.type()) && "Image".equals(target.label())) {
                 String image =
                         firstNonBlank(target.name(), text(target.props(), "repository"), text(edge.props(), "image"));
                 add(surface, AttributeKind.IDENTIFIER, image);
-                addPrefixed(surface, AttributeKind.REF, "registry", text(target.props(), "registry"));
+                addPrefixed(surface, AttributeKind.IDENTIFIER, "registry", text(target.props(), "registry"));
                 add(surface, AttributeKind.FILE, anchor(target));
-            } else if ("CONFIGURES".equals(edge.type()) && "EnvVar".equals(target.label())) {
-                counters.increment("cmm.ignored_env_var");
             }
         }
     }
 
     private static void addBuildDefinitionNodes(
-            IngestionBatch batch, ParserGraph graph, SurfaceCounters counters, Map<GroupKey, List<CtxSurface>> groups) {
+            IngestionBatch batch, ParserGraph graph, Map<GroupKey, List<CtxSurface>> groups) {
         for (ParserGraph.Node node : graph.nodes().values()) {
             if (!node.props().containsKey("image_context") && !node.props().containsKey("image_files")) {
                 continue;
             }
             if (isTest(node.props(), node.filePath())) {
-                counters.increment("cmm.excluded_test");
                 continue;
             }
-            CtxSurface surface = newSurface(batch, SurfaceRole.PROVIDES, "BuildDefinition");
-            add(surface, AttributeKind.NAME, node.name());
-            addPrefixed(surface, AttributeKind.REF, "build_context", text(node.props(), "image_context"));
+            CtxSurface surface = newSurface(batch, SurfaceRole.REQUIRES, "BuildDefinition");
+            add(surface, AttributeKind.IDENTIFIER, node.name());
+            addPrefixed(surface, AttributeKind.IDENTIFIER, "build_context", text(node.props(), "image_context"));
             for (String buildFile : stringList(node.props().get("image_files"))) {
-                addPrefixed(surface, AttributeKind.REF, "build_file", buildFile);
+                addPrefixed(surface, AttributeKind.IDENTIFIER, "build_file", buildFile);
             }
             add(surface, AttributeKind.FILE, anchor(node));
             GroupKey key =
-                    new GroupKey(SurfaceRole.PROVIDES, "build|" + file(node), "Build definition in " + display(node));
+                    new GroupKey(SurfaceRole.REQUIRES, "build|" + file(node), "Build definition in " + display(node));
             groups.computeIfAbsent(key, ignored -> new ArrayList<>()).add(surface);
-            counters.increment("cmm.build_definition");
         }
     }
 
     private static GroupKey edgeGroup(
-            String type, SurfaceRole role, ParserGraph.Node source, String url, String transport, String channel) {
+            String type, ParserGraph.Node source, String url, String transport, String channel) {
         return switch (type) {
             case "HANDLES", "CALLS" ->
                 new GroupKey(
                         SurfaceRole.PROVIDES,
                         "http-provides|" + file(source),
                         "HTTP API provided by " + display(source));
-            case "EMITS" -> messagingGroup(role, transport, channel, "provided");
+            case "EMITS", "LISTENS_ON" -> messagingGroup(transport, channel);
             case "HTTP_CALLS" -> httpRequiresGroup(source, url);
-            case "LISTENS_ON" -> messagingGroup(role, transport, channel, "consumed");
             case "DEPENDS_ON" ->
                 new GroupKey(
                         SurfaceRole.REQUIRES,
@@ -314,13 +352,12 @@ final class GraphSurfaceTranslator {
                 "HTTP API used by " + display(source) + " on " + host);
     }
 
-    private static GroupKey messagingGroup(SurfaceRole role, String transport, String channel, String verb) {
+    private static GroupKey messagingGroup(String transport, String channel) {
         String actualTransport = transport == null || transport.isBlank() ? "messaging" : transport;
         String family = topicFamily(channel);
-        String key = "messaging-" + role.name().toLowerCase(Locale.ROOT) + "|"
-                + actualTransport.toLowerCase(Locale.ROOT) + "|" + family;
-        String description = actualTransport + " messages " + verb + (family.isBlank() ? "" : " on " + family);
-        return new GroupKey(role, key, description);
+        String key = "messaging-bidirectional|" + actualTransport.toLowerCase(Locale.ROOT) + "|" + family;
+        String description = actualTransport + " messaging" + (family.isBlank() ? "" : " on " + family);
+        return new GroupKey(SurfaceRole.BIDIRECTIONAL, key, description);
     }
 
     private static GroupKey specificationRouteGroup(ParserGraph.Node node) {
@@ -347,7 +384,8 @@ final class GraphSurfaceTranslator {
     }
 
     private static String debugValue(CtxSurfaceAttribute attribute) {
-        if (attribute.getKind() == AttributeKind.REF && attribute.getValue().startsWith("target:")) {
+        if (attribute.getKind() == AttributeKind.IDENTIFIER
+                && attribute.getValue().startsWith("target:")) {
             return "target:<redacted>";
         }
         return attribute.getValue();
@@ -405,11 +443,7 @@ final class GraphSurfaceTranslator {
         Set<String> higherSpecificityValues = new HashSet<>();
         for (CtxSurfaceAttribute attribute : current) {
             AttributeKind kind = attribute.getKind();
-            if (kind == AttributeKind.ENDPOINT
-                    || kind == AttributeKind.IDENTIFIER
-                    || kind == AttributeKind.METHOD
-                    || kind == AttributeKind.TECHNOLOGY
-                    || kind == AttributeKind.NAME) {
+            if (kind == AttributeKind.ENDPOINT || kind == AttributeKind.METHOD || kind == AttributeKind.TECHNOLOGY) {
                 if (kind == AttributeKind.ENDPOINT
                         && attribute.getValue().contains("{}")
                         && namedSkeletons.contains(placeholderSkeleton(attribute.getValue()))) {
@@ -439,7 +473,7 @@ final class GraphSurfaceTranslator {
                     continue;
                 }
             }
-            if (kind == AttributeKind.REF && isShadowedByHigherKind(value, higherSpecificityValues)) {
+            if (kind == AttributeKind.IDENTIFIER && higherSpecificityValues.contains(value)) {
                 continue;
             }
             add(surface, kind, value);
@@ -471,9 +505,7 @@ final class GraphSurfaceTranslator {
             case IDENTIFIER -> 2;
             case METHOD -> 3;
             case TECHNOLOGY -> 4;
-            case NAME -> 5;
-            case FILE -> 6;
-            case REF -> 7;
+            case FILE -> 5;
         };
     }
 
@@ -484,17 +516,6 @@ final class GraphSurfaceTranslator {
     private static String stripLineSuffix(String fileAnchor) {
         Matcher matcher = LINE_SUFFIX.matcher(fileAnchor);
         return matcher.matches() ? matcher.group(1) : fileAnchor;
-    }
-
-    private static boolean isShadowedByHigherKind(String refValue, Set<String> higherSpecificityValues) {
-        if (higherSpecificityValues.contains(refValue)) {
-            return true;
-        }
-        int colon = refValue.indexOf(':');
-        if (colon >= 0 && colon + 1 < refValue.length()) {
-            return higherSpecificityValues.contains(refValue.substring(colon + 1));
-        }
-        return false;
     }
 
     private static boolean selfCall(String url, long targetId, Set<Long> ownRoutes, Set<String> ownRoutePaths) {
@@ -604,17 +625,12 @@ final class GraphSurfaceTranslator {
     }
 
     private static void addSpecificationHandler(
-            CtxSurface surface,
-            ParserGraph.Node route,
-            Map<String, List<ParserGraph.Node>> handlersByName,
-            SurfaceCounters counters) {
+            CtxSurface surface, ParserGraph.Node route, Map<String, List<ParserGraph.Node>> handlersByName) {
         String operationId = text(route.props(), "operation_id");
-        addPrefixed(surface, AttributeKind.REF, "operation_id", operationId);
+        addPrefixed(surface, AttributeKind.IDENTIFIER, "operation_id", operationId);
         List<ParserGraph.Node> candidates =
                 operationId == null ? List.of() : handlersByName.getOrDefault(operationId, List.of());
         if (candidates.size() != 1) {
-            String protocol = "proto".equals(text(route.props(), "source")) ? "grpc" : "http";
-            counters.increment("payload.no_handler:" + protocol);
             return;
         }
         ParserGraph.Node handler = candidates.getFirst();

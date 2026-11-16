@@ -1,0 +1,21 @@
+databaseChangeLog:
+- changeSet:
+    id: 023-rename-deploys-to-hosts-001
+    author: kratis
+    changes:
+    - sql:
+        dbms: postgresql
+        endDelimiter: ;
+        splitStatements: true
+        sql: >-
+          DELETE FROM ctx_repo_relations d
+          WHERE d.nature = 'DEPLOYS'
+            AND EXISTS (
+              SELECT 1 FROM ctx_repo_relations h
+              WHERE h.batch_a_id = d.batch_a_id
+                AND h.batch_b_id = d.batch_b_id
+                AND h.nature = 'HOSTS'
+            );
+          UPDATE ctx_repo_relations
+          SET nature = 'HOSTS'
+          WHERE nature = 'DEPLOYS';

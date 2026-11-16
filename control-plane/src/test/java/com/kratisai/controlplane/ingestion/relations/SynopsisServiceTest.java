@@ -95,7 +95,7 @@ class SynopsisServiceTest {
         when(required.getDetectedBy()).thenReturn(SurfaceDetection.MODEL);
         when(required.getAttributeRows()).thenReturn(List.of());
         when(name.getId()).thenReturn(nameId);
-        when(name.getKind()).thenReturn(AttributeKind.NAME);
+        when(name.getKind()).thenReturn(AttributeKind.IDENTIFIER);
         when(name.getValue()).thenReturn("orders");
         when(name.getDetectedBy()).thenReturn(SurfaceDetection.MODEL);
         when(file.getId()).thenReturn(fileId);
@@ -117,7 +117,7 @@ class SynopsisServiceTest {
                         fileId.toString(),
                         "Event publisher",
                         "Unfamiliar transport consumer",
-                        "name=orders",
+                        "identifier=orders",
                         "file=src/events.java",
                         "source: MODEL",
                         "Seed known_as names: [orders]");
@@ -147,23 +147,27 @@ class SynopsisServiceTest {
     }
 
     @Test
-    void excludesLegacyAndUnclassifiedSurfacesFromSynopsisInputs() {
+    void excludesOnlyLegacySurfacesFromSynopsisInputs() {
         CtxSurface legacy = mock(CtxSurface.class);
-        CtxSurface unclassified = mock(CtxSurface.class);
+        CtxSurface unknownRole = mock(CtxSurface.class);
         CtxSurface current = mock(CtxSurface.class);
+        UUID unknownId = UUID.randomUUID();
         UUID currentId = UUID.randomUUID();
         when(legacy.getDetectedBy()).thenReturn(SurfaceDetection.UNKNOWN);
-        when(unclassified.getDetectedBy()).thenReturn(SurfaceDetection.CMM);
-        when(unclassified.getRole()).thenReturn(SurfaceRole.UNKNOWN);
+        when(unknownRole.getDetectedBy()).thenReturn(SurfaceDetection.CMM);
+        when(unknownRole.getId()).thenReturn(unknownId);
+        when(unknownRole.getRole()).thenReturn(SurfaceRole.UNKNOWN);
+        when(unknownRole.getDescription()).thenReturn("ambiguous interface");
+        when(unknownRole.getAttributeRows()).thenReturn(List.of());
         when(current.getDetectedBy()).thenReturn(SurfaceDetection.CMM);
         when(current.getId()).thenReturn(currentId);
         when(current.getRole()).thenReturn(SurfaceRole.PROVIDES);
         when(current.getDescription()).thenReturn("production interface");
         when(current.getAttributeRows()).thenReturn(List.of());
 
-        assertThat(SynopsisService.evidenceSurfaces(List.of(legacy, unclassified, current)))
+        assertThat(SynopsisService.evidenceSurfaces(List.of(legacy, unknownRole, current)))
                 .extracting(SynopsisService.SurfaceEvidence::id)
-                .containsExactly(currentId);
+                .containsExactly(unknownId, currentId);
     }
 
     @Test
@@ -215,10 +219,10 @@ class SynopsisServiceTest {
 
     @Test
     void promptPreservesProvenanceAndSeedsOnlyProvidedNames() {
-        var duplicate = new SynopsisService.AttributeEvidence(UUID.randomUUID(), "name", "orders", "MODEL");
+        var duplicate = new SynopsisService.AttributeEvidence(UUID.randomUUID(), "identifier", "orders", "MODEL");
         var identifier = new SynopsisService.AttributeEvidence(UUID.randomUUID(), "identifier", "pkg/orders", "SYFT");
         var file = new SynopsisService.AttributeEvidence(UUID.randomUUID(), "file", "orders.yaml", "CMM");
-        var required = new SynopsisService.AttributeEvidence(UUID.randomUUID(), "name", "external", "CMM");
+        var required = new SynopsisService.AttributeEvidence(UUID.randomUUID(), "identifier", "external", "CMM");
         var unknown = new SynopsisService.AttributeEvidence(UUID.randomUUID(), "identifier", "unverified", "UNKNOWN");
         var surfaces = List.of(
                 new SynopsisService.SurfaceEvidence(
@@ -253,8 +257,9 @@ class SynopsisServiceTest {
                 .contains("Repository: orders-repo", "[" + dimensionId + "] Product", "Messaging: ")
                 .contains("w".repeat(4000) + "\n...", "d".repeat(500) + "\n...", "p".repeat(300) + "\n...")
                 .doesNotContain("w".repeat(4001), "d".repeat(501), "p".repeat(301))
-                .contains("file=orders.yaml (source: CMM)", "identifier=pkg/orders (source: SYFT)")
-                .contains("name=external (source: CMM)", "identifier=unverified (source: UNKNOWN)")
+                .contains("file=orders.yaml (source: CMM)", "identifier=orders (source: MODEL)")
+                .contains("identifier=pkg/orders (source: SYFT)", "identifier=external (source: CMM)")
+                .contains("identifier=unverified (source: UNKNOWN)")
                 .contains("Seed known_as names: [orders, pkg/orders]");
     }
 
@@ -397,7 +402,7 @@ class SynopsisServiceTest {
         when(surface.getDetectedBy()).thenReturn(SurfaceDetection.CMM);
         when(surface.getAttributeRows()).thenReturn(List.of(attribute));
         when(attribute.getId()).thenReturn(attributeId);
-        when(attribute.getKind()).thenReturn(AttributeKind.NAME);
+        when(attribute.getKind()).thenReturn(AttributeKind.IDENTIFIER);
         when(attribute.getValue()).thenReturn("orders");
         when(attribute.getDetectedBy()).thenReturn(SurfaceDetection.MODEL);
         when(fixture.surfaces.findByBatchId(fixture.batchId)).thenReturn(List.of(surface));
@@ -432,7 +437,7 @@ class SynopsisServiceTest {
                         surfaceId.toString(),
                         attributeId.toString(),
                         "orders publisher",
-                        "name=orders (source: MODEL)"));
+                        "identifier=orders (source: MODEL)"));
     }
 
     @Test

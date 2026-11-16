@@ -112,7 +112,7 @@ public class SearchRepositoryFilesTool {
         SearchFilesResult result = new SearchFilesResult(List.copyOf(hits), truncated, null);
         Object logger = toolContext.getContext().get("batchLogger");
         if (logger instanceof IngestionBatchLogService.BatchLogger batchLogger) {
-            batchLogger.info(
+            batchLogger.debug(
                     "ASSIST_SURFACES_SEARCH_FILES",
                     "pattern=" + pattern
                             + " glob=" + (pathGlob == null || pathGlob.isBlank() ? "*" : pathGlob)

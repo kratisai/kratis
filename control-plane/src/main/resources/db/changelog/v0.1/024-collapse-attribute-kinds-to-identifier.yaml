@@ -1,0 +1,26 @@
+databaseChangeLog:
+- changeSet:
+    id: 024-collapse-attribute-kinds-to-identifier-001
+    author: kratis
+    changes:
+    - sql:
+        dbms: postgresql
+        endDelimiter: ;
+        splitStatements: true
+        sql: >-
+          DELETE FROM ctx_surface_attributes a
+          WHERE a.kind IN ('NAME', 'REF')
+            AND EXISTS (
+              SELECT 1 FROM ctx_surface_attributes keep
+              WHERE keep.surface_id = a.surface_id
+                AND keep.value = a.value
+                AND keep.detected_by = a.detected_by
+                AND (
+                  keep.kind = 'IDENTIFIER'
+                  OR (keep.kind = 'NAME' AND a.kind = 'REF')
+                  OR (keep.kind = a.kind AND keep.id < a.id)
+                )
+            );
+          UPDATE ctx_surface_attributes
+          SET kind = 'IDENTIFIER'
+          WHERE kind IN ('NAME', 'REF');

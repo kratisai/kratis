@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.ingestion.surfaces;
 
+import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.ingestion.parse.CodebaseMemoryParserService;
 import com.kratisai.controlplane.model.CtxSurface;
 import com.kratisai.controlplane.model.CtxSurfaceAttribute;
@@ -10,18 +11,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 
 @Service
 public class SurfaceExtractionService {
-    public record Result(int persisted, Map<String, Integer> counters) {
+    public record Result(int persisted, int cmmCount, int syftCount, int unparsedFiles) {
         public String summary() {
-            String details = counters.entrySet().stream()
-                    .map(entry -> entry.getKey() + "=" + entry.getValue())
-                    .collect(Collectors.joining(", "));
-            return "Persisted " + persisted + " surfaces. " + details;
+            String base = "persisted " + persisted + " surfaces (CMM: " + cmmCount + ", Syft: " + syftCount + ")";
+            return unparsedFiles > 0 ? base + ", " + unparsedFiles + " unparsed files" : base;
         }
     }
 
@@ -44,18 +41,21 @@ public class SurfaceExtractionService {
         this.ctxSurfaceAttributeRepository = ctxSurfaceAttributeRepository;
     }
 
-    public Result extract(IngestionBatch batch, Path cloneDirectory) {
+    public Result extract(IngestionBatch batch, Path cloneDirectory, IngestionBatchLogService.BatchLogger batchLogger) {
         Path sqlitePath = parserService.sqlitePathFor(batch);
         if (!Files.isRegularFile(sqlitePath)) {
             throw new IllegalStateException("Parser database missing at " + sqlitePath + " for batch " + batch.getId()
                     + "; EXTRACT_SURFACES must run before the parser database is removed");
         }
-        SurfaceCounters counters = new SurfaceCounters();
-        List<CtxSurface> extracted = new ArrayList<>(graphSurfaceAdapter.extract(
-                batch, sqlitePath, CodebaseMemoryParserService.projectName(batch), counters));
-        extracted.addAll(syftSurfaceAdapter.extract(batch, cloneDirectory, counters));
+        GraphSurfaceAdapter.Result cmmResult = graphSurfaceAdapter.extract(
+                batch, sqlitePath, CodebaseMemoryParserService.projectName(batch), batchLogger);
+        List<CtxSurface> syftSurfaces = syftSurfaceAdapter.extract(batch, cloneDirectory, batchLogger);
+        List<CtxSurface> extracted = new ArrayList<>(cmmResult.surfaces().size() + syftSurfaces.size());
+        extracted.addAll(cmmResult.surfaces());
+        extracted.addAll(syftSurfaces);
         persist(extracted);
-        return new Result(extracted.size(), counters.snapshot());
+        return new Result(
+                extracted.size(), cmmResult.surfaces().size(), syftSurfaces.size(), cmmResult.unparsedFiles());
     }
 
     void persist(List<CtxSurface> extracted) {

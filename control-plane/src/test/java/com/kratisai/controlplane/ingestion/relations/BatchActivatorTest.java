@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -234,32 +235,58 @@ class BatchActivatorTest {
     }
 
     @Test
-    void excludesLegacyAndUnclassifiedSurfacesFromMatchingAndReportsCounts() throws Exception {
+    void excludesOnlyLegacySurfacesFromMatchingAndReportsCounts() throws Exception {
         CtxSurface legacy = mock(CtxSurface.class);
-        CtxSurface unclassified = mock(CtxSurface.class);
+        CtxSurface unknownRole = mock(CtxSurface.class);
         CtxSurface current = mock(CtxSurface.class);
+        UUID unknownRoleId = UUID.randomUUID();
         when(legacy.getDetectedBy()).thenReturn(SurfaceDetection.UNKNOWN);
-        when(unclassified.getDetectedBy()).thenReturn(SurfaceDetection.CMM);
-        when(unclassified.getRole()).thenReturn(SurfaceRole.UNKNOWN);
+        when(unknownRole.getDetectedBy()).thenReturn(SurfaceDetection.CMM);
+        when(unknownRole.getRole()).thenReturn(SurfaceRole.UNKNOWN);
+        when(unknownRole.getBatch()).thenReturn(subject);
+        when(unknownRole.getId()).thenReturn(unknownRoleId);
         when(current.getDetectedBy()).thenReturn(SurfaceDetection.CMM);
         when(current.getRole()).thenReturn(SurfaceRole.PROVIDES);
         when(current.getBatch()).thenReturn(subject);
         when(current.getId()).thenReturn(subjectSurfaceId);
-        when(surfaces.findByBatchIdIn(any())).thenReturn(List.of(legacy, unclassified, current));
+        when(surfaces.findByBatchIdIn(any())).thenReturn(List.of(legacy, unknownRole, current));
         stubInference(List.of());
         activator(mapper).activate(subject.getId(), logger, "commit");
         var subjectView = ArgumentCaptor.forClass(CrossRepoMatchingService.RepoView.class);
         verify(inference).infer(eq(subject.getId()), subjectView.capture(), any(), eq(logger));
         assertThat(subjectView.getValue().surfaces())
                 .extracting(CrossRepoMatchingService.SurfaceView::id)
-                .containsExactly(subjectSurfaceId);
+                .containsExactly(unknownRoleId, subjectSurfaceId);
         verify(logs)
                 .log(
                         eq(subject.getId()),
                         eq(teamId),
                         eq("INFO"),
                         eq("ACTIVATE_BATCH"),
-                        eq("Excluded 1 legacy UNKNOWN-provenance surfaces and 1 unclassified surfaces from matching."));
+                        eq("Excluded 1 legacy UNKNOWN-provenance surfaces from matching."));
+    }
+
+    @Test
+    void preservesUnknownDirectionAcrossCanonicalOrderingAndMerging() throws Exception {
+        var directed = match(Direction.A_TO_B, Ceiling.CONFIRMED);
+        var unknown = match(Direction.UNKNOWN, Ceiling.SUGGESTED);
+        stubInference(List.of(directed, unknown));
+
+        activator(mapper).activate(subject.getId(), logger, "commit");
+
+        ArgumentCaptor<CtxRepoRelation> saved = ArgumentCaptor.forClass(CtxRepoRelation.class);
+        verify(relations).save(saved.capture());
+        assertThat(saved.getValue().getDirection()).isEqualTo(Direction.B_TO_A);
+
+        reset(relations);
+        when(relations.findByBatchAIdAndBatchBIdAndNature(any(), any(), any())).thenReturn(Optional.empty());
+        stubInference(List.of(unknown));
+
+        activator(mapper).activate(subject.getId(), logger, "commit");
+
+        ArgumentCaptor<CtxRepoRelation> unknownOnly = ArgumentCaptor.forClass(CtxRepoRelation.class);
+        verify(relations).save(unknownOnly.capture());
+        assertThat(unknownOnly.getValue().getDirection()).isEqualTo(Direction.UNKNOWN);
     }
 
     @Test

@@ -52,7 +52,6 @@ public class PatternResearchService {
     private final CtxArchitecturePatternRepository ctxArchitecturePatternRepository;
     private final ChatModelFactory chatModelFactory;
     private final LiteLLMProvisioningService litellmProvisioningService;
-    private final IngestionBatchLogService ingestionBatchLogService;
     private final IngestionUsageTracker usageTracker;
     private final ToolCallback[] toolCallbacks;
     private final Executor agentTaskExecutor;
@@ -64,7 +63,6 @@ public class PatternResearchService {
             CtxArchitecturePatternRepository ctxArchitecturePatternRepository,
             ChatModelFactory chatModelFactory,
             LiteLLMProvisioningService litellmProvisioningService,
-            IngestionBatchLogService ingestionBatchLogService,
             IngestionUsageTracker usageTracker,
             ReadFileTool readFileTool,
             @Qualifier("agentTaskExecutor") Executor agentTaskExecutor) {
@@ -74,7 +72,6 @@ public class PatternResearchService {
         this.ctxArchitecturePatternRepository = ctxArchitecturePatternRepository;
         this.chatModelFactory = chatModelFactory;
         this.litellmProvisioningService = litellmProvisioningService;
-        this.ingestionBatchLogService = ingestionBatchLogService;
         this.usageTracker = usageTracker;
         this.agentTaskExecutor = agentTaskExecutor;
         this.toolCallbacks =
@@ -95,18 +92,13 @@ public class PatternResearchService {
     }
 
     @Transactional
-    public void researchPatterns(IngestionBatch batch) {
-        var batchLogger = new IngestionBatchLogService.BatchLogger(
-                batch.getId(), batch.getRepository().getTeam().getId(), ingestionBatchLogService);
-
+    public String researchPatterns(IngestionBatch batch, IngestionBatchLogService.BatchLogger batchLogger) {
         List<CtxDimension> archetypeDimensions = ctxDimensionRepository.findByBatchId(batch.getId()).stream()
                 .filter(d -> d.getCategory() == DimensionCategory.ARCHETYPE)
                 .toList();
 
         if (archetypeDimensions.isEmpty()) {
-            batchLogger.info(
-                    "RESEARCH_PATTERNS", "No ARCHETYPE dimensions found. Skipping architecture pattern deduction.");
-            return;
+            return "skipped (no ARCHETYPE dimensions found)";
         }
 
         StringBuilder archetypeContext = new StringBuilder();
@@ -136,16 +128,14 @@ public class PatternResearchService {
         }
 
         if (archetypeContext.isEmpty()) {
-            batchLogger.info(
-                    "RESEARCH_PATTERNS",
-                    "No exemplar files found for any ARCHETYPE dimension. Skipping architecture pattern deduction.");
-            return;
+            return "skipped (no exemplar files found for ARCHETYPE dimensions)";
         }
 
-        executeArchitecturePatternDeduction(batch, archetypeContext.toString(), batchLogger);
+        int saved = executeArchitecturePatternDeduction(batch, archetypeContext.toString(), batchLogger);
+        return "saved " + saved + " architecture patterns";
     }
 
-    private void executeArchitecturePatternDeduction(
+    private int executeArchitecturePatternDeduction(
             IngestionBatch batch, String archetypeContext, IngestionBatchLogService.BatchLogger batchLogger) {
 
         int maxTurns = 10;
@@ -225,7 +215,7 @@ public class PatternResearchService {
 
         ctxArchitecturePatternRepository.saveAll(patterns);
         logger.debug("RESEARCH_PATTERNS: Saved {} architecture patterns.", patterns.size());
-        batchLogger.info("RESEARCH_PATTERNS", "Saved " + patterns.size() + " architecture patterns.");
+        return patterns.size();
     }
 
     private void logToolEvent(
@@ -237,13 +227,13 @@ public class PatternResearchService {
         switch (phase) {
             case START -> {
                 logger.debug("RESEARCH_PATTERNS: calling tool {}{}", toolName, detailAddsContext ? " - " + detail : "");
-                batchLogger.info(
+                batchLogger.debug(
                         "RESEARCH_PATTERNS", "Calling tool: " + toolName + (detailAddsContext ? " - " + detail : ""));
             }
             case COMPLETE -> logger.debug("RESEARCH_PATTERNS: tool {} completed", toolName);
             case ERROR -> {
                 logger.debug("RESEARCH_PATTERNS: tool {} failed: {}", toolName, detail);
-                batchLogger.error("RESEARCH_PATTERNS", "Tool execution failed: " + toolName + " - " + detail);
+                batchLogger.warn("RESEARCH_PATTERNS", "Tool execution failed (retrying): " + toolName + " - " + detail);
             }
         }
     }

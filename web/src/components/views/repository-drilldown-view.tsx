@@ -5,6 +5,7 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  Download,
   FileText,
   GitBranch,
   GitCommit,
@@ -14,7 +15,7 @@ import {
   Terminal,
   XCircle,
 } from 'lucide-react'
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
 import type { ArchitecturePatternDto, DimensionStatDto } from '@/types/auth-types'
 
@@ -32,6 +33,7 @@ import {
 } from '@/hooks/use-repositories'
 import { useStartChat } from '@/hooks/use-start-chat'
 import { formatDurationSeconds, formatRelativeTime, formatSpend } from '@/lib/format'
+import { downloadIngestionLogsCsv } from '@/lib/ingestion-log-export'
 
 export function RepositoryDrilldownView() {
   const { repoId } = useParams({ from: '/repos/$repoId' })
@@ -45,9 +47,10 @@ export function RepositoryDrilldownView() {
   const { data: batchHistory, isLoading: isHistoryLoading } = useBatchHistory(repoId)
   const latestBatchId = repo?.latestBatchId ?? null
 
-  const [selectedBatchId, setSelectedBatchId] = React.useState<null | string>(null)
+  const [selectedBatchId, setSelectedBatchId] = useState<null | string>(null)
+  const [showDebugLogs, setShowDebugLogs] = useState(false)
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (latestBatchId) {
       setSelectedBatchId(latestBatchId)
     }
@@ -55,6 +58,9 @@ export function RepositoryDrilldownView() {
 
   const { data: logs = [], isLoading: isLogsLoading } = useBatchLogs(repoId, selectedBatchId)
   const { data: batchStats, isLoading: isStatsLoading } = useBatchStats(repoId, selectedBatchId)
+
+  const debugLogCount = logs.filter((log) => log.level === 'DEBUG').length
+  const visibleLogs = showDebugLogs ? logs : logs.filter((log) => log.level !== 'DEBUG')
 
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 
@@ -67,7 +73,7 @@ export function RepositoryDrilldownView() {
         viewport.scrollTop = viewport.scrollHeight
       }
     }
-  }, [logs])
+  }, [visibleLogs.length])
 
   const activeStatus = repo?.ingestionStatus ?? 'INACTIVE'
   const isRunning = activeStatus === 'QUEUED' || activeStatus === 'PROCESSING'
@@ -253,15 +259,43 @@ export function RepositoryDrilldownView() {
 
               {/* Terminal Logs Viewer */}
               <div className="relative rounded-2xl border border-black/10 bg-slate-950 p-4 shadow-inner">
-                <div className="mb-3 flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
                   <div className="flex items-center gap-1.5">
                     <div className="h-3.5 w-3.5 rounded-full bg-rose-500/80" />
                     <div className="h-3.5 w-3.5 rounded-full bg-amber-500/80" />
                     <div className="h-3.5 w-3.5 rounded-full bg-emerald-500/80" />
                   </div>
-                  <span className="font-mono text-xs text-slate-500 select-none">
-                    kratis-intel-session
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {debugLogCount > 0 && (
+                      <button
+                        aria-pressed={showDebugLogs}
+                        className={`rounded border px-2 py-0.5 font-mono text-[11px] transition-colors ${
+                          showDebugLogs
+                            ? 'border-slate-600 bg-slate-800 text-slate-200'
+                            : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
+                        }`}
+                        onClick={() => setShowDebugLogs((prev) => !prev)}
+                        type="button"
+                      >
+                        {showDebugLogs
+                          ? `Hide debug (${debugLogCount})`
+                          : `Show debug (${debugLogCount})`}
+                      </button>
+                    )}
+                    {selectedBatchId && logs.length > 0 && (
+                      <button
+                        className="inline-flex items-center gap-1 rounded border border-slate-800 bg-slate-900 px-2 py-0.5 font-mono text-[11px] text-slate-300 transition-colors hover:border-slate-700 hover:text-white"
+                        onClick={() => downloadIngestionLogsCsv(logs, repo.name, selectedBatchId)}
+                        type="button"
+                      >
+                        <Download className="h-3 w-3" />
+                        Download CSV
+                      </button>
+                    )}
+                    <span className="font-mono text-xs text-slate-500 select-none">
+                      kratis-intel-session
+                    </span>
+                  </div>
                 </div>
 
                 <ScrollArea
@@ -286,11 +320,12 @@ export function RepositoryDrilldownView() {
                       <Loader2 className="h-6 w-6 animate-spin text-slate-600" />
                       <span>Fetching logs...</span>
                     </div>
-                  ) : logs.length > 0 ? (
+                  ) : visibleLogs.length > 0 ? (
                     <div className="space-y-1.5 pr-3">
-                      {logs.map((log) => {
+                      {visibleLogs.map((log) => {
                         const isError = log.level === 'ERROR'
                         const isWarn = log.level === 'WARN' || log.level === 'WARNING'
+                        const isDebug = log.level === 'DEBUG'
                         const dateStr = new Date(log.createdAt).toLocaleTimeString()
                         return (
                           <div
@@ -304,7 +339,9 @@ export function RepositoryDrilldownView() {
                                   ? 'bg-red-950 text-red-400'
                                   : isWarn
                                     ? 'bg-amber-950 text-amber-400'
-                                    : 'bg-blue-950 text-blue-400'
+                                    : isDebug
+                                      ? 'bg-slate-800 text-slate-400'
+                                      : 'bg-blue-950 text-blue-400'
                               }`}
                             >
                               {log.level}
@@ -318,7 +355,9 @@ export function RepositoryDrilldownView() {
                                   ? 'text-rose-300'
                                   : isWarn
                                     ? 'text-amber-300'
-                                    : 'text-slate-200'
+                                    : isDebug
+                                      ? 'text-slate-400'
+                                      : 'text-slate-200'
                               }
                             >
                               {log.message}
@@ -326,6 +365,14 @@ export function RepositoryDrilldownView() {
                           </div>
                         )
                       })}
+                    </div>
+                  ) : logs.length > 0 ? (
+                    <div className="flex h-70 flex-col items-center justify-center gap-2 text-slate-500 select-none">
+                      <Terminal className="mb-1 h-8 w-8 text-slate-700" />
+                      <span>Only DEBUG logs recorded for this batch.</span>
+                      <span className="text-[10px] text-slate-600">
+                        Use Show debug above or Download CSV to inspect.
+                      </span>
                     </div>
                   ) : (
                     <div className="flex h-70 flex-col items-center justify-center gap-2 text-slate-500 select-none">

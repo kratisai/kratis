@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.kratisai.controlplane.model.CtxNode;
 import com.kratisai.controlplane.model.IngestionBatch;
+import com.kratisai.controlplane.model.IngestionBatchLog;
 import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.IngestionStatus;
 import com.kratisai.controlplane.model.Repository;
@@ -171,6 +172,22 @@ class IngestionWorkerComponentTest {
         assertThat(nodes)
                 .anyMatch(n -> n.getNodeType() == com.kratisai.controlplane.model.NodeType.CLASS
                         && "UserController".equals(n.getSymbolName()));
+
+        List<IngestionBatchLog> logs = ingestionBatchLogService.getLogsForBatch(batch.getId());
+        assertThat(logs)
+                .anySatisfy(log -> {
+                    assertThat(log.getStep()).isEqualTo("START");
+                    assertThat(log.getLevel()).isEqualTo("INFO");
+                    assertThat(log.getMessage())
+                            .contains(repository.getName())
+                            .contains("test-provider/gpt-4o")
+                            .doesNotContain("ModelProvider@");
+                })
+                .anySatisfy(log -> {
+                    assertThat(log.getStep()).isEqualTo("SUCCESS");
+                    assertThat(log.getLevel()).isEqualTo("INFO");
+                    assertThat(log.getMessage()).contains("Ingestion completed in ");
+                });
     }
 
     @Test

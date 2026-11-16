@@ -5,19 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.ingestion.relations.SynopsisFragments;
-import com.kratisai.controlplane.model.AttributeKind;
-import com.kratisai.controlplane.model.Ceiling;
-import com.kratisai.controlplane.model.CtxNode;
-import com.kratisai.controlplane.model.CtxRepoRelation;
-import com.kratisai.controlplane.model.CtxRepoSynopsis;
-import com.kratisai.controlplane.model.CtxSurface;
-import com.kratisai.controlplane.model.Direction;
-import com.kratisai.controlplane.model.IngestionBatch;
-import com.kratisai.controlplane.model.Nature;
-import com.kratisai.controlplane.model.NodeType;
-import com.kratisai.controlplane.model.Repository;
-import com.kratisai.controlplane.model.SurfaceDetection;
-import com.kratisai.controlplane.model.SurfaceRole;
+import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.CtxNodeRepository;
 import com.kratisai.controlplane.repository.CtxRepoRelationRepository;
 import com.kratisai.controlplane.repository.CtxRepoSynopsisRepository;
@@ -83,23 +71,44 @@ public class RepositoryTool {
     @KratisTool(
             name = "list_repositories",
             description =
-                    "List all repositories ingested for this team. Returns repository names (required as the 'repoName' parameter for other tools), their ingestion status, and the last commit hash analyzed. Call this first to discover which repositories are available.")
+                    "List all repositories ingested for this team. Returns repository names (required as the 'repoName' parameter for other tools), ingestion status, last commit, a compact synopsis, and cross-repository relation lines rendered as readable sentences (for example 'BookingService HOSTS PortalUi'). Call this first to discover which repositories are available.")
     @Transactional(readOnly = true)
     public List<RepositorySummary> listRepositories(ToolContext toolContext) {
         UUID teamId = (UUID) toolContext.getContext().get("teamId");
         List<Repository> repos = repositoryRepository.findByTeamId(teamId);
+        Map<UUID, IngestionBatch> activeBatches = ingestionBatchRepository.findActiveByTeamId(teamId).stream()
+                .collect(Collectors.toMap(
+                        batch -> batch.getRepository().getId(), batch -> batch, (first, second) -> first));
+        Map<UUID, String> synopses = synopsesByBatchId(
+                activeBatches.values().stream().map(IngestionBatch::getId).toList());
+        List<CtxRepoRelation> allRelations = relationRepository.findCurrentByTeamId(teamId);
 
         return repos.stream()
                 .map(repo -> {
-                    var activeBatch = ingestionBatchRepository.findByRepositoryIdAndIsActiveTrue(repo.getId());
+                    IngestionBatch activeBatch = activeBatches.get(repo.getId());
                     return new RepositorySummary(
                             repo.getName(),
                             repo.getUrl(),
-                            activeBatch.map(b -> b.getStatus().name()).orElse("NOT_INGESTED"),
-                            activeBatch.map(IngestionBatch::getCompletedAt).orElse(null),
-                            activeBatch.map(IngestionBatch::getCommitHash).orElse(null));
+                            activeBatch == null
+                                    ? "NOT_INGESTED"
+                                    : activeBatch.getStatus().name(),
+                            activeBatch == null ? null : activeBatch.getCompletedAt(),
+                            activeBatch == null ? null : activeBatch.getCommitHash(),
+                            activeBatch == null ? null : synopses.get(activeBatch.getId()),
+                            compactRelatedRepos(allRelations, repo.getId()));
                 })
                 .toList();
+    }
+
+    private Map<UUID, String> synopsesByBatchId(List<UUID> batchIds) {
+        if (batchIds.isEmpty()) {
+            return Map.of();
+        }
+        return synopsisRepository.findByBatchIdIn(batchIds).stream()
+                .collect(Collectors.toMap(
+                        synopsis -> synopsis.getBatch().getId(),
+                        synopsis -> new SynopsisFragments(synopsis.getSynopsis()).render(),
+                        (first, second) -> first));
     }
 
     @KratisTool(
@@ -132,47 +141,123 @@ public class RepositoryTool {
         int safeDepth = Math.clamp(depth, 1, 5);
 
         // Validate repository exists
-        batchResolutionService.resolveRepository(teamId, repoName);
+        Repository repo = batchResolutionService.resolveRepository(teamId, repoName);
 
         List<CtxNode> downstream = graphQueryService.getDependencies(teamId, repoName, path, safeDepth);
         List<CtxNode> upstream = graphQueryService.getUsages(teamId, repoName, path, safeDepth);
 
         return new DependenciesResponse(
                 downstream.stream().map(CtxNode::getSourceCodeRef).collect(Collectors.toList()),
-                upstream.stream().map(CtxNode::getSourceCodeRef).collect(Collectors.toList()));
+                upstream.stream().map(CtxNode::getSourceCodeRef).collect(Collectors.toList()),
+                crossRepoLinks(teamId, repo.getId(), path));
     }
 
     @KratisTool(
             name = "get_related_repos",
             description =
-                    "List current cross-repository relations and all embedded surface-pair evidence with batch provenance. Relation direction is relative to repositoryA and repositoryB; evidence direction is relative to its subject and other surfaces. An empty evidence list indicates legacy ungrounded relation data, not evidence of a match. Use get_dependencies for within-repository code dependencies.")
+                    "List current cross-repository relations grouped by peer repository, including each peer repository's synopsis and ingestion status. Each relation reports the current repository's file anchors, a readable relation sentence naming the acting side (for example 'PortalUi CALLS BookingService'), and the rationale. Use get_dependencies for within-repository code dependencies.")
     @Transactional(readOnly = true)
-    public List<RelatedRepository> getRelatedRepos(
+    public List<RelatedRepoSummary> getRelatedRepos(
             @ToolParam(description = "The repository name (from list_repositories)") String repoName,
             ToolContext toolContext) {
         UUID teamId = (UUID) toolContext.getContext().get("teamId");
         Repository repo = batchResolutionService.resolveRepository(teamId, repoName);
-        return relationRepository.findCurrentForRepository(teamId, repo.getId()).stream()
-                .map(this::relatedRepository)
+        List<CtxRepoRelation> relations = relationRepository.findCurrentForRepository(teamId, repo.getId());
+
+        Map<String, IngestionBatch> otherBatches = new LinkedHashMap<>();
+        Map<String, List<RepoRelationSummary>> grouped = new LinkedHashMap<>();
+
+        for (CtxRepoRelation relation : relations) {
+            boolean repoIsA = relation.getBatchA().getRepository().getId().equals(repo.getId());
+            IngestionBatch otherBatch = repoIsA ? relation.getBatchB() : relation.getBatchA();
+            IngestionBatch currentBatch = repoIsA ? relation.getBatchA() : relation.getBatchB();
+            String otherName = otherBatch.getRepository().getName();
+
+            otherBatches.putIfAbsent(otherName, otherBatch);
+            List<String> currentRepoFiles = extractFilesForBatch(relation, currentBatch.getId());
+            grouped.computeIfAbsent(otherName, ignored -> new ArrayList<>())
+                    .add(new RepoRelationSummary(
+                            currentRepoFiles, otherName, formatRelation(relation), relation.getRationale()));
+        }
+
+        return grouped.entrySet().stream()
+                .map(entry -> {
+                    IngestionBatch otherBatch = otherBatches.get(entry.getKey());
+                    return new RelatedRepoSummary(
+                            entry.getKey(),
+                            renderSynopsis(otherBatch.getId()),
+                            otherBatch.getStatus().name(),
+                            entry.getValue());
+                })
                 .toList();
     }
 
-    private RelatedRepository relatedRepository(CtxRepoRelation relation) {
-        return new RelatedRepository(
-                relation.getId(),
-                relation.getBatchA().getRepository().getName(),
-                relation.getBatchB().getRepository().getName(),
-                relation.getBatchA().getId(),
-                relation.getBatchB().getId(),
-                relation.getNature(),
-                relation.getDirection(),
-                relation.getConfidence(),
-                relation.getRationale(),
-                relation.getCitations(),
-                surfacePairs(relation));
+    private String renderSynopsis(UUID batchId) {
+        return synopsisRepository
+                .findByBatchId(batchId)
+                .map(s -> new SynopsisFragments(s.getSynopsis()).render())
+                .orElse(null);
     }
 
-    private List<SurfacePairEvidence> surfacePairs(CtxRepoRelation relation) {
+    private List<String> compactRelatedRepos(List<CtxRepoRelation> allRelations, UUID repoId) {
+        return allRelations.stream()
+                .filter(relation -> relation.getBatchA().getRepository().getId().equals(repoId)
+                        || relation.getBatchB().getRepository().getId().equals(repoId))
+                .map(RepositoryTool::formatRelation)
+                .distinct()
+                .toList();
+    }
+
+    private static String formatRelation(CtxRepoRelation relation) {
+        return renderRelation(
+                relation.getBatchA().getRepository().getName(),
+                relation.getBatchB().getRepository().getName(),
+                relation.getNature(),
+                relation.getDirection());
+    }
+
+    /**
+     * Direction names the upstream side: A_TO_B means A serves, publishes, or hosts B. CALLS and
+     * BUILDS_AGAINST are performed by the downstream side, so their operands are swapped.
+     */
+    static String renderRelation(String nameA, String nameB, Nature nature, Direction direction) {
+        boolean verbIsPerformedByDownstream =
+                switch (nature) {
+                    case CALLS, BUILDS_AGAINST -> true;
+                    case MESSAGES, HOSTS, SHARES_STATE, PEER -> false;
+                };
+        return switch (direction) {
+            case A_TO_B ->
+                verbIsPerformedByDownstream ? nameB + " " + nature + " " + nameA : nameA + " " + nature + " " + nameB;
+            case B_TO_A ->
+                verbIsPerformedByDownstream ? nameA + " " + nature + " " + nameB : nameB + " " + nature + " " + nameA;
+            case BIDIRECTIONAL, UNKNOWN -> nameA + " <-> " + nameB + " (" + nature + ")";
+        };
+    }
+
+    private List<CrossRepoLink> crossRepoLinks(UUID teamId, UUID repoId, String path) {
+        int colonIdx = path.indexOf(':');
+        String filePath = colonIdx >= 0 ? path.substring(0, colonIdx) : path;
+        List<CrossRepoLink> links = new ArrayList<>();
+        for (CtxRepoRelation relation : relationRepository.findCurrentForRepository(teamId, repoId)) {
+            boolean repoIsA = relation.getBatchA().getRepository().getId().equals(repoId);
+            IngestionBatch currentBatch = repoIsA ? relation.getBatchA() : relation.getBatchB();
+            IngestionBatch otherBatch = repoIsA ? relation.getBatchB() : relation.getBatchA();
+            List<String> currentFiles = extractFilesForBatch(relation, currentBatch.getId());
+            boolean matchesFile =
+                    currentFiles.stream().anyMatch(f -> f.equals(filePath) || f.startsWith(filePath + ":"));
+            if (matchesFile) {
+                links.add(new CrossRepoLink(
+                        otherBatch.getRepository().getName(),
+                        relation.getNature(),
+                        relation.getConfidence(),
+                        extractFilesForBatch(relation, otherBatch.getId())));
+            }
+        }
+        return links;
+    }
+
+    private List<String> extractFilesForBatch(CtxRepoRelation relation, UUID batchId) {
         if (relation.getCitations() == null) {
             return List.of();
         }
@@ -186,53 +271,32 @@ public class RepositoryTool {
         if (matches == null || !matches.isArray()) {
             return List.of();
         }
-        List<SurfacePairEvidence> pairs = new ArrayList<>();
+        List<String> files = new ArrayList<>();
         for (JsonNode match : matches) {
-            pairs.add(new SurfacePairEvidence(
-                    objectMapper.convertValue(match, Object.class),
-                    resolveSurface(relation, match.path("subjectSurfaceId")),
-                    resolveSurface(relation, match.path("otherSurfaceId"))));
+            collectSurfaceFiles(relation, batchId, match.path("subjectSurfaceId"), files);
+            collectSurfaceFiles(relation, batchId, match.path("otherSurfaceId"), files);
         }
-        return pairs;
+        return files.stream().distinct().toList();
     }
 
-    private SurfaceEvidence resolveSurface(CtxRepoRelation relation, JsonNode id) {
+    private void collectSurfaceFiles(CtxRepoRelation relation, UUID batchId, JsonNode id, List<String> files) {
         if (!id.isTextual()) {
-            return null;
+            return;
         }
         UUID surfaceId;
         try {
             surfaceId = UUID.fromString(id.textValue());
         } catch (IllegalArgumentException e) {
-            return null;
+            return;
         }
-        return surfaceRepository
+        surfaceRepository
                 .findById(surfaceId)
                 .filter(surface -> relation.getTeamId().equals(surface.getTeamId()))
-                .filter(surface ->
-                        surface.getBatch().getId().equals(relation.getBatchA().getId())
-                                || surface.getBatch()
-                                        .getId()
-                                        .equals(relation.getBatchB().getId()))
-                .map(this::surfaceEvidence)
-                .orElse(null);
-    }
-
-    private SurfaceEvidence surfaceEvidence(CtxSurface surface) {
-        CtxRepoSynopsis synopsis =
-                synopsisRepository.findByBatchId(surface.getBatch().getId()).orElse(null);
-        return new SurfaceEvidence(
-                surface.getId(),
-                surface.getRepositoryId(),
-                surface.getBatch().getId(),
-                surface.getRole(),
-                surface.getDescription(),
-                surface.getDetectedBy(),
-                surface.getAttributeRows().stream()
-                        .map(a -> new AttributeEvidence(a.getId(), a.getKind(), a.getValue(), a.getDetectedBy()))
-                        .toList(),
-                synopsis == null ? null : new SynopsisFragments(synopsis.getSynopsis()).render(),
-                synopsis == null ? null : synopsis.getCitations());
+                .filter(surface -> surface.getBatch().getId().equals(batchId))
+                .ifPresent(surface -> surface.getAttributeRows().stream()
+                        .filter(a -> a.getKind() == AttributeKind.FILE)
+                        .map(CtxSurfaceAttribute::getValue)
+                        .forEach(files::add));
     }
 
     @KratisTool(
@@ -276,37 +340,24 @@ public class RepositoryTool {
     }
 
     public record RepositorySummary(
-            String name, String url, String ingestionStatus, Instant lastIngestedAt, String commitHash) {}
-
-    public record DependenciesResponse(List<String> downstream, List<String> upstream) {}
-
-    public record RelatedRepository(
-            UUID relationId,
-            String repositoryA,
-            String repositoryB,
-            UUID batchAId,
-            UUID batchBId,
-            Nature nature,
-            Direction direction,
-            Ceiling confidence,
-            String rationale,
-            String citations,
-            List<SurfacePairEvidence> matches) {}
-
-    public record SurfacePairEvidence(Object evidence, SurfaceEvidence subjectSurface, SurfaceEvidence otherSurface) {}
-
-    public record SurfaceEvidence(
-            UUID id,
-            UUID repositoryId,
-            UUID batchId,
-            SurfaceRole role,
-            String description,
-            SurfaceDetection detectedBy,
-            List<AttributeEvidence> attributes,
+            String name,
+            String url,
+            String ingestionStatus,
+            Instant lastIngestedAt,
+            String commitHash,
             String synopsis,
-            Map<String, Object> synopsisCitations) {}
+            List<String> relatedRepos) {}
 
-    public record AttributeEvidence(UUID id, AttributeKind kind, String value, SurfaceDetection detectedBy) {}
+    public record DependenciesResponse(
+            List<String> downstream, List<String> upstream, List<CrossRepoLink> crossRepoLinks) {}
+
+    public record CrossRepoLink(String peerRepo, Nature nature, Ceiling confidence, List<String> peerFiles) {}
+
+    public record RelatedRepoSummary(
+            String otherRepoName, String synopsis, String ingestionStatus, List<RepoRelationSummary> relations) {}
+
+    public record RepoRelationSummary(
+            List<String> currentRepoFiles, String otherRepoName, String relation, String rationale) {}
 
     public record FileSearchResult(String path, List<String> symbols) {}
 }

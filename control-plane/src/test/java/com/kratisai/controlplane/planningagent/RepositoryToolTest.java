@@ -6,7 +6,6 @@ import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.model.AttributeKind;
-import com.kratisai.controlplane.model.Ceiling;
 import com.kratisai.controlplane.model.CtxNode;
 import com.kratisai.controlplane.model.CtxRepoRelation;
 import com.kratisai.controlplane.model.CtxRepoSynopsis;
@@ -112,13 +111,20 @@ class RepositoryToolTest {
         UUID repoId = UUID.randomUUID();
         repo.setId(repoId);
 
+        UUID activeBatchId = UUID.randomUUID();
         IngestionBatch batch = new IngestionBatch();
+        batch.setId(activeBatchId);
+        batch.setRepository(repo);
         batch.setStatus(IngestionStatus.SUCCESS);
         batch.setCompletedAt(Instant.parse("2026-07-25T14:30:00Z"));
         batch.setCommitHash("abc123");
+        CtxRepoSynopsis synopsis = mock(CtxRepoSynopsis.class);
+        when(synopsis.getBatch()).thenReturn(batch);
+        when(synopsis.getSynopsis()).thenReturn("Domain: Orders.");
 
         when(repositoryRepository.findByTeamId(teamId)).thenReturn(List.of(repo));
-        when(ingestionBatchRepository.findByRepositoryIdAndIsActiveTrue(repoId)).thenReturn(Optional.of(batch));
+        when(ingestionBatchRepository.findActiveByTeamId(teamId)).thenReturn(List.of(batch));
+        when(synopsisRepository.findByBatchIdIn(List.of(activeBatchId))).thenReturn(List.of(synopsis));
 
         List<RepositoryTool.RepositorySummary> result = repositoryTool.listRepositories(toolContext);
 
@@ -129,6 +135,7 @@ class RepositoryToolTest {
         assertThat(summary.ingestionStatus()).isEqualTo("SUCCESS");
         assertThat(summary.lastIngestedAt()).isEqualTo(Instant.parse("2026-07-25T14:30:00Z"));
         assertThat(summary.commitHash()).isEqualTo("abc123");
+        assertThat(summary.synopsis()).isEqualTo("f1: Orders.");
     }
 
     @Test
@@ -143,7 +150,7 @@ class RepositoryToolTest {
         repo.setId(repoId);
 
         when(repositoryRepository.findByTeamId(teamId)).thenReturn(List.of(repo));
-        when(ingestionBatchRepository.findByRepositoryIdAndIsActiveTrue(repoId)).thenReturn(Optional.empty());
+        when(ingestionBatchRepository.findActiveByTeamId(teamId)).thenReturn(List.of());
 
         List<RepositoryTool.RepositorySummary> result = repositoryTool.listRepositories(toolContext);
 
@@ -274,10 +281,29 @@ class RepositoryToolTest {
     }
 
     @Test
+    void renderRelationNamesTheActingSideForEachNature() {
+        assertThat(RepositoryTool.renderRelation("alpha", "beta", Nature.CALLS, Direction.A_TO_B))
+                .isEqualTo("beta CALLS alpha");
+        assertThat(RepositoryTool.renderRelation("alpha", "beta", Nature.CALLS, Direction.B_TO_A))
+                .isEqualTo("alpha CALLS beta");
+        assertThat(RepositoryTool.renderRelation("alpha", "beta", Nature.BUILDS_AGAINST, Direction.A_TO_B))
+                .isEqualTo("beta BUILDS_AGAINST alpha");
+        assertThat(RepositoryTool.renderRelation("alpha", "beta", Nature.BUILDS_AGAINST, Direction.B_TO_A))
+                .isEqualTo("alpha BUILDS_AGAINST beta");
+        assertThat(RepositoryTool.renderRelation("alpha", "beta", Nature.HOSTS, Direction.A_TO_B))
+                .isEqualTo("alpha HOSTS beta");
+        assertThat(RepositoryTool.renderRelation("alpha", "beta", Nature.HOSTS, Direction.B_TO_A))
+                .isEqualTo("beta HOSTS alpha");
+        assertThat(RepositoryTool.renderRelation("alpha", "beta", Nature.MESSAGES, Direction.BIDIRECTIONAL))
+                .isEqualTo("alpha <-> beta (MESSAGES)");
+        assertThat(RepositoryTool.renderRelation("alpha", "beta", Nature.SHARES_STATE, Direction.UNKNOWN))
+                .isEqualTo("alpha <-> beta (SHARES_STATE)");
+    }
+
+    @Test
     void relatedRepositoriesReturnsMatchesAndNavigableEvidence() {
         UUID repoId = UUID.randomUUID();
         UUID otherId = UUID.randomUUID();
-        UUID relationId = UUID.randomUUID();
         Repository repo = new Repository("subject", "url", "main", RepositoryType.GENERIC);
         repo.setId(repoId);
         Repository other = new Repository("other", "url", "main", RepositoryType.GENERIC);
@@ -287,12 +313,10 @@ class RepositoryToolTest {
         IngestionBatch otherBatch = new IngestionBatch(other);
         otherBatch.setId(UUID.randomUUID());
         CtxRepoRelation relation = mock(CtxRepoRelation.class);
-        when(relation.getId()).thenReturn(relationId);
         when(relation.getBatchA()).thenReturn(subjectBatch);
         when(relation.getBatchB()).thenReturn(otherBatch);
         when(relation.getNature()).thenReturn(Nature.CALLS);
         when(relation.getDirection()).thenReturn(Direction.A_TO_B);
-        when(relation.getConfidence()).thenReturn(Ceiling.SUGGESTED);
         when(relation.getTeamId()).thenReturn(teamId);
         UUID subjectSurfaceId = UUID.randomUUID();
         UUID providerSurfaceId = UUID.randomUUID();
@@ -313,40 +337,25 @@ class RepositoryToolTest {
                 otherBatch, otherId, teamId, SurfaceRole.PROVIDES, "Serves orders", SurfaceDetection.MODEL);
         CtxRepoSynopsis synopsis = mock(CtxRepoSynopsis.class);
         when(synopsis.getSynopsis()).thenReturn("Domain: Orders. Handles payments.");
-        when(synopsis.getCitations()).thenReturn(Map.of("filePaths", List.of("client.java")));
         when(batchResolutionService.resolveRepository(teamId, "subject")).thenReturn(repo);
         when(relationRepository.findCurrentForRepository(teamId, repoId)).thenReturn(List.of(relation));
         when(surfaceRepository.findById(subjectSurfaceId)).thenReturn(Optional.of(subject));
         when(surfaceRepository.findById(providerSurfaceId)).thenReturn(Optional.of(provider));
-        when(synopsisRepository.findByBatchId(batchId)).thenReturn(Optional.of(synopsis));
+        when(synopsisRepository.findByBatchId(otherBatch.getId())).thenReturn(Optional.of(synopsis));
 
         var result = repositoryTool.getRelatedRepos("subject", toolContext);
 
         assertThat(result).singleElement().satisfies(related -> {
-            assertThat(related.repositoryA()).isEqualTo("subject");
-            assertThat(related.repositoryB()).isEqualTo("other");
-            assertThat(related.direction()).isEqualTo(Direction.A_TO_B);
-            assertThat(related.rationale()).isEqualTo("Legacy rationale");
-            assertThat(related.citations()).isEqualTo(citations);
-            assertThat(related.matches()).hasSize(2);
-            var first = related.matches().getFirst();
-            assertThat(first.evidence())
-                    .isEqualTo(Map.of(
-                            "subjectSurfaceId", subjectSurfaceId.toString(),
-                            "otherSurfaceId", providerSurfaceId.toString(),
-                            "confidence", "SUGGESTED",
-                            "rationale", "Client calls server",
-                            "evidence", Map.of("subjectSynopsisIds", List.of("f1"), "direction", "A_TO_B")));
-            assertThat(first.subjectSurface().attributes())
-                    .singleElement()
-                    .satisfies(attribute -> assertThat(attribute.value()).isEqualTo("client.java"));
-            assertThat(first.subjectSurface().synopsis()).contains("f1: Orders.", "f2: Handles payments.");
-            assertThat(first.subjectSurface().synopsisCitations()).containsKey("filePaths");
-            assertThat(first.otherSurface().synopsis()).isNull();
-            var second = related.matches().get(1);
-            assertThat(second.evidence().toString()).contains("Second pair", "f2");
-            assertThat(second.subjectSurface().description()).isEqualTo("Serves orders");
-            assertThat(second.otherSurface().description()).isEqualTo("Calls orders");
+            assertThat(related.otherRepoName()).isEqualTo("other");
+            assertThat(related.ingestionStatus())
+                    .isEqualTo(otherBatch.getStatus().name());
+            assertThat(related.synopsis()).contains("f1: Orders.", "f2: Handles payments.");
+            assertThat(related.relations()).singleElement().satisfies(rel -> {
+                assertThat(rel.otherRepoName()).isEqualTo("other");
+                assertThat(rel.relation()).isEqualTo("other CALLS subject");
+                assertThat(rel.rationale()).isEqualTo("Legacy rationale");
+                assertThat(rel.currentRepoFiles()).containsExactly("client.java");
+            });
         });
     }
 
@@ -360,6 +369,8 @@ class RepositoryToolTest {
         CtxRepoRelation relation = mock(CtxRepoRelation.class);
         when(relation.getBatchA()).thenReturn(repoBatch);
         when(relation.getBatchB()).thenReturn(otherBatch);
+        when(relation.getNature()).thenReturn(Nature.CALLS);
+        when(relation.getDirection()).thenReturn(Direction.A_TO_B);
         when(relation.getRationale()).thenReturn("Legacy explanation");
         when(relation.getCitations()).thenReturn("{\"fragments\":[\"legacy-f1\"]}");
         when(batchResolutionService.resolveRepository(teamId, "subject")).thenReturn(repo);
@@ -368,11 +379,13 @@ class RepositoryToolTest {
         assertThat(repositoryTool.getRelatedRepos("subject", toolContext))
                 .singleElement()
                 .satisfies(related -> {
-                    assertThat(related.rationale()).isEqualTo("Legacy explanation");
-                    assertThat(related.citations()).isEqualTo("{\"fragments\":[\"legacy-f1\"]}");
-                    assertThat(related.matches()).isEmpty();
+                    assertThat(related.otherRepoName()).isEqualTo("other");
+                    assertThat(related.relations()).singleElement().satisfies(rel -> {
+                        assertThat(rel.rationale()).isEqualTo("Legacy explanation");
+                        assertThat(rel.currentRepoFiles()).isEmpty();
+                    });
                 });
-        verifyNoInteractions(surfaceRepository, synopsisRepository);
+        verifyNoInteractions(surfaceRepository);
     }
 
     @Test
@@ -391,6 +404,8 @@ class RepositoryToolTest {
         CtxRepoRelation relation = mock(CtxRepoRelation.class);
         when(relation.getBatchA()).thenReturn(repoBatch);
         when(relation.getBatchB()).thenReturn(otherBatch);
+        when(relation.getNature()).thenReturn(Nature.CALLS);
+        when(relation.getDirection()).thenReturn(Direction.A_TO_B);
         when(relation.getTeamId()).thenReturn(teamId);
         when(relation.getCitations()).thenReturn("""
                 {"matches":[{"subjectSurfaceId":"%s","otherSurfaceId":"%s","rationale":"retained"},
@@ -404,14 +419,10 @@ class RepositoryToolTest {
         assertThat(repositoryTool.getRelatedRepos("subject", toolContext))
                 .singleElement()
                 .satisfies(related -> {
-                    assertThat(related.matches()).hasSize(2);
-                    assertThat(related.matches()).allSatisfy(pair -> {
-                        assertThat(pair.evidence().toString()).contains("retained");
-                        assertThat(pair.subjectSurface()).isNull();
-                        assertThat(pair.otherSurface()).isNull();
-                    });
+                    assertThat(related.otherRepoName()).isEqualTo("other");
+                    assertThat(related.relations()).singleElement().satisfies(rel -> assertThat(rel.currentRepoFiles())
+                            .isEmpty());
                 });
-        verifyNoInteractions(synopsisRepository);
     }
 
     @Test

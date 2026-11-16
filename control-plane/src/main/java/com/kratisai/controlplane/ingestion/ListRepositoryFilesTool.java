@@ -57,7 +57,7 @@ public class ListRepositoryFilesTool {
         ListFilesResult result = ListFilesResult.success(matched);
         Object logger = toolContext.getContext().get("batchLogger");
         if (logger instanceof IngestionBatchLogService.BatchLogger batchLogger) {
-            batchLogger.info(
+            batchLogger.debug(
                     "ASSIST_SURFACES_LIST_FILES",
                     "glob=" + glob + " results=" + result.paths().size() + " truncated=" + result.truncated());
         }

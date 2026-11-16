@@ -7,7 +7,10 @@ import com.kratisai.controlplane.planningagent.DimensionTool.DimensionDetail;
 import com.kratisai.controlplane.planningagent.DimensionTool.DimensionOverview;
 import com.kratisai.controlplane.planningagent.DimensionTool.PatternSummary;
 import com.kratisai.controlplane.planningagent.DimensionTool.RankedFile;
+import com.kratisai.controlplane.planningagent.RepositoryTool.CrossRepoLink;
 import com.kratisai.controlplane.planningagent.RepositoryTool.DependenciesResponse;
+import com.kratisai.controlplane.planningagent.RepositoryTool.RelatedRepoSummary;
+import com.kratisai.controlplane.planningagent.RepositoryTool.RepoRelationSummary;
 import com.kratisai.controlplane.planningagent.RepositoryTool.RepositorySummary;
 import com.kratisai.controlplane.planningagent.WikiTool.WikiPageSummary;
 import com.kratisai.controlplane.planningagent.WikiTool.WikiSearchResponse;
@@ -41,6 +44,24 @@ public class AotHints implements RuntimeHintsRegistrar {
         hints.reflection()
                 .registerType(
                         DependenciesResponse.class,
+                        MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS,
+                        MemberCategory.INVOKE_PUBLIC_METHODS);
+
+        hints.reflection()
+                .registerType(
+                        CrossRepoLink.class,
+                        MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS,
+                        MemberCategory.INVOKE_PUBLIC_METHODS);
+
+        hints.reflection()
+                .registerType(
+                        RelatedRepoSummary.class,
+                        MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS,
+                        MemberCategory.INVOKE_PUBLIC_METHODS);
+
+        hints.reflection()
+                .registerType(
+                        RepoRelationSummary.class,
                         MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS,
                         MemberCategory.INVOKE_PUBLIC_METHODS);
 

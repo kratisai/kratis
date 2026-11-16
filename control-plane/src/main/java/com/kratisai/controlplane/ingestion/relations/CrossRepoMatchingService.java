@@ -26,13 +26,18 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.NonNull;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 @Service
 public class CrossRepoMatchingService {
@@ -60,37 +65,80 @@ public class CrossRepoMatchingService {
             Match only interfaces owned by the repositories themselves. Shared use of the same external third-party
             service, API, provider, library or dependency is not a relationship between the repositories; never use it
             as evidence for PEER or SHARES_STATE.
-            Relation natures (never return surface roles PROVIDES or REQUIRES as nature):
-            - CALLS: synchronous request/response APIs only (HTTP REST, gRPC, RPC), matching one PROVIDES surface to one
-              REQUIRES surface; cite ENDPOINT, IDENTIFIER, or REF attributes on both. Never use CALLS for WebSocket, and
-              do not use CALLS for DNS zones/records, load balancers, or CDN/ingress routing infrastructure (those are
-              DEPLOYS).
-            - MESSAGES: asynchronous or bidirectional message and event streams — ALWAYS use MESSAGES (never CALLS) for
-              WebSocket endpoints (ws://, wss://, WebSocket), Socket.IO, pub/sub topics, queues, event buses, and domain
-              event/message payload contracts exchanged with a WebSocket or messaging server (including when client
-              transport is mediated through a shared SDK or library); cite NAME, IDENTIFIER, ENDPOINT, REF, or METHOD
-              attributes on both surfaces.
-            - BUILDS_AGAINST: one surface PROVIDES a package/artifact and the other REQUIRES that direct dependency,
-              with the same package type, namespace, and name in IDENTIFIER (versions may differ).
-            - DEPLOYS: deployment, provisioning, or runtime-hosting coupling between the two repositories (IaC
-              provisioning, CI artifact publishing, or runtime hosting); cite FILE, IDENTIFIER, TECHNOLOGY, NAME, or REF
-              attributes on both surfaces. Sharing a CI platform, workflow template, or deployment tool alone is not
-              evidence unless one repository builds, provisions, configures, or hosts the other's deployable artifact.
-            - SHARES_STATE: two REQUIRES surfaces sharing the same resource name/reference in cited NAME or REF.
-            - PEER: domain-level peer relationship; cite synopsis fragments and domain NAME/REF attributes on both sides
-              (never endpoints, package coordinates, or technologies).
-            Using synopses to challenge noisy surface roles and set direction:
-            - Surface roles (PROVIDES/REQUIRES) are imperfect single-repository estimates: for example, a client sending
-              events to a server and the server hosting the WebSocket endpoint may both be labeled PROVIDES, or two
-              services communicating via an external cloud broker may both be labeled REQUIRES. On MESSAGES and DEPLOYS,
-              do NOT skip a genuine match just because both surfaces share the same PROVIDES or REQUIRES label — use
-              both repositories' synopses, roles, and shared ecosystem context (such as a shared internal framework/SDK
-              named in the synopses) to connect client event/runtime surfaces to their server counterparts.
-            - Set direction to reflect architectural dependency flow: A_TO_B when Subject (A) is the upstream server,
-              provider, publisher, or host and Other (B) is the client, consumer, or hosted app; B_TO_A when Other (B)
-              is upstream and Subject (A) is downstream; or BIDIRECTIONAL for SHARES_STATE, PEER, or symmetric coupling.
-              Cite supporting synopsis fragments (f1, f2, ...) on both sides when using synopsis context to resolve
-              direction or bridge SDK-mediated surfaces.""";
+            Core separation principle:
+            Infrastructure provisioning a messaging platform, broker, topic, queue, cache, database, or ingress route
+            is a HOSTS surface. CALLS, MESSAGES, and SHARES_STATE represent runtime exchange or sharing of data between
+            applications that actively send, receive, or persist data — never the infrastructure that hosts or routes
+            them.
+
+            Relation natures (never return surface roles PROVIDES, REQUIRES, BIDIRECTIONAL, or UNKNOWN as nature):
+            - CALLS (directional: A_TO_B or B_TO_A):
+              - Meaning: one repository serves a synchronous REST, RPC, GraphQL, or HTTP request/response interface
+                that the other repository invokes and waits on for a response.
+              - Rules: match one serving interface against one caller; cite supporting non-FILE attributes on both
+                (such as ENDPOINT, IDENTIFIER, METHOD, or TECHNOLOGY), including if DTO/payload matches are inexact.
+                Two repositories calling the same third service each have CALLS to that service — never CALLS,
+                MESSAGES, or SHARES_STATE between the two callers. Prefer MESSAGES for persistent bidirectional
+                streams, sockets, WebSockets, queues, topics, event buses, or HOSTS for infrastructure.
+            - BUILDS_AGAINST (directional: A_TO_B or B_TO_A):
+              - Meaning: one repository publishes a reusable library, module, or package that the other repository
+                declares as a direct compile-time or package-manager dependency.
+              - Rules: match one PROVIDES package identity to one REQUIRES dependency with the same package type,
+                namespace, and name in IDENTIFIER (versions may differ). Never use BUILDS_AGAINST for deployable runtime
+                artifacts (container images, registries, static bundles, CI workflows, or cloud infrastructure — those
+                are HOSTS).
+            - HOSTS (directional: A_TO_B or B_TO_A):
+              - Meaning: a deployable artifact, service, or runtime workload produced by one repository ends up running
+                in, stored in, or provisioned by runtime infrastructure declared in the other repository (compute
+                runtimes, static hosting, container registries, managed data stores, messaging brokers, ingress/routing).
+              - Rules: cite supporting attributes on both surfaces. CI/CD workflows,
+                deployment scripts, image names, and manifests are clues tracing where an artifact lands — do not
+                require either repository to be dedicated IaC, and do not treat sharing a CI tool, workflow pattern, or
+                cloud vendor between two peer workloads as HOSTS. Infrastructure provisioning a broker, topic, queue,
+                cache, database, or route is HOSTS, never MESSAGES, CALLS, or SHARES_STATE.
+              - Direction for HOSTS: ALWAYS point from the hosting/provisioning infrastructure repository to the
+                hosted/deployed workload repository (A_TO_B when Subject A declares the infrastructure, hosting,
+                registry, or provisioned resource; B_TO_A when Other B declares it). Never point workload ->
+                infrastructure.
+            - MESSAGES (non-directional: BIDIRECTIONAL):
+              - Meaning: both repositories actively participate in runtime asynchronous communication — sending and/or
+                receiving messages, events, commands, or persistent-stream payloads over a shared channel, topic, queue,
+                event bus, socket, or bidirectional stream. Report ALL repositories participating in a shared stream.
+              - Rules: ground in the runtime act of sending and/or receiving messages, events, or bidirectional stream
+                frames (including WebSockets, Socket.IO, pub/sub topics, and queues), not transport-URL strings or
+                broker provisioning alone; cite supporting non-FILE attributes on both surfaces (including message,
+                event, or payload/schema IDENTIFIERs when available; payload names are helpful supporting evidence
+                rather than mandatory). Multiple client repositories may each independently hold MESSAGES relationships
+                with a shared messaging server, event bus, or broker; however, two repositories that merely make
+                independent synchronous HTTP/REST CALLS to the same third service do NOT have a MESSAGES relationship
+                with each other (HTTP/REST calls belong strictly to CALLS with the serving repository).
+                When client-side messaging is mediated through an internal shared library/SDK, record BUILDS_AGAINST to
+                the SDK and MESSAGES between the client application and the server/peer exchanging compatible event or
+                message contracts at runtime. Never match an infrastructure-provisioning surface (IaC templates or
+                cloud resource definitions creating a broker, topic, queue, or route) as MESSAGES — those are HOSTS.
+            - SHARES_STATE (non-directional: BIDIRECTIONAL):
+              - Meaning: both repositories save or load data directly from the same shared persistent storage resource
+                at runtime — such as a shared database, schema, or table; a shared cache or key-value store; a shared
+                object-storage bucket or path; or a shared filesystem, volume, or disk path.
+              - Rules: require a shared cited backing-store identity in IDENTIFIER. Never use SHARES_STATE merely
+                because two callers consume the same HTTP/REST API or share an API base-URL configuration key (CALLS),
+                nor for message brokers/topics/queues/streams (MESSAGES), shared libraries/lockfiles (BUILDS_AGAINST),
+                or infrastructure provisioning of the store (HOSTS).
+            - PEER (non-directional: BIDIRECTIONAL):
+              - Meaning: both repositories collaborate around a shared domain concept or product workflow where none of
+                the technical runtime, build, or hosting natures apply.
+              - Rules: cite synopsis fragments and non-package domain IDENTIFIER attributes on both sides (co-cited
+                endpoints, package coordinates, or technologies are ignored as PEER evidence).
+
+            Direction rules (output only A_TO_B, B_TO_A, or BIDIRECTIONAL):
+            - For MESSAGES, SHARES_STATE, and PEER, always set direction to BIDIRECTIONAL.
+            - For CALLS, BUILDS_AGAINST, and HOSTS, inspect BOTH the surface details (roles, descriptions, attributes)
+              and the overall repository synopses (domain role, known aliases, architecture flow) to determine direction:
+              set A_TO_B when Subject (A) serves, publishes, or hosts Other (B); set B_TO_A when Other (B) serves,
+              publishes, or hosts Subject (A). Surface roles are single-repository estimates — do not skip a genuine
+              match on HOSTS or MESSAGES just because both surfaces share the same role or carry BIDIRECTIONAL/UNKNOWN.
+              Cite supporting synopsis fragments (f1, f2, ...) when using synopsis context to resolve direction or
+              bridge SDK-mediated surfaces.""";
 
     private final BatchChatClientFactory chatClients;
     private final IngestionBatchRepository ingestionBatchRepository;
@@ -107,6 +155,40 @@ public class CrossRepoMatchingService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.ingestionProperties = ingestionProperties;
+    }
+
+    static BeanOutputConverter<InferenceResponse> createConverter() {
+        return new BeanOutputConverter<>(InferenceResponse.class) {
+            @Override
+            protected void postProcessSchema(@NonNull JsonNode jsonNode) {
+                super.postProcessSchema(jsonNode);
+                stripUnknownDirectionFromSchema(jsonNode);
+            }
+        };
+    }
+
+    private static void stripUnknownDirectionFromSchema(JsonNode node) {
+        if (node instanceof ObjectNode objectNode) {
+            JsonNode directionNode = objectNode.get("direction");
+            if (directionNode instanceof ObjectNode dirObj && dirObj.get("enum") instanceof ArrayNode enumArray) {
+                for (int i = enumArray.size() - 1; i >= 0; i--) {
+                    if (Direction.UNKNOWN.name().equals(enumArray.get(i).asString())) {
+                        enumArray.remove(i);
+                    }
+                }
+            }
+            for (JsonNode child : objectNode) {
+                stripUnknownDirectionFromSchema(child);
+            }
+        } else if (node instanceof ArrayNode arrayNode) {
+            for (JsonNode child : arrayNode) {
+                stripUnknownDirectionFromSchema(child);
+            }
+        }
+    }
+
+    static String systemPrompt() {
+        return SYSTEM_PROMPT;
     }
 
     public record SynopsisView(UUID batchId, String repoRole, List<String> knownAs, SynopsisFragments fragments) {
@@ -143,10 +225,11 @@ public class CrossRepoMatchingService {
         }
 
         List<PeerPlan> plans = new ArrayList<>(others.size());
+        List<String> emptyPeers = new ArrayList<>();
         boolean anyLlmWork = false;
         for (RepoView other : others) {
             if (other.surfaces().isEmpty()) {
-                batchLogger.info(STEP, "No surfaces in repository " + other.repositoryId() + "; no pairs omitted.");
+                emptyPeers.add(repoLabel(other));
                 continue;
             }
             List<InferenceResponse.RelationProposal> directCandidates = directBuildMatches(subject, other);
@@ -165,6 +248,10 @@ public class CrossRepoMatchingService {
             }
             plans.add(new PeerPlan(other, directCandidates, subjectPromptSurfaces, otherPromptSurfaces, needsLlm));
         }
+        if (!emptyPeers.isEmpty()) {
+            batchLogger.info(
+                    STEP, "Skipped " + emptyPeers.size() + " active peer(s) with 0 eligible surfaces: " + emptyPeers);
+        }
 
         record ClientBudget(ChatClient chatClient, int maxPromptChars) {}
         ClientBudget clientBudget = anyLlmWork
@@ -173,7 +260,7 @@ public class CrossRepoMatchingService {
                     return new ClientBudget(chatClients.chatClientFor(batch), chatClients.maxPromptCharsFor(batch));
                 })
                 : new ClientBudget(null, 0);
-        BeanOutputConverter<InferenceResponse> converter = new BeanOutputConverter<>(InferenceResponse.class);
+        BeanOutputConverter<InferenceResponse> converter = createConverter();
         String format = converter.getFormat();
         IngestionProperties.Matching matching = ingestionProperties.getMatching();
         Semaphore semaphore = new Semaphore(Math.max(1, matching.getMaxConcurrency()));
@@ -208,6 +295,11 @@ public class CrossRepoMatchingService {
                 for (InferenceResponse.RelationProposal proposal : outcome.accepted()) {
                     if (acceptedEvidence.add(evidenceKey(proposal))) {
                         accepted.add(new AcceptedProposal(outcome.otherBatchId(), proposal));
+                    } else {
+                        batchLogger.debug(
+                                STEP,
+                                "Duplicate evidence collapsed across peers for " + proposal.nature() + " ("
+                                        + repoLabel(subject) + " <-> " + outcome.otherRepoName() + ").");
                     }
                 }
             }
@@ -250,12 +342,17 @@ public class CrossRepoMatchingService {
         Set<String> directBuildPairs = new HashSet<>();
         Set<Nature> acceptedNatures = EnumSet.noneOf(Nature.class);
 
+        int directAccepted = 0;
         int discarded = 0;
         for (InferenceResponse.RelationProposal proposal : plan.directMatches()) {
             String reason = validate(proposal, subject, subject.surfaces(), other, other.surfaces());
             if (reason != null) {
                 discarded++;
-                logs.add(PeerLog.warn("Deterministic package match candidate rejected ("
+                logs.add(PeerLog.debug("Deterministic package match candidate rejected for "
+                        + repoLabel(subject)
+                        + " <-> "
+                        + repoLabel(other)
+                        + " ("
                         + reason
                         + "); deferring to LLM comparison."));
                 continue;
@@ -264,13 +361,16 @@ public class CrossRepoMatchingService {
                 accepted.add(proposal);
                 acceptedNatures.add(proposal.nature());
                 directBuildPairs.add(surfacePairKey(proposal));
-                logs.add(PeerLog.info("Matched a direct package coordinate from " + subject.repositoryId() + " to "
-                        + other.repositoryId() + " (" + proposal.subjectSurfaceId() + " -> "
-                        + proposal.otherSurfaceId() + ")."));
+                directAccepted++;
             }
         }
         if (!plan.needsLlm()) {
-            return new PeerOutcome(other.batchId(), accepted, discarded, logs, null);
+            if (directAccepted == 0) {
+                logs.add(PeerLog.debug("Skipped LLM comparison for " + repoLabel(subject) + " vs " + repoLabel(other)
+                        + ": all surfaces trimmed as unmatched SBOM dependencies."));
+            }
+            logs.add(PeerLog.info(peerSummary(subject, other, directAccepted, 0, discarded, 0)));
+            return new PeerOutcome(other.batchId(), repoLabel(other), accepted, discarded, logs, null);
         }
 
         boolean acquired = false;
@@ -286,11 +386,12 @@ public class CrossRepoMatchingService {
             if (availableBudget <= 0) {
                 logs.add(PeerLog.error(
                         "Matching prompt exceeds configured character limit; comparison omitted and activation aborted for "
-                                + subject.repositoryId()
+                                + repoLabel(subject)
                                 + " and "
-                                + other.repositoryId()));
+                                + repoLabel(other)));
                 return new PeerOutcome(
                         other.batchId(),
+                        repoLabel(other),
                         List.of(),
                         0,
                         logs,
@@ -309,8 +410,15 @@ public class CrossRepoMatchingService {
                 int halfBudget = Math.max(1, availableBudget / 2);
                 leftGroups = groups(plan.subjectSurfaces(), halfBudget);
                 rightGroups = groups(plan.otherSurfaces(), halfBudget);
+                if (leftGroups.size() > 1 || rightGroups.size() > 1) {
+                    logs.add(PeerLog.info("Prompt budget " + maxPromptChars + " chars exceeded for "
+                            + repoLabel(subject) + " vs " + repoLabel(other) + "; split into "
+                            + leftGroups.size() + "x" + rightGroups.size() + " groups."));
+                }
             }
 
+            int llmAccepted = 0;
+            AtomicInteger retryCount = new AtomicInteger();
             for (List<SurfaceView> left : leftGroups) {
                 for (List<SurfaceView> right : rightGroups) {
                     AliasTable aliases = AliasTable.build(subject, left, other, right);
@@ -318,11 +426,12 @@ public class CrossRepoMatchingService {
                     if (SYSTEM_PROMPT.length() + userPrompt.length() > maxPromptChars) {
                         logs.add(PeerLog.error(
                                 "Matching prompt exceeds configured character limit; comparison omitted and activation aborted for "
-                                        + subject.repositoryId()
+                                        + repoLabel(subject)
                                         + " and "
-                                        + other.repositoryId()));
+                                        + repoLabel(other)));
                         return new PeerOutcome(
                                 other.batchId(),
+                                repoLabel(other),
                                 List.of(),
                                 discarded,
                                 logs,
@@ -330,7 +439,7 @@ public class CrossRepoMatchingService {
                                         "Surface matching prompt exceeds character limit for batch " + batchId));
                     }
                     InferenceResponse response =
-                            callWithRetry(batchId, chatClient, userPrompt, converter, matching, logs);
+                            callWithRetry(batchId, chatClient, userPrompt, converter, matching, logs, retryCount);
                     GroupPassResult firstPass = evaluateGroupResponse(
                             response,
                             aliases,
@@ -341,10 +450,12 @@ public class CrossRepoMatchingService {
                             directBuildPairs,
                             localEvidence,
                             acceptedNatures,
-                            accepted);
-                    int groupAccepted = firstPass.acceptedCount();
+                            accepted,
+                            logs);
+                    llmAccepted += firstPass.acceptedCount();
                     List<String> unrecoverableRejections = new ArrayList<>();
                     List<String> recoverableRejections = new ArrayList<>();
+                    List<String> recoverablePromptLines = new ArrayList<>();
                     for (RejectedCandidate rejected : firstPass.rejections()) {
                         if (rejected.nature() != null
                                 && (acceptedNatures.contains(rejected.nature())
@@ -352,20 +463,22 @@ public class CrossRepoMatchingService {
                             unrecoverableRejections.add(rejected.message());
                         } else {
                             recoverableRejections.add(rejected.message());
+                            recoverablePromptLines.add(rejected.promptLine());
                         }
                     }
                     if (!recoverableRejections.isEmpty()) {
-                        String correctionPrompt =
-                                buildCorrectionPrompt(userPrompt, response, recoverableRejections, converter);
-                        logs.add(PeerLog.info("Requesting 1 validation-correction pass for "
-                                + subject.repositoryId()
+                        String correctionPrompt = buildCorrectionPrompt(
+                                userPrompt, firstPass.acceptedSummaries(), recoverablePromptLines, converter);
+                        logs.add(PeerLog.debug("Requesting 1 validation-correction pass for "
+                                + repoLabel(subject)
                                 + " vs "
-                                + other.repositoryId()
+                                + repoLabel(other)
                                 + " ("
                                 + recoverableRejections.size()
-                                + " recoverable candidate(s))."));
-                        InferenceResponse corrected =
-                                callWithRetry(batchId, chatClient, correctionPrompt, converter, matching, logs);
+                                + " recoverable candidate(s)): "
+                                + String.join("; ", recoverableRejections)));
+                        InferenceResponse corrected = callWithRetry(
+                                batchId, chatClient, correctionPrompt, converter, matching, logs, retryCount);
                         GroupPassResult secondPass = evaluateGroupResponse(
                                 corrected,
                                 aliases,
@@ -376,8 +489,9 @@ public class CrossRepoMatchingService {
                                 directBuildPairs,
                                 localEvidence,
                                 acceptedNatures,
-                                accepted);
-                        groupAccepted += secondPass.acceptedCount();
+                                accepted,
+                                logs);
+                        llmAccepted += secondPass.acceptedCount();
                         for (RejectedCandidate rejected : secondPass.rejections()) {
                             if (rejected.nature() == null || !acceptedNatures.contains(rejected.nature())) {
                                 unrecoverableRejections.add(rejected.message());
@@ -388,25 +502,22 @@ public class CrossRepoMatchingService {
                         discarded++;
                         logs.add(PeerLog.warn(rejection));
                     }
-                    logs.add(PeerLog.info("Compared repository " + subject.repositoryId() + " surfaces "
-                            + left.stream().map(SurfaceView::id).toList() + " against repository "
-                            + other.repositoryId()
-                            + " surfaces "
-                            + right.stream().map(SurfaceView::id).toList() + "; accepted " + groupAccepted
-                            + "; no work omitted for this group."));
                 }
             }
-            return new PeerOutcome(other.batchId(), accepted, discarded, logs, null);
+            logs.add(PeerLog.info(
+                    peerSummary(subject, other, directAccepted, llmAccepted, discarded, retryCount.get())));
+            return new PeerOutcome(other.batchId(), repoLabel(other), accepted, discarded, logs, null);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return new PeerOutcome(
                     other.batchId(),
+                    repoLabel(other),
                     List.of(),
                     discarded,
                     logs,
                     new IllegalStateException("Interrupted while waiting for surface-matching permit", e));
         } catch (RuntimeException e) {
-            return new PeerOutcome(other.batchId(), List.of(), discarded, logs, e);
+            return new PeerOutcome(other.batchId(), repoLabel(other), List.of(), discarded, logs, e);
         } finally {
             if (acquired) {
                 semaphore.release();
@@ -424,24 +535,35 @@ public class CrossRepoMatchingService {
             Set<String> directBuildPairs,
             Set<String> localEvidence,
             Set<Nature> acceptedNatures,
-            List<InferenceResponse.RelationProposal> accepted) {
+            List<InferenceResponse.RelationProposal> accepted,
+            List<PeerLog> logs) {
         int count = 0;
+        List<String> acceptedSummaries = new ArrayList<>();
         List<RejectedCandidate> rejections = new ArrayList<>();
         for (InferenceResponse.RelationProposal rawItem : response.matches()) {
             for (InferenceResponse.RelationProposal raw : expandMultiSurfaceProposal(rawItem)) {
                 InferenceResponse.RelationProposal aligned = alignToSubject(aliases.resolve(raw), subject, other);
                 InferenceResponse.RelationProposal prepared =
-                        prepareForValidation(aligned, subject, left, other, right);
+                        prepareForValidation(aligned, subject, left, other, right, logs);
                 String reason = validate(prepared, subject, left, other, right);
                 if (reason != null) {
-                    rejections.add(new RejectedCandidate(
-                            raw.nature(),
-                            "Surface-match candidate nature=" + raw.nature()
-                                    + " subjectRepository=" + raw.subjectRepositoryId()
-                                    + " subjectSurface=" + raw.subjectSurfaceId()
-                                    + " otherRepository=" + raw.otherRepositoryId()
-                                    + " otherSurface=" + raw.otherSurfaceId()
-                                    + " rejected: " + reason));
+                    String subjectLabel = describeSurface(
+                            left, prepared != null ? prepared.subjectSurfaceId() : null, raw.subjectSurfaceId());
+                    String otherLabel = describeSurface(
+                            right, prepared != null ? prepared.otherSurfaceId() : null, raw.otherSurfaceId());
+                    String message = "Rejected " + raw.nature() + " candidate (" + repoLabel(subject) + "/"
+                            + subjectLabel + " vs " + repoLabel(other) + "/" + otherLabel + "): " + reason;
+                    String promptLine = message
+                            + " (proposed: subject="
+                            + raw.subjectSurfaceId()
+                            + " attrs="
+                            + raw.subjectAttributeIds()
+                            + ", other="
+                            + raw.otherSurfaceId()
+                            + " attrs="
+                            + raw.otherAttributeIds()
+                            + ")";
+                    rejections.add(new RejectedCandidate(raw.nature(), message, promptLine));
                 } else {
                     if (prepared.nature() == Nature.BUILDS_AGAINST
                             && directBuildPairs.contains(surfacePairKey(prepared))) {
@@ -450,12 +572,20 @@ public class CrossRepoMatchingService {
                     if (localEvidence.add(evidenceKey(prepared))) {
                         accepted.add(prepared);
                         acceptedNatures.add(prepared.nature());
+                        acceptedSummaries.add(
+                                raw.nature() + ": " + raw.subjectSurfaceId() + " <-> " + raw.otherSurfaceId());
                         count++;
+                    } else {
+                        logs.add(PeerLog.debug("Duplicate evidence collapsed within "
+                                + repoLabel(subject) + " <-> " + repoLabel(other) + " for " + prepared.nature()
+                                + " (" + describeSurface(left, prepared.subjectSurfaceId(), raw.subjectSurfaceId())
+                                + " <-> " + describeSurface(right, prepared.otherSurfaceId(), raw.otherSurfaceId())
+                                + ")."));
                     }
                 }
             }
         }
-        return new GroupPassResult(count, List.copyOf(rejections));
+        return new GroupPassResult(count, List.copyOf(acceptedSummaries), List.copyOf(rejections));
     }
 
     private static List<InferenceResponse.RelationProposal> expandMultiSurfaceProposal(
@@ -511,30 +641,30 @@ public class CrossRepoMatchingService {
                                 new RepoView(subject.batchId(), subject.repositoryId(), subject.repoName(), null, left),
                                 new RepoView(other.batchId(), other.repositoryId(), other.repoName(), null, right))
                         .isEmpty();
-            case SHARES_STATE -> hasSharedRequiresValue(left, right);
+            case SHARES_STATE -> hasSharedStateValue(left, right);
             case PEER ->
                 subject.synopsis() != null
                         && other.synopsis() != null
-                        && hasAnyAttrInGroup(left, "NAME", "REF")
-                        && hasAnyAttrInGroup(right, "NAME", "REF");
-            case CALLS -> hasOppositeRolePairWithKinds(left, right, "ENDPOINT", "IDENTIFIER", "REF");
+                        && hasNonPackageIdentifierInGroup(left)
+                        && hasNonPackageIdentifierInGroup(right);
+            case CALLS -> hasCallPairWithKinds(left, right, "ENDPOINT", "IDENTIFIER", "METHOD", "TECHNOLOGY");
             case MESSAGES ->
-                hasAnyAttrInGroup(left, "NAME", "IDENTIFIER", "ENDPOINT", "REF", "METHOD")
-                        && hasAnyAttrInGroup(right, "NAME", "IDENTIFIER", "ENDPOINT", "REF", "METHOD");
-            case DEPLOYS ->
-                hasAnyAttrInGroup(left, "FILE", "IDENTIFIER", "TECHNOLOGY", "NAME", "REF")
-                        && hasAnyAttrInGroup(right, "FILE", "IDENTIFIER", "TECHNOLOGY", "NAME", "REF");
+                hasAnyAttrInGroup(left, "IDENTIFIER", "ENDPOINT", "METHOD", "TECHNOLOGY")
+                        && hasAnyAttrInGroup(right, "IDENTIFIER", "ENDPOINT", "METHOD", "TECHNOLOGY");
+            case HOSTS ->
+                hasAnyAttrInGroup(left, "FILE", "IDENTIFIER", "TECHNOLOGY", "ENDPOINT", "METHOD")
+                        && hasAnyAttrInGroup(right, "FILE", "IDENTIFIER", "TECHNOLOGY", "ENDPOINT", "METHOD");
         };
     }
 
-    private static boolean hasSharedRequiresValue(List<SurfaceView> left, List<SurfaceView> right) {
+    private static boolean hasSharedStateValue(List<SurfaceView> left, List<SurfaceView> right) {
         Set<String> leftValues = new HashSet<>();
         for (SurfaceView surface : left) {
-            if (surface.role() != SurfaceRole.REQUIRES) {
+            if (surface.role() == SurfaceRole.PROVIDES) {
                 continue;
             }
             for (AttributeView attribute : surface.attributes()) {
-                if ("NAME".equals(attribute.kind()) || "REF".equals(attribute.kind())) {
+                if ("IDENTIFIER".equals(attribute.kind())) {
                     leftValues.add(attribute.value());
                 }
             }
@@ -543,12 +673,11 @@ public class CrossRepoMatchingService {
             return false;
         }
         for (SurfaceView surface : right) {
-            if (surface.role() != SurfaceRole.REQUIRES) {
+            if (surface.role() == SurfaceRole.PROVIDES) {
                 continue;
             }
             for (AttributeView attribute : surface.attributes()) {
-                if (("NAME".equals(attribute.kind()) || "REF".equals(attribute.kind()))
-                        && leftValues.contains(attribute.value())) {
+                if ("IDENTIFIER".equals(attribute.kind()) && leftValues.contains(attribute.value())) {
                     return true;
                 }
             }
@@ -556,18 +685,26 @@ public class CrossRepoMatchingService {
         return false;
     }
 
-    private static boolean hasOppositeRolePairWithKinds(
-            List<SurfaceView> left, List<SurfaceView> right, String... kinds) {
+    private static boolean hasCallPairWithKinds(List<SurfaceView> left, List<SurfaceView> right, String... kinds) {
         for (SurfaceView l : left) {
             if (!hasAnyKind(l.attributes(), kinds)) {
                 continue;
             }
             for (SurfaceView r : right) {
-                boolean opposite = (l.role() == SurfaceRole.PROVIDES && r.role() == SurfaceRole.REQUIRES)
-                        || (l.role() == SurfaceRole.REQUIRES && r.role() == SurfaceRole.PROVIDES);
-                if (opposite && hasAnyKind(r.attributes(), kinds)) {
+                boolean compatible = !(l.role() == SurfaceRole.PROVIDES && r.role() == SurfaceRole.PROVIDES)
+                        && !(l.role() == SurfaceRole.REQUIRES && r.role() == SurfaceRole.REQUIRES);
+                if (compatible && hasAnyKind(r.attributes(), kinds)) {
                     return true;
                 }
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasNonPackageIdentifierInGroup(List<SurfaceView> group) {
+        for (SurfaceView surface : group) {
+            if (hasNonPackageIdentifier(surface.attributes())) {
+                return true;
             }
         }
         return false;
@@ -575,8 +712,7 @@ public class CrossRepoMatchingService {
 
     private static boolean hasAnyAttrInGroup(List<SurfaceView> group, String... kinds) {
         for (SurfaceView surface : group) {
-            if (surface.role() != SurfaceRole.UNKNOWN
-                    && (surface.attributes().isEmpty() || hasAnyKind(surface.attributes(), kinds))) {
+            if (hasAnyKind(surface.attributes(), kinds)) {
                 return true;
             }
         }
@@ -585,19 +721,24 @@ public class CrossRepoMatchingService {
 
     private static String buildCorrectionPrompt(
             String originalUserPrompt,
-            InferenceResponse previousResponse,
+            List<String> acceptedSummaries,
             List<String> rejections,
             BeanOutputConverter<InferenceResponse> converter) {
-        StringBuilder builder =
-                new StringBuilder(originalUserPrompt).append("\nPrevious matches rejected by validation:\n");
+        StringBuilder builder = new StringBuilder(originalUserPrompt)
+                .append("\nAlready accepted from your previous pass (do not repeat unless adding new evidence):\n");
+        if (acceptedSummaries.isEmpty()) {
+            builder.append("- (none)\n");
+        } else {
+            for (String summary : acceptedSummaries) {
+                builder.append("- ").append(summary).append('\n');
+            }
+        }
+        builder.append("\nPrevious matches rejected by validation:\n");
         for (String rejection : rejections) {
             builder.append("- ").append(rejection).append('\n');
         }
-        builder.append("Previous proposal count=")
-                .append(previousResponse.matches().size())
-                .append(".\n");
         builder.append(
-                "Return the corrected full matches list using ONLY exact supplied surface aliases (s1, o1) and their own scoped attribute aliases (s1.a1, o1.b1). Omit any unsupported match.\n");
+                "Repair and return all rejected matches above, plus any additional valid relationships that were missed on the first pass, using ONLY exact supplied surface aliases (s1, o1) and their own scoped attribute aliases (s1.a1, o1.b1). Fix mismatched surface aliases, ensure each attribute alias belongs to the selected surface, add missing supporting attribute or synopsis citations, or select the correct nature — validation will filter out anything that remains unsupported.\n");
         builder.append(converter.getFormat());
         return builder.toString();
     }
@@ -607,7 +748,8 @@ public class CrossRepoMatchingService {
             RepoView subject,
             List<SurfaceView> left,
             RepoView other,
-            List<SurfaceView> right) {
+            List<SurfaceView> right,
+            List<PeerLog> logs) {
         if (match == null) {
             return null;
         }
@@ -656,7 +798,13 @@ public class CrossRepoMatchingService {
                 filteredOtherAttrs,
                 filteredSubjectFragments,
                 filteredOtherFragments);
-        return normalizeDirection(cleaned, left, right);
+        InferenceResponse.RelationProposal normalized = normalizeDirection(cleaned, left, right);
+        if (normalized.direction() != cleaned.direction()) {
+            logs.add(PeerLog.debug("Direction normalized for " + cleaned.nature() + " (" + repoLabel(subject)
+                    + " <-> " + repoLabel(other) + "): " + cleaned.direction() + " -> "
+                    + normalized.direction() + "."));
+        }
+        return normalized;
     }
 
     private static SurfaceView findSurface(List<SurfaceView> surfaces, UUID surfaceId) {
@@ -721,7 +869,8 @@ public class CrossRepoMatchingService {
             String userPrompt,
             BeanOutputConverter<InferenceResponse> converter,
             IngestionProperties.Matching matching,
-            List<PeerLog> logs) {
+            List<PeerLog> logs,
+            AtomicInteger retryCount) {
         int maxRetries = Math.max(0, matching.getMaxRetries());
         long backoffMs = Math.max(0L, matching.getInitialBackoffMs());
         IllegalStateException lastFailure = null;
@@ -737,7 +886,7 @@ public class CrossRepoMatchingService {
                     throw new IllegalStateException("Surface matching returned no content for batch " + batchId);
                 }
                 InferenceResponse response = converter.convert(content);
-                if (response == null || response.matches() == null) {
+                if (response.matches() == null) {
                     throw new IllegalStateException(
                             "Surface matching returned an invalid response for batch " + batchId);
                 }
@@ -750,6 +899,7 @@ public class CrossRepoMatchingService {
                         e);
             }
             if (attempt < maxRetries) {
+                retryCount.incrementAndGet();
                 logs.add(PeerLog.warn("Retrying surface-matching call after attempt "
                         + (attempt + 1)
                         + " failed: "
@@ -783,6 +933,7 @@ public class CrossRepoMatchingService {
                         case A_TO_B -> Direction.B_TO_A;
                         case B_TO_A -> Direction.A_TO_B;
                         case BIDIRECTIONAL -> Direction.BIDIRECTIONAL;
+                        case UNKNOWN -> Direction.UNKNOWN;
                     };
             return new InferenceResponse.RelationProposal(
                     proposal.otherRepositoryId(),
@@ -817,13 +968,7 @@ public class CrossRepoMatchingService {
         for (SurfaceView surface : surfaces) {
             if (surface.detectedBy() == SurfaceDetection.SYFT && surface.role() == SurfaceRole.REQUIRES) {
                 List<AttributeView> kept = surface.attributes().stream()
-                        .filter(attribute -> {
-                            if (!"IDENTIFIER".equals(attribute.kind())) {
-                                return true;
-                            }
-                            String coordinate = packageCoordinate(attribute.value());
-                            return coordinate == null || peerCoordinates.contains(coordinate);
-                        })
+                        .filter(attribute -> identifierMatchesPeer(attribute, peerCoordinates))
                         .toList();
                 if (!kept.isEmpty()) {
                     trimmed.add(new SurfaceView(
@@ -834,6 +979,14 @@ public class CrossRepoMatchingService {
             }
         }
         return List.copyOf(trimmed);
+    }
+
+    public static boolean identifierMatchesPeer(AttributeView attribute, Set<String> peerCoordinates) {
+        if (!"IDENTIFIER".equals(attribute.kind())) {
+            return true;
+        }
+        String coordinate = packageCoordinate(attribute.value());
+        return coordinate == null || peerCoordinates.contains(coordinate);
     }
 
     static List<List<SurfaceView>> groups(List<SurfaceView> surfaces, int maxGroupChars) {
@@ -861,9 +1014,7 @@ public class CrossRepoMatchingService {
             current.add(surface);
             size += chars;
         }
-        if (!current.isEmpty()) {
-            result.add(List.copyOf(current));
-        }
+        result.add(List.copyOf(current));
         return List.copyOf(result);
     }
 
@@ -935,39 +1086,26 @@ public class CrossRepoMatchingService {
         return switch (match.nature()) {
             case CALLS, BUILDS_AGAINST ->
                 validateDirectedEvidence(match, subject, other, subjectEvidence, otherEvidence);
-            case MESSAGES -> validateMessagesEvidence(subject, other, subjectEvidence, otherEvidence);
-            case DEPLOYS -> validateDeploysEvidence(subject, other, subjectEvidence, otherEvidence);
-            case SHARES_STATE -> validateSharedStateEvidence(match, subject, other, subjectEvidence, otherEvidence);
-            case PEER -> validatePeerEvidence(match, subject, other, subjectEvidence, otherEvidence);
+            case MESSAGES -> validateMessagesEvidence(subjectEvidence, otherEvidence);
+            case HOSTS -> validateHostsEvidence(subjectEvidence, otherEvidence);
+            case SHARES_STATE -> validateSharedStateEvidence(subject, other, subjectEvidence, otherEvidence);
+            case PEER -> validatePeerEvidence(match, subjectEvidence, otherEvidence);
         };
     }
 
     private static String validateMessagesEvidence(
-            SurfaceView subject,
-            SurfaceView other,
-            List<AttributeView> subjectEvidence,
-            List<AttributeView> otherEvidence) {
-        if (subject.role() == SurfaceRole.UNKNOWN || other.role() == SurfaceRole.UNKNOWN) {
-            return "MESSAGES requires classified surfaces";
-        }
-        return hasAnyKind(subjectEvidence, "NAME", "IDENTIFIER", "ENDPOINT", "REF", "METHOD")
-                        && hasAnyKind(otherEvidence, "NAME", "IDENTIFIER", "ENDPOINT", "REF", "METHOD")
+            List<AttributeView> subjectEvidence, List<AttributeView> otherEvidence) {
+        return hasAnyKind(subjectEvidence, "IDENTIFIER", "ENDPOINT", "METHOD", "TECHNOLOGY")
+                        && hasAnyKind(otherEvidence, "IDENTIFIER", "ENDPOINT", "METHOD", "TECHNOLOGY")
                 ? null
-                : "MESSAGES requires cited message or endpoint identity evidence on both surfaces";
+                : "MESSAGES requires cited non-FILE evidence on both surfaces";
     }
 
-    private static String validateDeploysEvidence(
-            SurfaceView subject,
-            SurfaceView other,
-            List<AttributeView> subjectEvidence,
-            List<AttributeView> otherEvidence) {
-        if (subject.role() == SurfaceRole.UNKNOWN || other.role() == SurfaceRole.UNKNOWN) {
-            return "DEPLOYS requires classified surfaces";
-        }
-        return hasAnyKind(subjectEvidence, "FILE", "IDENTIFIER", "TECHNOLOGY", "NAME", "REF")
-                        && hasAnyKind(otherEvidence, "FILE", "IDENTIFIER", "TECHNOLOGY", "NAME", "REF")
+    private static String validateHostsEvidence(
+            List<AttributeView> subjectEvidence, List<AttributeView> otherEvidence) {
+        return !subjectEvidence.isEmpty() && !otherEvidence.isEmpty()
                 ? null
-                : "DEPLOYS requires cited deployment or artifact evidence on both surfaces";
+                : "HOSTS requires cited hosting, provisioning, or artifact evidence on both surfaces";
     }
 
     private static String validateDirectedEvidence(
@@ -980,20 +1118,24 @@ public class CrossRepoMatchingService {
         boolean subjectRequires = subject.role() == SurfaceRole.REQUIRES;
         boolean otherProvides = other.role() == SurfaceRole.PROVIDES;
         boolean otherRequires = other.role() == SurfaceRole.REQUIRES;
-        if (!(subjectProvides && otherRequires || subjectRequires && otherProvides)) {
-            return match.nature() + " requires one PROVIDES surface and one REQUIRES surface";
+        if (match.nature() == Nature.BUILDS_AGAINST) {
+            if (!(subjectProvides && otherRequires || subjectRequires && otherProvides)) {
+                return "BUILDS_AGAINST requires one PROVIDES surface and one REQUIRES surface";
+            }
+            return sharesPackageCoordinate(subjectEvidence, otherEvidence)
+                    ? null
+                    : "BUILDS_AGAINST requires the provided and required package coordinates to match";
+        }
+        if ((subjectProvides && otherProvides) || (subjectRequires && otherRequires)) {
+            return "CALLS requires one PROVIDES surface and one REQUIRES surface";
         }
         return switch (match.nature()) {
             case CALLS ->
-                hasAnyKind(subjectEvidence, "ENDPOINT", "IDENTIFIER", "REF")
-                                && hasAnyKind(otherEvidence, "ENDPOINT", "IDENTIFIER", "REF")
+                hasAnyKind(subjectEvidence, "ENDPOINT", "IDENTIFIER", "METHOD", "TECHNOLOGY")
+                                && hasAnyKind(otherEvidence, "ENDPOINT", "IDENTIFIER", "METHOD", "TECHNOLOGY")
                         ? null
-                        : "CALLS requires cited endpoint or interface identity evidence on both surfaces";
-            case BUILDS_AGAINST ->
-                sharesPackageCoordinate(subjectEvidence, otherEvidence)
-                        ? null
-                        : "BUILDS_AGAINST requires the provided and required package coordinates to match";
-            case MESSAGES, DEPLOYS, SHARES_STATE, PEER -> "Invalid directed relation nature";
+                        : "CALLS requires cited non-FILE evidence on both surfaces";
+            case BUILDS_AGAINST, MESSAGES, HOSTS, SHARES_STATE, PEER -> "Invalid directed relation nature";
         };
     }
 
@@ -1072,7 +1214,9 @@ public class CrossRepoMatchingService {
         if (match.nature() == null) {
             return match;
         }
-        if (match.nature() == Nature.PEER || match.nature() == Nature.SHARES_STATE) {
+        if (match.nature() == Nature.MESSAGES
+                || match.nature() == Nature.SHARES_STATE
+                || match.nature() == Nature.PEER) {
             return withDirection(match, Direction.BIDIRECTIONAL);
         }
         UUID subjectId = uuid(match.subjectSurfaceId());
@@ -1086,27 +1230,22 @@ public class CrossRepoMatchingService {
                 .findFirst()
                 .orElse(null);
         if (subject == null || other == null) {
+            return match.direction() == null ? withDirection(match, Direction.UNKNOWN) : match;
+        }
+        boolean subjectProvidesOtherRequires =
+                subject.role() == SurfaceRole.PROVIDES && other.role() == SurfaceRole.REQUIRES;
+        boolean subjectRequiresOtherProvides =
+                subject.role() == SurfaceRole.REQUIRES && other.role() == SurfaceRole.PROVIDES;
+        if (subjectProvidesOtherRequires) {
+            return withDirection(match, Direction.A_TO_B);
+        }
+        if (subjectRequiresOtherProvides) {
+            return withDirection(match, Direction.B_TO_A);
+        }
+        if (match.direction() == Direction.A_TO_B || match.direction() == Direction.B_TO_A) {
             return match;
         }
-        if (match.nature() == Nature.MESSAGES || match.nature() == Nature.DEPLOYS) {
-            if (subject.role() == other.role()) {
-                return match.direction() == null ? withDirection(match, Direction.BIDIRECTIONAL) : match;
-            }
-            if (hasSynopsisChallenge(match) && match.direction() != null) {
-                return match;
-            }
-            Direction expected = subject.role() == SurfaceRole.PROVIDES ? Direction.A_TO_B : Direction.B_TO_A;
-            return withDirection(match, expected);
-        }
-        Direction expected = subject.role() == SurfaceRole.PROVIDES ? Direction.A_TO_B : Direction.B_TO_A;
-        return withDirection(match, expected);
-    }
-
-    private static boolean hasSynopsisChallenge(InferenceResponse.RelationProposal match) {
-        return match.subjectSynopsisIds() != null
-                && !match.subjectSynopsisIds().isEmpty()
-                && match.otherSynopsisIds() != null
-                && !match.otherSynopsisIds().isEmpty();
+        return withDirection(match, Direction.UNKNOWN);
     }
 
     private static InferenceResponse.RelationProposal withDirection(
@@ -1130,44 +1269,34 @@ public class CrossRepoMatchingService {
     }
 
     private static String validateSharedStateEvidence(
-            InferenceResponse.RelationProposal match,
             SurfaceView subject,
             SurfaceView other,
             List<AttributeView> subjectEvidence,
             List<AttributeView> otherEvidence) {
-        if (match.direction() != Direction.BIDIRECTIONAL) {
-            return "SHARES_STATE must be bidirectional";
+        if (subject.role() == SurfaceRole.PROVIDES || other.role() == SurfaceRole.PROVIDES) {
+            return "SHARES_STATE requires non-provisioning surfaces (use HOSTS for infrastructure provisioning)";
         }
-        if (subject.role() != SurfaceRole.REQUIRES || other.role() != SurfaceRole.REQUIRES) {
-            return "SHARES_STATE requires two resource-consuming surfaces";
-        }
-        return sharesValueOfKinds(subjectEvidence, otherEvidence, "NAME", "REF")
+        return sharesValueOfKinds(subjectEvidence, otherEvidence, "IDENTIFIER")
                 ? null
                 : "SHARES_STATE requires a shared cited resource name or reference";
     }
 
     private static String validatePeerEvidence(
             InferenceResponse.RelationProposal match,
-            SurfaceView subject,
-            SurfaceView other,
             List<AttributeView> subjectEvidence,
             List<AttributeView> otherEvidence) {
-        if (match.direction() != Direction.BIDIRECTIONAL) {
-            return "PEER must be bidirectional";
-        }
-        if (subject.role() == SurfaceRole.UNKNOWN || other.role() == SurfaceRole.UNKNOWN) {
-            return "PEER requires classified surfaces";
-        }
         if (match.subjectSynopsisIds().isEmpty() || match.otherSynopsisIds().isEmpty()) {
             return "PEER requires synopsis evidence for both repositories";
         }
-        if (hasAnyKind(subjectEvidence, "ENDPOINT", "IDENTIFIER", "TECHNOLOGY")
-                || hasAnyKind(otherEvidence, "ENDPOINT", "IDENTIFIER", "TECHNOLOGY")) {
-            return "PEER cannot be supported by technical endpoints, package coordinates, or technologies";
-        }
-        return hasAnyKind(subjectEvidence, "NAME", "REF") && hasAnyKind(otherEvidence, "NAME", "REF")
+        return hasNonPackageIdentifier(subjectEvidence) && hasNonPackageIdentifier(otherEvidence)
                 ? null
-                : "PEER requires cited domain or product evidence on both surfaces";
+                : "PEER requires cited non-package domain IDENTIFIER evidence on both surfaces";
+    }
+
+    private static boolean hasNonPackageIdentifier(List<AttributeView> attributes) {
+        return attributes.stream()
+                .anyMatch(attribute ->
+                        "IDENTIFIER".equals(attribute.kind()) && packageCoordinate(attribute.value()) == null);
     }
 
     private static List<AttributeView> citedAttributes(SurfaceView surface, List<String> ids) {
@@ -1219,7 +1348,7 @@ public class CrossRepoMatchingService {
         int query = identifier.indexOf('?');
         int subpath = identifier.indexOf('#');
         if (query >= 0) {
-            end = Math.min(end, query);
+            end = query; // Query always less than length
         }
         if (subpath >= 0) {
             end = Math.min(end, subpath);
@@ -1494,9 +1623,10 @@ public class CrossRepoMatchingService {
         }
     }
 
-    private record RejectedCandidate(Nature nature, String message) {}
+    private record RejectedCandidate(Nature nature, String message, String promptLine) {}
 
-    private record GroupPassResult(int acceptedCount, List<RejectedCandidate> rejections) {}
+    private record GroupPassResult(
+            int acceptedCount, List<String> acceptedSummaries, List<RejectedCandidate> rejections) {}
 
     private record PeerPlan(
             RepoView other,
@@ -1505,13 +1635,41 @@ public class CrossRepoMatchingService {
             List<SurfaceView> otherSurfaces,
             boolean needsLlm) {}
 
+    private static String repoLabel(RepoView repo) {
+        return repo.repoName() != null && !repo.repoName().isBlank()
+                ? repo.repoName()
+                : repo.repositoryId().toString();
+    }
+
+    private static String describeSurface(List<SurfaceView> surfaces, String resolvedId, String fallbackToken) {
+        SurfaceView surface = findSurface(surfaces, uuid(resolvedId));
+        if (surface == null) {
+            return fallbackToken == null || fallbackToken.isBlank() ? "<unknown>" : fallbackToken;
+        }
+        String desc = surface.description();
+        return desc != null && !desc.isBlank() ? desc : surface.id().toString();
+    }
+
+    private static String peerSummary(
+            RepoView subject, RepoView other, int directAccepted, int llmAccepted, int discarded, int retries) {
+        return "Compared " + repoLabel(subject) + " (" + subject.surfaces().size() + " surfaces) vs "
+                + repoLabel(other) + " (" + other.surfaces().size() + " surfaces): direct=" + directAccepted
+                + ", accepted=" + (directAccepted + llmAccepted) + ", rejected=" + discarded + ", retries=" + retries
+                + ".";
+    }
+
     private enum LogLevel {
+        DEBUG,
         INFO,
         WARN,
         ERROR
     }
 
     private record PeerLog(LogLevel level, String message) {
+        static PeerLog debug(String message) {
+            return new PeerLog(LogLevel.DEBUG, message);
+        }
+
         static PeerLog info(String message) {
             return new PeerLog(LogLevel.INFO, message);
         }
@@ -1526,6 +1684,7 @@ public class CrossRepoMatchingService {
 
         void writeTo(BatchLogger logger) {
             switch (level) {
+                case DEBUG -> logger.debug(STEP, message);
                 case INFO -> logger.info(STEP, message);
                 case WARN -> logger.warn(STEP, message);
                 case ERROR -> logger.error(STEP, message);
@@ -1535,6 +1694,7 @@ public class CrossRepoMatchingService {
 
     private record PeerOutcome(
             UUID otherBatchId,
+            String otherRepoName,
             List<InferenceResponse.RelationProposal> accepted,
             int discarded,
             List<PeerLog> logs,

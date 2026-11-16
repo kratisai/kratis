@@ -17,7 +17,7 @@ final class AssistedResponse {
 
     record Observation(UUID surfaceId, SurfaceRole role, String description, List<Fact> attributes) {
         Observation {
-            Objects.requireNonNull(role);
+            role = role == null ? SurfaceRole.UNKNOWN : role;
             Objects.requireNonNull(description);
             attributes = List.copyOf(Objects.requireNonNull(attributes));
         }
@@ -25,9 +25,20 @@ final class AssistedResponse {
 
     record Fact(AttributeKind kind, String value, String file) {
         Fact {
-            Objects.requireNonNull(kind);
-            Objects.requireNonNull(value);
-            Objects.requireNonNull(file);
+            if (kind == null) {
+                throw new IllegalArgumentException("Fact.kind is required");
+            }
+            if (kind == AttributeKind.FILE && file == null && value != null) {
+                file = value;
+            } else if (kind == AttributeKind.FILE && file != null && value == null) {
+                value = file;
+            }
+            if (value == null) {
+                throw new IllegalArgumentException("Fact.value is required");
+            }
+            if (file == null) {
+                throw new IllegalArgumentException("Fact.file is required (repository-relative path)");
+            }
         }
     }
 }

@@ -95,10 +95,6 @@ public class ResearchDimensionWorker {
                     attempt == 0 ? "Starting" : "Retrying",
                     dimension.getCategory(),
                     dimension.getName());
-            batchLogger.info(
-                    "RESEARCH_DIMENSIONS",
-                    (attempt == 0 ? "Starting" : "Retrying") + " research for " + dimension.getCategory() + ": \""
-                            + dimension.getName() + "\"");
             try {
                 Prompt prompt = new Prompt(
                         basePromptText + feedback,
@@ -110,13 +106,25 @@ public class ResearchDimensionWorker {
                 if (!StringUtils.hasText(text)) {
                     throw new RetryableResponseException("LLM returned an empty synopsis");
                 }
-                return convertSynopsis(converter, text);
+                DimensionSynopsisResult result = convertSynopsis(converter, text);
+                if (StringUtils.hasText(result.synopsis())) {
+                    String retryNote = attempt > 0 ? " (after " + attempt + " retry)" : "";
+                    batchLogger.info(
+                            "RESEARCH_DIMENSIONS",
+                            "Researched " + dimension.getCategory() + ": \"" + dimension.getName() + "\"" + retryNote
+                                    + " (" + wordCount(result.synopsis()) + " words)");
+                }
+                return result;
 
             } catch (RetryableResponseException e) {
                 if (attempt == maxRetries) {
                     throw new IngestionPipelineAbortException(
                             "Max retries exceeded for LLM request: " + e.getMessage(), e);
                 }
+                batchLogger.warn(
+                        "RESEARCH_DIMENSIONS",
+                        "Retrying research for " + dimension.getCategory() + ": \"" + dimension.getName()
+                                + "\" (attempt " + (attempt + 2) + "): " + e.getMessage());
                 feedback = RETRY_GUIDANCE;
                 sleep(backoff(initialBackoffMs, maxBackoffMs, attempt));
             } catch (RuntimeException e) {
@@ -131,12 +139,21 @@ public class ResearchDimensionWorker {
                     throw new IngestionPipelineAbortException(
                             "Max retries exceeded for LLM request (" + category + "): " + e.getMessage(), e);
                 }
+                batchLogger.warn(
+                        "RESEARCH_DIMENSIONS",
+                        "Retrying research for " + dimension.getCategory() + ": \"" + dimension.getName()
+                                + "\" (attempt " + (attempt + 2) + "): " + category);
                 sleep(backoff(initialBackoffMs, maxBackoffMs, attempt));
             }
         }
 
         throw new IngestionPipelineAbortException(
                 "Unexpected exit from retry loop for dimension: " + dimension.getName());
+    }
+
+    private static int wordCount(String text) {
+        String trimmed = text.trim();
+        return trimmed.isEmpty() ? 0 : trimmed.split("\\s+").length;
     }
 
     private static DimensionSynopsisResult convertSynopsis(

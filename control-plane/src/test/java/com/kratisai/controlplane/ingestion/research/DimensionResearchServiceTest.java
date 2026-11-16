@@ -3,7 +3,9 @@ package com.kratisai.controlplane.ingestion.research;
 import static com.kratisai.controlplane.testsupport.llm.FakeChatModelMatchers.ingestionPipelineMatchers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
+import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.CtxDimensionRepository;
 import com.kratisai.controlplane.repository.CtxNodeDimensionRepository;
@@ -53,6 +55,7 @@ class DimensionResearchServiceTest {
     private FakeChatModel fakeChatModel;
 
     private IngestionBatch batch;
+    private IngestionBatchLogService.BatchLogger batchLogger;
 
     @BeforeEach
     void setUp() {
@@ -61,6 +64,8 @@ class DimensionResearchServiceTest {
         fakeChatModel.addMatchers(ingestionPipelineMatchers());
         TestDataFactory.TestContext ctx = testDataFactory.createDefaultContext("Test Team", "test-repo");
         batch = ctx.batch();
+        batchLogger = new IngestionBatchLogService.BatchLogger(
+                batch.getId(), ctx.team().getId(), mock(IngestionBatchLogService.class));
     }
 
     @AfterEach
@@ -129,7 +134,7 @@ class DimensionResearchServiceTest {
         ctxNodeDimensionRepository.saveAndFlush(new CtxNodeDimension(node3, dim3, 0.85));
 
         // Execute research (uses virtual threads for parallel execution)
-        dimensionResearchService.researchDimensions(batch);
+        dimensionResearchService.researchDimensions(batch, batchLogger);
 
         // Assert all dimensions have been updated with a non-blank synopsis
         List<CtxDimension> updatedDimensions = ctxDimensionRepository.findByBatchId(batch.getId());
@@ -140,7 +145,7 @@ class DimensionResearchServiceTest {
 
     @Test
     void shouldThrowExceptionWhenNoDimensionsFound() {
-        assertThatThrownBy(() -> dimensionResearchService.researchDimensions(batch))
+        assertThatThrownBy(() -> dimensionResearchService.researchDimensions(batch, batchLogger))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("No dimensions found for batch.");
     }
@@ -170,7 +175,6 @@ class DimensionResearchServiceTest {
         ctxNodeDimensionRepository.saveAndFlush(new CtxNodeDimension(node1, dim1, 0.95));
 
         TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
-        ModelProvider[] providerHolder = new ModelProvider[1];
 
         transactionTemplate.execute(status -> {
             // this repo returns a LAZY provider.
@@ -178,13 +182,12 @@ class DimensionResearchServiceTest {
                     .findByIdWithRepositoryAndTeam(batch.getId())
                     .orElseThrow();
             ModelProvider provider = freshBatch.getRepository().getTeam().getIngestionProvider();
-            providerHolder[0] = provider;
 
             assertThat(Hibernate.isInitialized(provider))
                     .as("ingestionProvider should still be an uninitialized lazy proxy at this point")
                     .isFalse();
 
-            dimensionResearchService.researchDimensions(freshBatch);
+            dimensionResearchService.researchDimensions(freshBatch, batchLogger);
 
             assertThat(Hibernate.isInitialized(provider))
                     .as("DimensionResearchService must eagerly initialize the shared ModelProvider "

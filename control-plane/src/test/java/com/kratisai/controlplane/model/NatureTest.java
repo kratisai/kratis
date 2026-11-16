@@ -9,6 +9,6 @@ class NatureTest {
     void closedSetHasNoExtraNature() {
         assertThat(Nature.values())
                 .extracting(Enum::name)
-                .containsExactly("CALLS", "MESSAGES", "BUILDS_AGAINST", "DEPLOYS", "SHARES_STATE", "PEER");
+                .containsExactly("CALLS", "MESSAGES", "BUILDS_AGAINST", "HOSTS", "SHARES_STATE", "PEER");
     }
 }

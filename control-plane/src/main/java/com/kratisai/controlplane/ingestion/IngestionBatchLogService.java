@@ -13,6 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class IngestionBatchLogService {
 
+    static final int MAX_MESSAGE_CHARS = 8_000;
+    private static final String TRUNCATED_SUFFIX = "... [truncated]";
+
     private final IngestionBatchLogRepository logRepository;
     private final JdbcTemplate jdbcTemplate;
 
@@ -23,6 +26,7 @@ public class IngestionBatchLogService {
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void log(UUID batchId, UUID teamId, String level, String step, String message) {
+        String bounded = boundMessage(message);
         // Use jdbcTemplate instead of our repositories to avoid creating new sessions
         // whilst "work"
         // happens in a normal session.
@@ -33,8 +37,18 @@ public class IngestionBatchLogService {
                 teamId,
                 level,
                 step,
-                message,
+                bounded,
                 java.sql.Timestamp.from(Instant.now()));
+    }
+
+    static String boundMessage(String message) {
+        if (message == null) {
+            return "";
+        }
+        if (message.length() <= MAX_MESSAGE_CHARS) {
+            return message;
+        }
+        return message.substring(0, MAX_MESSAGE_CHARS - TRUNCATED_SUFFIX.length()) + TRUNCATED_SUFFIX;
     }
 
     @Transactional(readOnly = true)
@@ -43,6 +57,10 @@ public class IngestionBatchLogService {
     }
 
     public record BatchLogger(UUID batchId, UUID teamId, IngestionBatchLogService service) {
+        public void debug(String step, String message) {
+            service.log(batchId, teamId, "DEBUG", step, message);
+        }
+
         public void info(String step, String message) {
             service.log(batchId, teamId, "INFO", step, message);
         }

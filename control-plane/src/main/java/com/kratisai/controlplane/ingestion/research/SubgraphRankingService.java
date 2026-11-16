@@ -1,6 +1,5 @@
 package com.kratisai.controlplane.ingestion.research;
 
-import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
 import java.util.*;
@@ -24,30 +23,21 @@ public class SubgraphRankingService {
     private final CtxEdgeRepository ctxEdgeRepository;
     private final CtxDimensionRepository ctxDimensionRepository;
     private final CtxNodeDimensionRepository ctxNodeDimensionRepository;
-    private final IngestionBatchLogService ingestionBatchLogService;
 
     public SubgraphRankingService(
             CtxEdgeRepository ctxEdgeRepository,
             CtxDimensionRepository ctxDimensionRepository,
-            CtxNodeDimensionRepository ctxNodeDimensionRepository,
-            IngestionBatchLogService ingestionBatchLogService) {
+            CtxNodeDimensionRepository ctxNodeDimensionRepository) {
         this.ctxEdgeRepository = ctxEdgeRepository;
         this.ctxDimensionRepository = ctxDimensionRepository;
         this.ctxNodeDimensionRepository = ctxNodeDimensionRepository;
-        this.ingestionBatchLogService = ingestionBatchLogService;
     }
 
     @Transactional
-    public void rankDimensions(IngestionBatch batch) {
-        var batchLogger = new IngestionBatchLogService.BatchLogger(
-                batch.getId(), batch.getRepository().getTeam().getId(), ingestionBatchLogService);
-
-        batchLogger.info("RESEARCH_GRAPH", "Starting subgraph ranking for dimensions...");
-
+    public String rankDimensions(IngestionBatch batch) {
         List<CtxDimension> dimensions = ctxDimensionRepository.findByBatchId(batch.getId());
         if (dimensions.isEmpty()) {
-            batchLogger.info("RESEARCH_GRAPH", "No dimensions found to rank.");
-            return;
+            return "no dimensions found to rank";
         }
 
         int totalRanked = 0;
@@ -98,9 +88,7 @@ public class SubgraphRankingService {
         }
 
         logger.debug("Ranked {} node-dimension mappings", totalRanked);
-        batchLogger.info(
-                "RESEARCH_GRAPH",
-                "Ranked " + totalRanked + " node-dimension mappings across " + dimensions.size() + " dimensions.");
+        return "ranked " + totalRanked + " node-dimension mappings across " + dimensions.size() + " dimensions";
     }
 
     /**

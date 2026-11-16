@@ -6,15 +6,17 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 public enum Direction {
     A_TO_B,
     B_TO_A,
-    BIDIRECTIONAL;
+    BIDIRECTIONAL,
+    UNKNOWN;
 
     @JsonCreator
     public static Direction from(String value) {
         if (value == null) {
             return null;
         }
+        String trimmed = value.trim();
         for (Direction candidate : values()) {
-            if (candidate.name().equalsIgnoreCase(value)) {
+            if (candidate.name().equalsIgnoreCase(trimmed)) {
                 return candidate;
             }
         }

@@ -3,6 +3,7 @@ package com.kratisai.controlplane.ingestion;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,13 +44,15 @@ class WriteWikiPageToolTest {
     private IngestionBatch batch;
     private Team team;
     private Repository repository;
+    private IngestionBatchLogService.BatchLogger wikiBatchLogger;
 
     @BeforeEach
     void setUp() {
         writeWikiPageTool =
                 new WriteWikiPageTool(ctxWikiPageRepository, ingestionBatchRepository, new MermaidDiagramValidator());
         batchId = UUID.randomUUID();
-        toolContext = new ToolContext(Map.of("batchId", batchId));
+        wikiBatchLogger = mock(IngestionBatchLogService.BatchLogger.class);
+        toolContext = new ToolContext(Map.of("batchId", batchId, "wikiBatchLogger", wikiBatchLogger));
         team = new Team();
         team.setId(UUID.randomUUID());
         repository = new Repository();
@@ -80,6 +83,7 @@ class WriteWikiPageToolTest {
         assertThat(saved.getContent()).isEqualTo("# Overview content");
         assertThat(saved.getOrderIndex()).isZero();
         assertThat(saved.getParentPage()).isNull();
+        verify(wikiBatchLogger).info("GENERATE_WIKI", "Created wiki page \"System Overview\" (slug=overview, 3 words)");
     }
 
     @Test

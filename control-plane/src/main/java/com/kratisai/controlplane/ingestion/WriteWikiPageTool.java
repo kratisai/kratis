@@ -94,6 +94,7 @@ public class WriteWikiPageTool {
             existingPage.setContent(content);
             ctxWikiPageRepository.saveAndFlush(existingPage);
             logger.info("WriteWikiPageTool: Updated existing wiki page: {}", pageSlug);
+            logPageWrite(toolContext, "Updated", title, pageSlug, content);
             return "SUCCESS: Wiki page '" + pageSlug + "' updated successfully.";
         } else {
             CtxWikiPage newPage = new CtxWikiPage(
@@ -107,7 +108,23 @@ public class WriteWikiPageTool {
                     content);
             ctxWikiPageRepository.saveAndFlush(newPage);
             logger.info("WriteWikiPageTool: Created new wiki page: {}", pageSlug);
+            logPageWrite(toolContext, "Created", title, pageSlug, content);
             return "SUCCESS: Wiki page '" + pageSlug + "' created successfully.";
+        }
+    }
+
+    private static void logPageWrite(
+            ToolContext toolContext, String action, String title, String pageSlug, String content) {
+        if (toolContext == null) {
+            return;
+        }
+        Object loggerObj = toolContext.getContext().get("wikiBatchLogger");
+        if (loggerObj instanceof IngestionBatchLogService.BatchLogger batchLogger) {
+            String trimmed = content.trim();
+            int words = trimmed.isEmpty() ? 0 : trimmed.split("\\s+").length;
+            batchLogger.info(
+                    "GENERATE_WIKI",
+                    action + " wiki page \"" + title + "\" (slug=" + pageSlug + ", " + words + " words)");
         }
     }
 

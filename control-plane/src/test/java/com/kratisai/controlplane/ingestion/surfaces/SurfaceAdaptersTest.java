@@ -4,15 +4,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.groups.Tuple.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.config.IngestionProperties;
+import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.ingestion.parse.CodebaseMemoryParserService;
 import com.kratisai.controlplane.model.AttributeKind;
 import com.kratisai.controlplane.model.CtxSurface;
@@ -70,8 +75,8 @@ class SurfaceAdaptersTest {
                 ],
                 "dependencies":[{"ref":"root","dependsOn":["a","b"]},{"ref":"a","dependsOn":["c"]}]}
                 """);
-        var counters = new SurfaceCounters();
-        var surfaces = new SyftSurfaceAdapter(null, null, new ObjectMapper()).parse(batch(), bom, counters);
+        var batchLogger = mock(IngestionBatchLogService.BatchLogger.class);
+        var surfaces = new SyftSurfaceAdapter(null, null, new ObjectMapper()).parse(batch(), bom, batchLogger);
 
         assertThat(surfaces).hasSize(3);
         CtxSurface provided = surfaces.stream()
@@ -81,7 +86,7 @@ class SurfaceAdaptersTest {
         assertThat(provided.getDescription()).isEqualTo("Package identity declared by package-lock.json");
         assertThat(provided.getAttributeRows())
                 .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
-                .contains(tuple(AttributeKind.IDENTIFIER, "pkg:npm/app@1.0.0"), tuple(AttributeKind.NAME, "app"));
+                .contains(tuple(AttributeKind.IDENTIFIER, "pkg:npm/app@1.0.0"), tuple(AttributeKind.IDENTIFIER, "app"));
         CtxSurface packages = surfaces.stream()
                 .filter(surface -> surface.getDescription().contains("package-lock.json")
                         && surface.getRole() == SurfaceRole.REQUIRES)
@@ -95,8 +100,8 @@ class SurfaceAdaptersTest {
                         tuple(AttributeKind.TECHNOLOGY, "unfamiliar"),
                         tuple(AttributeKind.IDENTIFIER, "pkg:npm/a@1"),
                         tuple(AttributeKind.IDENTIFIER, "pkg:unfamiliar/b@1"),
-                        tuple(AttributeKind.REF, "direct:2"),
-                        tuple(AttributeKind.REF, "transitive:1"))
+                        tuple(AttributeKind.IDENTIFIER, "direct:2"),
+                        tuple(AttributeKind.IDENTIFIER, "transitive:1"))
                 .doesNotContain(
                         tuple(AttributeKind.IDENTIFIER, "pkg:npm/app@1.0.0"),
                         tuple(AttributeKind.IDENTIFIER, "pkg:npm/c@1"));
@@ -110,11 +115,7 @@ class SurfaceAdaptersTest {
                 .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
                 .contains(
                         tuple(AttributeKind.FILE, "requirements.txt"), tuple(AttributeKind.IDENTIFIER, "pkg:pypi/d@2"));
-        assertThat(counters.snapshot())
-                .containsEntry("sbom.components", 5)
-                .containsEntry("syft.roots", 1)
-                .containsEntry("syft.transitive_excluded", 1)
-                .containsEntry("syft.manifests", 2);
+        verifyNoInteractions(batchLogger);
     }
 
     @Test
@@ -128,8 +129,8 @@ class SurfaceAdaptersTest {
                   {"name":"no-purl", "properties":[{"name":"syft:location:0:path","value":"/package.json"}]}
                 ]}
                 """);
-        var counters = new SurfaceCounters();
-        var surfaces = new SyftSurfaceAdapter(null, null, new ObjectMapper()).parse(batch(), bom, counters);
+        var batchLogger = mock(IngestionBatchLogService.BatchLogger.class);
+        var surfaces = new SyftSurfaceAdapter(null, null, new ObjectMapper()).parse(batch(), bom, batchLogger);
 
         assertThat(surfaces).singleElement().satisfies(surface -> {
             assertThat(surface.getRole()).isEqualTo(SurfaceRole.REQUIRES);
@@ -139,10 +140,6 @@ class SurfaceAdaptersTest {
                             tuple(AttributeKind.FILE, "package.json"),
                             tuple(AttributeKind.IDENTIFIER, "pkg:npm/unknown@1"));
         });
-        assertThat(counters.snapshot())
-                .containsEntry("syft.excluded_test", 1)
-                .containsEntry("syft.unknown_scope", 2)
-                .containsEntry("syft.no_purl", 1);
     }
 
     @Test
@@ -164,8 +161,7 @@ class SurfaceAdaptersTest {
                   {"ref":"wasm","dependsOn":["platform"]}
                 ]}
                 """);
-        var counters = new SurfaceCounters();
-        var surfaces = new SyftSurfaceAdapter(null, null, new ObjectMapper()).parse(batch(), bom, counters);
+        var surfaces = new SyftSurfaceAdapter(null, null, new ObjectMapper()).parse(batch(), bom, null);
 
         assertThat(surfaces).hasSize(3);
         assertThat(surfaces.stream().filter(surface -> surface.getRole() == SurfaceRole.PROVIDES))
@@ -180,7 +176,6 @@ class SurfaceAdaptersTest {
                             tuple(AttributeKind.IDENTIFIER, "pkg:npm/a@1"),
                             tuple(AttributeKind.IDENTIFIER, "pkg:npm/platform@1"));
         });
-        assertThat(counters.snapshot()).containsEntry("syft.roots", 2);
     }
 
     @Test
@@ -206,8 +201,7 @@ class SurfaceAdaptersTest {
                   {"ref":"go","dependsOn":["go-dep"]}
                 ]}
                 """);
-        var counters = new SurfaceCounters();
-        var surfaces = new SyftSurfaceAdapter(null, null, new ObjectMapper()).parse(batch(), bom, counters);
+        var surfaces = new SyftSurfaceAdapter(null, null, new ObjectMapper()).parse(batch(), bom, null);
 
         assertThat(surfaces).hasSize(6);
         assertThat(surfaces.stream().filter(surface -> surface.getRole() == SurfaceRole.PROVIDES))
@@ -218,18 +212,17 @@ class SurfaceAdaptersTest {
                 .hasSize(3)
                 .allSatisfy(surface -> assertThat(surface.getAttributeRows())
                         .anyMatch(attribute -> attribute.getKind() == AttributeKind.IDENTIFIER));
-        assertThat(counters.snapshot()).containsEntry("syft.roots", 3);
     }
 
     @Test
     void syftReportsEmptyDocuments() throws Exception {
         var mapper = new ObjectMapper();
         var adapter = new SyftSurfaceAdapter(null, null, new ObjectMapper());
-        var counters = new SurfaceCounters();
-        assertThat(adapter.parse(batch(), mapper.readTree("{}"), counters)).isEmpty();
-        assertThat(adapter.parse(batch(), mapper.readTree("{\"components\":[]}"), counters))
+        var batchLogger = mock(IngestionBatchLogService.BatchLogger.class);
+        assertThat(adapter.parse(batch(), mapper.readTree("{}"), batchLogger)).isEmpty();
+        assertThat(adapter.parse(batch(), mapper.readTree("{\"components\":[]}"), batchLogger))
                 .isEmpty();
-        assertThat(counters.snapshot()).containsEntry("sbom.empty", 2).doesNotContainKey("sbom.components");
+        verify(batchLogger, times(2)).debug("EXTRACT_SURFACES", "SBOM produced 0 components.");
     }
 
     @Test
@@ -249,9 +242,10 @@ class SurfaceAdaptersTest {
                                 Map.of("callee", "publish", "broker", "custom", "topic", "actual")),
                         new ParserGraph.Edge(2, 3, "ASYNC_CALLS", Map.of("transport", "event_emitter")),
                         new ParserGraph.Edge(4, 3, "ASYNC_CALLS", Map.of("broker", "custom")),
-                        new ParserGraph.Edge(2, 3, "EMITS", Map.of("transport", "event_emitter"))));
-        var counters = new SurfaceCounters();
-        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, counters);
+                        new ParserGraph.Edge(2, 3, "EMITS", Map.of("transport", "event_emitter"))),
+                List.of());
+        var batchLogger = mock(IngestionBatchLogService.BatchLogger.class);
+        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, batchLogger);
         assertThat(surfaces).singleElement().satisfies(surface -> {
             assertThat(surface.getRole()).isEqualTo(SurfaceRole.PROVIDES);
             assertThat(surface.getDescription()).isEqualTo("HTTP API specification api.yaml");
@@ -259,10 +253,9 @@ class SurfaceAdaptersTest {
                     .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
                     .contains(tuple(AttributeKind.ENDPOINT, "/orders"), tuple(AttributeKind.FILE, "api.yaml:8"));
         });
-        assertThat(counters.snapshot())
-                .containsEntry("cmm.unclassified_async_call", 1)
-                .containsEntry("cmm.excluded_in_process", 2)
-                .containsEntry("cmm.excluded_test", 1);
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Ignored unclassified ASYNC_CALLS"));
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Excluded in-process ASYNC_CALLS (event_emitter)"));
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Excluded in-process EMITS (event_emitter)"));
     }
 
     @Test
@@ -280,9 +273,10 @@ class SurfaceAdaptersTest {
                         new ParserGraph.Edge(4, 1, "CALLS", Map.of("via", "route_registration")),
                         new ParserGraph.Edge(999, 1, "CALLS", Map.of("via", "route_registration")),
                         new ParserGraph.Edge(2, 1, "CALLS", Map.of("via", "other")),
-                        new ParserGraph.Edge(2, 5, "CALLS", Map.of("via", "route_registration"))));
-        var counters = new SurfaceCounters();
-        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, counters);
+                        new ParserGraph.Edge(2, 5, "CALLS", Map.of("via", "route_registration"))),
+                List.of());
+        var batchLogger = mock(IngestionBatchLogService.BatchLogger.class);
+        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, batchLogger);
         var registrations = surfaces.stream()
                 .filter(surface -> surface.getDescription().startsWith("HTTP API provided by "))
                 .toList();
@@ -294,8 +288,8 @@ class SurfaceAdaptersTest {
                     .contains(tuple(AttributeKind.ENDPOINT, "/orders"), tuple(AttributeKind.METHOD, "POST"))
                     .doesNotContain(
                             tuple(AttributeKind.IDENTIFIER, "/orders"),
-                            tuple(AttributeKind.REF, "via:route_registration"),
-                            tuple(AttributeKind.REF, "signal:CALLS:route_registration"));
+                            tuple(AttributeKind.IDENTIFIER, "via:route_registration"),
+                            tuple(AttributeKind.IDENTIFIER, "signal:CALLS:route_registration"));
         });
         assertThat(registrations).anySatisfy(surface -> assertThat(surface.getAttributeRows())
                 .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
@@ -304,11 +298,7 @@ class SurfaceAdaptersTest {
                 .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
                 .contains(tuple(AttributeKind.FILE, "src/api.js"))
                 .doesNotContain(tuple(AttributeKind.FILE, "src/api.js:1")));
-        assertThat(counters.snapshot())
-                .containsEntry("cmm.excluded_test", 1)
-                .containsEntry("ignored.edge:CALLS", 1)
-                .containsEntry("cmm.unclassified_cross_file_call", 1)
-                .containsEntry("dropped.dangling_edge:CALLS", 1);
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Dropped dangling CALLS edge"));
     }
 
     @Test
@@ -322,9 +312,9 @@ class SurfaceAdaptersTest {
                 List.of(
                         new ParserGraph.Edge(1, 4, "EMITS", Map.of()),
                         new ParserGraph.Edge(2, 4, "EMITS", Map.of()),
-                        new ParserGraph.Edge(3, 4, "EMITS", Map.of())));
-        var counters = new SurfaceCounters();
-        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, counters);
+                        new ParserGraph.Edge(3, 4, "EMITS", Map.of())),
+                List.of());
+        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, null);
         assertThat(surfaces).singleElement().satisfies(surface -> assertThat(surface.getAttributeRows())
                 .anySatisfy(a -> {
                     assertThat(a.getKind()).isEqualTo(AttributeKind.TECHNOLOGY);
@@ -338,7 +328,6 @@ class SurfaceAdaptersTest {
                     assertThat(a.getKind()).isEqualTo(AttributeKind.FILE);
                     assertThat(a.getValue()).isEqualTo("src/unknown.java:7");
                 }));
-        assertThat(counters.snapshot()).containsEntry("cmm.excluded_test", 1).containsEntry("cmm.unknown_scope", 1);
     }
 
     @Test
@@ -412,9 +401,10 @@ class SurfaceAdaptersTest {
                         new ParserGraph.Edge(999, 1, "HTTP_CALLS", Map.of()),
                         new ParserGraph.Edge(5, 1, "HTTP_CALLS", Map.of("url_path", "/orders")),
                         new ParserGraph.Edge(4, 2, "HANDLES", Map.of()),
-                        new ParserGraph.Edge(999, 2, "HANDLES", Map.of())));
-        var counters = new SurfaceCounters();
-        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, counters);
+                        new ParserGraph.Edge(999, 2, "HANDLES", Map.of())),
+                List.of());
+        var batchLogger = mock(IngestionBatchLogService.BatchLogger.class);
+        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, batchLogger);
         assertThat(surfaces).hasSize(2);
         assertThat(surfaces).anySatisfy(surface -> {
             assertThat(surface.getDescription()).isEqualTo("HTTP API specification api/orders.yaml");
@@ -426,13 +416,13 @@ class SurfaceAdaptersTest {
                             tuple(AttributeKind.METHOD, "GET"),
                             tuple(AttributeKind.FILE, "api/orders.yaml:12"),
                             tuple(AttributeKind.FILE, "src/orders.java:25"),
-                            tuple(AttributeKind.REF, "operation_id:fetchOrder"))
+                            tuple(AttributeKind.IDENTIFIER, "operation_id:fetchOrder"))
                     .doesNotContain(
                             tuple(AttributeKind.FILE, "tests/orders.java:4"),
-                            tuple(AttributeKind.NAME, "GetOrderRequest"),
-                            tuple(AttributeKind.NAME, "List<OrderFilter>"),
-                            tuple(AttributeKind.NAME, "ResponseEntity<Order>"),
-                            tuple(AttributeKind.NAME, "TestResponse"));
+                            tuple(AttributeKind.IDENTIFIER, "GetOrderRequest"),
+                            tuple(AttributeKind.IDENTIFIER, "List<OrderFilter>"),
+                            tuple(AttributeKind.IDENTIFIER, "ResponseEntity<Order>"),
+                            tuple(AttributeKind.IDENTIFIER, "TestResponse"));
         });
         assertThat(surfaces).anySatisfy(surface -> {
             assertThat(surface.getDescription()).isEqualTo("RPC API specification api/catalog.proto");
@@ -443,19 +433,16 @@ class SurfaceAdaptersTest {
                             tuple(AttributeKind.ENDPOINT, "catalog.List"),
                             tuple(AttributeKind.FILE, "api/catalog.proto:7"),
                             tuple(AttributeKind.FILE, "src/catalog.go"),
-                            tuple(AttributeKind.REF, "operation_id:listCatalog"))
+                            tuple(AttributeKind.IDENTIFIER, "operation_id:listCatalog"))
                     .doesNotContain(
                             tuple(AttributeKind.FILE, "src/catalog.go:1"),
-                            tuple(AttributeKind.NAME, "CatalogQuery"),
-                            tuple(AttributeKind.NAME, "CatalogPage"));
+                            tuple(AttributeKind.IDENTIFIER, "CatalogQuery"),
+                            tuple(AttributeKind.IDENTIFIER, "CatalogPage"));
         });
-        assertThat(counters.snapshot())
-                .containsEntry("cmm.excluded_test", 3)
-                .containsEntry("cmm.unclassified_route", 1)
-                .containsEntry("cmm.excluded_self_call", 1)
-                .containsEntry("dropped.dangling_edge:HTTP_CALLS", 1)
-                .containsEntry("dropped.dangling_edge:HANDLES", 1)
-                .doesNotContainKeys("payload.no_handler:http", "payload.no_handler:grpc");
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Ignored unclassified Route /unknown"));
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Excluded self-call HTTP_CALLS /orders"));
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Dropped dangling HTTP_CALLS edge"));
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Dropped dangling HANDLES edge"));
     }
 
     @Test
@@ -509,11 +496,12 @@ class SurfaceAdaptersTest {
                         new ParserGraph.Edge(9, 10, "LISTENS_ON", Map.of()),
                         new ParserGraph.Edge(9, 11, "LISTENS_ON", Map.of()),
                         new ParserGraph.Edge(9, 10, "EMITS", Map.of()),
-                        new ParserGraph.Edge(9, 11, "EMITS", Map.of())));
-        var counters = new SurfaceCounters();
-        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, counters);
+                        new ParserGraph.Edge(9, 11, "EMITS", Map.of())),
+                List.of());
+        var batchLogger = mock(IngestionBatchLogService.BatchLogger.class);
+        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, batchLogger);
 
-        assertThat(surfaces).hasSize(6);
+        assertThat(surfaces).hasSize(4);
         assertThat(surfaces).anySatisfy(surface -> {
             assertThat(surface.getDescription()).isEqualTo("HTTP API provided by src/OrderController.java");
             assertThat(surface.getRole()).isEqualTo(SurfaceRole.PROVIDES);
@@ -537,21 +525,14 @@ class SurfaceAdaptersTest {
         });
         for (String channel : List.of("eventA", "eventB")) {
             assertThat(surfaces).anySatisfy(surface -> {
-                assertThat(surface.getDescription()).isEqualTo("websocket messages consumed on " + channel);
-                assertThat(surface.getRole()).isEqualTo(SurfaceRole.REQUIRES);
-                assertThat(surface.getAttributeRows())
-                        .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
-                        .contains(tuple(AttributeKind.IDENTIFIER, channel));
-            });
-            assertThat(surfaces).anySatisfy(surface -> {
-                assertThat(surface.getDescription()).isEqualTo("websocket messages provided on " + channel);
-                assertThat(surface.getRole()).isEqualTo(SurfaceRole.PROVIDES);
+                assertThat(surface.getDescription()).isEqualTo("websocket messaging on " + channel);
+                assertThat(surface.getRole()).isEqualTo(SurfaceRole.BIDIRECTIONAL);
                 assertThat(surface.getAttributeRows())
                         .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
                         .contains(tuple(AttributeKind.IDENTIFIER, channel));
             });
         }
-        assertThat(counters.snapshot()).containsEntry("cmm.excluded_self_call", 1);
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Excluded self-call HTTP_CALLS /orders"));
     }
 
     @Test
@@ -562,22 +543,18 @@ class SurfaceAdaptersTest {
                 2, "Route", "catalog.List", "catalog.proto", 6, Map.of("source", "proto", "operation_id", "missing"));
         var first = new ParserGraph.Node(3, "Method", "find", "src/a.java", 1, Map.of("return_type", "First"));
         var second = new ParserGraph.Node(4, "Function", "find", "src/b.java", 2, Map.of("return_type", "Second"));
-        var graph = new ParserGraph(Map.of(1L, openapi, 2L, proto, 3L, first, 4L, second), List.of());
-        var counters = new SurfaceCounters();
-        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, counters);
+        var graph = new ParserGraph(Map.of(1L, openapi, 2L, proto, 3L, first, 4L, second), List.of(), List.of());
+        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, null);
         assertThat(surfaces).hasSize(2).allSatisfy(surface -> {
             assertThat(surface.getRole()).isEqualTo(SurfaceRole.PROVIDES);
             assertThat(surface.getAttributeRows())
                     .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
                     .doesNotContain(
-                            tuple(AttributeKind.NAME, "First"),
-                            tuple(AttributeKind.NAME, "Second"),
+                            tuple(AttributeKind.IDENTIFIER, "First"),
+                            tuple(AttributeKind.IDENTIFIER, "Second"),
                             tuple(AttributeKind.FILE, "src/a.java:1"),
                             tuple(AttributeKind.FILE, "src/b.java:2"));
         });
-        assertThat(counters.snapshot())
-                .containsEntry("payload.no_handler:http", 1)
-                .containsEntry("payload.no_handler:grpc", 1);
     }
 
     @Test
@@ -605,10 +582,16 @@ class SurfaceAdaptersTest {
                         new ParserGraph.Edge(1, 3, "ASYNC_CALLS", Map.of()),
                         new ParserGraph.Edge(1, 2, "DEPENDS_ON", Map.of()),
                         new ParserGraph.Edge(1, 3, "HANDLES", Map.of()),
+                        new ParserGraph.Edge(1, 6, "DEFINES", Map.of()),
+                        new ParserGraph.Edge(1, 6, "IMPORTS", Map.of()),
+                        new ParserGraph.Edge(1, 6, "WRITES", Map.of()),
+                        new ParserGraph.Edge(1, 6, "DECORATES", Map.of()),
+                        new ParserGraph.Edge(1, 6, "CONTAINS_FILE", Map.of()),
                         new ParserGraph.Edge(1, 3, "UNRECOGNIZED", Map.of()),
-                        new ParserGraph.Edge(999, 3, "EMITS", Map.of())));
-        var counters = new SurfaceCounters();
-        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, counters);
+                        new ParserGraph.Edge(999, 3, "EMITS", Map.of())),
+                List.of());
+        var batchLogger = mock(IngestionBatchLogService.BatchLogger.class);
+        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, batchLogger);
         assertThat(surfaces).hasSize(2);
         assertThat(surfaces).noneMatch(surface -> surface.getRole() == SurfaceRole.UNKNOWN);
         CtxSurface handled = surfaces.stream()
@@ -623,14 +606,17 @@ class SurfaceAdaptersTest {
                         tuple(AttributeKind.METHOD, "POST"),
                         tuple(AttributeKind.FILE, "src/main.java:3"),
                         tuple(AttributeKind.FILE, "api.yaml:4"));
-        assertThat(counters.snapshot())
-                .containsEntry("cmm.excluded_test", 1)
-                .containsEntry("cmm.unclassified_async_call", 3)
-                .containsEntry("cmm.unclassified_route", 1)
-                .containsEntry("ignored.edge:DEPENDS_ON", 1)
-                .containsEntry("ignored.edge:HANDLES_non_route", 1)
-                .containsEntry("ignored.edge:UNRECOGNIZED", 1)
-                .containsEntry("dropped.dangling_edge:EMITS", 1);
+        verify(batchLogger, times(3)).debug(eq("EXTRACT_SURFACES"), contains("Ignored unclassified ASYNC_CALLS"));
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Ignored unclassified Route /other"));
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Ignored DEPENDS_ON edge"));
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Ignored HANDLES edge to non-Route"));
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Ignored UNRECOGNIZED edge"));
+        verify(batchLogger).debug(eq("EXTRACT_SURFACES"), contains("Dropped dangling EMITS edge"));
+        verify(batchLogger, never()).debug(eq("EXTRACT_SURFACES"), contains("Ignored DEFINES edge"));
+        verify(batchLogger, never()).debug(eq("EXTRACT_SURFACES"), contains("Ignored IMPORTS edge"));
+        verify(batchLogger, never()).debug(eq("EXTRACT_SURFACES"), contains("Ignored WRITES edge"));
+        verify(batchLogger, never()).debug(eq("EXTRACT_SURFACES"), contains("Ignored DECORATES edge"));
+        verify(batchLogger, never()).debug(eq("EXTRACT_SURFACES"), contains("Ignored CONTAINS_FILE edge"));
     }
 
     @Test
@@ -710,10 +696,10 @@ class SurfaceAdaptersTest {
                                 Map.of("ref", "image", "image", "ghcr.io/glark-newco/supplychain:latest")),
                         new ParserGraph.Edge(3, 4, "CONFIGURES", Map.of("strategy", "env_set", "source", "compose")),
                         new ParserGraph.Edge(3, 6, "CONFIGURES", Map.of("strategy", "env_set", "source", "compose")),
-                        new ParserGraph.Edge(3, 7, "CONFIGURES", Map.of("strategy", "env_set", "source", "compose"))));
-        var counters = new SurfaceCounters();
+                        new ParserGraph.Edge(3, 7, "CONFIGURES", Map.of("strategy", "env_set", "source", "compose"))),
+                List.of());
 
-        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, counters);
+        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, null);
 
         assertThat(surfaces).hasSize(3);
         assertThat(surfaces).anySatisfy(surface -> {
@@ -722,14 +708,14 @@ class SurfaceAdaptersTest {
             assertThat(surface.getAttributeRows())
                     .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
                     .containsExactlyInAnyOrder(
-                            tuple(AttributeKind.NAME, "Deployment/supplychain"),
+                            tuple(AttributeKind.IDENTIFIER, "Deployment/supplychain"),
                             tuple(AttributeKind.TECHNOLOGY, "k8s"),
-                            tuple(AttributeKind.REF, "kind:Deployment"),
-                            tuple(AttributeKind.REF, "group:apps"),
-                            tuple(AttributeKind.REF, "version:v1"),
-                            tuple(AttributeKind.REF, "obj_key:apps/Deployment/?/supplychain"),
+                            tuple(AttributeKind.IDENTIFIER, "kind:Deployment"),
+                            tuple(AttributeKind.IDENTIFIER, "group:apps"),
+                            tuple(AttributeKind.IDENTIFIER, "version:v1"),
+                            tuple(AttributeKind.IDENTIFIER, "obj_key:apps/Deployment/?/supplychain"),
                             tuple(AttributeKind.IDENTIFIER, "ghcr.io/glark-newco/supplychain"),
-                            tuple(AttributeKind.REF, "registry:ghcr.io"),
+                            tuple(AttributeKind.IDENTIFIER, "registry:ghcr.io"),
                             tuple(AttributeKind.FILE, "deployment.yaml:1"));
         });
         assertThat(surfaces).anySatisfy(surface -> {
@@ -737,26 +723,23 @@ class SurfaceAdaptersTest {
             assertThat(surface.getAttributeRows())
                     .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
                     .containsExactlyInAnyOrder(
-                            tuple(AttributeKind.NAME, "Service/web"),
-                            tuple(AttributeKind.NAME, "web"),
+                            tuple(AttributeKind.IDENTIFIER, "Service/web"),
+                            tuple(AttributeKind.IDENTIFIER, "web"),
                             tuple(AttributeKind.TECHNOLOGY, "compose"),
-                            tuple(AttributeKind.REF, "kind:Service"),
+                            tuple(AttributeKind.IDENTIFIER, "kind:Service"),
                             tuple(AttributeKind.FILE, "docker-compose.yml:3"));
         });
         assertThat(surfaces).anySatisfy(surface -> {
             assertThat(surface.getDescription()).isEqualTo("Build definition in Dockerfile");
+            assertThat(surface.getRole()).isEqualTo(SurfaceRole.REQUIRES);
             assertThat(surface.getAttributeRows())
                     .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
                     .containsExactlyInAnyOrder(
-                            tuple(AttributeKind.NAME, "Dockerfile"),
-                            tuple(AttributeKind.REF, "build_file:lib"),
-                            tuple(AttributeKind.REF, "build_file:package.json"),
+                            tuple(AttributeKind.IDENTIFIER, "Dockerfile"),
+                            tuple(AttributeKind.IDENTIFIER, "build_file:lib"),
+                            tuple(AttributeKind.IDENTIFIER, "build_file:package.json"),
                             tuple(AttributeKind.FILE, "Dockerfile:1"));
         });
-        assertThat(counters.snapshot())
-                .containsEntry("cmm.resource_node", 2)
-                .containsEntry("cmm.build_definition", 1)
-                .containsEntry("cmm.ignored_env_var", 3);
     }
 
     @Test
@@ -798,10 +781,11 @@ class SurfaceAdaptersTest {
                                 6, 7, "HTTP_CALLS", Map.of("url_path", "/portalusers/{}", "method", "GET")),
                         new ParserGraph.Edge(
                                 6, 8, "HTTP_CALLS", Map.of("url_path", "/portalusers/{id}", "method", "GET")),
-                        new ParserGraph.Edge(10, 9, "HTTP_CALLS", Map.of("args", "API_BASE_URL"))));
-        var counters = new SurfaceCounters();
+                        new ParserGraph.Edge(10, 9, "HTTP_CALLS", Map.of("args", "API_BASE_URL"))),
+                List.of());
+        var batchLogger = mock(IngestionBatchLogService.BatchLogger.class);
 
-        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, counters);
+        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, batchLogger);
 
         assertThat(surfaces).hasSize(2).noneMatch(surface -> surface.getRole() == SurfaceRole.UNKNOWN);
         assertThat(surfaces).anySatisfy(surface -> {
@@ -818,12 +802,10 @@ class SurfaceAdaptersTest {
             assertThat(surface.getAttributeRows())
                     .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
                     .containsExactlyInAnyOrder(
-                            tuple(AttributeKind.REF, "target:API_BASE_URL"),
+                            tuple(AttributeKind.IDENTIFIER, "target:API_BASE_URL"),
                             tuple(AttributeKind.FILE, "src/ui/DynamicClient.ts:5"));
         });
-        assertThat(counters.snapshot())
-                .containsEntry("cmm.unclassified_cross_file_call", 2)
-                .containsEntry("cmm.ignored_same_file_call", 1);
+        verifyNoInteractions(batchLogger);
     }
 
     @Test
@@ -836,19 +818,19 @@ class SurfaceAdaptersTest {
                 Map.of(1L, testSource, 2L, productionSource, 3L, channel),
                 List.of(
                         new ParserGraph.Edge(1, 3, "LISTENS_ON", Map.of()),
-                        new ParserGraph.Edge(2, 3, "LISTENS_ON", Map.of())));
-        var counters = new SurfaceCounters();
+                        new ParserGraph.Edge(2, 3, "LISTENS_ON", Map.of())),
+                List.of());
 
-        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, counters);
+        var surfaces = new GraphSurfaceTranslator().translate(batch(), graph, null);
 
         assertThat(surfaces).singleElement().satisfies(surface -> {
-            assertThat(surface.getDescription()).isEqualTo("websocket messages consumed on messages");
+            assertThat(surface.getRole()).isEqualTo(SurfaceRole.BIDIRECTIONAL);
+            assertThat(surface.getDescription()).isEqualTo("websocket messaging on messages");
             assertThat(surface.getAttributeRows())
                     .extracting(CtxSurfaceAttribute::getKind, CtxSurfaceAttribute::getValue)
                     .contains(tuple(AttributeKind.FILE, "sidecar/rpc/client.go"))
                     .doesNotContain(tuple(AttributeKind.FILE, "sidecar/rpc/client_test.go"));
         });
-        assertThat(counters.snapshot()).containsEntry("cmm.excluded_test", 1);
     }
 
     @Test
@@ -863,8 +845,9 @@ class SurfaceAdaptersTest {
         when(batch.getId()).thenReturn(batchId);
         when(parser.sqlitePathFor(batch)).thenReturn(root.resolve("missing.db"));
         var service = new SurfaceExtractionService(parser, graph, syft, surfaces, attributes);
+        var batchLogger = mock(IngestionBatchLogService.BatchLogger.class);
 
-        assertThatThrownBy(() -> service.extract(batch, root))
+        assertThatThrownBy(() -> service.extract(batch, root, batchLogger))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Parser database missing")
                 .hasMessageContaining(batchId.toString());
@@ -893,8 +876,7 @@ class SurfaceAdaptersTest {
             statement.execute("INSERT INTO edges VALUES (2, 1, NULL, '', 'repo')");
             statement.execute("INSERT INTO edges VALUES (4, 1, 'EMITS', NULL, 'other')");
         }
-        var counters = new SurfaceCounters();
-        ParserGraph graph = new ParserGraphReader(new ObjectMapper()).read(database, "repo", counters);
+        ParserGraph graph = new ParserGraphReader(new ObjectMapper()).read(database, "repo");
         assertThat(graph.nodes()).hasSize(2);
         assertThat(graph.nodes().get(1L).props()).containsEntry("is_test", false);
         assertThat(graph.nodes().get(2L).label()).isEmpty();
@@ -905,11 +887,15 @@ class SurfaceAdaptersTest {
         assertThat(graph.edges().getFirst().props()).containsEntry("method", "GET");
         assertThat(graph.edges().get(1).type()).isEmpty();
         assertThat(graph.edges().get(1).props()).isEmpty();
-        assertThat(counters.snapshot())
-                .containsEntry("coverage.indexed_files", 1)
-                .containsEntry("coverage.unparsed_files", 1);
-        assertThatThrownBy(() -> new ParserGraphReader(new ObjectMapper())
-                        .read(root.resolve("empty.sqlite"), "repo", new SurfaceCounters()))
+        assertThat(graph.unparsedFiles()).containsExactly("missed");
+
+        var batchLogger = mock(IngestionBatchLogService.BatchLogger.class);
+        GraphSurfaceAdapter.Result result =
+                new GraphSurfaceAdapter(new ObjectMapper()).extract(batch(), database, "repo", batchLogger);
+        assertThat(result.unparsedFiles()).isEqualTo(1);
+        verify(batchLogger).debug("EXTRACT_SURFACES", "Unparsed files (1): missed");
+
+        assertThatThrownBy(() -> new ParserGraphReader(new ObjectMapper()).read(root.resolve("empty.sqlite"), "repo"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Parser graph read failed for repo");
     }
@@ -931,15 +917,15 @@ class SurfaceAdaptersTest {
                     "{\"components\":[{\"name\":\"runtime\",\"scope\":\"runtime\",\"purl\":\"pkg:npm/runtime@1\",\"properties\":[{\"name\":\"syft:location:0:path\",\"value\":\"/package.json\"}]}]}");
             return new ProcessExecutor.ProcessResult(0, new byte[0]);
         });
-        assertThat(adapter.extract(batch(), root, new SurfaceCounters())).hasSize(1);
+        assertThat(adapter.extract(batch(), root, null)).hasSize(1);
         doReturn(new ProcessExecutor.ProcessResult(9, "bad configuration".getBytes(StandardCharsets.UTF_8)))
                 .when(executor)
                 .execute(any(), any(), any());
-        assertThatThrownBy(() -> adapter.extract(batch(), root, new SurfaceCounters()))
+        assertThatThrownBy(() -> adapter.extract(batch(), root, null))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("exit 9 for " + root + ": bad configuration");
         doThrow(new IOException("cannot launch")).when(executor).execute(any(), any(), any());
-        assertThatThrownBy(() -> adapter.extract(batch(), root, new SurfaceCounters()))
+        assertThatThrownBy(() -> adapter.extract(batch(), root, null))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Could not run Syft")
                 .hasCauseInstanceOf(IOException.class);

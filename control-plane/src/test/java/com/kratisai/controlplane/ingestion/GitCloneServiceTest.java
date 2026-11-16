@@ -34,7 +34,6 @@ class GitCloneServiceTest {
     private GitCloneService gitCloneService;
 
     private final GitCredentialResolver credentialResolver = mock(GitCredentialResolver.class);
-    private final IngestionBatchLogService.BatchLogger batchLogger = mock(IngestionBatchLogService.BatchLogger.class);
 
     @Autowired
     private GitTransportUrlBuilder transportUrlBuilder;
@@ -111,7 +110,7 @@ class GitCloneServiceTest {
         UUID batchId = UUID.randomUUID();
 
         // Clones to an invalid port/url should fail and throw an IOException
-        assertThatThrownBy(() -> gitCloneService.cloneRepository(repository, batchId, batchLogger))
+        assertThatThrownBy(() -> gitCloneService.cloneRepository(repository, batchId))
                 .isInstanceOf(IOException.class);
 
         // Ensure target folder was cleaned up on failure
@@ -127,7 +126,7 @@ class GitCloneServiceTest {
 
         UUID batchId = UUID.randomUUID();
 
-        GitCloneService.CloneResult result = gitCloneService.cloneRepository(repository, batchId, batchLogger);
+        GitCloneService.CloneResult result = gitCloneService.cloneRepository(repository, batchId);
 
         assertThat(result).isNotNull();
         assertThat(result.cloneDirectory()).exists();
@@ -147,7 +146,7 @@ class GitCloneServiceTest {
         when(credentialResolver.resolve(repository)).thenReturn(GitAuthMaterial.ofToken("fake-token"));
 
         UUID batchId = UUID.randomUUID();
-        GitCloneService.CloneResult result = gitCloneService.cloneRepository(repository, batchId, batchLogger);
+        GitCloneService.CloneResult result = gitCloneService.cloneRepository(repository, batchId);
 
         assertThat(result).isNotNull();
         assertThat(result.cloneDirectory().resolve("readme.md")).exists();
@@ -165,7 +164,7 @@ class GitCloneServiceTest {
         when(credentialResolver.resolve(repository)).thenReturn(GitAuthMaterial.ofSshKey("fake-private-key-content"));
 
         UUID batchId = UUID.randomUUID();
-        GitCloneService.CloneResult result = gitCloneService.cloneRepository(repository, batchId, batchLogger);
+        GitCloneService.CloneResult result = gitCloneService.cloneRepository(repository, batchId);
 
         assertThat(result).isNotNull();
         assertThat(result.cloneDirectory().resolve("readme.md")).exists();
@@ -184,7 +183,7 @@ class GitCloneServiceTest {
 
         UUID batchId = UUID.randomUUID();
 
-        GitCloneService.CloneResult result = gitCloneService.cloneRepository(repository, batchId, batchLogger);
+        GitCloneService.CloneResult result = gitCloneService.cloneRepository(repository, batchId);
 
         assertThat(result).isNotNull();
         assertThat(result.cloneDirectory().resolve("readme.md")).exists();
@@ -210,7 +209,7 @@ class GitCloneServiceTest {
         assertThat(Files.exists(dummyFile)).isTrue();
 
         // Clone should succeed and clean up the existing directory first
-        GitCloneService.CloneResult result = gitCloneService.cloneRepository(repository, batchId, batchLogger);
+        GitCloneService.CloneResult result = gitCloneService.cloneRepository(repository, batchId);
 
         assertThat(result).isNotNull();
         assertThat(result.cloneDirectory()).exists();

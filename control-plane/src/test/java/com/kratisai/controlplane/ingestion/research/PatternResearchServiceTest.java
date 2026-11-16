@@ -4,9 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.agentloop.ReActLoopFatalException;
+import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.ingestion.IngestionUsageTracker;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
@@ -69,6 +71,7 @@ class PatternResearchServiceTest {
     private CtxNode controllerNode;
     private CtxNode repositoryNode;
     private CtxDimension controllerDimension;
+    private IngestionBatchLogService.BatchLogger batchLogger;
 
     @BeforeEach
     void setUp() {
@@ -78,6 +81,8 @@ class PatternResearchServiceTest {
         TestDataFactory.TestContext context = testDataFactory.createDefaultContext("Pattern Team", "test-repo");
         team = context.team();
         batch = context.batch();
+        batchLogger = new IngestionBatchLogService.BatchLogger(
+                batch.getId(), team.getId(), mock(IngestionBatchLogService.class));
         batch.setActive(true);
         ingestionBatchRepository.saveAndFlush(batch);
 
@@ -121,7 +126,7 @@ class PatternResearchServiceTest {
                                 ]
                                 """).build());
 
-        patternResearchService.researchPatterns(batch);
+        patternResearchService.researchPatterns(batch, batchLogger);
 
         List<CtxArchitecturePattern> patterns =
                 ctxArchitecturePatternRepository.findByBatchIdWithExemplarNodes(batch.getId());
@@ -168,7 +173,7 @@ class PatternResearchServiceTest {
                 .maxMatches(1)
                 .build());
 
-        patternResearchService.researchPatterns(batch);
+        patternResearchService.researchPatterns(batch, batchLogger);
 
         assertThat(capturedToolResponse.get()).isNotNull();
         assertThatCode(() -> new ObjectMapper().readTree(capturedToolResponse.get()))
@@ -181,7 +186,7 @@ class PatternResearchServiceTest {
         // No dimension hubs set — Stage 2 should be skipped
         fakeChatModel.addMatcher(PromptMatcher.builder().response("[]").build());
 
-        patternResearchService.researchPatterns(batch);
+        patternResearchService.researchPatterns(batch, batchLogger);
 
         List<CtxArchitecturePattern> patterns = ctxArchitecturePatternRepository.findByBatchId(batch.getId());
         assertThat(patterns).isEmpty();
@@ -196,7 +201,7 @@ class PatternResearchServiceTest {
 
         // Should throw after exceeding retries
         RuntimeException exception =
-                assertThrows(RuntimeException.class, () -> patternResearchService.researchPatterns(batch));
+                assertThrows(RuntimeException.class, () -> patternResearchService.researchPatterns(batch, batchLogger));
         assertThat(exception.getMessage()).contains("Failed to get valid architecture patterns");
     }
 
@@ -214,7 +219,7 @@ class PatternResearchServiceTest {
                                 ]
                                 """).build());
 
-        patternResearchService.researchPatterns(batch);
+        patternResearchService.researchPatterns(batch, batchLogger);
 
         List<CtxArchitecturePattern> patterns =
                 ctxArchitecturePatternRepository.findByBatchIdWithExemplarNodes(batch.getId());
@@ -260,7 +265,7 @@ class PatternResearchServiceTest {
                 })
                 .build());
 
-        patternResearchService.researchPatterns(batch);
+        patternResearchService.researchPatterns(batch, batchLogger);
 
         String prompt = capturedSystemPrompt.get();
         assertThat(prompt).isNotNull();
@@ -301,7 +306,7 @@ class PatternResearchServiceTest {
                 })
                 .build());
 
-        patternResearchService.researchPatterns(batch);
+        patternResearchService.researchPatterns(batch, batchLogger);
 
         String prompt = capturedSystemPrompt.get();
         assertThat(prompt).isNotNull();
@@ -323,7 +328,7 @@ class PatternResearchServiceTest {
                 .throwsException(new NonTransientAiException("401 - invalid api key"))
                 .build());
 
-        assertThatThrownBy(() -> patternResearchService.researchPatterns(batch))
+        assertThatThrownBy(() -> patternResearchService.researchPatterns(batch, batchLogger))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("LLM call failed during pattern deduction")
                 .hasCauseInstanceOf(ReActLoopFatalException.class);
@@ -355,7 +360,7 @@ class PatternResearchServiceTest {
                 })
                 .build());
 
-        patternResearchService.researchPatterns(batch);
+        patternResearchService.researchPatterns(batch, batchLogger);
 
         List<CtxArchitecturePattern> patterns = ctxArchitecturePatternRepository.findByBatchId(batch.getId());
         assertThat(patterns).hasSize(1);
@@ -370,7 +375,7 @@ class PatternResearchServiceTest {
                 PromptMatcher.builder().response("not valid json").build());
 
         RuntimeException exception =
-                assertThrows(RuntimeException.class, () -> patternResearchService.researchPatterns(batch));
+                assertThrows(RuntimeException.class, () -> patternResearchService.researchPatterns(batch, batchLogger));
         assertThat(exception.getMessage()).contains("Failed to get valid architecture patterns");
     }
 
@@ -408,7 +413,7 @@ class PatternResearchServiceTest {
                 })
                 .build());
 
-        patternResearchService.researchPatterns(batch);
+        patternResearchService.researchPatterns(batch, batchLogger);
 
         List<CtxArchitecturePattern> patterns =
                 ctxArchitecturePatternRepository.findByBatchIdWithExemplarNodes(batch.getId());
@@ -430,7 +435,7 @@ class PatternResearchServiceTest {
                 ]
                 """).build());
 
-        patternResearchService.researchPatterns(batch);
+        patternResearchService.researchPatterns(batch, batchLogger);
 
         List<CtxArchitecturePattern> patterns =
                 ctxArchitecturePatternRepository.findByBatchIdWithExemplarNodes(batch.getId());
@@ -446,7 +451,7 @@ class PatternResearchServiceTest {
         fakeChatModel.addMatcher(PromptMatcher.builder().response("[]").build());
 
         RuntimeException exception =
-                assertThrows(RuntimeException.class, () -> patternResearchService.researchPatterns(batch));
+                assertThrows(RuntimeException.class, () -> patternResearchService.researchPatterns(batch, batchLogger));
         assertThat(exception.getMessage()).contains("Failed to get valid architecture patterns");
     }
 
@@ -472,7 +477,7 @@ class PatternResearchServiceTest {
                         ]
                         """).maxMatches(1).build());
 
-        patternResearchService.researchPatterns(batch);
+        patternResearchService.researchPatterns(batch, batchLogger);
 
         var counters = usageTracker.snapshotAndClear(batch.getId());
         assertThat(counters).isPresent();

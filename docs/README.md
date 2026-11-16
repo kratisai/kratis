@@ -41,7 +41,7 @@ Design and runtime reference. Do not copy wire shapes here; `protocol/` is the c
 | [sandbox-provisioning.md](knowledge/sandbox-provisioning.md) | Docker sandbox contract |
 | [acp-lifecycle.md](knowledge/acp-lifecycle.md) | Connector as ACP client |
 | [e2e-agent-orchestration.md](knowledge/e2e-agent-orchestration.md) | E2E sequence and host Docker hygiene |
-| [repository-intelligence.md](knowledge/repository-intelligence.md) | Ingestion, graph, wiki |
+| [repository-intelligence.md](knowledge/repository-intelligence.md) | Ingestion, repo-relations, graph, wiki |
 | [publish-rebase-flow.md](knowledge/publish-rebase-flow.md) | Diff bases, squash, publish |
 | [Kratis Architect Persona.md](knowledge/Kratis%20Architect%20Persona.md) | Planning-agent persona |
 

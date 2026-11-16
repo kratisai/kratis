@@ -52,6 +52,13 @@ public class DimensionDiscoveryService {
             src/main/user/UserController.java).
             """;
 
+    private static final String CATEGORY_RETRY_GUIDANCE = """
+            Your previous response left one or more required dimension categories empty. You MUST return at least one
+            dimension in EVERY category (`domains`, `archetypes`, and `crossCutting`), even for small or focused
+            repositories (for `crossCutting`, include shared concerns such as configuration, build/packaging, logging,
+            error handling, or testing).
+            """;
+
     private static final int NODE_DIMENSION_INSERT_BATCH_SIZE = 1_000;
 
     private final CtxDimensionRepository ctxDimensionRepository;
@@ -59,7 +66,6 @@ public class DimensionDiscoveryService {
     private final DimensionGraphPropagator dimensionGraphPropagator;
     private final ChatModelFactory chatModelFactory;
     private final LiteLLMProvisioningService litellmProvisioningService;
-    private final IngestionBatchLogService ingestionBatchLogService;
     private final TreeHelper treeHelper;
     private final String baseCloneDir;
 
@@ -69,7 +75,6 @@ public class DimensionDiscoveryService {
             DimensionGraphPropagator dimensionGraphPropagator,
             ChatModelFactory chatModelFactory,
             LiteLLMProvisioningService litellmProvisioningService,
-            IngestionBatchLogService ingestionBatchLogService,
             TreeHelper treeHelper,
             IngestionProperties ingestionProperties) {
         this.ctxDimensionRepository = ctxDimensionRepository;
@@ -77,7 +82,6 @@ public class DimensionDiscoveryService {
         this.dimensionGraphPropagator = dimensionGraphPropagator;
         this.chatModelFactory = chatModelFactory;
         this.litellmProvisioningService = litellmProvisioningService;
-        this.ingestionBatchLogService = ingestionBatchLogService;
         this.treeHelper = treeHelper;
         this.baseCloneDir = ingestionProperties.getCloneDir();
     }
@@ -105,20 +109,28 @@ public class DimensionDiscoveryService {
     }
 
     @Transactional
-    public void discoverDimensions(IngestionBatch batch) {
-        var batchLogger = new IngestionBatchLogService.BatchLogger(
-                batch.getId(), batch.getRepository().getTeam().getId(), ingestionBatchLogService);
-
+    public String discoverDimensions(IngestionBatch batch, IngestionBatchLogService.BatchLogger batchLogger) {
         String annotatedTree = treeHelper.buildAnnotatedTree(batch);
 
         if (annotatedTree.isBlank()) {
-            batchLogger.info("PREPARE_DIMENSIONS", "No files found to discover dimensions.");
-            return;
+            return "no files found to discover dimensions";
         }
 
         List<GraphFrontierQuery.FileNode> files = graphFrontierQuery.findFileNodes(batch.getId());
 
         DimensionDiscoveryResult result = executeDimensionDiscovery(batch, annotatedTree, batchLogger, null);
+        if (!hasAllCategories(result)) {
+            batchLogger.warn(
+                    "PREPARE_DIMENSIONS",
+                    "Incomplete dimension categories discovered ("
+                            + sizeOf(result.domains())
+                            + " domains, "
+                            + sizeOf(result.archetypes())
+                            + " archetypes, "
+                            + sizeOf(result.crossCutting())
+                            + " cross-cutting); retrying discovery once.");
+            result = executeDimensionDiscovery(batch, annotatedTree, batchLogger, CATEGORY_RETRY_GUIDANCE);
+        }
         requireSufficientDimensions(result, batchLogger);
 
         List<CtxDimension> dimensions = createDimensionsFromResult(batch, result);
@@ -128,7 +140,7 @@ public class DimensionDiscoveryService {
         // anyway silently produces empty dimension stats, so give the model one corrective
         // retry before failing the ingestion.
         if (seedLabels.isEmpty()) {
-            batchLogger.info(
+            batchLogger.warn(
                     "PREPARE_DIMENSIONS",
                     "Discovered dimensions' glob patterns matched no files; retrying discovery once.");
             result = executeDimensionDiscovery(batch, annotatedTree, batchLogger, GLOB_RETRY_GUIDANCE);
@@ -137,11 +149,15 @@ public class DimensionDiscoveryService {
             seedLabels = buildSeedLabels(files, dimensions);
         }
 
-        int taggedFiles = persistDimensionsAndTagNodes(batch, dimensions, files, seedLabels, batchLogger);
+        int[] counts = persistDimensionsAndTagNodes(batch, dimensions, files, seedLabels);
+        int taggedFiles = counts[0];
+        int mappings = counts[1];
         if (taggedFiles == 0) {
             throw new DimensionDiscoveryException(
                     "Discovered dimensions' glob patterns matched no files in the repository.", null);
         }
+        return "discovered " + dimensions.size() + " dimensions, tagged " + taggedFiles + " files across " + mappings
+                + " mappings";
     }
 
     private Map<UUID, Long> buildSeedLabels(List<GraphFrontierQuery.FileNode> files, List<CtxDimension> dimensions) {
@@ -182,13 +198,17 @@ public class DimensionDiscoveryService {
         return false;
     }
 
+    private static boolean hasAllCategories(DimensionDiscoveryResult result) {
+        return sizeOf(result.domains()) > 0 && sizeOf(result.archetypes()) > 0 && sizeOf(result.crossCutting()) > 0;
+    }
+
     private void requireSufficientDimensions(
             DimensionDiscoveryResult result, IngestionBatchLogService.BatchLogger batchLogger) {
         int domainCount = sizeOf(result.domains());
         int archetypeCount = sizeOf(result.archetypes());
         int crossCuttingCount = sizeOf(result.crossCutting());
-        if (domainCount == 0 || archetypeCount == 0 || crossCuttingCount == 0) {
-            batchLogger.info("PREPARE_DIMENSIONS", "Insufficient dimensions discovered.");
+        if (!hasAllCategories(result)) {
+            batchLogger.error("PREPARE_DIMENSIONS", "Insufficient dimensions discovered.");
             throw new DimensionDiscoveryException(
                     "Insufficient dimensions discovered: " + domainCount
                             + " domains, " + archetypeCount
@@ -224,12 +244,11 @@ public class DimensionDiscoveryService {
         return names.isEmpty() ? "(none identified)" : String.join(", ", names);
     }
 
-    private int persistDimensionsAndTagNodes(
+    private int[] persistDimensionsAndTagNodes(
             IngestionBatch batch,
             List<CtxDimension> dimensionsToSave,
             List<GraphFrontierQuery.FileNode> files,
-            Map<UUID, Long> seedLabels,
-            IngestionBatchLogService.BatchLogger batchLogger) {
+            Map<UUID, Long> seedLabels) {
 
         ctxDimensionRepository.saveAll(dimensionsToSave);
         // Mappings are inserted through JDBC, so the dimension rows must be visible first.
@@ -267,16 +286,7 @@ public class DimensionDiscoveryService {
 
         int propagatedFiles = Math.max(0, taggedFiles - seedLabels.size());
         logger.debug("Tagged {} files via globs, {} via graph propagation", seedLabels.size(), propagatedFiles);
-        batchLogger.info(
-                "PREPARE_DIMENSIONS",
-                "Discovered "
-                        + dimensionsToSave.size()
-                        + " dimensions and tagged "
-                        + taggedFiles
-                        + " files across "
-                        + mappings
-                        + " mappings.");
-        return taggedFiles;
+        return new int[] {taggedFiles, mappings};
     }
 
     private DimensionDiscoveryResult executeDimensionDiscovery(
@@ -397,9 +407,9 @@ public class DimensionDiscoveryService {
                     requestedPaths = requestedPaths.subList(0, 10);
                 }
 
-                batchLogger.info(
+                batchLogger.debug(
                         "PREPARE_DIMENSIONS",
-                        "LLM requested additional context for " + requestedPaths.size() + " files. Fetching...");
+                        "LLM requested additional context for " + requestedPaths.size() + " files.");
 
                 String fileContents = readAmbiguousFiles(batch, requestedPaths);
 
@@ -441,6 +451,9 @@ public class DimensionDiscoveryService {
                                         : "N/A")
                         .replace("{fileContents}", fileContents)
                         .replace("{format}", converter.getFormat());
+                if (additionalGuidance != null && !additionalGuidance.isBlank()) {
+                    renderedShot2Prompt = renderedShot2Prompt + "\n\n" + additionalGuidance;
+                }
 
                 ChatResponse shot2Response =
                         chatClient.prompt(renderedShot2Prompt).call().chatResponse();

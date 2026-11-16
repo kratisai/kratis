@@ -26,30 +26,34 @@ class ParserGraphReader {
         this.objectMapper = objectMapper;
     }
 
-    ParserGraph read(Path sqlitePath, String projectName, SurfaceCounters counters) {
+    ParserGraph read(Path sqlitePath, String projectName) {
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + sqlitePath.toAbsolutePath())) {
             Map<Long, ParserGraph.Node> nodes = loadNodes(conn, projectName);
             List<ParserGraph.Edge> edges = loadEdges(conn, projectName);
-            countCoverage(conn, projectName, counters);
-            return new ParserGraph(nodes, edges);
+            List<String> unparsedFiles = loadUnparsedFiles(conn, projectName);
+            return new ParserGraph(nodes, edges, unparsedFiles);
         } catch (SQLException e) {
             throw new IllegalStateException("Parser graph read failed for " + projectName + ": " + e.getMessage(), e);
         }
     }
 
-    private void countCoverage(Connection conn, String projectName, SurfaceCounters counters) throws SQLException {
-        counters.add("coverage.indexed_files", countFiles(conn, projectName));
-        counters.add("coverage.unparsed_files", countFiles(conn, projectName + MISSED_PROJECT_SUFFIX));
-    }
-
-    private int countFiles(Connection conn, String project) throws SQLException {
-        try (PreparedStatement stmt =
-                conn.prepareStatement("SELECT COUNT(*) FROM nodes WHERE project = ? AND label = 'File'")) {
-            stmt.setString(1, project);
+    private List<String> loadUnparsedFiles(Connection conn, String projectName) throws SQLException {
+        List<String> files = new ArrayList<>();
+        try (PreparedStatement stmt = conn.prepareStatement(
+                "SELECT file_path, name FROM nodes WHERE project = ? AND label = 'File' ORDER BY id")) {
+            stmt.setString(1, projectName + MISSED_PROJECT_SUFFIX);
             try (ResultSet rs = stmt.executeQuery()) {
-                return rs.next() ? rs.getInt(1) : 0;
+                while (rs.next()) {
+                    String filePath = rs.getString("file_path");
+                    String name = rs.getString("name");
+                    String label = filePath != null && !filePath.isBlank() ? filePath : name;
+                    if (label != null && !label.isBlank()) {
+                        files.add(label);
+                    }
+                }
             }
         }
+        return files;
     }
 
     private Map<Long, ParserGraph.Node> loadNodes(Connection conn, String projectName) throws SQLException {

@@ -25,8 +25,10 @@ import java.io.IOException;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -162,74 +164,63 @@ public class IngestionWorker {
         ingestionBatchRepository.saveAndFlush(batch);
         eventPublisher.publishEvent(new IngestionStatusEvent(batch));
 
-        var loggerInstance = new IngestionBatchLogService.BatchLogger(
-                batchId, batch.getRepository().getTeam().getId(), ingestionBatchLogService);
-        loggerInstance.info("START", "Starting asynchronous repository ingestion process.");
+        var team = batch.getRepository().getTeam();
+        var provider = team.getIngestionProvider();
+        String providerName = provider != null ? provider.getDisplayName() : null;
+        String modelInfo = providerName != null && team.getIngestionModel() != null
+                ? providerName + "/" + team.getIngestionModel()
+                : "unconfigured";
+        var loggerInstance = new IngestionBatchLogService.BatchLogger(batchId, team.getId(), ingestionBatchLogService);
+        loggerInstance.info(
+                "START",
+                "Starting ingestion for " + batch.getRepository().getName() + " (team: " + team.getName() + ", model: "
+                        + modelInfo + ").");
         return loggerInstance;
     }
 
     public GitCloneService.@NonNull CloneResult performIngestion(
             UUID batchId, IngestionBatchLogService.BatchLogger batchLogger) {
+        long batchStartNanos = System.nanoTime();
 
         GitCloneService.CloneResult cloneResult = executePhase(
                 batchId,
                 batchLogger,
                 "CLONE",
-                "Cloning repository from remote location.",
-                "Cloning completed successfully.",
                 batch -> {
                     try {
-                        return gitCloneService.cloneRepository(batch.getRepository(), batch.getId(), batchLogger);
+                        return gitCloneService.cloneRepository(batch.getRepository(), batch.getId());
                     } catch (IOException | InterruptedException e) {
                         throw new RuntimeException("Failed to clone repository: " + e.getMessage(), e);
                     }
-                });
+                },
+                result -> "commit " + result.commitHash());
 
         executePhase(
                 batchId,
                 batchLogger,
                 "PREPARE_AST",
-                "Parsing repository structure using codebase-memory.",
-                "Code parsing completed successfully.",
                 batch -> {
                     codebaseMemoryParserService.prepareAst(batch, cloneResult.cloneDirectory());
                     return null;
-                });
+                },
+                ignored -> null);
 
         executePhase(
                 batchId,
                 batchLogger,
                 "EXTRACT_SURFACES",
-                "Extracting cross-repository surfaces from the parser graph and manifests.",
-                "Surface extraction completed successfully.",
-                batch -> {
-                    SurfaceExtractionService.Result result =
-                            surfaceExtractionService.extract(batch, cloneResult.cloneDirectory());
-                    batchLogger.info("EXTRACT_SURFACES", result.summary());
-                    return null;
-                });
+                batch -> surfaceExtractionService.extract(batch, cloneResult.cloneDirectory(), batchLogger),
+                SurfaceExtractionService.Result::summary);
 
         executePhase(
                 batchId,
                 batchLogger,
                 "PREPARE_DIMENSIONS",
-                "Starting Domain, Archetype + Utility discovery.",
-                "Domain, Archetype + Utility discovery completed successfully.",
-                batch -> {
-                    dimensionDiscoveryService.discoverDimensions(batch);
-                    return null;
-                });
+                batch -> dimensionDiscoveryService.discoverDimensions(batch, batchLogger),
+                summary -> summary);
 
         executePhase(
-                batchId,
-                batchLogger,
-                "RESEARCH_GRAPH",
-                "Calculating subgraph PageRank for dimension nodes.",
-                "Subgraph ranking completed successfully.",
-                batch -> {
-                    subgraphRankingService.rankDimensions(batch);
-                    return null;
-                });
+                batchId, batchLogger, "RESEARCH_GRAPH", subgraphRankingService::rankDimensions, summary -> summary);
 
         // Assist surfaces outside executePhase so the ReAct LLM loop never pins a JDBC connection.
         assistedSurfaceService.assist(batchId, batchLogger);
@@ -238,54 +229,47 @@ public class IngestionWorker {
                 batchId,
                 batchLogger,
                 "RESEARCH_DIMENSIONS",
-                "Researching dimensions and generating synopses.",
-                "Dimension research completed successfully.",
-                batch -> {
-                    dimensionResearchService.researchDimensions(batch);
-                    return null;
-                });
+                batch -> dimensionResearchService.researchDimensions(batch, batchLogger),
+                summary -> summary);
 
         executePhase(
                 batchId,
                 batchLogger,
                 "RESEARCH_PATTERNS",
-                "Deducing system-wide architecture patterns from dimension hubs.",
-                "Architecture pattern deduction completed successfully.",
-                batch -> {
-                    patternResearchService.researchPatterns(batch);
-                    return null;
-                });
+                batch -> patternResearchService.researchPatterns(batch, batchLogger),
+                summary -> summary);
 
         executePhase(
                 batchId,
                 batchLogger,
                 "GENERATE_WIKI",
-                "Generating repository Wiki documentation.",
-                "Wiki generation completed successfully.",
-                batch -> {
-                    wikiGenerationService.generateWiki(batch);
-                    return null;
-                });
+                batch -> wikiGenerationService.generateWiki(batch, batchLogger),
+                summary -> summary);
 
         executePhase(
                 batchId,
                 batchLogger,
                 "GENERATE_INDEX",
-                "Generating vector embeddings for wiki pages.",
-                "Vector embeddings generated successfully.",
                 batch -> {
                     semanticIndexingService.indexBatch(
                             batch, batch.getRepository().getTeam());
                     return null;
-                });
+                },
+                ignored -> null);
 
         synopsisService.synthesize(batchId, batchLogger);
+        BatchActivator.Activation activation;
         try {
-            batchActivator.activate(batchId, batchLogger, cloneResult.commitHash());
+            activation = batchActivator.activate(batchId, batchLogger, cloneResult.commitHash());
         } catch (SQLException e) {
             throw new RuntimeException("Activation failed for batch " + batchId + ": " + e.getMessage(), e);
         }
 
+        String elapsed = formatDuration(System.nanoTime() - batchStartNanos);
+        batchLogger.info(
+                "SUCCESS",
+                "Ingestion completed in " + elapsed + ": " + activation.relationsWritten() + " relations written, "
+                        + activation.superseded() + " superseded.");
         return cloneResult;
     }
 
@@ -293,18 +277,26 @@ public class IngestionWorker {
             UUID batchId,
             IngestionBatchLogService.BatchLogger batchLogger,
             String phaseName,
-            String startMessage,
-            String successMessage,
-            java.util.function.Function<IngestionBatch, T> phaseAction) {
-        return transactionTemplate.execute(status -> {
+            Function<IngestionBatch, T> phaseAction,
+            Function<T, String> completionSummary) {
+        long startNanos = System.nanoTime();
+        logger.debug("{}: starting", phaseName);
+        T result = transactionTemplate.execute(status -> {
             IngestionBatch batch = loadBatch(batchId);
-            batchLogger.info(phaseName, startMessage);
-            logger.debug("{}: {}", phaseName, startMessage);
-            T result = phaseAction.apply(batch);
-            batchLogger.info(phaseName, successMessage);
-            logger.debug("{}: {}", phaseName, successMessage);
-            return result;
+            return phaseAction.apply(batch);
         });
+        String detail = completionSummary.apply(result);
+        String elapsed = formatDuration(System.nanoTime() - startNanos);
+        String message = detail == null || detail.isBlank()
+                ? phaseName + " completed in " + elapsed + "."
+                : phaseName + " completed in " + elapsed + ": " + detail + ".";
+        batchLogger.info(phaseName, message);
+        logger.debug("{}: {}", phaseName, message);
+        return result;
+    }
+
+    private static String formatDuration(long nanos) {
+        return String.format(Locale.ROOT, "%.1fs", nanos / 1_000_000_000.0);
     }
 
     public @Nullable Object markBatchFailed(

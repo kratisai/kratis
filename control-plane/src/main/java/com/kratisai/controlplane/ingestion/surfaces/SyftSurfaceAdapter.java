@@ -3,6 +3,7 @@ package com.kratisai.controlplane.ingestion.surfaces;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.config.IngestionProperties;
+import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.model.AttributeKind;
 import com.kratisai.controlplane.model.CtxSurface;
 import com.kratisai.controlplane.model.CtxSurfaceAttribute;
@@ -41,7 +42,7 @@ class SyftSurfaceAdapter {
         this.objectMapper = objectMapper;
     }
 
-    List<CtxSurface> extract(IngestionBatch batch, Path root, SurfaceCounters counters) {
+    List<CtxSurface> extract(IngestionBatch batch, Path root, IngestionBatchLogService.BatchLogger batchLogger) {
         Path document;
         try {
             document = Files.createTempFile("kratis-syft-", ".json");
@@ -61,7 +62,7 @@ class SyftSurfaceAdapter {
                 throw new IllegalStateException("Syft failed with exit " + result.exitCode() + " for " + root + ": "
                         + new String(result.output(), StandardCharsets.UTF_8).strip());
             }
-            return parse(batch, objectMapper.readTree(document.toFile()), counters);
+            return parse(batch, objectMapper.readTree(document.toFile()), batchLogger);
         } catch (IOException e) {
             throw new IllegalStateException(
                     "Could not run Syft at " + ingestionProperties.getSbom().getSyftPath() + ": " + e.getMessage(), e);
@@ -76,14 +77,13 @@ class SyftSurfaceAdapter {
         }
     }
 
-    List<CtxSurface> parse(IngestionBatch batch, JsonNode bom, SurfaceCounters counters) {
+    List<CtxSurface> parse(IngestionBatch batch, JsonNode bom, IngestionBatchLogService.BatchLogger batchLogger) {
         JsonNode components = bom.path("components");
         JsonNode metadataComponent = bom.path("metadata").path("component");
         if (components.isEmpty() && text(metadataComponent, "purl") == null) {
-            counters.increment("sbom.empty");
+            debug(batchLogger, "SBOM produced 0 components.");
             return List.of();
         }
-        counters.add("sbom.components", components.size());
         Map<String, JsonNode> componentsByRef = new HashMap<>();
         for (JsonNode component : components) {
             String ref = text(component, "bom-ref");
@@ -95,7 +95,7 @@ class SyftSurfaceAdapter {
         if (metadataRef != null) {
             componentsByRef.putIfAbsent(metadataRef, metadataComponent);
         }
-        DependencyGraph dependencyGraph = dependencyGraph(bom, counters);
+        DependencyGraph dependencyGraph = dependencyGraph(bom);
         Set<String> rootRefs = new LinkedHashSet<>(dependencyGraph.roots());
         if (metadataRef != null && text(metadataComponent, "purl") != null) {
             rootRefs.add(metadataRef);
@@ -104,7 +104,7 @@ class SyftSurfaceAdapter {
         Set<String> emittedPackages = new LinkedHashSet<>();
         for (String ref : rootRefs) {
             JsonNode component = componentsByRef.get(ref);
-            if (component == null || !accepted(component, counters)) {
+            if (component == null || !accepted(component)) {
                 continue;
             }
             String purl = text(component, "purl");
@@ -115,7 +115,7 @@ class SyftSurfaceAdapter {
         }
         Map<String, List<JsonNode>> byManifest = new LinkedHashMap<>();
         for (JsonNode component : components) {
-            if (rootRefs.contains(text(component, "bom-ref")) || !accepted(component, counters)) {
+            if (rootRefs.contains(text(component, "bom-ref")) || !accepted(component)) {
                 continue;
             }
             String path = manifestPath(component);
@@ -135,23 +135,27 @@ class SyftSurfaceAdapter {
                         .toList();
             }
             int transitive = candidates.size() - included.size();
-            if (transitive > 0) {
-                counters.add("syft.transitive_excluded", transitive);
-            }
             if (included.isEmpty()) {
-                counters.increment("syft.manifest_without_direct");
+                debug(
+                        batchLogger,
+                        "Manifest " + path + " skipped: 0 direct dependencies (" + transitive + " transitive omitted)");
                 continue;
             }
             result.add(surface(batch, path, included, transitive));
         }
-        counters.add("syft.manifests", byManifest.size());
-        counters.add("syft.provided_packages", (int) result.stream()
-                .filter(surface -> surface.getRole() == SurfaceRole.PROVIDES)
-                .count());
+        if (result.isEmpty()) {
+            debug(batchLogger, "SBOM produced 0 package surfaces (components=" + components.size() + ").");
+        }
         return result;
     }
 
-    private DependencyGraph dependencyGraph(JsonNode bom, SurfaceCounters counters) {
+    private static void debug(IngestionBatchLogService.BatchLogger batchLogger, String message) {
+        if (batchLogger != null) {
+            batchLogger.debug("EXTRACT_SURFACES", message);
+        }
+    }
+
+    private DependencyGraph dependencyGraph(JsonNode bom) {
         JsonNode dependencies = bom.path("dependencies");
         if (!dependencies.isArray() || dependencies.isEmpty()) {
             return new DependencyGraph(Set.of(), Set.of());
@@ -178,7 +182,6 @@ class SyftSurfaceAdapter {
         List<String> roots = dependsOn.keySet().stream()
                 .filter(s -> incoming.getOrDefault(s, 0) == 0)
                 .toList();
-        counters.add("syft.roots", roots.size());
         Set<String> direct = new LinkedHashSet<>();
         for (String root : roots) {
             direct.addAll(dependsOn.getOrDefault(root, List.of()));
@@ -186,22 +189,14 @@ class SyftSurfaceAdapter {
         return new DependencyGraph(new LinkedHashSet<>(roots), direct);
     }
 
-    private static boolean accepted(JsonNode component, SurfaceCounters counters) {
+    private static boolean accepted(JsonNode component) {
         String scope = property(component, "syft:package:scope");
         if (scope == null) scope = property(component, "syft:scope");
         if (scope == null) scope = text(component, "scope");
         if (testScope(scope)) {
-            counters.increment("syft.excluded_test");
             return false;
         }
-        if (scope == null || !(scope.equalsIgnoreCase("runtime") || scope.equalsIgnoreCase("production"))) {
-            counters.increment("syft.unknown_scope");
-        }
-        if (text(component, "purl") == null) {
-            counters.increment("syft.no_purl");
-            return false;
-        }
-        return true;
+        return text(component, "purl") != null;
     }
 
     private static CtxSurface providedPackage(IngestionBatch batch, String path, JsonNode component) {
@@ -215,7 +210,7 @@ class SyftSurfaceAdapter {
                 SurfaceRole.PROVIDES,
                 description,
                 SurfaceDetection.SYFT);
-        add(surface, AttributeKind.NAME, text(component, "name"));
+        add(surface, AttributeKind.IDENTIFIER, text(component, "name"));
         add(surface, AttributeKind.TECHNOLOGY, technology);
         add(surface, AttributeKind.IDENTIFIER, purl);
         if (!UNATTRIBUTED.equals(path)) {
@@ -250,9 +245,9 @@ class SyftSurfaceAdapter {
             add(surface, AttributeKind.FILE, path);
         }
         purls.forEach(purl -> add(surface, AttributeKind.IDENTIFIER, purl));
-        add(surface, AttributeKind.REF, "direct:" + purls.size());
+        add(surface, AttributeKind.IDENTIFIER, "direct:" + purls.size());
         if (transitive > 0) {
-            add(surface, AttributeKind.REF, "transitive:" + transitive);
+            add(surface, AttributeKind.IDENTIFIER, "transitive:" + transitive);
         }
         return surface;
     }

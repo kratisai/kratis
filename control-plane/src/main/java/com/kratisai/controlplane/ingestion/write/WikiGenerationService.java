@@ -54,7 +54,6 @@ public class WikiGenerationService {
     private final LiteLLMProvisioningService litellmProvisioningService;
     private final RepositoryIntelligenceTools repositoryIntelligenceTools;
     private final ToolCallback[] toolCallbacks;
-    private final IngestionBatchLogService ingestionBatchLogService;
     private final IngestionUsageTracker usageTracker;
     private final ProcessExecutor processExecutor;
     private final ObjectMapper objectMapper;
@@ -71,7 +70,6 @@ public class WikiGenerationService {
             ReadWikiPageTool readWikiPageTool,
             ListWikiPagesTool listWikiPagesTool,
             WriteWikiPageTool writeWikiPageTool,
-            IngestionBatchLogService ingestionBatchLogService,
             IngestionUsageTracker usageTracker,
             ProcessExecutor processExecutor,
             ObjectMapper objectMapper,
@@ -89,7 +87,6 @@ public class WikiGenerationService {
                         listWikiPagesTool,
                         writeWikiPageTool))
                 .getToolCallbacks();
-        this.ingestionBatchLogService = ingestionBatchLogService;
         this.usageTracker = usageTracker;
         this.processExecutor = processExecutor;
         this.objectMapper = objectMapper;
@@ -112,12 +109,8 @@ public class WikiGenerationService {
                 .build();
     }
 
-    public void generateWiki(IngestionBatch batch) {
-        IngestionBatchLogService.BatchLogger batchLogger = new IngestionBatchLogService.BatchLogger(
-                batch.getId(), batch.getRepository().getTeam().getId(), ingestionBatchLogService);
-        batchLogger.info("GENERATE_WIKI", "Starting Agentic ReAct loop for Target Wiki Generation.");
-
-        ToolContext toolContext = new ToolContext(Map.of("batchId", batch.getId()));
+    public String generateWiki(IngestionBatch batch, IngestionBatchLogService.BatchLogger batchLogger) {
+        ToolContext toolContext = new ToolContext(Map.of("batchId", batch.getId(), "wikiBatchLogger", batchLogger));
         String patternsContext = repositoryIntelligenceTools.getArchitecturalPatterns(toolContext);
         String dimensionsContext = repositoryIntelligenceTools.getDimensions(toolContext);
 
@@ -233,9 +226,7 @@ public class WikiGenerationService {
                             + " top-level pages; the wiki should have exactly one root.");
         }
 
-        batchLogger.info(
-                "GENERATE_WIKI",
-                "Target Wiki Generation completed successfully with " + generatedPages.size() + " page(s).");
+        return "generated " + generatedPages.size() + " page(s)";
     }
 
     private void logToolEvent(
@@ -247,13 +238,13 @@ public class WikiGenerationService {
         switch (phase) {
             case START -> {
                 logger.debug("GENERATE_WIKI: calling tool {}{}", toolName, detailAddsContext ? " - " + detail : "");
-                batchLogger.info(
+                batchLogger.debug(
                         "GENERATE_WIKI", "Calling tool: " + toolName + (detailAddsContext ? " - " + detail : ""));
             }
             case COMPLETE -> logger.debug("GENERATE_WIKI: tool {} completed", toolName);
             case ERROR -> {
                 logger.debug("GENERATE_WIKI: tool {} failed: {}", toolName, detail);
-                batchLogger.error("GENERATE_WIKI", "Tool execution failed: " + toolName + " - " + detail);
+                batchLogger.warn("GENERATE_WIKI", "Tool execution failed (retrying): " + toolName + " - " + detail);
             }
         }
     }
