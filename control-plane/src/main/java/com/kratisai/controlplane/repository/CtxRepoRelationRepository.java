@@ -30,6 +30,12 @@ public interface CtxRepoRelationRepository extends JpaRepository<CtxRepoRelation
     List<CtxRepoRelation> findCurrentForRepository(
             @Param("teamId") UUID teamId, @Param("repositoryId") UUID repositoryId);
 
+    @Query("SELECT r FROM CtxRepoRelation r JOIN FETCH r.batchA a JOIN FETCH a.repository "
+            + "JOIN FETCH r.batchB b JOIN FETCH b.repository "
+            + "WHERE r.state = 'CURRENT' "
+            + "AND (r.batchA.id = :batchId OR r.batchB.id = :batchId)")
+    List<CtxRepoRelation> findCurrentByBatchId(@Param("batchId") UUID batchId);
+
     @Modifying
     @Query(
             "UPDATE CtxRepoRelation r SET r.state = 'SUPERSEDED' WHERE r.state = 'CURRENT' AND r.teamId = :teamId AND (r.repositoryAId = :repositoryId OR r.repositoryBId = :repositoryId)")

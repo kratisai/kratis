@@ -3,8 +3,12 @@ package com.kratisai.controlplane.service;
 import com.kratisai.controlplane.api.restdto.ArchitecturePatternDto;
 import com.kratisai.controlplane.api.restdto.DimensionStatDto;
 import com.kratisai.controlplane.api.restdto.IngestionBatchStatsDto;
+import com.kratisai.controlplane.api.restdto.RelationSide;
+import com.kratisai.controlplane.api.restdto.RelationStatDto;
+import com.kratisai.controlplane.api.restdto.SurfaceStatDto;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.DimensionCategory;
+import com.kratisai.controlplane.model.Direction;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.NodeType;
@@ -30,7 +34,9 @@ public class IngestionStatsService {
     private final CtxArchitecturePatternRepository ctxArchitecturePatternRepository;
     private final CtxWikiPageRepository ctxWikiPageRepository;
     private final CtxNodeDimensionRepository ctxNodeDimensionRepository;
-    private final CtxDimensionRepository ctxDimensionRepository;
+    private final CtxSurfaceRepository ctxSurfaceRepository;
+    private final CtxSurfaceAttributeRepository ctxSurfaceAttributeRepository;
+    private final CtxRepoRelationRepository ctxRepoRelationRepository;
 
     public IngestionStatsService(
             IngestionBatchRepository ingestionBatchRepository,
@@ -39,14 +45,18 @@ public class IngestionStatsService {
             CtxArchitecturePatternRepository ctxArchitecturePatternRepository,
             CtxWikiPageRepository ctxWikiPageRepository,
             CtxNodeDimensionRepository ctxNodeDimensionRepository,
-            CtxDimensionRepository ctxDimensionRepository) {
+            CtxSurfaceRepository ctxSurfaceRepository,
+            CtxSurfaceAttributeRepository ctxSurfaceAttributeRepository,
+            CtxRepoRelationRepository ctxRepoRelationRepository) {
         this.ingestionBatchRepository = ingestionBatchRepository;
         this.ctxNodeRepository = ctxNodeRepository;
         this.ctxEdgeRepository = ctxEdgeRepository;
         this.ctxArchitecturePatternRepository = ctxArchitecturePatternRepository;
         this.ctxWikiPageRepository = ctxWikiPageRepository;
         this.ctxNodeDimensionRepository = ctxNodeDimensionRepository;
-        this.ctxDimensionRepository = ctxDimensionRepository;
+        this.ctxSurfaceRepository = ctxSurfaceRepository;
+        this.ctxSurfaceAttributeRepository = ctxSurfaceAttributeRepository;
+        this.ctxRepoRelationRepository = ctxRepoRelationRepository;
     }
 
     @Transactional(readOnly = true)
@@ -146,6 +156,10 @@ public class IngestionStatsService {
             dimensions.add(new DimensionStatDto(category, name, count.intValue(), synopsis, topFiles));
         }
 
+        List<SurfaceStatDto> surfaces = getSurfaceStats(batchId);
+        List<RelationStatDto> relations =
+                getRelationStats(batchId, batch.getRepository().getId());
+
         IngestionBatchStatsDto dto = new IngestionBatchStatsDto(
                 batchId.toString(),
                 totalDurationSeconds,
@@ -155,6 +169,8 @@ public class IngestionStatsService {
                 edgeTypeCounts,
                 dimensions,
                 architecturePatterns,
+                surfaces,
+                relations,
                 wikiPageSlugs,
                 totalSpend,
                 totalTokens,
@@ -163,9 +179,52 @@ public class IngestionStatsService {
                 totalToolCalls,
                 usageLastUpdatedAt);
 
-        logger.trace("Ingestion batch has dimensions {}", ctxDimensionRepository.findByBatchId(batchId));
+        logger.trace("getBatchStats: {}", dto);
 
         return Optional.of(dto);
+    }
+
+    private List<SurfaceStatDto> getSurfaceStats(UUID batchId) {
+        Map<UUID, Integer> attributeCounts = new HashMap<>();
+        for (Object[] row : ctxSurfaceAttributeRepository.countByBatchIdGroupedBySurface(batchId)) {
+            attributeCounts.put((UUID) row[0], ((Long) row[1]).intValue());
+        }
+
+        return ctxSurfaceRepository.findByBatchId(batchId).stream()
+                .map(surface -> new SurfaceStatDto(
+                        surface.getRole(),
+                        surface.getDescription(),
+                        surface.getDetectedBy(),
+                        attributeCounts.getOrDefault(surface.getId(), 0)))
+                .sorted(Comparator.comparing(SurfaceStatDto::role).thenComparing(SurfaceStatDto::description))
+                .toList();
+    }
+
+    private List<RelationStatDto> getRelationStats(UUID batchId, UUID currentRepositoryId) {
+        return ctxRepoRelationRepository.findCurrentByBatchId(batchId).stream()
+                .map(relation -> {
+                    boolean currentIsA =
+                            relation.getBatchA().getRepository().getId().equals(currentRepositoryId);
+                    IngestionBatch otherBatch = currentIsA ? relation.getBatchB() : relation.getBatchA();
+                    return new RelationStatDto(
+                            relation.getNature(),
+                            relationSide(relation.getDirection(), currentIsA),
+                            relation.getConfidence(),
+                            otherBatch.getRepository().getId(),
+                            otherBatch.getRepository().getName());
+                })
+                .sorted(Comparator.comparing(RelationStatDto::otherRepositoryName)
+                        .thenComparing(relation -> relation.nature().name()))
+                .toList();
+    }
+
+    static RelationSide relationSide(Direction direction, boolean currentIsA) {
+        return switch (direction) {
+            case BIDIRECTIONAL -> RelationSide.BIDIRECTIONAL;
+            case UNKNOWN -> RelationSide.UNKNOWN;
+            case A_TO_B -> currentIsA ? RelationSide.UPSTREAM : RelationSide.DOWNSTREAM;
+            case B_TO_A -> currentIsA ? RelationSide.DOWNSTREAM : RelationSide.UPSTREAM;
+        };
     }
 
     private Map<String, List<String>> computeTopFilesByDimension(UUID batchId) {

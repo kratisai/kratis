@@ -58,6 +58,8 @@ export interface IngestionBatchStatsDto {
   edgeTypeCounts: Record<string, number>
   nodeTypeCounts: Record<string, number>
   promptTokens: null | number
+  relations: RelationStatDto[]
+  surfaces: SurfaceStatDto[]
   totalDurationSeconds: null | number
   totalEdges: number
   totalNodes: number
@@ -123,6 +125,24 @@ export interface RegisterUserRequest {
   password: string
 }
 
+export type RelationNature =
+  | 'BUILDS_AGAINST'
+  | 'CALLS'
+  | 'HOSTS'
+  | 'MESSAGES'
+  | 'PEER'
+  | 'SHARES_STATE'
+
+export type RelationSide = 'BIDIRECTIONAL' | 'DOWNSTREAM' | 'UNKNOWN' | 'UPSTREAM'
+
+export interface RelationStatDto {
+  confidence: 'CONFIRMED' | 'SUGGESTED'
+  currentSide: RelationSide
+  nature: RelationNature
+  otherRepositoryId: string
+  otherRepositoryName: string
+}
+
 export interface RemoteRepositoryDto {
   cloneUrl: string
   defaultBranch: string
@@ -171,6 +191,15 @@ export interface SupportedProviderType {
   requiresApiKey: boolean
   requiresBaseUrl: boolean
   type: string
+}
+
+export type SurfaceRole = 'BIDIRECTIONAL' | 'PROVIDES' | 'REQUIRES' | 'UNKNOWN'
+
+export interface SurfaceStatDto {
+  attributeCount: number
+  description: string
+  detectedBy: SurfaceDetection
+  role: SurfaceRole
 }
 
 export interface TeamDetailDto {
@@ -239,3 +268,5 @@ export interface UserDto {
   email: string
   id: string
 }
+
+type SurfaceDetection = 'CMM' | 'MODEL' | 'SYFT' | 'UNKNOWN'

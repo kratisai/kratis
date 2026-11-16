@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.kratisai.controlplane.api.restdto.DimensionStatDto;
 import com.kratisai.controlplane.api.restdto.IngestionBatchStatsDto;
+import com.kratisai.controlplane.api.restdto.RelationSide;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
@@ -43,6 +44,18 @@ class IngestionStatsServiceTest {
 
     @Autowired
     private IngestionBatchRepository ingestionBatchRepository;
+
+    @Autowired
+    private RepositoryRepository repositoryRepository;
+
+    @Autowired
+    private CtxSurfaceRepository ctxSurfaceRepository;
+
+    @Autowired
+    private CtxSurfaceAttributeRepository ctxSurfaceAttributeRepository;
+
+    @Autowired
+    private CtxRepoRelationRepository ctxRepoRelationRepository;
 
     @Autowired
     private TestDataFactory testDataFactory;
@@ -380,6 +393,103 @@ class IngestionStatsServiceTest {
         // No CtxNodeDimension rows exist for this dimension, so it won't appear in the
         // count-based dimensions list at all (it's driven by the join), which is existing behavior.
         assertThat(statsOpt.get().getDimensions()).noneMatch(d -> "Orphan Dimension".equals(d.name()));
+    }
+
+    @Test
+    void shouldReturnSurfaceStatsWithAttributeCounts() {
+        CtxSurface provides = new CtxSurface(
+                batch,
+                repository.getId(),
+                team.getId(),
+                SurfaceRole.PROVIDES,
+                "HTTP API provided by OrderController",
+                SurfaceDetection.CMM);
+        provides.addAttribute(
+                new CtxSurfaceAttribute(provides, AttributeKind.ENDPOINT, "/orders", SurfaceDetection.CMM));
+        provides.addAttribute(
+                new CtxSurfaceAttribute(provides, AttributeKind.FILE, "OrderController.java", SurfaceDetection.CMM));
+        CtxSurface requires = new CtxSurface(
+                batch,
+                repository.getId(),
+                team.getId(),
+                SurfaceRole.REQUIRES,
+                "Messaging dependency",
+                SurfaceDetection.MODEL);
+        requires.addAttribute(
+                new CtxSurfaceAttribute(requires, AttributeKind.TECHNOLOGY, "kafka", SurfaceDetection.MODEL));
+
+        ctxSurfaceRepository.saveAllAndFlush(List.of(provides, requires));
+        ctxSurfaceAttributeRepository.saveAllAndFlush(List.of(
+                provides.getAttributeRows().get(0),
+                provides.getAttributeRows().get(1),
+                requires.getAttributeRows().getFirst()));
+
+        IngestionBatchStatsDto stats =
+                ingestionStatsService.getBatchStats(batch.getId()).orElseThrow();
+
+        assertThat(stats.getSurfaces()).hasSize(2);
+        assertThat(stats.getSurfaces().getFirst().role()).isEqualTo(SurfaceRole.PROVIDES);
+        assertThat(stats.getSurfaces().getFirst().description()).isEqualTo("HTTP API provided by OrderController");
+        assertThat(stats.getSurfaces().getFirst().detectedBy()).isEqualTo(SurfaceDetection.CMM);
+        assertThat(stats.getSurfaces().getFirst().attributeCount()).isEqualTo(2);
+        assertThat(stats.getSurfaces().get(1).role()).isEqualTo(SurfaceRole.REQUIRES);
+        assertThat(stats.getSurfaces().get(1).attributeCount()).isEqualTo(1);
+    }
+
+    @Test
+    void shouldReturnRelationStatsRelativeToCurrentRepository() {
+        Repository otherRepository =
+                new Repository("billing-service", "https://github.com/user/billing.git", "main", RepositoryType.GITHUB);
+        otherRepository.setTeam(team);
+        repositoryRepository.saveAndFlush(otherRepository);
+
+        IngestionBatch otherBatch = new IngestionBatch(otherRepository);
+        otherBatch.setStatus(IngestionStatus.SUCCESS);
+        ingestionBatchRepository.saveAndFlush(otherBatch);
+
+        boolean currentRepoIsA = CtxRepoRelation.compareBySqlOrder(repository.getId(), otherRepository.getId()) < 0;
+        Direction direction = currentRepoIsA ? Direction.A_TO_B : Direction.B_TO_A;
+        CtxRepoRelation relation = currentRepoIsA
+                ? new CtxRepoRelation(team.getId(), batch, otherBatch, Nature.CALLS, direction, Ceiling.CONFIRMED)
+                : new CtxRepoRelation(team.getId(), otherBatch, batch, Nature.CALLS, direction, Ceiling.CONFIRMED);
+        ctxRepoRelationRepository.saveAndFlush(relation);
+
+        IngestionBatchStatsDto stats =
+                ingestionStatsService.getBatchStats(batch.getId()).orElseThrow();
+
+        assertThat(stats.getRelations()).singleElement().satisfies(actual -> {
+            assertThat(actual.nature()).isEqualTo(Nature.CALLS);
+            assertThat(actual.currentSide()).isEqualTo(RelationSide.UPSTREAM);
+            assertThat(actual.confidence()).isEqualTo(Ceiling.CONFIRMED);
+            assertThat(actual.otherRepositoryId()).isEqualTo(otherRepository.getId());
+            assertThat(actual.otherRepositoryName()).isEqualTo("billing-service");
+        });
+    }
+
+    @Test
+    void shouldExcludeSupersededRelationsFromBatchStats() {
+        Repository otherRepository =
+                new Repository("billing-service", "https://github.com/user/billing.git", "main", RepositoryType.GITHUB);
+        otherRepository.setTeam(team);
+        repositoryRepository.saveAndFlush(otherRepository);
+
+        IngestionBatch otherBatch = new IngestionBatch(otherRepository);
+        otherBatch.setStatus(IngestionStatus.SUCCESS);
+        ingestionBatchRepository.saveAndFlush(otherBatch);
+
+        boolean currentRepoIsA = CtxRepoRelation.compareBySqlOrder(repository.getId(), otherRepository.getId()) < 0;
+        CtxRepoRelation relation = currentRepoIsA
+                ? new CtxRepoRelation(
+                        team.getId(), batch, otherBatch, Nature.MESSAGES, Direction.BIDIRECTIONAL, Ceiling.CONFIRMED)
+                : new CtxRepoRelation(
+                        team.getId(), otherBatch, batch, Nature.MESSAGES, Direction.BIDIRECTIONAL, Ceiling.CONFIRMED);
+        relation.setState(RelationState.SUPERSEDED);
+        ctxRepoRelationRepository.saveAndFlush(relation);
+
+        IngestionBatchStatsDto stats =
+                ingestionStatsService.getBatchStats(batch.getId()).orElseThrow();
+
+        assertThat(stats.getRelations()).isEmpty();
     }
 
     @Test

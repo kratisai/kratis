@@ -13,9 +13,10 @@ public interface CtxSurfaceAttributeRepository extends JpaRepository<CtxSurfaceA
 
     List<CtxSurfaceAttribute> findBySurfaceId(@Param("surfaceId") UUID surfaceId);
 
-    @Query("SELECT a FROM CtxSurfaceAttribute a WHERE a.surface.id in :surfaceIds")
-    List<CtxSurfaceAttribute> findBySurfaceIdIn(@Param("surfaceIds") List<UUID> surfaceIds);
-
     @Query("SELECT a FROM CtxSurfaceAttribute a WHERE a.surface.batch.id = :batchId")
     List<CtxSurfaceAttribute> findByBatchId(@Param("batchId") UUID batchId);
+
+    @Query("SELECT a.surface.id, COUNT(a) FROM CtxSurfaceAttribute a "
+            + "WHERE a.surface.batch.id = :batchId GROUP BY a.surface.id")
+    List<Object[]> countByBatchIdGroupedBySurface(@Param("batchId") UUID batchId);
 }

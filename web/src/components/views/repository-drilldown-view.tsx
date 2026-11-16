@@ -20,6 +20,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import type { ArchitecturePatternDto, DimensionStatDto } from '@/types/auth-types'
 
 import { IngestionStatusBadge } from '@/components/repos/ingestion-status-badge'
+import { RepositoryRelationList } from '@/components/repos/repository-relation-list'
+import { RepositorySurfaceCloud } from '@/components/repos/repository-surface-cloud'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
@@ -49,6 +51,7 @@ export function RepositoryDrilldownView() {
 
   const [selectedBatchId, setSelectedBatchId] = useState<null | string>(null)
   const [showDebugLogs, setShowDebugLogs] = useState(false)
+  const [showSurfaces, setShowSurfaces] = useState(false)
 
   useEffect(() => {
     if (latestBatchId) {
@@ -61,6 +64,8 @@ export function RepositoryDrilldownView() {
 
   const debugLogCount = logs.filter((log) => log.level === 'DEBUG').length
   const visibleLogs = showDebugLogs ? logs : logs.filter((log) => log.level !== 'DEBUG')
+  const surfaceStats = batchStats?.surfaces ?? []
+  const relationStats = batchStats?.relations ?? []
 
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 
@@ -561,6 +566,32 @@ export function RepositoryDrilldownView() {
                     )
                   })}
                 </div>
+
+                {/* Cross-repository Relations */}
+                {(relationStats.length > 0 || surfaceStats.length > 0) && (
+                  <div className="rounded-lg border p-4">
+                    <p className="text-muted-foreground text-sm">Cross-repository Relations</p>
+                    <p className="mt-1 text-2xl font-semibold">{relationStats.length}</p>
+                    {relationStats.length > 0 && (
+                      <RepositoryRelationList relations={relationStats} />
+                    )}
+                    {surfaceStats.length > 0 && (
+                      <>
+                        <button
+                          aria-expanded={showSurfaces}
+                          className="text-muted-foreground hover:text-foreground mt-3 inline-flex items-center text-xs underline-offset-2 hover:underline"
+                          onClick={() => setShowSurfaces((prev) => !prev)}
+                          type="button"
+                        >
+                          {showSurfaces
+                            ? 'Hide surfaces'
+                            : `Show surfaces (${surfaceStats.length})`}
+                        </button>
+                        {showSurfaces && <RepositorySurfaceCloud surfaces={surfaceStats} />}
+                      </>
+                    )}
+                  </div>
+                )}
 
                 {/* Architecture Patterns */}
                 {batchStats.architecturePatterns.length > 0 && (

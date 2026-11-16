@@ -17,6 +17,8 @@ public class IngestionBatchStatsDto {
     private Map<RelationType, Integer> edgeTypeCounts;
     private List<DimensionStatDto> dimensions;
     private List<ArchitecturePatternDto> architecturePatterns;
+    private List<SurfaceStatDto> surfaces;
+    private List<RelationStatDto> relations;
     private List<String> wikiPageSlugs;
     private Double totalSpend;
     private Long totalTokens;
@@ -34,6 +36,8 @@ public class IngestionBatchStatsDto {
             Map<RelationType, Integer> edgeTypeCounts,
             List<DimensionStatDto> dimensions,
             List<ArchitecturePatternDto> architecturePatterns,
+            List<SurfaceStatDto> surfaces,
+            List<RelationStatDto> relations,
             List<String> wikiPageSlugs,
             Double totalSpend,
             Long totalTokens,
@@ -49,6 +53,8 @@ public class IngestionBatchStatsDto {
         this.edgeTypeCounts = edgeTypeCounts;
         this.dimensions = Objects.requireNonNull(dimensions, "dimensions is required");
         this.architecturePatterns = Objects.requireNonNull(architecturePatterns, "architecturePatterns is required");
+        this.surfaces = Objects.requireNonNull(surfaces, "surfaces is required");
+        this.relations = Objects.requireNonNull(relations, "relations is required");
         this.wikiPageSlugs = Objects.requireNonNull(wikiPageSlugs, "wikiPageSlugs is required");
         this.totalSpend = totalSpend;
         this.totalTokens = totalTokens;
@@ -56,6 +62,32 @@ public class IngestionBatchStatsDto {
         this.completionTokens = completionTokens;
         this.totalToolCalls = totalToolCalls;
         this.usageLastUpdatedAt = usageLastUpdatedAt;
+    }
+
+    @Override
+    public String toString() {
+        return "IngestionBatchStatsDto{" + "batchId='"
+                + batchId + '\'' + ", totalDurationSeconds="
+                + totalDurationSeconds + ", totalNodes="
+                + totalNodes + ", totalEdges="
+                + totalEdges + ", nodeTypeCounts="
+                + nodeTypeCounts + ", edgeTypeCounts="
+                + edgeTypeCounts + ", dimensionCount="
+                + size(dimensions) + ", architecturePatternCount="
+                + size(architecturePatterns) + ", surfaceCount="
+                + size(surfaces) + ", relationCount="
+                + size(relations) + ", wikiPageCount="
+                + size(wikiPageSlugs) + ", totalSpend="
+                + totalSpend + ", totalTokens="
+                + totalTokens + ", promptTokens="
+                + promptTokens + ", completionTokens="
+                + completionTokens + ", totalToolCalls="
+                + totalToolCalls + ", usageLastUpdatedAt="
+                + usageLastUpdatedAt + '}';
+    }
+
+    private static int size(List<?> values) {
+        return values == null ? 0 : values.size();
     }
 
     public String getBatchId() {
@@ -128,6 +160,22 @@ public class IngestionBatchStatsDto {
 
     public void setArchitecturePatterns(List<ArchitecturePatternDto> architecturePatterns) {
         this.architecturePatterns = architecturePatterns;
+    }
+
+    public List<SurfaceStatDto> getSurfaces() {
+        return surfaces;
+    }
+
+    public void setSurfaces(List<SurfaceStatDto> surfaces) {
+        this.surfaces = surfaces;
+    }
+
+    public List<RelationStatDto> getRelations() {
+        return relations;
+    }
+
+    public void setRelations(List<RelationStatDto> relations) {
+        this.relations = relations;
     }
 
     public Double getTotalSpend() {

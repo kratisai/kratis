@@ -54,6 +54,15 @@ class IngestionControllerTest {
     private CtxArchitecturePatternRepository ctxArchitecturePatternRepository;
 
     @Autowired
+    private CtxSurfaceRepository ctxSurfaceRepository;
+
+    @Autowired
+    private CtxSurfaceAttributeRepository ctxSurfaceAttributeRepository;
+
+    @Autowired
+    private CtxRepoRelationRepository ctxRepoRelationRepository;
+
+    @Autowired
     private WebApplicationContext wac;
 
     @Autowired
@@ -419,6 +428,62 @@ class IngestionControllerTest {
                 .andExpect(jsonPath("$.nodeTypeCounts.function").value(1))
                 .andExpect(jsonPath("$.nodeTypeCounts.class").value(1))
                 .andExpect(jsonPath("$.edgeTypeCounts.calls").value(1));
+    }
+
+    @Test
+    void getBatchStats_includesSurfacesAndRelations() throws Exception {
+        Repository repo = repositoryRepository.findById(repoId).orElseThrow();
+        IngestionBatch batch = new IngestionBatch(repo);
+        batch.setStartedAt(Instant.now().minusSeconds(60));
+        batch.setCompletedAt(Instant.now());
+        batch.setStatus(IngestionStatus.SUCCESS);
+        ingestionBatchRepository.saveAndFlush(batch);
+
+        CtxSurface surface = new CtxSurface(
+                batch,
+                repo.getId(),
+                teamId,
+                SurfaceRole.PROVIDES,
+                "HTTP API provided by OrderController",
+                SurfaceDetection.CMM);
+        surface.addAttribute(new CtxSurfaceAttribute(surface, AttributeKind.ENDPOINT, "/orders", SurfaceDetection.CMM));
+        ctxSurfaceRepository.saveAndFlush(surface);
+        ctxSurfaceAttributeRepository.saveAllAndFlush(surface.getAttributeRows());
+
+        Repository otherRepository =
+                new Repository("billing-service", "https://github.com/user/billing.git", "main", RepositoryType.GITHUB);
+        otherRepository.setTeam(teamRepository.findById(teamId).orElseThrow());
+        repositoryRepository.saveAndFlush(otherRepository);
+        IngestionBatch otherBatch = new IngestionBatch(otherRepository);
+        otherBatch.setStatus(IngestionStatus.SUCCESS);
+        ingestionBatchRepository.saveAndFlush(otherBatch);
+
+        boolean currentRepoIsA = CtxRepoRelation.compareBySqlOrder(repo.getId(), otherRepository.getId()) < 0;
+        Direction direction = currentRepoIsA ? Direction.A_TO_B : Direction.B_TO_A;
+        CtxRepoRelation relation = currentRepoIsA
+                ? new CtxRepoRelation(teamId, batch, otherBatch, Nature.CALLS, direction, Ceiling.CONFIRMED)
+                : new CtxRepoRelation(teamId, otherBatch, batch, Nature.CALLS, direction, Ceiling.CONFIRMED);
+        ctxRepoRelationRepository.saveAndFlush(relation);
+
+        mockMvc.perform(get(
+                                "/api/v1/teams/{teamId}/repositories/{repoId}/batches/{batchId}/stats",
+                                teamId,
+                                repoId,
+                                batch.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.surfaces.length()").value(1))
+                .andExpect(jsonPath("$.surfaces[0].role").value("PROVIDES"))
+                .andExpect(jsonPath("$.surfaces[0].description").value("HTTP API provided by OrderController"))
+                .andExpect(jsonPath("$.surfaces[0].detectedBy").value("CMM"))
+                .andExpect(jsonPath("$.surfaces[0].attributeCount").value(1))
+                .andExpect(jsonPath("$.relations.length()").value(1))
+                .andExpect(jsonPath("$.relations[0].nature").value("CALLS"))
+                .andExpect(jsonPath("$.relations[0].currentSide").value("UPSTREAM"))
+                .andExpect(jsonPath("$.relations[0].confidence").value("CONFIRMED"))
+                .andExpect(jsonPath("$.relations[0].otherRepositoryId")
+                        .value(otherRepository.getId().toString()))
+                .andExpect(jsonPath("$.relations[0].otherRepositoryName").value("billing-service"));
     }
 
     @Test

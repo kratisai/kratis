@@ -673,6 +673,8 @@ describe('Repository Drilldown - Ingestion Statistics', () => {
           dimensions: [],
           edgeTypeCounts: {},
           nodeTypeCounts: {},
+          relations: [],
+          surfaces: [],
           wikiPageSlugs: [],
           ...stats,
         })
@@ -1026,6 +1028,8 @@ describe('Repository Drilldown - Batch Selection', () => {
           dimensions: [],
           edgeTypeCounts: {},
           nodeTypeCounts: {},
+          relations: [],
+          surfaces: [],
           wikiPageSlugs: [],
           ...(stats as Record<string, unknown>),
         })
@@ -1286,6 +1290,8 @@ describe('Repository Drilldown - Dimension Categories & Wiki Pages', () => {
           dimensions: [],
           edgeTypeCounts: {},
           nodeTypeCounts: {},
+          relations: [],
+          surfaces: [],
           wikiPageSlugs: [],
           ...stats,
         })
