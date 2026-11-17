@@ -115,10 +115,11 @@ const CALLOUT_LABELS: Record<string, string> = {
 
 interface MarkdownMessageProps {
   content: string
+  onNavigate?: (path: string) => void
   variant?: MarkdownVariant
 }
 
-export function MarkdownMessage({ content, variant = 'chat' }: MarkdownMessageProps) {
+export function MarkdownMessage({ content, onNavigate, variant = 'chat' }: MarkdownMessageProps) {
   const unclosedMermaid = findUnclosedMermaidFence(content)
 
   return (
@@ -130,6 +131,27 @@ export function MarkdownMessage({ content, variant = 'chat' }: MarkdownMessagePr
     >
       <ReactMarkdown
         components={{
+          a({ children, href, node: _node, ...props }) {
+            if (href && href.startsWith('/wiki') && onNavigate) {
+              return (
+                <a
+                  href={href}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    onNavigate(href)
+                  }}
+                  {...props}
+                >
+                  {children}
+                </a>
+              )
+            }
+            return (
+              <a href={href} {...props}>
+                {children}
+              </a>
+            )
+          },
           blockquote({ children, node: _node, ...props }) {
             const callout = detectCallout(children)
             if (!callout) {

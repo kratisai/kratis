@@ -12,18 +12,25 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useRepositories } from '@/hooks/use-repositories'
 import { useWikiPage, useWikiTree } from '@/hooks/use-wiki'
+import { buildRepoWikiSplat, parseRepoWikiSplat } from '@/lib/wiki-route'
 
 export function WikiView() {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-  const params = useParams({ strict: false }) as { pageSlug?: string; repoId?: string }
-  const { pageSlug: pageSlugParam, repoId } = params
-  const pageSlug = pageSlugParam
+  const params = useParams({ strict: false }) as {
+    _splat?: string
+    pageSlug?: string
+    repoId?: string
+  }
+  const { _splat: splat, pageSlug: paramPageSlug, repoId: repoIdParam } = params
   const navigate = useNavigate()
 
   const { data: repositories } = useRepositories()
-  const repo = repositories?.find((r) => r.id === repoId)
+  const splatParsed = parseRepoWikiSplat(splat, repositories)
+  const repo = repoIdParam ? repositories?.find((r) => r.id === repoIdParam) : splatParsed.repo
+  const pageSlug = repoIdParam ? paramPageSlug : splatParsed.pageSlug
+  const effectiveRepoId = repo?.id ?? repoIdParam ?? ''
 
-  const { data: tree, isLoading: isTreeLoading } = useWikiTree(repoId ?? '')
+  const { data: tree, isLoading: isTreeLoading } = useWikiTree(effectiveRepoId)
 
   let selectedPageId: null | string = null
   if (tree && pageSlug) {
@@ -35,23 +42,47 @@ export function WikiView() {
     }
   }
 
-  const { data: selectedPage, isLoading: isPageLoading } = useWikiPage(repoId ?? '', selectedPageId)
+  const { data: selectedPage, isLoading: isPageLoading } = useWikiPage(
+    effectiveRepoId,
+    selectedPageId,
+  )
 
   useEffect(() => {
-    if (tree && !pageSlug && tree.topLevel.length > 0) {
+    if (!tree || tree.topLevel.length === 0) return
+    const missingSlug = Boolean(pageSlug && !selectedPageId)
+    if (!pageSlug || missingSlug) {
+      if (splat && repo) {
+        void navigate({
+          params: { _splat: buildRepoWikiSplat(repo.name, tree.topLevel[0].pageSlug) },
+          replace: true,
+          to: '/wiki/repo/$',
+        })
+      } else if (repoIdParam) {
+        void navigate({
+          params: { pageSlug: tree.topLevel[0].pageSlug, repoId: repoIdParam },
+          replace: true,
+          to: '/wiki/$repoId/$pageSlug',
+        })
+      }
+    }
+  }, [tree, pageSlug, selectedPageId, repoIdParam, splat, repo, navigate])
+
+  const handleSelectPage = (page: WikiPageDto) => {
+    if (splat && repo) {
       void navigate({
-        params: { pageSlug: tree.topLevel[0].pageSlug, repoId: repoId! },
-        replace: true,
+        params: { _splat: buildRepoWikiSplat(repo.name, page.pageSlug) },
+        to: '/wiki/repo/$',
+      })
+    } else {
+      void navigate({
+        params: { pageSlug: page.pageSlug, repoId: repoIdParam! },
         to: '/wiki/$repoId/$pageSlug',
       })
     }
-  }, [tree, pageSlug, repoId, navigate])
+  }
 
-  const handleSelectPage = (page: WikiPageDto) => {
-    void navigate({
-      params: { pageSlug: page.pageSlug, repoId: repoId! },
-      to: '/wiki/$repoId/$pageSlug',
-    })
+  const handleMarkdownNavigate = (path: string) => {
+    void navigate({ to: path })
   }
 
   const breadcrumbs: WikiPageDto[] = []
@@ -128,7 +159,11 @@ export function WikiView() {
 
             <Card>
               <CardContent className="p-6">
-                <MarkdownMessage content={selectedPage.content} variant="wiki" />
+                <MarkdownMessage
+                  content={selectedPage.content}
+                  onNavigate={handleMarkdownNavigate}
+                  variant="wiki"
+                />
               </CardContent>
             </Card>
           </div>

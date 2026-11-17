@@ -69,6 +69,19 @@ public class AsyncConfig {
         return executor;
     }
 
+    @Bean(name = "teamWikiTaskExecutor")
+    public ThreadPoolTaskExecutor teamWikiTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(Integer.MAX_VALUE);
+        executor.setThreadNamePrefix("team-wiki-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(60);
+        executor.initialize();
+        return executor;
+    }
+
     @Bean(name = "agentTaskExecutor")
     public ThreadPoolTaskExecutor agentTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

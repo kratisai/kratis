@@ -8,5 +8,6 @@ public enum TeamEntityType {
     SANDBOX_EXECUTIONS,
     CHATS,
     USAGE,
-    PERMISSIONS
+    PERMISSIONS,
+    TEAM_WIKI
 }

@@ -35,6 +35,8 @@ public class IngestionQueueManager {
     private final TransactionTemplate transactionTemplate;
     private final CtxNodeRepository ctxNodeRepository;
     private final CtxEdgeRepository ctxEdgeRepository;
+    private final CtxDimensionRepository ctxDimensionRepository;
+    private final CtxNodeDimensionRepository ctxNodeDimensionRepository;
     private final CtxEmbeddingRepository ctxEmbeddingRepository;
     private final CtxWikiPageRepository ctxWikiPageRepository;
     private final CtxArchitecturePatternRepository ctxArchitecturePatternRepository;
@@ -49,6 +51,8 @@ public class IngestionQueueManager {
             PlatformTransactionManager transactionManager,
             CtxNodeRepository ctxNodeRepository,
             CtxEdgeRepository ctxEdgeRepository,
+            CtxDimensionRepository ctxDimensionRepository,
+            CtxNodeDimensionRepository ctxNodeDimensionRepository,
             CtxEmbeddingRepository ctxEmbeddingRepository,
             CtxWikiPageRepository ctxWikiPageRepository,
             CtxArchitecturePatternRepository ctxArchitecturePatternRepository,
@@ -58,8 +62,12 @@ public class IngestionQueueManager {
             IngestionBatchLogRepository ingestionBatchLogRepository) {
         this.ingestionBatchRepository = ingestionBatchRepository;
         this.ingestionWorker = ingestionWorker;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.ctxNodeRepository = ctxNodeRepository;
         this.ctxEdgeRepository = ctxEdgeRepository;
+        this.ctxDimensionRepository = ctxDimensionRepository;
+        this.ctxNodeDimensionRepository = ctxNodeDimensionRepository;
         this.ctxEmbeddingRepository = ctxEmbeddingRepository;
         this.ctxWikiPageRepository = ctxWikiPageRepository;
         this.ctxArchitecturePatternRepository = ctxArchitecturePatternRepository;
@@ -67,10 +75,6 @@ public class IngestionQueueManager {
         this.ctxRepoRelationRepository = ctxRepoRelationRepository;
         this.ctxRepoSynopsisRepository = ctxRepoSynopsisRepository;
         this.ingestionBatchLogRepository = ingestionBatchLogRepository;
-
-        TransactionTemplate tt = new TransactionTemplate(transactionManager);
-        tt.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        this.transactionTemplate = tt;
     }
 
     /**
@@ -90,6 +94,8 @@ public class IngestionQueueManager {
                 // interact with the node delete's DB cascade and the context-clearing reset update.
                 ctxEmbeddingRepository.deleteByBatchId(batchId);
                 ctxArchitecturePatternRepository.deleteByBatchId(batchId);
+                ctxNodeDimensionRepository.deleteByBatchId(batchId);
+                ctxDimensionRepository.deleteByBatchId(batchId);
                 ctxEdgeRepository.deleteByBatchId(batchId);
                 ctxSurfaceRepository.deleteByBatchId(batchId);
                 ctxRepoRelationRepository.deleteByBatchId(batchId);

@@ -22,7 +22,21 @@ public interface CtxWikiPageRepository extends JpaRepository<CtxWikiPage, UUID> 
 
     Optional<CtxWikiPage> findByBatchIdAndPageSlug(UUID batchId, String pageSlug);
 
+    List<CtxWikiPage> findByTeamWikiBatchId(UUID teamWikiBatchId);
+
+    List<CtxWikiPage> findByTeamWikiBatchIdAndParentPageIsNullOrderByOrderIndexAsc(UUID teamWikiBatchId);
+
+    List<CtxWikiPage> findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(UUID teamWikiBatchId, UUID parentPageId);
+
+    Optional<CtxWikiPage> findByTeamWikiBatchIdAndId(UUID teamWikiBatchId, UUID id);
+
+    Optional<CtxWikiPage> findByTeamWikiBatchIdAndPageSlug(UUID teamWikiBatchId, String pageSlug);
+
     @Modifying
     @Query("DELETE FROM CtxWikiPage p WHERE p.batch.id = :batchId")
     void deleteByBatchId(@Param("batchId") UUID batchId);
+
+    @Modifying
+    @Query("DELETE FROM CtxWikiPage p WHERE p.teamWikiBatch.id = :teamWikiBatchId")
+    void deleteByTeamWikiBatchId(@Param("teamWikiBatchId") UUID teamWikiBatchId);
 }

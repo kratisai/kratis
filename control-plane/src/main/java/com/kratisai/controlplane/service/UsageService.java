@@ -9,12 +9,16 @@ import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.IngestionStatus;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.model.TeamWikiBatch;
+import com.kratisai.controlplane.model.TeamWikiModelUsage;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.repository.IngestionModelUsageRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
+import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
+import com.kratisai.controlplane.repository.TeamWikiModelUsageRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -41,6 +45,8 @@ public class UsageService {
     private final ChatRepository chatRepository;
     private final ChatUsageSessionRepository chatUsageSessionRepository;
     private final IngestionModelUsageRepository ingestionModelUsageRepository;
+    private final TeamWikiBatchRepository teamWikiBatchRepository;
+    private final TeamWikiModelUsageRepository teamWikiModelUsageRepository;
 
     public UsageService(
             TeamMemberRepository teamMemberRepository,
@@ -48,13 +54,17 @@ public class UsageService {
             IngestionBatchRepository ingestionBatchRepository,
             ChatRepository chatRepository,
             ChatUsageSessionRepository chatUsageSessionRepository,
-            IngestionModelUsageRepository ingestionModelUsageRepository) {
+            IngestionModelUsageRepository ingestionModelUsageRepository,
+            TeamWikiBatchRepository teamWikiBatchRepository,
+            TeamWikiModelUsageRepository teamWikiModelUsageRepository) {
         this.teamMemberRepository = teamMemberRepository;
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.ingestionBatchRepository = ingestionBatchRepository;
         this.chatRepository = chatRepository;
         this.chatUsageSessionRepository = chatUsageSessionRepository;
         this.ingestionModelUsageRepository = ingestionModelUsageRepository;
+        this.teamWikiBatchRepository = teamWikiBatchRepository;
+        this.teamWikiModelUsageRepository = teamWikiModelUsageRepository;
     }
 
     private void validateMembership(UUID userId, UUID teamId) {
@@ -185,6 +195,45 @@ public class UsageService {
                             .sum()));
         }
 
+        // 2b. Fetch Team Wiki Batches for team
+        List<TeamWikiBatch> teamWikiBatches =
+                teamWikiBatchRepository.findByTeamIdAndStartedAtBetween(teamId, start, end);
+        for (TeamWikiBatch twBatch : teamWikiBatches) {
+            Long duration = null;
+            if (twBatch.getStartedAt() != null && twBatch.getCompletedAt() != null) {
+                duration = twBatch.getCompletedAt().getEpochSecond()
+                        - twBatch.getStartedAt().getEpochSecond();
+            }
+            SandboxExecutionStatus status = SandboxExecutionStatus.COMPLETED;
+            if (twBatch.getStatus() == IngestionStatus.FAILED) {
+                status = SandboxExecutionStatus.FAILED;
+            } else if (twBatch.getStatus() == IngestionStatus.PROCESSING
+                    || twBatch.getStatus() == IngestionStatus.QUEUED) {
+                status = SandboxExecutionStatus.RUNNING;
+            }
+            Set<String> models = twBatch.getModelUsage().stream()
+                    .map(TeamWikiModelUsage::getModelIdentifier)
+                    .filter(identifier -> identifier != null && !identifier.isBlank())
+                    .collect(Collectors.toCollection(() -> new TreeSet<>(String.CASE_INSENSITIVE_ORDER)));
+
+            allEntries.add(new UsageLogEntryDto(
+                    "team-wiki-" + twBatch.getId(),
+                    twBatch.getStartedAt(),
+                    duration,
+                    "Team Wiki Build (" + twBatch.getBuildMode().name().toLowerCase(Locale.ROOT) + ")",
+                    "Team Wiki Worker",
+                    status,
+                    "system@kratis.ai",
+                    models,
+                    "INGESTION",
+                    twBatch.getModelUsage().stream()
+                            .mapToLong(usage -> usage.getTotalTokens() != null ? usage.getTotalTokens() : 0L)
+                            .sum(),
+                    twBatch.getModelUsage().stream()
+                            .mapToDouble(usage -> usage.getTotalSpend() != null ? usage.getTotalSpend() : 0.0)
+                            .sum()));
+        }
+
         // 3. Fetch Chat Usage Sessions for team
         List<ChatEntity> chats = chatRepository.findByTeamId(teamId);
         for (ChatEntity chat : chats) {
@@ -287,9 +336,21 @@ public class UsageService {
 
             // Per-model statistics for ingestion come from the persisted per-model rows,
             // so each model is attributed exactly its own spend and tokens.
-            if ("INGESTION".equalsIgnoreCase(entry.usageType())) {
+            if ("INGESTION".equalsIgnoreCase(entry.usageType()) && entry.id().startsWith("ingest-")) {
                 UUID batchId = UUID.fromString(entry.id().substring("ingest-".length()));
                 for (IngestionModelUsage modelUsage : breakdownByBatch.getOrDefault(batchId, List.of())) {
+                    accumulateModel(
+                            costByModel,
+                            tokensByModel,
+                            countByModel,
+                            modelUsage.getModelIdentifier(),
+                            modelUsage.getTotalSpend() != null ? modelUsage.getTotalSpend() : 0.0,
+                            modelUsage.getTotalTokens() != null ? modelUsage.getTotalTokens() : 0L);
+                }
+            } else if ("INGESTION".equalsIgnoreCase(entry.usageType())
+                    && entry.id().startsWith("team-wiki-")) {
+                UUID twBatchId = UUID.fromString(entry.id().substring("team-wiki-".length()));
+                for (TeamWikiModelUsage modelUsage : teamWikiModelUsageRepository.findByTeamWikiBatchId(twBatchId)) {
                     accumulateModel(
                             costByModel,
                             tokensByModel,

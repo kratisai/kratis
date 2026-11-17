@@ -25,4 +25,5 @@ properties:
     - "CHATS"
     - "USAGE"
     - "PERMISSIONS"
+    - "TEAM_WIKI"
 additionalProperties: true

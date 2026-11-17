@@ -303,6 +303,8 @@ export const CLIENT_RESULTS = {
         'SANDBOX_EXECUTIONS',
         'CHATS',
         'PERMISSIONS',
+        'USAGE',
+        'TEAM_WIKI',
       ]),
       teamId: uuid,
       type: z.literal('team_entity_changed'),

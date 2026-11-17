@@ -1,4 +1,4 @@
-import { Link, useMatchRoute, useParams, useRouterState } from '@tanstack/react-router'
+import { Link, useMatchRoute, useRouterState } from '@tanstack/react-router'
 import {
   Archive,
   BarChart3,
@@ -74,6 +74,7 @@ function TopicStatusLabel({ lastActivityAt, status }: TopicStatusLabelProps) {
 const navItems = [
   { icon: MessageSquare, label: 'Ask Kratis', to: '/ask' as const },
   { icon: GitBranch, label: 'Repos', to: '/repos' as const },
+  { icon: BookOpen, label: 'Wiki', to: '/wiki' as const },
   { icon: BarChart3, label: 'Usage', to: '/usage' as const },
 ]
 
@@ -88,11 +89,8 @@ export function SidebarNav({ className, onClose, showLabels = true }: SidebarNav
   const [filter, setFilter] = useState<'all' | 'mine'>('mine')
   const [status, setStatus] = useState<'active' | 'archived'>('active')
   const matchRoute = useMatchRoute()
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- strict:false params need narrowing for wiki repoId
-  const wikiParams = useParams({ strict: false }) as { repoId?: string }
-  const wikiRepoId = wikiParams.repoId
   const onWikiRoute = useRouterState({
-    select: (state) => state.location.pathname.startsWith('/wiki/'),
+    select: (state) => state.location.pathname.startsWith('/wiki'),
   })
 
   const { data: chats = [] } = useChats(currentTeamId, filter, status)
@@ -109,53 +107,37 @@ export function SidebarNav({ className, onClose, showLabels = true }: SidebarNav
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
-      {!showLabels && onWikiRoute && wikiRepoId && (
-        <div className="p-2">
-          <Link
-            aria-label="Wiki"
-            className="bg-secondary text-secondary-foreground flex w-full items-center justify-center rounded-md px-2 py-2 text-sm font-medium transition-colors"
-            onClick={onClose}
-            params={{ repoId: wikiRepoId }}
-            title="Wiki"
-            to="/wiki/$repoId"
-          >
-            <BookOpen className="h-4 w-4 shrink-0" />
-          </Link>
-        </div>
-      )}
-
-      {showLabels && onWikiRoute && (
-        <>
-          <div className="overflow-hidden p-2">
-            <WikiSidebarSection onClose={onClose} />
-          </div>
-          <Separator className="bg-sidebar-border" />
-        </>
-      )}
-
       <nav className="flex min-h-0 flex-1 flex-col space-y-1 overflow-hidden p-2">
         {navItems.map((item) => {
-          const isActive = !!matchRoute({ fuzzy: true, to: item.to })
+          const isActive =
+            item.to === '/wiki' ? onWikiRoute : !!matchRoute({ fuzzy: true, to: item.to })
+          const isExpandedWiki = showLabels && item.to === '/wiki' && onWikiRoute
           return (
-            <Link
-              className={cn(
-                'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-secondary text-secondary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                !showLabels && 'justify-center px-2',
+            <div className={cn(isExpandedWiki && 'flex min-h-0 flex-1 flex-col')} key={item.to}>
+              <Link
+                className={cn(
+                  'flex w-full shrink-0 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-secondary text-secondary-foreground'
+                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                  !showLabels && 'justify-center px-2',
+                )}
+                onClick={onClose}
+                to={item.to}
+              >
+                <item.icon className="h-4 w-4 shrink-0" />
+                {showLabels && <span>{item.label}</span>}
+              </Link>
+              {isExpandedWiki && (
+                <ScrollArea className="min-h-0 flex-1">
+                  <WikiSidebarSection onClose={onClose} />
+                </ScrollArea>
               )}
-              key={item.to}
-              onClick={onClose}
-              to={item.to}
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              {showLabels && <span>{item.label}</span>}
-            </Link>
+            </div>
           )
         })}
 
-        {showLabels && (
+        {showLabels && !onWikiRoute && (
           <>
             <Separator className="bg-sidebar-border my-4" />
             <div className="text-muted-foreground flex items-center justify-between px-2 py-1 text-xs">

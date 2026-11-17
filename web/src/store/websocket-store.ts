@@ -80,6 +80,8 @@ export function teamEntityQueryKey(entity: string, teamId: string): null | strin
       return ['permissions', teamId]
     case 'REPOSITORIES':
       return [REPOSITORIES_QUERY_KEY, teamId]
+    case 'TEAM_WIKI':
+      return ['team-wiki', teamId]
     case 'USAGE':
       return ['team-usage-summary', teamId]
     default:

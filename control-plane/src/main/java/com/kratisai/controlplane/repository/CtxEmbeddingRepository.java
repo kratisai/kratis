@@ -29,7 +29,64 @@ public interface CtxEmbeddingRepository extends JpaRepository<CtxEmbedding, UUID
             @Param("dimSize") int dimSize,
             @Param("limit") int limit);
 
+    @Query(nativeQuery = true, value = """
+            SELECT e.* FROM ctx_embeddings e
+            WHERE e.team_id = :teamId
+              AND e.dim_size = :dimSize
+              AND (
+                e.batch_id = :batchId
+                OR e.team_wiki_batch_id IN (
+                  SELECT twb.id FROM team_wiki_batches twb
+                  WHERE twb.team_id = :teamId AND twb.is_active = true
+                )
+              )
+            ORDER BY
+              CASE
+                WHEN :dimSize = 3072 THEN (e.embedding::halfvec(3072)) <=> cast(:vector as halfvec)
+                ELSE e.embedding <=> cast(:vector as vector)
+              END
+            LIMIT :limit
+            """)
+    List<CtxEmbedding> findSimilarRepoAndTeam(
+            @Param("teamId") UUID teamId,
+            @Param("batchId") UUID batchId,
+            @Param("vector") float[] vector,
+            @Param("dimSize") int dimSize,
+            @Param("limit") int limit);
+
+    @Query(nativeQuery = true, value = """
+            SELECT e.* FROM ctx_embeddings e
+            WHERE e.team_id = :teamId
+              AND e.dim_size = :dimSize
+              AND (
+                e.batch_id IN (
+                  SELECT ib.id FROM ingestion_batches ib
+                  JOIN repositories r ON ib.repository_id = r.id
+                  WHERE r.team_id = :teamId AND ib.is_active = true
+                )
+                OR e.team_wiki_batch_id IN (
+                  SELECT twb.id FROM team_wiki_batches twb
+                  WHERE twb.team_id = :teamId AND twb.is_active = true
+                )
+              )
+            ORDER BY
+              CASE
+                WHEN :dimSize = 3072 THEN (e.embedding::halfvec(3072)) <=> cast(:vector as halfvec)
+                ELSE e.embedding <=> cast(:vector as vector)
+              END
+            LIMIT :limit
+            """)
+    List<CtxEmbedding> findSimilarTeamWide(
+            @Param("teamId") UUID teamId,
+            @Param("vector") float[] vector,
+            @Param("dimSize") int dimSize,
+            @Param("limit") int limit);
+
     @Modifying
     @Query("DELETE FROM CtxEmbedding e WHERE e.batch.id = :batchId")
     void deleteByBatchId(@Param("batchId") UUID batchId);
+
+    @Modifying
+    @Query("DELETE FROM CtxEmbedding e WHERE e.teamWikiBatch.id = :teamWikiBatchId")
+    void deleteByTeamWikiBatchId(@Param("teamWikiBatchId") UUID teamWikiBatchId);
 }

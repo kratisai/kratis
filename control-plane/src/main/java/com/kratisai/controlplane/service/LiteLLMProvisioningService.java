@@ -45,7 +45,8 @@ public class LiteLLMProvisioningService {
 
     public enum VirtualKeyScope {
         SANDBOX,
-        INGESTION
+        INGESTION,
+        TEAM_WIKI
     }
 
     private final LiteLLMClient liteLLMClient;

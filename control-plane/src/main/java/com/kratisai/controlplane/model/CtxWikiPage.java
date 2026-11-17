@@ -14,16 +14,19 @@ public class CtxWikiPage {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(
-            name = "batch_id",
-            nullable = false,
-            foreignKey = @jakarta.persistence.ForeignKey(name = "fk_ctx_wiki_pages_batch"))
+    @JoinColumn(name = "batch_id", foreignKey = @jakarta.persistence.ForeignKey(name = "fk_ctx_wiki_pages_batch"))
     private IngestionBatch batch;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(
+            name = "team_wiki_batch_id",
+            foreignKey = @jakarta.persistence.ForeignKey(name = "fk_ctx_wiki_pages_team_wiki_batch"))
+    private TeamWikiBatch teamWikiBatch;
 
     @Column(name = "team_id", nullable = false)
     private UUID teamId;
 
-    @Column(name = "repo_name", nullable = false, length = 255)
+    @Column(name = "repo_name", length = 255)
     private String repoName;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -68,6 +71,23 @@ public class CtxWikiPage {
         this.content = content;
     }
 
+    public CtxWikiPage(
+            TeamWikiBatch teamWikiBatch,
+            UUID teamId,
+            CtxWikiPage parentPage,
+            String pageSlug,
+            String title,
+            Integer orderIndex,
+            String content) {
+        this.teamWikiBatch = teamWikiBatch;
+        this.teamId = teamId;
+        this.parentPage = parentPage;
+        this.pageSlug = pageSlug;
+        this.title = title;
+        this.orderIndex = orderIndex;
+        this.content = content;
+    }
+
     public UUID getId() {
         return id;
     }
@@ -82,6 +102,14 @@ public class CtxWikiPage {
 
     public void setBatch(IngestionBatch batch) {
         this.batch = batch;
+    }
+
+    public TeamWikiBatch getTeamWikiBatch() {
+        return teamWikiBatch;
+    }
+
+    public void setTeamWikiBatch(TeamWikiBatch teamWikiBatch) {
+        this.teamWikiBatch = teamWikiBatch;
     }
 
     public UUID getTeamId() {

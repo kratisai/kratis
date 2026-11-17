@@ -7,6 +7,7 @@ import { ChatView } from '@/components/views/chat-view'
 import { ReposView } from '@/components/views/repos-view'
 import { RepositoryDrilldownView } from '@/components/views/repository-drilldown-view'
 import { SettingsView } from '@/components/views/settings-view'
+import { TeamWikiView } from '@/components/views/team-wiki-view'
 import { UsageView } from '@/components/views/usage-view'
 import { WikiView } from '@/components/views/wiki-view'
 
@@ -76,6 +77,24 @@ const chatExecutionRoute = createRoute({
   path: '/executions/$executionId',
 })
 
+const teamWikiRoute = createRoute({
+  component: TeamWikiView,
+  getParentRoute: () => rootRoute,
+  path: '/wiki',
+})
+
+const teamWikiPageRoute = createRoute({
+  component: TeamWikiView,
+  getParentRoute: () => rootRoute,
+  path: '/wiki/team/$pageSlug',
+})
+
+const repoNameWikiRoute = createRoute({
+  component: WikiView,
+  getParentRoute: () => rootRoute,
+  path: '/wiki/repo/$',
+})
+
 const wikiRoute = createRoute({
   component: WikiView,
   getParentRoute: () => rootRoute,
@@ -108,6 +127,9 @@ export const routeTree = rootRoute.addChildren([
   reposRoute,
   repoDrilldownRoute,
   chatTree,
+  teamWikiRoute,
+  teamWikiPageRoute,
+  repoNameWikiRoute,
   wikiRoute,
   wikiPageRoute,
   settingsRoute,

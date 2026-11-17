@@ -20,8 +20,12 @@ public class CtxEmbedding {
     private UUID id = UUID.randomUUID();
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "batch_id", nullable = false)
+    @JoinColumn(name = "batch_id")
     private IngestionBatch batch;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "team_wiki_batch_id")
+    private TeamWikiBatch teamWikiBatch;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "team_id", nullable = false)
@@ -52,12 +56,25 @@ public class CtxEmbedding {
         this.embedding = embedding;
     }
 
+    public CtxEmbedding(TeamWikiBatch teamWikiBatch, Team team, CtxWikiPage page, String chunkText, float[] embedding) {
+        this.teamWikiBatch = teamWikiBatch;
+        this.team = team;
+        this.page = page;
+        this.chunkText = chunkText;
+        this.dimSize = embedding != null ? embedding.length : 0;
+        this.embedding = embedding;
+    }
+
     public UUID getId() {
         return id;
     }
 
     public IngestionBatch getBatch() {
         return batch;
+    }
+
+    public TeamWikiBatch getTeamWikiBatch() {
+        return teamWikiBatch;
     }
 
     public Team getTeam() {

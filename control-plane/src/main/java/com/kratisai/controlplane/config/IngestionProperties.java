@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.config;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -33,6 +34,8 @@ public class IngestionProperties {
      * SBOM binary configuration used during surface extraction.
      */
     private Sbom sbom = new Sbom();
+
+    private TeamWiki teamWiki = new TeamWiki();
 
     public int getMaxConcurrent() {
         return maxConcurrent;
@@ -72,6 +75,14 @@ public class IngestionProperties {
 
     public void setSbom(Sbom sbom) {
         this.sbom = sbom;
+    }
+
+    public TeamWiki getTeamWiki() {
+        return teamWiki;
+    }
+
+    public void setTeamWiki(TeamWiki teamWiki) {
+        this.teamWiki = teamWiki;
     }
 
     /**
@@ -171,6 +182,64 @@ public class IngestionProperties {
 
         public void setSyftPath(String syftPath) {
             this.syftPath = syftPath;
+        }
+    }
+
+    /** Configuration properties for automatic and manual Team Wiki rebuilds. */
+    public static class TeamWiki {
+        private boolean enabled = true;
+        private Duration maxDeferral = Duration.ofMinutes(90);
+        private int maxBuildsPer24h = 4;
+        private Duration pollInterval = Duration.ofSeconds(30);
+        private Duration failureBackoff = Duration.ofMinutes(30);
+        private int maxIterations = 35;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public Duration getMaxDeferral() {
+            return maxDeferral;
+        }
+
+        public void setMaxDeferral(Duration maxDeferral) {
+            this.maxDeferral = maxDeferral;
+        }
+
+        public int getMaxBuildsPer24h() {
+            return maxBuildsPer24h;
+        }
+
+        public void setMaxBuildsPer24h(int maxBuildsPer24h) {
+            this.maxBuildsPer24h = maxBuildsPer24h;
+        }
+
+        public Duration getPollInterval() {
+            return pollInterval;
+        }
+
+        public void setPollInterval(Duration pollInterval) {
+            this.pollInterval = pollInterval;
+        }
+
+        public Duration getFailureBackoff() {
+            return failureBackoff;
+        }
+
+        public void setFailureBackoff(Duration failureBackoff) {
+            this.failureBackoff = failureBackoff;
+        }
+
+        public int getMaxIterations() {
+            return maxIterations;
+        }
+
+        public void setMaxIterations(int maxIterations) {
+            this.maxIterations = maxIterations;
         }
     }
 }

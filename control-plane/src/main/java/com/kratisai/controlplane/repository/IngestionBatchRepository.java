@@ -47,4 +47,8 @@ public interface IngestionBatchRepository extends JpaRepository<IngestionBatch, 
 
     @Query("SELECT ib.id FROM IngestionBatch ib WHERE ib.status = 'PROCESSING'")
     List<UUID> findProcessingBatchIds();
+
+    boolean existsByRepositoryTeamIdAndStatusIn(UUID teamId, List<IngestionStatus> statuses);
+
+    List<IngestionBatch> findByRepositoryTeamIdAndStatusIn(UUID teamId, List<IngestionStatus> statuses);
 }

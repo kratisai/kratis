@@ -7,6 +7,8 @@ import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.Team;
+import com.kratisai.controlplane.model.TeamWikiBatch;
+import com.kratisai.controlplane.model.TeamWikiModelUsage;
 import com.kratisai.controlplane.repository.CtxEmbeddingRepository;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.service.EmbeddingModelFactory;
@@ -79,5 +81,40 @@ public class SemanticIndexingService {
 
         embeddingRepository.saveAll(embeddingsToSave);
         log.info("Completed semantic indexing for batch: {}. Saved {} chunks.", batch.getId(), embeddingsToSave.size());
+    }
+
+    @Transactional
+    public void indexTeamWikiBatch(TeamWikiBatch batch, Team team) {
+        log.info("Starting semantic indexing for team wiki batch: {}", batch.getId());
+        List<CtxWikiPage> pages = wikiPageRepository.findByTeamWikiBatchId(batch.getId());
+
+        ModelProvider provider = team.getEmbeddingProvider();
+        String embeddingModelName = team.getEmbeddingModel();
+        if (provider == null || embeddingModelName == null) {
+            throw new IllegalStateException("Embedding models are required for Semantic Indexing.");
+        }
+
+        String litellmModelName = litellmProvisioningService.buildLiteLLMModelName(provider, embeddingModelName);
+        String virtualKey = batch.modelUsageFor(ModelKind.EMBEDDING)
+                .map(TeamWikiModelUsage::getVirtualKey)
+                .orElse(null);
+        EmbeddingModel embeddingModel =
+                embeddingModelFactory.createEmbeddingModelViaLiteLLM(provider, litellmModelName, virtualKey);
+
+        List<CtxEmbedding> embeddingsToSave = new ArrayList<>();
+        for (CtxWikiPage page : pages) {
+            List<Document> chunks = textSplitter.apply(List.of(new Document(page.getContent())));
+            for (Document docChunk : chunks) {
+                String chunk = docChunk.getText();
+                float[] vector = embeddingModel.embed(chunk);
+                embeddingsToSave.add(new CtxEmbedding(batch, team, page, chunk, vector));
+            }
+        }
+
+        embeddingRepository.saveAll(embeddingsToSave);
+        log.info(
+                "Completed semantic indexing for team wiki batch: {}. Saved {} chunks.",
+                batch.getId(),
+                embeddingsToSave.size());
     }
 }

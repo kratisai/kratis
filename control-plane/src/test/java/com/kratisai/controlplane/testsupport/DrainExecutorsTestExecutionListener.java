@@ -26,6 +26,7 @@ public class DrainExecutorsTestExecutionListener implements TestExecutionListene
 
     private static final List<String> EXECUTOR_BEAN_NAMES = List.of(
             "repoIngestTaskExecutor",
+            "teamWikiTaskExecutor",
             "agentTaskExecutor",
             "envMessageExecutor",
             "clientBroadcastExecutor",

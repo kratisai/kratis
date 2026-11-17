@@ -8,6 +8,7 @@ import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.CtxEmbeddingRepository;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
+import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
 import com.kratisai.controlplane.service.BatchResolutionService;
 import com.kratisai.controlplane.service.EmbeddingModelFactory;
 import java.util.List;
@@ -38,6 +39,9 @@ class WikiToolTest {
     private TeamRepository teamRepository;
 
     @Mock
+    private TeamWikiBatchRepository teamWikiBatchRepository;
+
+    @Mock
     private EmbeddingModelFactory embeddingModelFactory;
 
     @Mock
@@ -57,6 +61,7 @@ class WikiToolTest {
                 ctxEmbeddingRepository,
                 batchResolutionService,
                 teamRepository,
+                teamWikiBatchRepository,
                 embeddingModelFactory);
 
         teamId = UUID.randomUUID();
@@ -177,12 +182,13 @@ class WikiToolTest {
         CtxEmbedding embedding1 = createEmbedding(page1, "Authentication is handled by...");
         CtxEmbedding embedding2 = createEmbedding(page2, "Security best practices include...");
 
-        when(ctxEmbeddingRepository.findSimilar(teamId, batchId, queryVector, 3, 5))
+        when(ctxEmbeddingRepository.findSimilarRepoAndTeam(teamId, batchId, queryVector, 3, 5))
                 .thenReturn(List.of(embedding1, embedding2));
 
         WikiTool.WikiSearchResponse result = wikiTool.searchWiki("test-repo", "authentication", toolContext);
 
         assertThat(result.results()).hasSize(2);
+        assertThat(result.results().getFirst().repoName()).isEqualTo("test-repo");
         assertThat(result.results().getFirst().pageSlug()).isEqualTo("auth-overview");
         assertThat(result.results().getFirst().pageTitle()).isEqualTo("Authentication Overview");
         assertThat(result.results().getFirst().matchedText()).isEqualTo("Authentication is handled by...");
@@ -209,7 +215,7 @@ class WikiToolTest {
 
         float[] queryVector = {0.1f, 0.2f, 0.3f};
         when(embeddingModel.embed("nonexistent topic")).thenReturn(queryVector);
-        when(ctxEmbeddingRepository.findSimilar(teamId, batchId, queryVector, 3, 5))
+        when(ctxEmbeddingRepository.findSimilarRepoAndTeam(teamId, batchId, queryVector, 3, 5))
                 .thenReturn(List.of());
 
         WikiTool.WikiSearchResponse result = wikiTool.searchWiki("test-repo", "nonexistent topic", toolContext);
@@ -219,8 +225,6 @@ class WikiToolTest {
 
     @Test
     void searchWiki_withNoEmbeddingProvider_throwsException() {
-        when(batchResolutionService.resolveActiveBatch(teamId, "test-repo")).thenReturn(batch);
-
         Team team = new Team();
         team.setId(teamId);
         team.setEmbeddingProvider(null);
@@ -234,7 +238,6 @@ class WikiToolTest {
 
     @Test
     void searchWiki_withNonExistentTeam_throwsException() {
-        when(batchResolutionService.resolveActiveBatch(teamId, "test-repo")).thenReturn(batch);
         when(teamRepository.findById(teamId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> wikiTool.searchWiki("test-repo", "query", toolContext))
@@ -242,9 +245,83 @@ class WikiToolTest {
                 .hasMessageContaining("Team not found");
     }
 
+    @Test
+    void listWikiPages_withoutRepoName_listsTeamWikiPages() {
+        TeamWikiBatch teamBatch = new TeamWikiBatch();
+        UUID twId = UUID.randomUUID();
+        teamBatch.setId(twId);
+        when(teamWikiBatchRepository.findByTeamIdAndIsActiveTrue(teamId)).thenReturn(Optional.of(teamBatch));
+
+        CtxWikiPage rootPage = createTeamWikiPage("team-overview", "Team Overview", null, "Team root");
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndParentPageIsNullOrderByOrderIndexAsc(twId))
+                .thenReturn(List.of(rootPage));
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(twId, rootPage.getId()))
+                .thenReturn(List.of());
+
+        List<WikiTool.WikiPageSummary> result = wikiTool.listWikiPages(null, toolContext);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().pageSlug()).isEqualTo("team-overview");
+    }
+
+    @Test
+    void readWikiPage_withoutRepoName_readsTeamWikiPage() {
+        TeamWikiBatch teamBatch = new TeamWikiBatch();
+        UUID twId = UUID.randomUUID();
+        teamBatch.setId(twId);
+        when(teamWikiBatchRepository.findByTeamIdAndIsActiveTrue(teamId)).thenReturn(Optional.of(teamBatch));
+
+        CtxWikiPage page = createTeamWikiPage("team-overview", "Team Overview", null, "Team landscape.");
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(twId, "team-overview"))
+                .thenReturn(Optional.of(page));
+
+        String result = wikiTool.readWikiPage("", "team-overview", toolContext);
+        assertThat(result).isEqualTo("# Team Overview\n\nTeam landscape.");
+    }
+
+    @Test
+    void searchWiki_withoutRepoName_searchesTeamWide() {
+        Team team = new Team();
+        team.setId(teamId);
+        ModelProvider provider = new ModelProvider();
+        provider.setId(UUID.randomUUID());
+        team.setEmbeddingProvider(provider);
+        team.setEmbeddingModel("text-embedding-3-small");
+
+        when(teamRepository.findById(teamId)).thenReturn(Optional.of(team));
+        when(embeddingModelFactory.createEmbeddingModel(provider, "text-embedding-3-small"))
+                .thenReturn(embeddingModel);
+
+        float[] queryVector = {0.1f, 0.2f, 0.3f};
+        when(embeddingModel.embed("platform")).thenReturn(queryVector);
+
+        CtxWikiPage teamPage = createTeamWikiPage("platform-cluster", "Platform Cluster", null, "Shared infra");
+        CtxEmbedding teamEmbedding = new CtxEmbedding(new TeamWikiBatch(), team, teamPage, "Shared infra", queryVector);
+        when(ctxEmbeddingRepository.findSimilarTeamWide(teamId, queryVector, 3, 5))
+                .thenReturn(List.of(teamEmbedding));
+
+        WikiTool.WikiSearchResponse result = wikiTool.searchWiki(null, "platform", toolContext);
+
+        assertThat(result.results()).hasSize(1);
+        assertThat(result.results().getFirst().repoName()).isNull();
+        assertThat(result.results().getFirst().pageSlug()).isEqualTo("platform-cluster");
+    }
+
     private CtxWikiPage createWikiPage(String slug, String title, CtxWikiPage parent, String content) {
         CtxWikiPage page = new CtxWikiPage();
         page.setId(UUID.randomUUID());
+        page.setRepoName("test-repo");
+        page.setPageSlug(slug);
+        page.setTitle(title);
+        page.setParentPage(parent);
+        page.setContent(content);
+        return page;
+    }
+
+    private CtxWikiPage createTeamWikiPage(String slug, String title, CtxWikiPage parent, String content) {
+        CtxWikiPage page = new CtxWikiPage();
+        page.setId(UUID.randomUUID());
+        page.setRepoName(null);
         page.setPageSlug(slug);
         page.setTitle(title);
         page.setParentPage(parent);

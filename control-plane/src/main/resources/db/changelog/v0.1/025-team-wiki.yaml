@@ -1,0 +1,272 @@
+databaseChangeLog:
+- changeSet:
+    id: 025-team-wiki-001
+    author: kratis
+    changes:
+    - createTable:
+        tableName: team_wiki_batches
+        columns:
+        - column:
+            name: id
+            type: UUID
+            defaultValueComputed: gen_random_uuid()
+            constraints:
+              primaryKey: true
+              primaryKeyName: team_wiki_batches_pkey
+              nullable: false
+        - column:
+            name: team_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: status
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: is_active
+            type: BOOLEAN
+            defaultValueBoolean: false
+            constraints:
+              nullable: false
+        - column:
+            name: build_mode
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: trigger_kind
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: source_snapshot
+            type: JSONB
+        - column:
+            name: started_at
+            type: TIMESTAMPTZ
+            defaultValueComputed: now()
+            constraints:
+              nullable: false
+        - column:
+            name: completed_at
+            type: TIMESTAMPTZ
+        - column:
+            name: error_message
+            type: TEXT
+        - column:
+            name: total_tool_calls
+            type: BIGINT
+    - addForeignKeyConstraint:
+        baseTableName: team_wiki_batches
+        baseColumnNames: team_id
+        constraintName: fk_team_wiki_batches_team
+        referencedTableName: teams
+        referencedColumnNames: id
+        onDelete: CASCADE
+    - createIndex:
+        tableName: team_wiki_batches
+        indexName: idx_team_wiki_batches_team_active
+        columns:
+        - column:
+            name: team_id
+        - column:
+            name: is_active
+    - createIndex:
+        tableName: team_wiki_batches
+        indexName: idx_team_wiki_batches_team_started
+        columns:
+        - column:
+            name: team_id
+        - column:
+            name: started_at
+    - createIndex:
+        tableName: team_wiki_batches
+        indexName: idx_team_wiki_batches_status
+        columns:
+        - column:
+            name: status
+    - createTable:
+        tableName: team_wiki_batch_logs
+        columns:
+        - column:
+            name: id
+            type: UUID
+            defaultValueComputed: gen_random_uuid()
+            constraints:
+              primaryKey: true
+              primaryKeyName: team_wiki_batch_logs_pkey
+              nullable: false
+        - column:
+            name: team_wiki_batch_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: team_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: level
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: step
+            type: VARCHAR(50)
+            constraints:
+              nullable: false
+        - column:
+            name: message
+            type: TEXT
+            constraints:
+              nullable: false
+        - column:
+            name: created_at
+            type: TIMESTAMPTZ
+            defaultValueComputed: now()
+            constraints:
+              nullable: false
+    - addForeignKeyConstraint:
+        baseTableName: team_wiki_batch_logs
+        baseColumnNames: team_wiki_batch_id
+        constraintName: fk_team_wiki_batch_logs_batch
+        referencedTableName: team_wiki_batches
+        referencedColumnNames: id
+        onDelete: CASCADE
+    - createIndex:
+        tableName: team_wiki_batch_logs
+        indexName: idx_team_wiki_batch_logs_batch_created
+        columns:
+        - column:
+            name: team_wiki_batch_id
+        - column:
+            name: created_at
+    - createTable:
+        tableName: team_wiki_model_usage
+        columns:
+        - column:
+            name: id
+            type: UUID
+            defaultValueComputed: gen_random_uuid()
+            constraints:
+              primaryKey: true
+              primaryKeyName: team_wiki_model_usage_pkey
+              nullable: false
+        - column:
+            name: team_wiki_batch_id
+            type: UUID
+            constraints:
+              nullable: false
+        - column:
+            name: model_kind
+            type: VARCHAR(20)
+            constraints:
+              nullable: false
+        - column:
+            name: model_identifier
+            type: VARCHAR(255)
+            constraints:
+              nullable: false
+        - column:
+            name: litellm_alias
+            type: VARCHAR(255)
+        - column:
+            name: virtual_key
+            type: TEXT
+        - column:
+            name: total_spend
+            type: DOUBLE PRECISION
+            defaultValueNumeric: 0.0
+        - column:
+            name: total_tokens
+            type: BIGINT
+            defaultValueNumeric: 0
+        - column:
+            name: prompt_tokens
+            type: BIGINT
+            defaultValueNumeric: 0
+        - column:
+            name: completion_tokens
+            type: BIGINT
+            defaultValueNumeric: 0
+        - column:
+            name: usage_last_updated_at
+            type: TIMESTAMPTZ
+    - addForeignKeyConstraint:
+        baseTableName: team_wiki_model_usage
+        baseColumnNames: team_wiki_batch_id
+        constraintName: fk_team_wiki_model_usage_batch
+        referencedTableName: team_wiki_batches
+        referencedColumnNames: id
+        onDelete: CASCADE
+    - addUniqueConstraint:
+        tableName: team_wiki_model_usage
+        columnNames: team_wiki_batch_id, model_kind
+        constraintName: uk_team_wiki_model_usage_batch_kind
+    - dropNotNullConstraint:
+        tableName: ctx_wiki_pages
+        columnName: batch_id
+        columnDataType: UUID
+    - dropNotNullConstraint:
+        tableName: ctx_wiki_pages
+        columnName: repo_name
+        columnDataType: VARCHAR(255)
+    - addColumn:
+        tableName: ctx_wiki_pages
+        columns:
+        - column:
+            name: team_wiki_batch_id
+            type: UUID
+    - addForeignKeyConstraint:
+        baseTableName: ctx_wiki_pages
+        baseColumnNames: team_wiki_batch_id
+        constraintName: fk_ctx_wiki_pages_team_wiki_batch
+        referencedTableName: team_wiki_batches
+        referencedColumnNames: id
+        onDelete: CASCADE
+    - createIndex:
+        tableName: ctx_wiki_pages
+        indexName: idx_ctx_wiki_pages_team_wiki_batch_id
+        columns:
+        - column:
+            name: team_wiki_batch_id
+    - sql:
+        dbms: postgresql
+        endDelimiter: ;
+        splitStatements: true
+        sql: >-
+          ALTER TABLE ctx_wiki_pages
+            ADD CONSTRAINT chk_ctx_wiki_pages_owner CHECK (num_nonnulls(batch_id, team_wiki_batch_id) = 1);
+    - dropNotNullConstraint:
+        tableName: ctx_embeddings
+        columnName: batch_id
+        columnDataType: UUID
+    - addColumn:
+        tableName: ctx_embeddings
+        columns:
+        - column:
+            name: team_wiki_batch_id
+            type: UUID
+    - addForeignKeyConstraint:
+        baseTableName: ctx_embeddings
+        baseColumnNames: team_wiki_batch_id
+        constraintName: fk_ctx_embeddings_team_wiki_batch
+        referencedTableName: team_wiki_batches
+        referencedColumnNames: id
+        onDelete: CASCADE
+    - createIndex:
+        tableName: ctx_embeddings
+        indexName: idx_ctx_embeddings_team_wiki_batch
+        columns:
+        - column:
+            name: team_wiki_batch_id
+    - sql:
+        dbms: postgresql
+        endDelimiter: ;
+        splitStatements: true
+        sql: >-
+          ALTER TABLE ctx_embeddings
+            ADD CONSTRAINT chk_ctx_embeddings_owner CHECK (num_nonnulls(batch_id, team_wiki_batch_id) = 1);

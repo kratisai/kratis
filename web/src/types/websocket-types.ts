@@ -358,6 +358,7 @@ export type TeamEntityType =
   | 'PERMISSIONS'
   | 'REPOSITORIES'
   | 'SANDBOX_EXECUTIONS'
+  | 'TEAM_WIKI'
   | 'USAGE'
 
 export type TelemetryEvent = ThoughtEvent | ToolCompleteEvent | ToolErrorEvent | ToolStartEvent
