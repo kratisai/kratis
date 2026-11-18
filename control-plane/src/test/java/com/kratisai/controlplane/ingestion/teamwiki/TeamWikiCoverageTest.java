@@ -268,7 +268,7 @@ class TeamWikiCoverageTest {
                 snapshotService,
                 new ListTeamWikiPagesTool(null),
                 new ReadTeamWikiPageTool(null),
-                new WriteTeamWikiPageTool(null, null, null),
+                new WriteTeamWikiPageTool(null, null, null, null),
                 new DeleteTeamWikiPageTool(null),
                 new TeamWikiRepoReadTools(null, null),
                 Runnable::run,

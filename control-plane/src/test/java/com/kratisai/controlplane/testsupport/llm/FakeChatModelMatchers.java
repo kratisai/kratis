@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.testsupport.llm;
 
+import com.kratisai.controlplane.testsupport.WikiPageContentFixtures;
 import java.util.List;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
@@ -129,7 +130,8 @@ public class FakeChatModelMatchers {
                 "call_1",
                 "function",
                 "write_wiki_page",
-                "{\"pageSlug\":\"user-management-overview\",\"title\":\"User Management Overview\",\"content\":\"# User Management\"}");
+                "{\"pageSlug\":\"user-management-overview\",\"title\":\"User Management Overview\",\"content\":\"# User Management\\n\\n"
+                        + WikiPageContentFixtures.WIKI_PAGE_BODY + "\"}");
         AssistantMessage assistantMessage =
                 AssistantMessage.builder().toolCalls(List.of(toolCall)).build();
         return PromptMatcher.builder()

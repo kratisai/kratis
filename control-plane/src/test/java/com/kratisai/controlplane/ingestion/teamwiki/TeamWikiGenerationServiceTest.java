@@ -30,6 +30,7 @@ import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.WikiPageContentFixtures;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import java.util.List;
@@ -166,7 +167,9 @@ class TeamWikiGenerationServiceTest {
                                         "title",
                                         "Team Landscape",
                                         "content",
-                                        "Covers [Orders](/wiki/repo/orders-api/overview) and [Billing](/wiki/repo/billing-api)."));
+                                        WikiPageContentFixtures.WIKI_PAGE_BODY
+                                                + " Covers [Orders](/wiki/repo/orders-api/overview) and"
+                                                + " [Billing](/wiki/repo/billing-api)."));
                     }
                     if (step == 1) {
                         return toolResponse(
@@ -179,7 +182,7 @@ class TeamWikiGenerationServiceTest {
                                         "parentPageSlug",
                                         "team-overview",
                                         "content",
-                                        "Temporary cluster page."));
+                                        WikiPageContentFixtures.WIKI_PAGE_BODY + " Temporary cluster page."));
                     }
                     return textResponse("Team wiki generation complete.");
                 })
@@ -223,7 +226,8 @@ class TeamWikiGenerationServiceTest {
                                                 "title",
                                                 "Team Landscape Updated",
                                                 "content",
-                                                "Updated links to [Orders](/wiki/repo/orders-api) and"
+                                                WikiPageContentFixtures.WIKI_PAGE_BODY
+                                                        + " Updated links to [Orders](/wiki/repo/orders-api) and"
                                                         + " [Billing](/wiki/repo/billing-api).")));
                     }
                     return textResponse("Incremental update complete.");

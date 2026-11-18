@@ -12,7 +12,9 @@ import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.TeamWikiBatch;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
+import com.kratisai.controlplane.testsupport.WikiPageContentFixtures;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
+import com.kratisai.controlplane.validation.WikiPageContentValidator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,6 +30,8 @@ import org.springframework.ai.chat.model.ToolContext;
 @ExtendWith(MockitoExtension.class)
 class WriteTeamWikiPageToolTest {
 
+    private static final String VALID_CONTENT = WikiPageContentFixtures.WIKI_PAGE_BODY;
+
     @Mock
     private CtxWikiPageRepository ctxWikiPageRepository;
 
@@ -42,7 +46,11 @@ class WriteTeamWikiPageToolTest {
 
     @BeforeEach
     void setUp() {
-        tool = new WriteTeamWikiPageTool(ctxWikiPageRepository, teamWikiBatchRepository, new MermaidDiagramValidator());
+        tool = new WriteTeamWikiPageTool(
+                ctxWikiPageRepository,
+                teamWikiBatchRepository,
+                new MermaidDiagramValidator(),
+                new WikiPageContentValidator());
         batchId = UUID.randomUUID();
         repoBatchId = UUID.randomUUID();
         Team team = new Team();
@@ -68,7 +76,8 @@ class WriteTeamWikiPageToolTest {
         String result = tool.writeTeamWikiPage(
                 "overview",
                 "Team Overview",
-                "See [Orders API](/wiki/repo/orders-api) and [Arch](/wiki/repo/orders-api/architecture).",
+                VALID_CONTENT + " See [Orders API](/wiki/repo/orders-api) and"
+                        + " [Arch](/wiki/repo/orders-api/architecture).",
                 null,
                 toolContext);
 
@@ -90,7 +99,7 @@ class WriteTeamWikiPageToolTest {
         String result = tool.writeTeamWikiPage(
                 "overview",
                 "Team Overview",
-                "See [Booking](/wiki/repo/glark-newco/BookingService) and"
+                VALID_CONTENT + " See [Booking](/wiki/repo/glark-newco/BookingService) and"
                         + " [Details](/wiki/repo/glark-newco/BookingService/booking-service).",
                 null,
                 toolContext);
@@ -101,7 +110,11 @@ class WriteTeamWikiPageToolTest {
     @Test
     void writeTeamWikiPage_rejectsUnknownRepoLink() {
         assertThatThrownBy(() -> tool.writeTeamWikiPage(
-                        "overview", "Overview", "See [Missing](/wiki/repo/unknown-repo).", null, toolContext))
+                        "overview",
+                        "Overview",
+                        VALID_CONTENT + " See [Missing](/wiki/repo/unknown-repo).",
+                        null,
+                        toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("unknown-repo");
     }
@@ -115,10 +128,27 @@ class WriteTeamWikiPageToolTest {
         when(ctxWikiPageRepository.findByBatchId(repoBatchId)).thenReturn(List.of(validPage));
 
         assertThatThrownBy(() -> tool.writeTeamWikiPage(
-                        "overview", "Overview", "See [Broken](/wiki/repo/orders-api/missing-slug).", null, toolContext))
+                        "overview",
+                        "Overview",
+                        VALID_CONTENT + " See [Broken](/wiki/repo/orders-api/missing-slug).",
+                        null,
+                        toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("missing-slug")
                 .hasMessageContaining("overview");
+    }
+
+    @Test
+    void writeTeamWikiPage_rejectsHeadingOnlyContent() {
+        assertThatThrownBy(() -> tool.writeTeamWikiPage(
+                        "authentication",
+                        "Authentication & Security",
+                        "# Authentication & Security\n",
+                        null,
+                        toolContext))
+                .isInstanceOf(KratisToolException.class)
+                .hasMessageContaining("at least 80 words of prose")
+                .hasMessageContaining("this page has 0");
     }
 
     @Test
@@ -128,7 +158,7 @@ class WriteTeamWikiPageToolTest {
                 .thenReturn(Optional.empty());
         when(ctxWikiPageRepository.findByTeamWikiBatchId(batchId)).thenReturn(List.of());
 
-        assertThatThrownBy(() -> tool.writeTeamWikiPage("child", "Child", "Body", "missing-parent", toolContext))
+        assertThatThrownBy(() -> tool.writeTeamWikiPage("child", "Child", VALID_CONTENT, "missing-parent", toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("missing-parent");
     }
@@ -140,7 +170,7 @@ class WriteTeamWikiPageToolTest {
         when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "overview"))
                 .thenReturn(Optional.of(existing));
 
-        String result = tool.writeTeamWikiPage("overview", "New Title", "New body", null, toolContext);
+        String result = tool.writeTeamWikiPage("overview", "New Title", VALID_CONTENT, null, toolContext);
 
         assertThat(result).contains("updated successfully");
         verify(ctxWikiPageRepository).saveAndFlush(any(CtxWikiPage.class));
@@ -160,7 +190,7 @@ class WriteTeamWikiPageToolTest {
         when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "root"))
                 .thenReturn(Optional.of(root));
 
-        assertThatThrownBy(() -> tool.writeTeamWikiPage("root", "Root", "Updated", "child", toolContext))
+        assertThatThrownBy(() -> tool.writeTeamWikiPage("root", "Root", VALID_CONTENT, "child", toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("descendant");
     }

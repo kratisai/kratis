@@ -13,6 +13,7 @@ import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.TestIngestionExecutorConfig;
+import com.kratisai.controlplane.testsupport.WikiPageContentFixtures;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModelConfig;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModelMatchers;
 import com.kratisai.controlplane.testsupport.llm.HttpRequestMatcher;
@@ -98,7 +99,8 @@ class IngestionUsageAttributionTest {
                         .contains("write_wiki_page")
                         .sseResponse(LlmResponseBuilders.openAiSseToolCall(
                                 "write_wiki_page",
-                                "{\"pageSlug\":\"overview\",\"title\":\"Overview\",\"content\":\"# Overview\"}"))
+                                "{\"pageSlug\":\"overview\",\"title\":\"Overview\",\"content\":\"# Overview\\n\\n"
+                                        + WikiPageContentFixtures.WIKI_PAGE_BODY + "\"}"))
                         // The tool-call turn stays in the conversation history, so without a
                         // match cap every follow-up turn would loop back into another tool call.
                         .maxMatches(1)

@@ -9,6 +9,7 @@ import com.kratisai.controlplane.model.TeamWikiBatch;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
+import com.kratisai.controlplane.validation.WikiPageContentValidator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -33,14 +34,17 @@ public class WriteTeamWikiPageTool {
     private final CtxWikiPageRepository ctxWikiPageRepository;
     private final TeamWikiBatchRepository teamWikiBatchRepository;
     private final MermaidDiagramValidator mermaidDiagramValidator;
+    private final WikiPageContentValidator wikiPageContentValidator;
 
     public WriteTeamWikiPageTool(
             CtxWikiPageRepository ctxWikiPageRepository,
             TeamWikiBatchRepository teamWikiBatchRepository,
-            MermaidDiagramValidator mermaidDiagramValidator) {
+            MermaidDiagramValidator mermaidDiagramValidator,
+            WikiPageContentValidator wikiPageContentValidator) {
         this.ctxWikiPageRepository = ctxWikiPageRepository;
         this.teamWikiBatchRepository = teamWikiBatchRepository;
         this.mermaidDiagramValidator = mermaidDiagramValidator;
+        this.wikiPageContentValidator = wikiPageContentValidator;
     }
 
     @KratisTool(
@@ -71,6 +75,7 @@ public class WriteTeamWikiPageTool {
         }
 
         content = mermaidDiagramValidator.normalizeFences(content);
+        wikiPageContentValidator.requireBody(content);
         List<String> mermaidIssues = mermaidDiagramValidator.findIssues(content);
         if (!mermaidIssues.isEmpty()) {
             throw new KratisToolException(

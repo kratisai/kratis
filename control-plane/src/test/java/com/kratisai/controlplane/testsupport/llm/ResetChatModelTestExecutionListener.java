@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.testsupport.llm;
 
+import com.kratisai.controlplane.testsupport.WikiPageContentFixtures;
 import java.util.List;
 import java.util.Locale;
 import org.jspecify.annotations.NonNull;
@@ -72,7 +73,8 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
                                 "call_1",
                                 "function",
                                 "write_wiki_page",
-                                "{\"pageSlug\":\"user-management-overview\",\"title\":\"User Management Overview\",\"content\":\"# User Management\"}");
+                                "{\"pageSlug\":\"user-management-overview\",\"title\":\"User Management Overview\",\"content\":\"# User Management\\n\\n"
+                                        + WikiPageContentFixtures.WIKI_PAGE_BODY + "\"}");
                         AssistantMessage message = AssistantMessage.builder()
                                 .toolCalls(List.of(toolCall))
                                 .build();
@@ -170,7 +172,8 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
                                     "call_1",
                                     "function",
                                     "write_wiki_page",
-                                    "{\"pageSlug\":\"user-management-overview\",\"title\":\"User Management Overview\",\"content\":\"# User Management\"}");
+                                    "{\"pageSlug\":\"user-management-overview\",\"title\":\"User Management Overview\",\"content\":\"# User Management\\n\\n"
+                                            + WikiPageContentFixtures.WIKI_PAGE_BODY + "\"}");
                             AssistantMessage message = AssistantMessage.builder()
                                     .toolCalls(List.of(toolCall))
                                     .build();

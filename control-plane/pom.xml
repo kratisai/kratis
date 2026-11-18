@@ -27,6 +27,7 @@
 		<java.version>21</java.version>
 		<error-prone.version>2.41.0</error-prone.version>
 		<spring-ai.version>2.0.0-M6</spring-ai.version>
+		<commonmark.version>0.21.0</commonmark.version>
 		<!-- Native image resource caps - override on the CLI: -Dnative.parallelism=8 -->
 		<native.parallelism>4</native.parallelism>
 		<native.jvm.maxheap>24g</native.jvm.maxheap>
@@ -242,6 +243,11 @@
 			<groupId>org.xerial</groupId>
 			<artifactId>sqlite-jdbc</artifactId>
 			<version>3.45.3.0</version>
+		</dependency>
+		<dependency>
+			<groupId>org.commonmark</groupId>
+			<artifactId>commonmark</artifactId>
+			<version>${commonmark.version}</version>
 		</dependency>
 	</dependencies>
 

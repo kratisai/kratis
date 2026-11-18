@@ -10,6 +10,7 @@ import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
+import com.kratisai.controlplane.validation.WikiPageContentValidator;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -27,14 +28,17 @@ public class WriteWikiPageTool {
     private final CtxWikiPageRepository ctxWikiPageRepository;
     private final IngestionBatchRepository ingestionBatchRepository;
     private final MermaidDiagramValidator mermaidDiagramValidator;
+    private final WikiPageContentValidator wikiPageContentValidator;
 
     public WriteWikiPageTool(
             CtxWikiPageRepository ctxWikiPageRepository,
             IngestionBatchRepository ingestionBatchRepository,
-            MermaidDiagramValidator mermaidDiagramValidator) {
+            MermaidDiagramValidator mermaidDiagramValidator,
+            WikiPageContentValidator wikiPageContentValidator) {
         this.ctxWikiPageRepository = ctxWikiPageRepository;
         this.ingestionBatchRepository = ingestionBatchRepository;
         this.mermaidDiagramValidator = mermaidDiagramValidator;
+        this.wikiPageContentValidator = wikiPageContentValidator;
     }
 
     @KratisTool(
@@ -64,6 +68,7 @@ public class WriteWikiPageTool {
         }
 
         content = mermaidDiagramValidator.normalizeFences(content);
+        wikiPageContentValidator.requireBody(content);
         List<String> mermaidIssues = mermaidDiagramValidator.findIssues(content);
         if (!mermaidIssues.isEmpty()) {
             throw new KratisToolException(

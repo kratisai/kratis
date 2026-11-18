@@ -19,6 +19,7 @@ import com.kratisai.controlplane.service.ProcessExecutor;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.WikiPageContentFixtures;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
@@ -111,14 +112,17 @@ class WikiGenerationServiceTest {
         }
     }
 
+    private static String pageCall(String slug, String title, String parentPageSlug) {
+        String parent = parentPageSlug == null ? "" : ",\"parentPageSlug\":\"" + parentPageSlug + "\"";
+        return "{\"pageSlug\":\"" + slug + "\",\"title\":\"" + title + "\",\"content\":\"# " + title + "\\n\\n"
+                + WikiPageContentFixtures.WIKI_PAGE_BODY + "\"" + parent + "}";
+    }
+
     @Test
     void happyPath1_dynamicWikiGenerationWithTools() {
         // Turn 1: LLM returns a ToolCall to write a wiki page
         AssistantMessage.ToolCall toolCall1 = new AssistantMessage.ToolCall(
-                "call_1",
-                "function",
-                "write_wiki_page",
-                "{\"pageSlug\":\"overview\",\"title\":\"Overview\",\"content\":\"# Overview\\nThis is a test repo.\"}");
+                "call_1", "function", "write_wiki_page", pageCall("overview", "Overview", null));
         AssistantMessage turn1Message =
                 AssistantMessage.builder().toolCalls(List.of(toolCall1)).build();
 
@@ -143,19 +147,13 @@ class WikiGenerationServiceTest {
     void happyPath2_multiplePagesGenerated() {
         // Turn 1: LLM writes first page
         AssistantMessage.ToolCall toolCall1 = new AssistantMessage.ToolCall(
-                "call_1",
-                "function",
-                "write_wiki_page",
-                "{\"pageSlug\":\"architecture\",\"title\":\"Architecture\",\"content\":\"# Arch\"}");
+                "call_1", "function", "write_wiki_page", pageCall("architecture", "Architecture", null));
         AssistantMessage turn1Message =
                 AssistantMessage.builder().toolCalls(List.of(toolCall1)).build();
 
         // Turn 2: LLM writes second page
-        AssistantMessage.ToolCall toolCall2 = new AssistantMessage.ToolCall(
-                "call_2",
-                "function",
-                "write_wiki_page",
-                "{\"pageSlug\":\"api\",\"title\":\"API\",\"content\":\"# API\"}");
+        AssistantMessage.ToolCall toolCall2 =
+                new AssistantMessage.ToolCall("call_2", "function", "write_wiki_page", pageCall("api", "API", null));
         AssistantMessage turn2Message =
                 AssistantMessage.builder().toolCalls(List.of(toolCall2)).build();
 
@@ -230,10 +228,7 @@ class WikiGenerationServiceTest {
                             .ifPresent(trm -> capturedToolResponse.set(
                                     trm.getResponses().getFirst().responseData()));
                     AssistantMessage.ToolCall writeCall = new AssistantMessage.ToolCall(
-                            "call_2",
-                            "function",
-                            "write_wiki_page",
-                            "{\"pageSlug\":\"overview\",\"title\":\"Overview\",\"content\":\"# Overview\"}");
+                            "call_2", "function", "write_wiki_page", pageCall("overview", "Overview", null));
                     return new ChatResponse(List.of(new Generation(AssistantMessage.builder()
                             .toolCalls(List.of(writeCall))
                             .build())));
@@ -268,10 +263,7 @@ class WikiGenerationServiceTest {
         // Turn 1: LLM returns a ToolCall to write a wiki page
         // We verify the system prompt contains the dimension name "Authentication"
         AssistantMessage.ToolCall toolCall1 = new AssistantMessage.ToolCall(
-                "call_1",
-                "function",
-                "write_wiki_page",
-                "{\"pageSlug\":\"auth-overview\",\"title\":\"Auth Overview\",\"content\":\"# Auth Overview\"}");
+                "call_1", "function", "write_wiki_page", pageCall("auth-overview", "Auth Overview", null));
         AssistantMessage turn1Message =
                 AssistantMessage.builder().toolCalls(List.of(toolCall1)).build();
 
@@ -363,10 +355,7 @@ class WikiGenerationServiceTest {
 
         // Turn 1: LLM returns a ToolCall to write a wiki page
         AssistantMessage.ToolCall toolCall = new AssistantMessage.ToolCall(
-                "call_1",
-                "function",
-                "write_wiki_page",
-                "{\"pageSlug\":\"overview\",\"title\":\"Overview\",\"content\":\"# Overview\"}");
+                "call_1", "function", "write_wiki_page", pageCall("overview", "Overview", null));
         AssistantMessage turn1Message =
                 AssistantMessage.builder().toolCalls(List.of(toolCall)).build();
         AssistantMessage turn2Message = new AssistantMessage("Wiki generation complete.");
@@ -455,10 +444,7 @@ class WikiGenerationServiceTest {
     @Test
     void tracksTokenUsageAndToolCallsAcrossTurns() {
         AssistantMessage.ToolCall toolCall1 = new AssistantMessage.ToolCall(
-                "call_1",
-                "function",
-                "write_wiki_page",
-                "{\"pageSlug\":\"overview\",\"title\":\"Overview\",\"content\":\"# Overview\"}");
+                "call_1", "function", "write_wiki_page", pageCall("overview", "Overview", null));
         AssistantMessage turn1Message =
                 AssistantMessage.builder().toolCalls(List.of(toolCall1)).build();
         AssistantMessage turn2Message = new AssistantMessage("Wiki generation complete.");
@@ -492,26 +478,17 @@ class WikiGenerationServiceTest {
     @Test
     void unknownParentSlug_isReportedToModelAndRecovered() {
         AssistantMessage.ToolCall badChildCall = new AssistantMessage.ToolCall(
-                "call_1",
-                "function",
-                "write_wiki_page",
-                "{\"pageSlug\":\"architecture\",\"title\":\"Architecture\",\"content\":\"# Architecture\",\"parentPageSlug\":\"home\"}");
+                "call_1", "function", "write_wiki_page", pageCall("architecture", "Architecture", "home"));
         AssistantMessage turn1 =
                 AssistantMessage.builder().toolCalls(List.of(badChildCall)).build();
 
         AssistantMessage.ToolCall rootCall = new AssistantMessage.ToolCall(
-                "call_2",
-                "function",
-                "write_wiki_page",
-                "{\"pageSlug\":\"overview\",\"title\":\"Overview\",\"content\":\"# Overview\"}");
+                "call_2", "function", "write_wiki_page", pageCall("overview", "Overview", null));
         AssistantMessage turn2 =
                 AssistantMessage.builder().toolCalls(List.of(rootCall)).build();
 
         AssistantMessage.ToolCall childCall = new AssistantMessage.ToolCall(
-                "call_3",
-                "function",
-                "write_wiki_page",
-                "{\"pageSlug\":\"architecture\",\"title\":\"Architecture\",\"content\":\"# Architecture\",\"parentPageSlug\":\"overview\"}");
+                "call_3", "function", "write_wiki_page", pageCall("architecture", "Architecture", "overview"));
         AssistantMessage turn3 =
                 AssistantMessage.builder().toolCalls(List.of(childCall)).build();
 
@@ -547,10 +524,7 @@ class WikiGenerationServiceTest {
     @Test
     void systemPrompt_instructsRootFirstAndParentDiscovery() {
         AssistantMessage.ToolCall toolCall = new AssistantMessage.ToolCall(
-                "call_1",
-                "function",
-                "write_wiki_page",
-                "{\"pageSlug\":\"overview\",\"title\":\"Overview\",\"content\":\"# Overview\"}");
+                "call_1", "function", "write_wiki_page", pageCall("overview", "Overview", null));
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .contains("list_wiki_pages")
                 .contains("Write the single top-level page FIRST")
