@@ -147,13 +147,18 @@ class SynopsisServiceTest {
     }
 
     @Test
-    void excludesOnlyLegacySurfacesFromSynopsisInputs() {
-        CtxSurface legacy = mock(CtxSurface.class);
+    void includesAllSurfacesInSynopsisInputs() {
+        CtxSurface syftSurface = mock(CtxSurface.class);
         CtxSurface unknownRole = mock(CtxSurface.class);
         CtxSurface current = mock(CtxSurface.class);
+        UUID syftId = UUID.randomUUID();
         UUID unknownId = UUID.randomUUID();
         UUID currentId = UUID.randomUUID();
-        when(legacy.getDetectedBy()).thenReturn(SurfaceDetection.UNKNOWN);
+        when(syftSurface.getDetectedBy()).thenReturn(SurfaceDetection.SYFT);
+        when(syftSurface.getId()).thenReturn(syftId);
+        when(syftSurface.getRole()).thenReturn(SurfaceRole.PROVIDES);
+        when(syftSurface.getDescription()).thenReturn("package manifest");
+        when(syftSurface.getAttributeRows()).thenReturn(List.of());
         when(unknownRole.getDetectedBy()).thenReturn(SurfaceDetection.CMM);
         when(unknownRole.getId()).thenReturn(unknownId);
         when(unknownRole.getRole()).thenReturn(SurfaceRole.UNKNOWN);
@@ -165,9 +170,9 @@ class SynopsisServiceTest {
         when(current.getDescription()).thenReturn("production interface");
         when(current.getAttributeRows()).thenReturn(List.of());
 
-        assertThat(SynopsisService.evidenceSurfaces(List.of(legacy, unknownRole, current)))
+        assertThat(SynopsisService.evidenceSurfaces(List.of(syftSurface, unknownRole, current)))
                 .extracting(SynopsisService.SurfaceEvidence::id)
-                .containsExactly(unknownId, currentId);
+                .containsExactly(syftId, unknownId, currentId);
     }
 
     @Test

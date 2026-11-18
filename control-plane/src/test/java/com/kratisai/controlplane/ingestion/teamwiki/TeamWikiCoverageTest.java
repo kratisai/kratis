@@ -265,6 +265,7 @@ class TeamWikiCoverageTest {
                 null,
                 null,
                 null,
+                null,
                 snapshotService,
                 new ListTeamWikiPagesTool(null),
                 new ReadTeamWikiPageTool(null),

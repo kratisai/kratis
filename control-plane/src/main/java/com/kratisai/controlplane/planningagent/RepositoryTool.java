@@ -175,9 +175,14 @@ public class RepositoryTool {
 
             otherBatches.putIfAbsent(otherName, otherBatch);
             List<String> currentRepoFiles = extractFilesForBatch(relation, currentBatch.getId());
+            List<String> rationales =
+                    RelationRationales.extract(relation.getCitations(), relation.getId(), objectMapper);
             grouped.computeIfAbsent(otherName, ignored -> new ArrayList<>())
                     .add(new RepoRelationSummary(
-                            currentRepoFiles, otherName, formatRelation(relation), relation.getRationale()));
+                            currentRepoFiles,
+                            otherName,
+                            formatRelation(relation),
+                            rationales.isEmpty() ? null : String.join("; ", rationales)));
         }
 
         return grouped.entrySet().stream()

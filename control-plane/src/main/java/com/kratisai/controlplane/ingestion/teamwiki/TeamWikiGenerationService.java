@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.ingestion.teamwiki;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.agentloop.ReActLoop;
 import com.kratisai.controlplane.agentloop.ReActLoopExhaustedException;
 import com.kratisai.controlplane.agentloop.ReActLoopFatalException;
@@ -13,6 +14,7 @@ import com.kratisai.controlplane.model.CtxRepoSynopsis;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.ModelProvider;
+import com.kratisai.controlplane.model.RelationRationales;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.TeamWikiBatch;
 import com.kratisai.controlplane.model.TeamWikiBuildMode;
@@ -63,6 +65,7 @@ public class TeamWikiGenerationService {
     private final CtxWikiPageRepository ctxWikiPageRepository;
     private final CtxRepoSynopsisRepository synopsisRepository;
     private final CtxRepoRelationRepository relationRepository;
+    private final ObjectMapper objectMapper;
     private final CtxDimensionRepository dimensionRepository;
     private final CtxArchitecturePatternRepository patternRepository;
     private final TeamWikiSnapshotService snapshotService;
@@ -79,6 +82,7 @@ public class TeamWikiGenerationService {
             CtxWikiPageRepository ctxWikiPageRepository,
             CtxRepoSynopsisRepository synopsisRepository,
             CtxRepoRelationRepository relationRepository,
+            ObjectMapper objectMapper,
             CtxDimensionRepository dimensionRepository,
             CtxArchitecturePatternRepository patternRepository,
             TeamWikiSnapshotService snapshotService,
@@ -96,6 +100,7 @@ public class TeamWikiGenerationService {
         this.ctxWikiPageRepository = ctxWikiPageRepository;
         this.synopsisRepository = synopsisRepository;
         this.relationRepository = relationRepository;
+        this.objectMapper = objectMapper;
         this.dimensionRepository = dimensionRepository;
         this.patternRepository = patternRepository;
         this.snapshotService = snapshotService;
@@ -341,8 +346,10 @@ public class TeamWikiGenerationService {
                     .append(" [")
                     .append(rel.getConfidence())
                     .append("]");
-            if (rel.getRationale() != null && !rel.getRationale().isBlank()) {
-                sb.append(" — ").append(rel.getRationale());
+            String rationale =
+                    String.join("; ", RelationRationales.extract(rel.getCitations(), rel.getId(), objectMapper));
+            if (!rationale.isBlank()) {
+                sb.append(" — ").append(rationale);
             }
             sb.append('\n');
         }

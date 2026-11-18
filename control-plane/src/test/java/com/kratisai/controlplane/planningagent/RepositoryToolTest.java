@@ -329,7 +329,6 @@ class RepositoryToolTest {
                 ],"previous":{"rationale":"Prior rationale","citations":{"fragments":["old-f1"]}}}
                 """.formatted(subjectSurfaceId, providerSurfaceId, providerSurfaceId, subjectSurfaceId);
         when(relation.getCitations()).thenReturn(citations);
-        when(relation.getRationale()).thenReturn("Legacy rationale");
         CtxSurface subject = new CtxSurface(
                 subjectBatch, repoId, teamId, SurfaceRole.REQUIRES, "Calls orders", SurfaceDetection.CMM);
         subject.addAttribute(new CtxSurfaceAttribute(subject, AttributeKind.FILE, "client.java", SurfaceDetection.CMM));
@@ -353,14 +352,14 @@ class RepositoryToolTest {
             assertThat(related.relations()).singleElement().satisfies(rel -> {
                 assertThat(rel.otherRepoName()).isEqualTo("other");
                 assertThat(rel.relation()).isEqualTo("other CALLS subject");
-                assertThat(rel.rationale()).isEqualTo("Legacy rationale");
+                assertThat(rel.rationale()).isEqualTo("Client calls server; Second pair");
                 assertThat(rel.currentRepoFiles()).containsExactly("client.java");
             });
         });
     }
 
     @Test
-    void relatedRepositoriesPreservesLegacyRationaleAndCitationsWithoutInventingPairs() {
+    void relatedRepositoriesIgnoresLegacyRationaleAndCitationsWithoutMatchEvidence() {
         Repository repo = new Repository("subject", "url", "main", RepositoryType.GENERIC);
         repo.setId(UUID.randomUUID());
         IngestionBatch repoBatch = new IngestionBatch(repo);
@@ -371,7 +370,6 @@ class RepositoryToolTest {
         when(relation.getBatchB()).thenReturn(otherBatch);
         when(relation.getNature()).thenReturn(Nature.CALLS);
         when(relation.getDirection()).thenReturn(Direction.A_TO_B);
-        when(relation.getRationale()).thenReturn("Legacy explanation");
         when(relation.getCitations()).thenReturn("{\"fragments\":[\"legacy-f1\"]}");
         when(batchResolutionService.resolveRepository(teamId, "subject")).thenReturn(repo);
         when(relationRepository.findCurrentForRepository(teamId, repo.getId())).thenReturn(List.of(relation));
@@ -381,7 +379,7 @@ class RepositoryToolTest {
                 .satisfies(related -> {
                     assertThat(related.otherRepoName()).isEqualTo("other");
                     assertThat(related.relations()).singleElement().satisfies(rel -> {
-                        assertThat(rel.rationale()).isEqualTo("Legacy explanation");
+                        assertThat(rel.rationale()).isNull();
                         assertThat(rel.currentRepoFiles()).isEmpty();
                     });
                 });

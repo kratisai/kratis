@@ -141,6 +141,7 @@ export interface RelationStatDto {
   nature: RelationNature
   otherRepositoryId: string
   otherRepositoryName: string
+  rationales?: string[]
 }
 
 export interface RemoteRepositoryDto {
@@ -269,4 +270,4 @@ export interface UserDto {
   id: string
 }
 
-type SurfaceDetection = 'CMM' | 'MODEL' | 'SYFT' | 'UNKNOWN'
+type SurfaceDetection = 'CMM' | 'MODEL' | 'SYFT'

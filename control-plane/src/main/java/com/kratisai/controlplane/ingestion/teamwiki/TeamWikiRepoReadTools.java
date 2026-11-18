@@ -5,7 +5,6 @@ import com.kratisai.controlplane.agentloop.KratisToolException;
 import com.kratisai.controlplane.model.CtxSurface;
 import com.kratisai.controlplane.model.CtxSurfaceAttribute;
 import com.kratisai.controlplane.model.CtxWikiPage;
-import com.kratisai.controlplane.model.SurfaceDetection;
 import com.kratisai.controlplane.repository.CtxSurfaceRepository;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import java.util.List;
@@ -76,7 +75,6 @@ public class TeamWikiRepoReadTools {
             @ToolParam(description = "Repository name") String repoName, ToolContext toolContext) {
         UUID repoBatchId = resolveRepoBatchId(repoName, toolContext);
         List<CtxSurface> surfaces = ctxSurfaceRepository.findByBatchIdIn(List.of(repoBatchId)).stream()
-                .filter(s -> s.getDetectedBy() != SurfaceDetection.UNKNOWN)
                 .toList();
         if (surfaces.isEmpty()) {
             return "No boundary surfaces recorded for repository '" + repoName + "'.";

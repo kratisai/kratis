@@ -57,9 +57,6 @@ public class CtxRepoRelation {
     @Column(name = "confidence", nullable = false, length = 20)
     private Ceiling confidence;
 
-    @Column(name = "rationale")
-    private String rationale;
-
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "citations", columnDefinition = "jsonb")
     private String citations;
@@ -170,14 +167,6 @@ public class CtxRepoRelation {
 
     public void setConfidence(Ceiling confidence) {
         this.confidence = Objects.requireNonNull(confidence, "confidence");
-    }
-
-    public String getRationale() {
-        return rationale;
-    }
-
-    public void setRationale(String rationale) {
-        this.rationale = rationale;
     }
 
     public String getCitations() {

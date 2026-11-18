@@ -13,7 +13,6 @@ import com.kratisai.controlplane.model.CtxRepoSynopsis;
 import com.kratisai.controlplane.model.CtxSurface;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.IngestionBatch;
-import com.kratisai.controlplane.model.SurfaceDetection;
 import com.kratisai.controlplane.model.SurfaceRole;
 import com.kratisai.controlplane.repository.CtxArchitecturePatternRepository;
 import com.kratisai.controlplane.repository.CtxDimensionRepository;
@@ -161,7 +160,6 @@ public class SynopsisService {
 
     static List<SurfaceEvidence> evidenceSurfaces(List<CtxSurface> surfaces) {
         return surfaces.stream()
-                .filter(surface -> surface.getDetectedBy() != SurfaceDetection.UNKNOWN)
                 .map(surface -> new SurfaceEvidence(
                         surface.getId(),
                         surface.getRole(),

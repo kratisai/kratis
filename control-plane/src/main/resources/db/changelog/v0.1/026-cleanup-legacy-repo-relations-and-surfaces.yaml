@@ -1,0 +1,32 @@
+databaseChangeLog:
+  - changeSet:
+      id: 026-cleanup-legacy-repo-relations-and-surfaces-001
+      author: kratis
+      changes:
+        - sql:
+            dbms: postgresql
+            sql: UPDATE ctx_surfaces SET detected_by = 'MODEL' WHERE detected_by = 'UNKNOWN'
+        - sql:
+            dbms: postgresql
+            sql: >-
+              DELETE FROM ctx_surface_attributes
+              WHERE detected_by = 'UNKNOWN'
+                AND EXISTS (
+                  SELECT 1 FROM ctx_surface_attributes existing
+                  WHERE existing.surface_id = ctx_surface_attributes.surface_id
+                    AND existing.kind = ctx_surface_attributes.kind
+                    AND existing.value = ctx_surface_attributes.value
+                    AND existing.detected_by = 'MODEL'
+                )
+        - sql:
+            dbms: postgresql
+            sql: UPDATE ctx_surface_attributes SET detected_by = 'MODEL' WHERE detected_by = 'UNKNOWN'
+        - sql:
+            dbms: postgresql
+            sql: >-
+              UPDATE ctx_repo_relations
+              SET citations = citations - 'legacy'
+              WHERE citations IS NOT NULL AND jsonb_exists(citations, 'legacy')
+        - dropColumn:
+            tableName: ctx_repo_relations
+            columnName: rationale

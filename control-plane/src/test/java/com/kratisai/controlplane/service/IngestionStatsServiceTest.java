@@ -452,6 +452,8 @@ class IngestionStatsServiceTest {
         CtxRepoRelation relation = currentRepoIsA
                 ? new CtxRepoRelation(team.getId(), batch, otherBatch, Nature.CALLS, direction, Ceiling.CONFIRMED)
                 : new CtxRepoRelation(team.getId(), otherBatch, batch, Nature.CALLS, direction, Ceiling.CONFIRMED);
+        relation.setCitations("{\"matches\":[{\"rationale\":\"Order service calls billing\"},"
+                + "{\"rationale\":\"Order service calls billing\"},{\"rationale\":\" \"}]}");
         ctxRepoRelationRepository.saveAndFlush(relation);
 
         IngestionBatchStatsDto stats =
@@ -463,7 +465,35 @@ class IngestionStatsServiceTest {
             assertThat(actual.confidence()).isEqualTo(Ceiling.CONFIRMED);
             assertThat(actual.otherRepositoryId()).isEqualTo(otherRepository.getId());
             assertThat(actual.otherRepositoryName()).isEqualTo("billing-service");
+            assertThat(actual.rationales()).containsExactly("Order service calls billing");
         });
+    }
+
+    @Test
+    void shouldReturnEmptyRationalesWhenRelationCitationsHaveNoMatches() {
+        Repository otherRepository =
+                new Repository("billing-service", "https://github.com/user/billing.git", "main", RepositoryType.GITHUB);
+        otherRepository.setTeam(team);
+        repositoryRepository.saveAndFlush(otherRepository);
+
+        IngestionBatch otherBatch = new IngestionBatch(otherRepository);
+        otherBatch.setStatus(IngestionStatus.SUCCESS);
+        ingestionBatchRepository.saveAndFlush(otherBatch);
+
+        boolean currentRepoIsA = CtxRepoRelation.compareBySqlOrder(repository.getId(), otherRepository.getId()) < 0;
+        CtxRepoRelation relation = currentRepoIsA
+                ? new CtxRepoRelation(
+                        team.getId(), batch, otherBatch, Nature.CALLS, Direction.A_TO_B, Ceiling.CONFIRMED)
+                : new CtxRepoRelation(
+                        team.getId(), otherBatch, batch, Nature.CALLS, Direction.B_TO_A, Ceiling.CONFIRMED);
+        relation.setCitations("{\"sources\":[\"legacy\"]}");
+        ctxRepoRelationRepository.saveAndFlush(relation);
+
+        IngestionBatchStatsDto stats =
+                ingestionStatsService.getBatchStats(batch.getId()).orElseThrow();
+
+        assertThat(stats.getRelations()).singleElement().satisfies(actual -> assertThat(actual.rationales())
+                .isEmpty());
     }
 
     @Test

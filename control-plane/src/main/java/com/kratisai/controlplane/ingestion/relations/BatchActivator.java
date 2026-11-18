@@ -1,7 +1,6 @@
 package com.kratisai.controlplane.ingestion.relations;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService.BatchLogger;
 import com.kratisai.controlplane.model.Ceiling;
@@ -12,7 +11,6 @@ import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionStatus;
 import com.kratisai.controlplane.model.Nature;
 import com.kratisai.controlplane.model.RelationState;
-import com.kratisai.controlplane.model.SurfaceDetection;
 import com.kratisai.controlplane.repository.CtxRepoRelationRepository;
 import com.kratisai.controlplane.repository.CtxRepoSynopsisRepository;
 import com.kratisai.controlplane.repository.CtxSurfaceRepository;
@@ -63,10 +61,7 @@ public class BatchActivator {
 
     public record Activation(int relationsWritten, int superseded) {}
 
-    record Prepared(
-            CrossRepoMatchingService.RepoView subject,
-            List<CrossRepoMatchingService.RepoView> others,
-            long excludedLegacy) {}
+    record Prepared(CrossRepoMatchingService.RepoView subject, List<CrossRepoMatchingService.RepoView> others) {}
 
     record RelationKey(UUID otherBatchId, Nature nature) {}
 
@@ -74,9 +69,6 @@ public class BatchActivator {
         UUID teamId = loadBatch(batchId).getRepository().getTeam().getId();
         try (TeamActivationLock.TeamLock ignored = teamActivationLock.acquire(teamId)) {
             Prepared prepared = transactionTemplate.execute(status -> prepare(batchId, teamId));
-            batchLogger.info(
-                    "ACTIVATE_BATCH",
-                    "Excluded " + prepared.excludedLegacy() + " legacy UNKNOWN-provenance surfaces from matching.");
             CrossRepoMatchingService.InferenceResult result =
                     crossRepoMatchingService.infer(batchId, prepared.subject(), prepared.others(), batchLogger);
             Activation activation =
@@ -106,31 +98,25 @@ public class BatchActivator {
                         synopsisByBatch.put(row.getBatch().getId(), CrossRepoMatchingService.SynopsisView.of(row)));
         Map<UUID, List<CrossRepoMatchingService.SurfaceView>> surfaceByBatch = new HashMap<>();
         List<CtxSurface> observedSurfaces = ctxSurfaceRepository.findByBatchIdIn(ids);
-        long excludedLegacy = observedSurfaces.stream()
-                .filter(surface -> surface.getDetectedBy() == SurfaceDetection.UNKNOWN)
-                .count();
-        observedSurfaces.stream()
-                .filter(surface -> surface.getDetectedBy() != SurfaceDetection.UNKNOWN)
-                .forEach(surface -> surfaceByBatch
-                        .computeIfAbsent(surface.getBatch().getId(), unused -> new ArrayList<>())
-                        .add(new CrossRepoMatchingService.SurfaceView(
-                                surface.getId(),
-                                surface.getRole(),
-                                surface.getDescription(),
-                                surface.getDetectedBy(),
-                                surface.getAttributeRows().stream()
-                                        .map(attribute -> new CrossRepoMatchingService.AttributeView(
-                                                attribute.getId(),
-                                                attribute.getKind().name(),
-                                                attribute.getValue(),
-                                                attribute.getDetectedBy()))
-                                        .toList())));
+        observedSurfaces.forEach(surface -> surfaceByBatch
+                .computeIfAbsent(surface.getBatch().getId(), unused -> new ArrayList<>())
+                .add(new CrossRepoMatchingService.SurfaceView(
+                        surface.getId(),
+                        surface.getRole(),
+                        surface.getDescription(),
+                        surface.getDetectedBy(),
+                        surface.getAttributeRows().stream()
+                                .map(attribute -> new CrossRepoMatchingService.AttributeView(
+                                        attribute.getId(),
+                                        attribute.getKind().name(),
+                                        attribute.getValue(),
+                                        attribute.getDetectedBy()))
+                                .toList())));
         return new Prepared(
                 view(subject, synopsisByBatch, surfaceByBatch),
                 active.stream()
                         .map(batch -> view(batch, synopsisByBatch, surfaceByBatch))
-                        .toList(),
-                excludedLegacy);
+                        .toList());
     }
 
     private static CrossRepoMatchingService.RepoView view(
@@ -200,9 +186,8 @@ public class BatchActivator {
                 relation.setConfidence(confidence);
                 relation.setState(RelationState.CURRENT);
             }
-            String citations = citations(entry.getValue(), relation);
+            String citations = citations(entry.getValue());
             relation.setCitations(citations);
-            relation.setRationale(null);
             ctxRepoRelationRepository.save(relation);
         }
         subject.setStatus(IngestionStatus.SUCCESS);
@@ -214,7 +199,7 @@ public class BatchActivator {
         return new Activation(grouped.size(), superseded);
     }
 
-    private String citations(List<CrossRepoMatchingService.AcceptedProposal> proposals, CtxRepoRelation relation) {
+    private String citations(List<CrossRepoMatchingService.AcceptedProposal> proposals) {
         List<Map<String, Object>> evidence = proposals.stream()
                 .map(item -> {
                     InferenceResponse.RelationProposal proposal = item.proposal();
@@ -233,34 +218,7 @@ public class BatchActivator {
                 })
                 .toList();
         try {
-            Map<String, Object> result = new HashMap<>();
-            result.put("matches", evidence);
-            Map<String, Object> legacy = new HashMap<>();
-            if (relation.getCitations() != null) {
-                JsonNode previous = objectMapper.readTree(relation.getCitations());
-                if (previous != null && !previous.path("matches").isArray()) {
-                    legacy.put("citations", previous);
-                } else if (previous != null && previous.has("legacy")) {
-                    JsonNode previousLegacy = previous.get("legacy");
-                    if (!previousLegacy.isObject()) {
-                        throw new IllegalStateException("Invalid legacy relation evidence for " + relation.getId());
-                    }
-                    previousLegacy.fields().forEachRemaining(field -> legacy.put(field.getKey(), field.getValue()));
-                }
-            }
-            if (relation.getRationale() != null) {
-                JsonNode existingRationale = (JsonNode) legacy.get("rationale");
-                if (existingRationale != null
-                        && (!existingRationale.isTextual()
-                                || !existingRationale.asText().equals(relation.getRationale()))) {
-                    throw new IllegalStateException("Conflicting legacy relation rationales for " + relation.getId());
-                }
-                legacy.put("rationale", relation.getRationale());
-            }
-            if (!legacy.isEmpty()) {
-                result.put("legacy", legacy);
-            }
-            return objectMapper.writeValueAsString(result);
+            return objectMapper.writeValueAsString(Map.of("matches", evidence));
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Cannot serialize surface match evidence", e);
         }

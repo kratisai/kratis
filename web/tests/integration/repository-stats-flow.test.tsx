@@ -1,3 +1,4 @@
+import { fireEvent } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import type { IngestionBatchStatsDto } from '@/types/auth-types'
@@ -18,6 +19,8 @@ import {
   waitFor,
 } from '../support/test-render'
 
+const SLOW_RENDER = { timeout: 5_000 }
+
 const stats: IngestionBatchStatsDto = {
   architecturePatterns: [],
   batchId: 'batch-1',
@@ -33,6 +36,7 @@ const stats: IngestionBatchStatsDto = {
       nature: 'CALLS',
       otherRepositoryId: 'repo-2',
       otherRepositoryName: 'billing-service',
+      rationales: ['OrderController calls the billing API', 'Shared protobuf contracts'],
     },
     {
       confidence: 'SUGGESTED',
@@ -131,6 +135,117 @@ describe('Repository stats surfaces and relations', () => {
     expect(screen.getByText('Suggested')).toBeInTheDocument()
   })
 
+  it('reveals relation rationales on hover instead of always displaying them', async () => {
+    mockListTeams([createMockTeam()])
+    mockListRepositories([
+      createMockRepository({
+        ingestionStatus: 'SUCCESS',
+        latestBatchId: 'batch-1',
+        name: 'orders-service',
+      }),
+    ])
+    addFetchHandler((url) => {
+      if (url.includes('/batches/batch-1/stats')) {
+        return jsonResponse(stats)
+      }
+      if (url.includes('/batches/') && url.includes('/logs')) {
+        return jsonResponse([])
+      }
+      if (url.includes('/batches')) {
+        return jsonResponse([])
+      }
+      return null
+    })
+
+    setAuthenticated({ teamId: 'team-1' })
+    const { user } = renderWithRouter(['/repos/repo-1'])
+
+    const rationaleTrigger = await screen.findByRole(
+      'button',
+      { name: 'Why billing-service is related' },
+      SLOW_RENDER,
+    )
+    expect(screen.queryByText('OrderController calls the billing API')).not.toBeInTheDocument()
+
+    await user.hover(rationaleTrigger)
+    await waitFor(() => {
+      expect(screen.getByText('Relation rationale')).toBeInTheDocument()
+      expect(screen.getByText('OrderController calls the billing API')).toBeInTheDocument()
+      expect(screen.getByText('Shared protobuf contracts')).toBeInTheDocument()
+    })
+  })
+
+  it('opens relation rationales on click and keyboard focus', async () => {
+    mockListTeams([createMockTeam()])
+    mockListRepositories([
+      createMockRepository({
+        ingestionStatus: 'SUCCESS',
+        latestBatchId: 'batch-1',
+        name: 'orders-service',
+      }),
+    ])
+    addFetchHandler((url) => {
+      if (url.includes('/batches/batch-1/stats')) {
+        return jsonResponse(stats)
+      }
+      if (url.includes('/batches/') && url.includes('/logs')) {
+        return jsonResponse([])
+      }
+      if (url.includes('/batches')) {
+        return jsonResponse([])
+      }
+      return null
+    })
+
+    setAuthenticated({ teamId: 'team-1' })
+    const { user } = renderWithRouter(['/repos/repo-1'])
+
+    const rationaleTrigger = await screen.findByRole(
+      'button',
+      { name: 'Why billing-service is related' },
+      SLOW_RENDER,
+    )
+    expect(rationaleTrigger).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.focus(rationaleTrigger)
+    await waitFor(() => {
+      expect(rationaleTrigger).toHaveAttribute('aria-expanded', 'true')
+    })
+    fireEvent.blur(rationaleTrigger)
+    await waitFor(() => {
+      expect(rationaleTrigger).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    await user.click(rationaleTrigger)
+    await waitFor(() => {
+      expect(rationaleTrigger).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByText('OrderController calls the billing API')).toBeInTheDocument()
+    })
+
+    fireEvent.blur(rationaleTrigger)
+    await waitFor(() => {
+      expect(rationaleTrigger).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    fireEvent.pointerDown(document.body)
+    await waitFor(() => {
+      expect(rationaleTrigger).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.queryByText('OrderController calls the billing API')).not.toBeInTheDocument()
+    })
+
+    await user.click(rationaleTrigger)
+    fireEvent.blur(rationaleTrigger)
+    await waitFor(() => {
+      expect(rationaleTrigger).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => {
+      expect(rationaleTrigger).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.queryByText('OrderController calls the billing API')).not.toBeInTheDocument()
+    })
+  })
+
   it('shows the surfaces toggle when a batch has no relations', async () => {
     mockListTeams([createMockTeam()])
     mockListRepositories([
@@ -194,7 +309,7 @@ describe('Repository stats surfaces and relations', () => {
     setAuthenticated({ teamId: 'team-1' })
     const { user } = renderWithRouter(['/repos/repo-1'])
 
-    await user.click(await screen.findByRole('button', { name: 'Show surfaces (10)' }))
+    await user.click(await screen.findByRole('button', { name: 'Show surfaces (10)' }, SLOW_RENDER))
 
     for (let index = 0; index < manySurfaces.length; index += 1) {
       expect(screen.getByText(`Surface ${index}`)).toBeInTheDocument()

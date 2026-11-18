@@ -36,6 +36,7 @@ import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -135,7 +136,7 @@ class TeamWikiGenerationServiceTest {
                 Nature.CALLS,
                 batch1First ? Direction.A_TO_B : Direction.B_TO_A,
                 Ceiling.CONFIRMED);
-        rel.setRationale("Billing calls Orders REST API");
+        rel.setCitations("{\"matches\":[{\"rationale\":\"Billing calls Orders REST API\"}]}");
         relationRepository.saveAndFlush(rel);
     }
 
@@ -154,9 +155,11 @@ class TeamWikiGenerationServiceTest {
                 snapshotService.captureCurrentState(team.getId()).snapshot()));
 
         AtomicInteger fullStep = new AtomicInteger(0);
+        AtomicReference<String> fullPrompt = new AtomicReference<>();
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .condition(p -> true)
                 .response(prompt -> {
+                    fullPrompt.set(prompt.getContents());
                     int step = fullStep.getAndIncrement();
                     if (step == 0) {
                         return toolResponse(
@@ -192,6 +195,7 @@ class TeamWikiGenerationServiceTest {
         var fullResult = generationService.generate(fullBatch.getId(), logger);
         assertThat(fullResult.pageCount()).isEqualTo(2);
         assertThat(fullResult.toolCalls()).isEqualTo(2L);
+        assertThat(fullPrompt.get()).contains("Billing calls Orders REST API");
 
         fullBatch.setStatus(IngestionStatus.SUCCESS);
         fullBatch.setActive(true);

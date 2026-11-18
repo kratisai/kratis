@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.ArchitecturePatternDto;
 import com.kratisai.controlplane.api.restdto.DimensionStatDto;
 import com.kratisai.controlplane.api.restdto.IngestionBatchStatsDto;
@@ -12,6 +13,7 @@ import com.kratisai.controlplane.model.Direction;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.NodeType;
+import com.kratisai.controlplane.model.RelationRationales;
 import com.kratisai.controlplane.model.RelationType;
 import com.kratisai.controlplane.repository.*;
 import java.time.Instant;
@@ -37,6 +39,7 @@ public class IngestionStatsService {
     private final CtxSurfaceRepository ctxSurfaceRepository;
     private final CtxSurfaceAttributeRepository ctxSurfaceAttributeRepository;
     private final CtxRepoRelationRepository ctxRepoRelationRepository;
+    private final ObjectMapper objectMapper;
 
     public IngestionStatsService(
             IngestionBatchRepository ingestionBatchRepository,
@@ -47,7 +50,8 @@ public class IngestionStatsService {
             CtxNodeDimensionRepository ctxNodeDimensionRepository,
             CtxSurfaceRepository ctxSurfaceRepository,
             CtxSurfaceAttributeRepository ctxSurfaceAttributeRepository,
-            CtxRepoRelationRepository ctxRepoRelationRepository) {
+            CtxRepoRelationRepository ctxRepoRelationRepository,
+            ObjectMapper objectMapper) {
         this.ingestionBatchRepository = ingestionBatchRepository;
         this.ctxNodeRepository = ctxNodeRepository;
         this.ctxEdgeRepository = ctxEdgeRepository;
@@ -57,6 +61,7 @@ public class IngestionStatsService {
         this.ctxSurfaceRepository = ctxSurfaceRepository;
         this.ctxSurfaceAttributeRepository = ctxSurfaceAttributeRepository;
         this.ctxRepoRelationRepository = ctxRepoRelationRepository;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional(readOnly = true)
@@ -211,7 +216,8 @@ public class IngestionStatsService {
                             relationSide(relation.getDirection(), currentIsA),
                             relation.getConfidence(),
                             otherBatch.getRepository().getId(),
-                            otherBatch.getRepository().getName());
+                            otherBatch.getRepository().getName(),
+                            RelationRationales.extract(relation.getCitations(), relation.getId(), objectMapper));
                 })
                 .sorted(Comparator.comparing(RelationStatDto::otherRepositoryName)
                         .thenComparing(relation -> relation.nature().name()))

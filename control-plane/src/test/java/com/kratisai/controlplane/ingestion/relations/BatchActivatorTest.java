@@ -133,7 +133,6 @@ class BatchActivatorTest {
         CtxRepoRelation existing =
                 new CtxRepoRelation(teamId, other, subject, Nature.CALLS, Direction.A_TO_B, Ceiling.SUGGESTED);
         existing.setState(RelationState.SUPERSEDED);
-        existing.setRationale("obsolete");
         existing.setCitations("{\"sources\":[\"old\"]}");
         when(relations.findByBatchAIdAndBatchBIdAndNature(other.getId(), subject.getId(), Nature.CALLS))
                 .thenReturn(Optional.of(existing));
@@ -142,39 +141,15 @@ class BatchActivatorTest {
         assertThat(existing.getDirection()).isEqualTo(Direction.B_TO_A);
         assertThat(existing.getConfidence()).isEqualTo(Ceiling.CONFIRMED);
         assertThat(existing.getState()).isEqualTo(RelationState.CURRENT);
-        assertThat(existing.getRationale()).isNull();
         JsonNode citations = mapper.readTree(existing.getCitations());
         assertThat(citations.path("matches").size()).isEqualTo(1);
-        assertThat(citations.path("legacy").path("rationale").asText()).isEqualTo("obsolete");
-        assertThat(citations
-                        .path("legacy")
-                        .path("citations")
-                        .path("sources")
-                        .get(0)
-                        .asText())
-                .isEqualTo("old");
+        assertThat(citations.has("legacy")).isFalse();
         activator(mapper).activate(subject.getId(), logger, "commit");
         JsonNode repeated = mapper.readTree(existing.getCitations());
-        assertThat(repeated.path("legacy")).isEqualTo(citations.path("legacy"));
+        assertThat(repeated.has("legacy")).isFalse();
         assertThat(repeated.path("matches").size()).isEqualTo(1);
         assertThat(repeated.has("previous")).isFalse();
-        assertThat(existing.getRationale()).isNull();
         verify(relations, times(2)).save(existing);
-    }
-
-    @Test
-    void preservesRationaleWithoutLegacyCitations() throws Exception {
-        CtxRepoRelation existing =
-                new CtxRepoRelation(teamId, other, subject, Nature.CALLS, Direction.A_TO_B, Ceiling.SUGGESTED);
-        existing.setRationale("old rationale");
-        when(relations.findByBatchAIdAndBatchBIdAndNature(other.getId(), subject.getId(), Nature.CALLS))
-                .thenReturn(Optional.of(existing));
-        stubInference(List.of(match(Direction.A_TO_B, Ceiling.CONFIRMED)));
-        activator(mapper).activate(subject.getId(), logger, "commit");
-        JsonNode citations = mapper.readTree(existing.getCitations());
-        assertThat(citations.path("legacy").path("rationale").asText()).isEqualTo("old rationale");
-        assertThat(citations.path("legacy").has("citations")).isFalse();
-        assertThat(existing.getRationale()).isNull();
     }
 
     @Test
@@ -194,53 +169,16 @@ class BatchActivatorTest {
     }
 
     @Test
-    void addsRationaleToExistingLegacyWithoutNesting() throws Exception {
-        CtxRepoRelation existing =
-                new CtxRepoRelation(teamId, other, subject, Nature.CALLS, Direction.A_TO_B, Ceiling.SUGGESTED);
-        existing.setRationale("old rationale");
-        existing.setCitations(
-                "{\"matches\":[{\"obsolete\":true}],\"legacy\":{\"citations\":{\"source\":\"old\"},\"extra\":1}}");
-        when(relations.findByBatchAIdAndBatchBIdAndNature(other.getId(), subject.getId(), Nature.CALLS))
-                .thenReturn(Optional.of(existing));
-        stubInference(List.of(match(Direction.A_TO_B, Ceiling.CONFIRMED)));
-        activator(mapper).activate(subject.getId(), logger, "commit");
-        JsonNode citations = mapper.readTree(existing.getCitations());
-        JsonNode legacy = citations.path("legacy");
-        assertThat(legacy.path("rationale").asText()).isEqualTo("old rationale");
-        assertThat(legacy.path("citations").path("source").asText()).isEqualTo("old");
-        assertThat(legacy.path("extra").asInt()).isEqualTo(1);
-        assertThat(citations.path("matches").get(0).path("rationale").asText()).isEqualTo("compatible interfaces");
-        assertThat(existing.getRationale()).isNull();
-        activator(mapper).activate(subject.getId(), logger, "commit");
-        assertThat(mapper.readTree(existing.getCitations()).path("legacy")).isEqualTo(legacy);
-    }
-
-    @Test
-    void conflictingLegacyRationalesAbortWithoutDiscardingEvidence() {
-        CtxRepoRelation existing =
-                new CtxRepoRelation(teamId, other, subject, Nature.CALLS, Direction.A_TO_B, Ceiling.SUGGESTED);
-        existing.setRationale("first");
-        String previous = "{\"matches\":[],\"legacy\":{\"rationale\":\"second\"}}";
-        existing.setCitations(previous);
-        when(relations.findByBatchAIdAndBatchBIdAndNature(other.getId(), subject.getId(), Nature.CALLS))
-                .thenReturn(Optional.of(existing));
-        stubInference(List.of(match(Direction.A_TO_B, Ceiling.CONFIRMED)));
-        assertThatThrownBy(() -> activator(mapper).activate(subject.getId(), logger, "commit"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Conflicting legacy relation rationales");
-        assertThat(existing.getCitations()).isEqualTo(previous);
-        assertThat(existing.getRationale()).isEqualTo("first");
-        verify(relations, never()).save(any());
-        verify(transactions).rollback(any());
-    }
-
-    @Test
-    void excludesOnlyLegacySurfacesFromMatchingAndReportsCounts() throws Exception {
+    void passesAllSurfacesToMatchingWithoutFiltering() throws Exception {
         CtxSurface legacy = mock(CtxSurface.class);
         CtxSurface unknownRole = mock(CtxSurface.class);
         CtxSurface current = mock(CtxSurface.class);
+        UUID legacyId = UUID.randomUUID();
         UUID unknownRoleId = UUID.randomUUID();
-        when(legacy.getDetectedBy()).thenReturn(SurfaceDetection.UNKNOWN);
+        when(legacy.getDetectedBy()).thenReturn(SurfaceDetection.SYFT);
+        when(legacy.getRole()).thenReturn(SurfaceRole.REQUIRES);
+        when(legacy.getBatch()).thenReturn(subject);
+        when(legacy.getId()).thenReturn(legacyId);
         when(unknownRole.getDetectedBy()).thenReturn(SurfaceDetection.CMM);
         when(unknownRole.getRole()).thenReturn(SurfaceRole.UNKNOWN);
         when(unknownRole.getBatch()).thenReturn(subject);
@@ -256,8 +194,8 @@ class BatchActivatorTest {
         verify(inference).infer(eq(subject.getId()), subjectView.capture(), any(), eq(logger));
         assertThat(subjectView.getValue().surfaces())
                 .extracting(CrossRepoMatchingService.SurfaceView::id)
-                .containsExactly(unknownRoleId, subjectSurfaceId);
-        verify(logs)
+                .containsExactly(legacyId, unknownRoleId, subjectSurfaceId);
+        verify(logs, never())
                 .log(
                         eq(subject.getId()),
                         eq(teamId),
