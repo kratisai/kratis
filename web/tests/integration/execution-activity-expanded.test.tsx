@@ -55,7 +55,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     })
     expect(screen.queryByText(/Building project/)).not.toBeInTheDocument()
 
-    const expandButton = screen.getByText('npm run build').closest('button')!
+    const expandButton = screen.getByText('npm run build').closest('[role="button"]')!
     await user.click(expandButton)
 
     await waitFor(() => {
@@ -88,7 +88,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     })
     expect(screen.queryByText('Permission denied')).not.toBeInTheDocument()
 
-    const expandButton = screen.getByText('rm -rf /tmp/cache').closest('button')!
+    const expandButton = screen.getByText('rm -rf /tmp/cache').closest('[role="button"]')!
     await user.click(expandButton)
 
     await waitFor(() => {
@@ -142,7 +142,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     expect(summary.className).toContain('truncate')
     expect(summary.className).toContain('italic')
 
-    await user.click(summary.closest('button')!)
+    await user.click(summary.closest('[role="button"]')!)
 
     await waitFor(() => {
       const expanded = screen.getByText(
@@ -219,7 +219,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     })
     expect(screen.queryByText('Found 42 files')).not.toBeInTheDocument()
 
-    const expandButton = screen.getByText('file_search').closest('button')!
+    const expandButton = screen.getByText('file_search').closest('[role="button"]')!
     await user.click(expandButton)
 
     await waitFor(() => {
@@ -251,7 +251,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     })
     expect(screen.queryByText('File not found')).not.toBeInTheDocument()
 
-    const expandButton = screen.getByText('read_file').closest('button')!
+    const expandButton = screen.getByText('read_file').closest('[role="button"]')!
     await user.click(expandButton)
 
     await waitFor(() => {
@@ -317,18 +317,18 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     })
     expect(screen.getByText('hello')).toBeInTheDocument()
 
-    const activeHeader = screen.getByText('echo hello').closest('button')!
+    const activeHeader = screen.getByText('echo hello').closest('[role="button"]')!
     await user.click(activeHeader)
     expect(screen.queryByText('hello')).not.toBeInTheDocument()
 
-    await user.click(screen.getByText('echo hello').closest('button')!)
+    await user.click(screen.getByText('echo hello').closest('[role="button"]')!)
     expect(screen.getByText('hello')).toBeInTheDocument()
 
-    const doneHeader = screen.getByText('echo done').closest('button')!
+    const doneHeader = screen.getByText('echo done').closest('[role="button"]')!
     await user.click(doneHeader)
     expect(screen.queryByText('done')).not.toBeInTheDocument()
 
-    await user.click(screen.getByText('echo done').closest('button')!)
+    await user.click(screen.getByText('echo done').closest('[role="button"]')!)
     expect(screen.getByText('done')).toBeInTheDocument()
   })
 
@@ -362,7 +362,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       expect(screen.getByText('PASS src/a.test.ts')).toBeInTheDocument()
     })
 
-    await user.click(screen.getByText('npm test').closest('button')!)
+    await user.click(screen.getByText('npm test').closest('[role="button"]')!)
     expect(screen.queryByText('PASS src/a.test.ts')).not.toBeInTheDocument()
 
     useActivityStore.getState().handleActivityEvent({
@@ -495,7 +495,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
 
     const summary = await screen.findByText(longCommand)
     expect(summary.className).toContain('truncate')
-    expect(summary.closest('button')).toHaveAttribute('title', longCommand)
+    expect(summary.closest('[role="button"]')).toHaveAttribute('title', longCommand)
   })
 
   it('renders expanded output inside a horizontal-scroll container without a max-height constraint', async () => {
@@ -541,20 +541,23 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       },
     ])
 
-    const summary = await screen.findByText('Auto-approved: rm -rf /tmp/cache')
+    const summary = await screen.findByText('rm -rf /tmp/cache')
     expect(summary.className).toContain('truncate')
     expect(screen.queryByText('removed cache')).not.toBeInTheDocument()
+    expect(screen.queryByText('Auto-approved')).not.toBeInTheDocument()
     expect(document.querySelector('[data-slot="card"]')).not.toBeInTheDocument()
 
-    await user.click(summary.closest('button')!)
+    await user.click(summary.closest('[role="button"]')!)
     expect(await screen.findByText('removed cache')).toBeInTheDocument()
+    expect(screen.getByText('Auto-approved')).toBeInTheDocument()
 
-    await user.click(screen.getByText('Auto-approved: rm -rf /tmp/cache').closest('button')!)
+    await user.click(screen.getByText('rm -rf /tmp/cache').closest('[role="button"]')!)
     expect(screen.queryByText('removed cache')).not.toBeInTheDocument()
+    expect(screen.queryByText('Auto-approved')).not.toBeInTheDocument()
   })
 
   it('auto-collapses a resolved approval once it completes', async () => {
-    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
 
     const store = useActivityStore.getState()
     store.handleActivityEvent({
@@ -592,9 +595,14 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       type: 'execution_activity',
     })
 
-    const summary = await screen.findByText('Permission approved: git status')
+    const summary = await screen.findByText('git status')
     expect(summary.className).toContain('truncate')
     expect(screen.queryByText('clean')).not.toBeInTheDocument()
+    expect(screen.queryByText('Approved')).not.toBeInTheDocument()
+
+    await user.click(summary.closest('[role="button"]')!)
+    expect(await screen.findByText('clean')).toBeInTheDocument()
+    expect(screen.getByText('Approved')).toBeInTheDocument()
   })
 
   it('toggles warning activities under their execution', async () => {
@@ -780,7 +788,9 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       },
     ])
 
-    const textEl = await screen.findByText('Selectable agent output text that should remain visible')
+    const textEl = await screen.findByText(
+      'Selectable agent output text that should remain visible',
+    )
     expect(textEl.className).toContain('select-text')
 
     const selectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({
@@ -790,7 +800,9 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     try {
       await user.click(textEl)
 
-      expect(screen.getByText('Selectable agent output text that should remain visible')).toBeInTheDocument()
+      expect(
+        screen.getByText('Selectable agent output text that should remain visible'),
+      ).toBeInTheDocument()
       expect(textEl.className).not.toContain('truncate')
     } finally {
       selectionSpy.mockRestore()
@@ -812,7 +824,9 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       },
     ])
 
-    const thoughtEl = await screen.findByText('Thinking ... Step-by-step thinking content to select and copy')
+    const thoughtEl = await screen.findByText(
+      'Thinking ... Step-by-step thinking content to select and copy',
+    )
     expect(thoughtEl.className).toContain('select-text')
 
     const selectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({
@@ -849,7 +863,9 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     ])
 
     await waitFor(() => {
-      expect(screen.getByText('Message that will be collapsed via chevron button')).toBeInTheDocument()
+      expect(
+        screen.getByText('Message that will be collapsed via chevron button'),
+      ).toBeInTheDocument()
     })
 
     const collapseButton = screen.getByRole('button', { name: 'Collapse' })
@@ -879,10 +895,12 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       },
     ])
 
-    const collapsedHeader = await screen.findByText('Detailed message line 1 Detailed message line 2')
+    const collapsedHeader = await screen.findByText(
+      'Detailed message line 1 Detailed message line 2',
+    )
     expect(collapsedHeader.className).toContain('truncate')
 
-    await user.click(collapsedHeader.closest('button')!)
+    await user.click(collapsedHeader.closest('[role="button"]')!)
 
     await waitFor(() => {
       const expandedText = screen.getByText('Detailed message line 1 Detailed message line 2')

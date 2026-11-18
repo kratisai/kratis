@@ -113,7 +113,7 @@ describe('Execution Activity Log', () => {
 
     // Assert approval prompt appears in timeline
     await waitFor(() => {
-      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+      expect(screen.getByText('Permission request required')).toBeInTheDocument()
     })
     expect(screen.getByText(/npm run build/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Allow once/i })).toBeInTheDocument()
@@ -141,9 +141,9 @@ describe('Execution Activity Log', () => {
 
     // Assert resolved state is shown (collapsed summary)
     await waitFor(() => {
-      expect(screen.getByText(/Permission approved/)).toBeInTheDocument()
+      expect(screen.getByText('rm -rf /tmp/cache')).toBeInTheDocument()
     })
-    expect(screen.getByText(/rm -rf \/tmp\/cache/)).toBeInTheDocument()
+    expect(screen.queryByText(/Permission approved/)).not.toBeInTheDocument()
     // Approve/Reject buttons should not be visible
     expect(screen.queryByRole('button', { name: /Allow once/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Reject/i })).not.toBeInTheDocument()
@@ -157,7 +157,7 @@ describe('Execution Activity Log', () => {
     await waitFor(() => {
       expect(screen.getByText('git status')).toBeInTheDocument()
     })
-    expect(screen.queryByText('Permission Required')).not.toBeInTheDocument()
+    expect(screen.queryByText('Permission request required')).not.toBeInTheDocument()
 
     triggerMockPermissionResolved(
       ws,
@@ -170,9 +170,10 @@ describe('Execution Activity Log', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText(/Permission approved/)).toBeInTheDocument()
+      expect(screen.getByText('git status')).toBeInTheDocument()
     })
-    expect(screen.queryByText('Permission Required')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Permission approved/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Permission request required')).not.toBeInTheDocument()
   })
 
   it('shows empty state when no activities', async () => {
@@ -273,10 +274,10 @@ describe('Execution Activity Log', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+      expect(screen.getByText('Permission request required')).toBeInTheDocument()
     })
 
-    const prompt = screen.getByText('Permission Required').closest('[data-activity-id]')
+    const prompt = screen.getByText('Permission request required').closest('[data-activity-id]')
     expect(prompt).not.toBeNull()
     const promptCall = calls.find((call) => call.el === prompt)
     expect(promptCall?.options).toEqual({ behavior: 'auto', block: 'center' })
@@ -424,7 +425,7 @@ describe('Execution Activity Log', () => {
     const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
 
     await waitFor(() => {
-      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+      expect(screen.getByText('Permission request required')).toBeInTheDocument()
     })
 
     const captured: Array<Record<string, unknown>> = []
@@ -507,10 +508,10 @@ describe('Execution Activity Log', () => {
     const ws = setupConnected()
     triggerMockPermissionRequired(ws, EXECUTION_ID, 'rm -rf /tmp/cache')
 
-    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
 
     await waitFor(() => {
-      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+      expect(screen.getByText('Permission request required')).toBeInTheDocument()
     })
 
     triggerMockPermissionResolved(
@@ -525,21 +526,22 @@ describe('Execution Activity Log', () => {
       'cancelled',
     )
 
-    await waitFor(() => {
-      expect(screen.getByText(/Permission request timed out/)).toBeInTheDocument()
-    })
-    expect(screen.getByText(/no response/)).toBeInTheDocument()
+    const summary = await screen.findByText(/Permission request timed out/)
+    expect(screen.queryByText(/no response/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/Permission rejected/)).not.toBeInTheDocument()
+
+    await user.click(summary.closest('[role="button"]')!)
+    expect(await screen.findByText('No response')).toBeInTheDocument()
   })
 
   it('shows a user-dismissed approval as cancelled', async () => {
     const ws = setupConnected()
     triggerMockPermissionRequired(ws, EXECUTION_ID, 'rm -rf /tmp/cache')
 
-    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
 
     await waitFor(() => {
-      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+      expect(screen.getByText('Permission request required')).toBeInTheDocument()
     })
 
     triggerMockPermissionResolved(
@@ -554,10 +556,40 @@ describe('Execution Activity Log', () => {
       'cancelled',
     )
 
-    await waitFor(() => {
-      expect(screen.getByText(/Permission request cancelled/)).toBeInTheDocument()
-    })
+    const summary = await screen.findByText(/Permission request cancelled/)
     expect(screen.queryByText(/Permission rejected/)).not.toBeInTheDocument()
+
+    await user.click(summary.closest('[role="button"]')!)
+    expect(await screen.findByText('Cancelled by user')).toBeInTheDocument()
+  })
+
+  it('attributes a system-cancelled approval without blaming the user', async () => {
+    useActivityStore.setState({
+      activitiesByExecution: {
+        [EXECUTION_ID]: [
+          {
+            approvalRequired: true,
+            collapsed: true,
+            command: 'rm -rf /tmp/cache',
+            executionId: EXECUTION_ID,
+            hitlResponse: 'cancelled',
+            id: 'act-system-cancelled',
+            resolvedBy: { kind: 'system' },
+            startedAt: '2026-01-01T00:00:00Z',
+            state: 'completed',
+            type: 'command_execution',
+          },
+        ],
+      },
+    })
+
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    const summary = await screen.findByText('Permission request cancelled: rm -rf /tmp/cache')
+    expect(screen.queryByText(/Cancelled by user/)).not.toBeInTheDocument()
+
+    await user.click(summary.closest('[role="button"]')!)
+    expect(await screen.findByText('Cancelled by system')).toBeInTheDocument()
   })
 
   it('renders warning activity with warning badge and message', async () => {
@@ -602,6 +634,6 @@ describe('Execution Activity Log', () => {
 
     expect(screen.getByText('go test ./...')).toBeInTheDocument()
     expect(screen.queryByText(/Permission rejected/)).not.toBeInTheDocument()
-    expect(screen.queryByText('Permission Required')).not.toBeInTheDocument()
+    expect(screen.queryByText('Permission request required')).not.toBeInTheDocument()
   })
 })

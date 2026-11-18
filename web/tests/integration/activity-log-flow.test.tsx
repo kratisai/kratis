@@ -90,7 +90,7 @@ describe('Activity Log Multi-Client Sync Flow', () => {
 
     // Assert: Permission prompt appears with command and buttons
     await waitFor(() => {
-      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+      expect(screen.getByText('Permission request required')).toBeInTheDocument()
     })
     expect(screen.getByText(/rm -rf \/tmp\/build/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Allow once/i })).toBeInTheDocument()
@@ -111,8 +111,10 @@ describe('Activity Log Multi-Client Sync Flow', () => {
 
     // Assert: Permission prompt shows resolved state
     await waitFor(() => {
-      expect(screen.getByText(/Permission approved/)).toBeInTheDocument()
+      expect(screen.queryByText('Permission request required')).not.toBeInTheDocument()
     })
+    expect(screen.getByText('rm -rf /tmp/build')).toBeInTheDocument()
+    expect(screen.queryByText(/Permission approved/)).not.toBeInTheDocument()
     // The approve/reject buttons should no longer be visible
     expect(screen.queryByRole('button', { name: /Allow once/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Reject/i })).not.toBeInTheDocument()
@@ -134,7 +136,7 @@ describe('Activity Log Multi-Client Sync Flow', () => {
 
     // Assert: Permission prompt appears
     await waitFor(() => {
-      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+      expect(screen.getByText('Permission request required')).toBeInTheDocument()
     })
     expect(screen.getByText(/npm install/)).toBeInTheDocument()
 
@@ -143,8 +145,10 @@ describe('Activity Log Multi-Client Sync Flow', () => {
 
     // Assert: Prompt shows resolved state without action buttons
     await waitFor(() => {
-      expect(screen.getByText(/Permission approved/)).toBeInTheDocument()
+      expect(screen.queryByText('Permission request required')).not.toBeInTheDocument()
     })
+    expect(screen.getByText('npm install')).toBeInTheDocument()
+    expect(screen.queryByText(/Permission approved/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Allow once/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Reject/i })).not.toBeInTheDocument()
   })
@@ -165,7 +169,7 @@ describe('Activity Log Multi-Client Sync Flow', () => {
 
     // Assert: Permission prompt appears
     await waitFor(() => {
-      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+      expect(screen.getByText('Permission request required')).toBeInTheDocument()
     })
 
     // Trigger execution_permission_resolved with approved=false
@@ -173,8 +177,10 @@ describe('Activity Log Multi-Client Sync Flow', () => {
 
     // Assert: Prompt shows rejected state
     await waitFor(() => {
-      expect(screen.getByText(/Permission rejected/)).toBeInTheDocument()
+      expect(screen.queryByText('Permission request required')).not.toBeInTheDocument()
     })
+    expect(screen.getByText('rm -rf /')).toBeInTheDocument()
+    expect(screen.queryByText(/Permission rejected/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Allow once/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Reject$/ })).not.toBeInTheDocument()
   })
@@ -193,8 +199,9 @@ describe('Activity Log Multi-Client Sync Flow', () => {
     triggerMockPermissionResolved(ws, EXECUTION_ID, 'burst command', true, 'user-2', 'Jane Smith')
 
     await waitFor(() => {
-      expect(screen.getByText(/Permission approved/)).toBeInTheDocument()
+      expect(screen.getByText('burst command')).toBeInTheDocument()
     })
+    expect(screen.queryByText(/Permission approved/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Allow once/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Reject/i })).not.toBeInTheDocument()
   })

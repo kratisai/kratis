@@ -8,16 +8,18 @@ import {
   HelpCircle,
   ListTodo,
   Loader2,
+  ShieldCheck,
   Terminal,
   XCircle,
 } from 'lucide-react'
-import { memo, type ReactNode, useEffect, useMemo, useRef } from 'react'
+import { type KeyboardEvent, memo, type ReactNode, useEffect, useMemo, useRef } from 'react'
 
 import type {
   Activity,
   CommandExecutionActivity,
   ElicitationActivity,
   ErrorActivity,
+  HitlResolverKind,
   MessageActivity,
   PlanActivity,
   ThinkingActivity,
@@ -192,6 +194,15 @@ const ActivityItem = memo(function ActivityItem({ activity, executionId }: Activ
   }
 })
 
+/**
+ * A resolved approval keeps the same collapsible shell as every other activity.
+ * The row shows the command; how it was resolved lives in the expanded body.
+ */
+interface ApprovalResolution {
+  detail: string
+  titlePrefix?: string
+}
+
 function ActivityItemShell({
   activity,
   content,
@@ -214,34 +225,46 @@ function ActivityItemShell({
     toggleCollapsed(executionId, activity.id)
   }
 
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    toggle()
+  }
+
   if (collapsed) {
     return (
-      <button
-        className="hover:bg-muted/50 flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left text-sm"
+      <div
+        aria-expanded={false}
+        className="hover:bg-muted/50 flex w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1 text-left text-sm select-text"
         onClick={toggle}
+        onKeyDown={onKeyDown}
+        role="button"
+        tabIndex={0}
         title={title}
-        type="button"
       >
         {chevron}
         {icon}
         <span className="min-w-0 flex-1 truncate">{title}</span>
         {trailing}
-      </button>
+      </div>
     )
   }
 
   return (
     <div className="border-border/50 min-w-0 rounded border p-2">
-      <button
-        className="flex w-full min-w-0 items-center gap-2 text-left text-sm"
+      <div
+        aria-expanded
+        className="flex w-full min-w-0 cursor-pointer items-center gap-2 text-left text-sm select-text"
         onClick={toggle}
-        type="button"
+        onKeyDown={onKeyDown}
+        role="button"
+        tabIndex={0}
       >
         {chevron}
         {icon}
         <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
         {trailing}
-      </button>
+      </div>
       {content}
     </div>
   )
@@ -280,34 +303,46 @@ function ActivityTextShell({
     toggleCollapsed(executionId, activity.id)
   }
 
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    toggle()
+  }
+
   if (collapsed) {
     return (
-      <button
+      <div
+        aria-expanded={false}
         aria-label="Expand"
-        className="hover:bg-muted/50 flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left"
+        className="hover:bg-muted/50 flex w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1 text-left select-text"
         onClick={toggle}
+        onKeyDown={onKeyDown}
+        role="button"
+        tabIndex={0}
         title={summary}
-        type="button"
       >
         {chevron}
         {icon}
         <span className={cn('min-w-0 flex-1 truncate', className)}>{summary}</span>
-      </button>
+      </div>
     )
   }
 
   return (
     <div className="border-border/50 min-w-0 rounded border p-2">
       <div className="flex w-full min-w-0 items-start gap-2">
-        <button
+        <div
+          aria-expanded
           aria-label="Collapse"
-          className="mt-0.5 flex shrink-0 items-center gap-1 hover:opacity-80"
+          className="mt-0.5 flex shrink-0 cursor-pointer items-center gap-1 select-text hover:opacity-80"
           onClick={toggle}
-          type="button"
+          onKeyDown={onKeyDown}
+          role="button"
+          tabIndex={0}
         >
           {chevron}
           {icon}
-        </button>
+        </div>
         <div
           className={cn('min-w-0 flex-1 break-words whitespace-pre-wrap select-text', className)}
         >
@@ -318,32 +353,69 @@ function ActivityTextShell({
   )
 }
 
-/**
- * A resolved approval keeps the resolution label while using the same collapsible
- * shell as every other activity. Pending approvals render the interactive prompt.
- */
-function approvalTitle(activity: CommandExecutionActivity | ToolExecutionActivity): string {
+function approvalResolution(
+  activity: CommandExecutionActivity | ToolExecutionActivity,
+): ApprovalResolution | undefined {
   const resolution =
     activity.hitlResponse ??
     (activity.approved === true ? 'approved' : activity.approved === false ? 'declined' : undefined)
-  const timedOut = resolution === 'cancelled' && activity.resolvedBy?.kind === 'timeout'
-  const autoApproved = resolution === 'approved' && activity.resolvedBy?.kind === 'policy'
-  const label = autoApproved
-    ? 'Auto-approved'
-    : resolution === 'approved'
-      ? 'Permission approved'
-      : timedOut
-        ? 'Permission request timed out — no response'
-        : resolution === 'cancelled'
-          ? 'Permission request cancelled'
-          : resolution === 'declined'
-            ? 'Permission rejected'
-            : activity.state === 'error'
-              ? 'Command failed'
-              : activity.state === 'active'
-                ? 'Running command'
-                : 'Command executed'
-  return `${label}: ${activityCommand(activity)}`
+  if (resolution === undefined) return undefined
+  const resolver = activity.resolvedBy?.kind
+  switch (resolution) {
+    case 'answered':
+      return undefined
+    case 'approved':
+      return {
+        detail: resolver === 'policy' ? 'Auto-approved' : `Approved${byResolverSuffix(resolver)}`,
+      }
+    case 'cancelled':
+      return resolver === 'timeout'
+        ? { detail: 'No response', titlePrefix: 'Permission request timed out' }
+        : {
+            detail: `Cancelled${byResolverSuffix(resolver)}`,
+            titlePrefix: 'Permission request cancelled',
+          }
+    case 'declined':
+      return { detail: `Rejected${byResolverSuffix(resolver)}` }
+  }
+}
+
+function ApprovalResolutionNote({
+  activity,
+}: {
+  activity: CommandExecutionActivity | ToolExecutionActivity
+}) {
+  const resolution = approvalResolution(activity)
+  if (resolution === undefined) return null
+  return (
+    <div className="text-muted-foreground mt-1 flex items-center gap-1 text-xs">
+      <ShieldCheck className="h-3 w-3 shrink-0" />
+      <span>{resolution.detail}</span>
+    </div>
+  )
+}
+
+function approvalTitle(activity: CommandExecutionActivity | ToolExecutionActivity): string {
+  const resolution = approvalResolution(activity)
+  return resolution?.titlePrefix
+    ? `${resolution.titlePrefix}: ${activityCommand(activity)}`
+    : activityTitle(activity)
+}
+
+function byResolverSuffix(resolver: HitlResolverKind | undefined): string {
+  switch (resolver) {
+    case 'policy':
+      return ' by policy'
+    case 'rule':
+      return ' by rule'
+    case 'system':
+      return ' by system'
+    case 'timeout':
+      return ''
+    case 'user':
+      return ' by user'
+  }
+  return ''
 }
 
 function CommandExecutionActivityItem({
@@ -361,10 +433,15 @@ function CommandExecutionActivityItem({
     <ActivityItemShell
       activity={activity}
       content={
-        activity.detail?.output ? (
-          <div className="mt-1 overflow-x-auto rounded bg-zinc-950 p-2 font-mono text-xs text-zinc-100">
-            <div className="whitespace-pre">{activity.detail.output}</div>
-          </div>
+        hasApprovalResolution(activity) || activity.detail?.output ? (
+          <>
+            <ApprovalResolutionNote activity={activity} />
+            {activity.detail?.output && (
+              <div className="mt-1 overflow-x-auto rounded bg-zinc-950 p-2 font-mono text-xs text-zinc-100">
+                <div className="whitespace-pre">{activity.detail.output}</div>
+              </div>
+            )}
+          </>
         ) : undefined
       }
       executionId={executionId}
@@ -454,7 +531,7 @@ function ErrorActivityItem({
 function hasApprovalResolution(
   activity: CommandExecutionActivity | ToolExecutionActivity,
 ): boolean {
-  return activity.hitlResponse !== undefined || activity.approved !== undefined
+  return approvalResolution(activity) !== undefined
 }
 
 function MessageActivityItem({
@@ -572,12 +649,14 @@ function ToolExecutionActivityItem({
     <ActivityItemShell
       activity={activity}
       content={
-        (activity.thought ||
+        (hasApprovalResolution(activity) ||
+          activity.thought ||
           activity.detail?.diff ||
           activity.detail?.output ||
           activity.result ||
           activity.error) && (
           <div className="mt-1 space-y-1 pl-5">
+            <ApprovalResolutionNote activity={activity} />
             {activity.thought && (
               <p className="text-muted-foreground text-xs break-words">{activity.thought}</p>
             )}

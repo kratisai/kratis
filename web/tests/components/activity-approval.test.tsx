@@ -621,7 +621,7 @@ describe('ActivityApproval', () => {
   it('bounds the permission card width without outer horizontal scroll', () => {
     render(<ActivityApproval activity={pendingActivity()} executionId="exec-1" />)
 
-    const heading = screen.getByText('Permission Required')
+    const heading = screen.getByText('Permission request required')
     const card = heading.closest('[data-slot="card"]')
     expect(card).toHaveClass('min-w-0')
     expect(card).not.toHaveClass('overflow-x-auto')

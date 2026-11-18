@@ -110,7 +110,7 @@ describe('Execution Activity Stream with HITL', () => {
 
     // Assert HITL prompt appears
     await waitFor(() => {
-      expect(screen.getByText('Permission Required')).toBeInTheDocument()
+      expect(screen.getByText('Permission request required')).toBeInTheDocument()
     })
     expect(screen.getByText(/rm -rf \/tmp\/build/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Allow once/i })).toBeInTheDocument()
@@ -124,8 +124,10 @@ describe('Execution Activity Stream with HITL', () => {
 
     // Assert resolved state
     await waitFor(() => {
-      expect(screen.getByText(/Permission approved/)).toBeInTheDocument()
+      expect(screen.queryByText('Permission request required')).not.toBeInTheDocument()
     })
+    expect(screen.getByText('rm -rf /tmp/build')).toBeInTheDocument()
+    expect(screen.queryByText(/Permission approved/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Allow once/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Reject/i })).not.toBeInTheDocument()
 

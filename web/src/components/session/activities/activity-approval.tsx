@@ -124,7 +124,7 @@ export function ActivityApproval({ activity, executionId }: ActivityApprovalProp
     <Card className="min-w-0 border-amber-500/50 bg-amber-50 dark:bg-amber-950/20" ref={cardRef}>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium text-amber-800 dark:text-amber-200">
-          Permission Required
+          Permission request required
         </CardTitle>
       </CardHeader>
       <CardContent className="min-w-0 space-y-3">
