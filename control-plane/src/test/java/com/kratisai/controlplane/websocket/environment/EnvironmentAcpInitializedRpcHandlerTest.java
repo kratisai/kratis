@@ -119,6 +119,24 @@ class EnvironmentAcpInitializedRpcHandlerTest {
     }
 
     @Test
+    void handle_withFailedExecutionAndNoRelaunch_skipsTaskPromptDispatch() {
+        when(sessionRegistry.getEnvironmentId(sessionId)).thenReturn(Optional.of(envId));
+        SandboxExecution execution = createExecution();
+        execution.setStatus(SandboxExecutionStatus.FAILED);
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.AcpInitialized params = new EnvironmentRpcPayload.AcpInitialized(
+                "acp-sess-3", "claude", "1.0", executionId.toString(), Boolean.FALSE);
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.AcpInitialized.METHOD, objectMapper.valueToTree(params), null);
+
+        handler.handle(sessionId, request, params);
+
+        verify(sandboxExecutionService, never()).dispatchAcpPrompt(eq(execution));
+        verify(eventPublisher).publishEvent(any(SandboxExecutionAcpInitializedEvent.class));
+    }
+
+    @Test
     void handle_withUnregisteredSession_throwsRegistrationError() {
         when(sessionRegistry.getEnvironmentId(sessionId)).thenReturn(Optional.empty());
 

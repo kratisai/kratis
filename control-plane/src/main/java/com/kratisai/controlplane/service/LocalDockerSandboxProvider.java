@@ -16,9 +16,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -475,16 +475,48 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
         }
     }
 
-    private static final AtomicInteger NETWORK_COUNTER = new AtomicInteger(1);
+    private static final String SANDBOX_SUBNET_PREFIX = "10.210.";
+    private static final int SANDBOX_SUBNET_POOL_SIZE = 256;
+    private static final String SUBNET_INSPECT_FORMAT = "{{range .IPAM.Config}}{{.Subnet}} {{end}}";
 
+    /**
+     * Allocates the first free /24 in the sandbox pool from the daemon's live state. A counter
+     * cannot work here: it resets with the JVM and is per-process, while networks outlive a
+     * control-plane restart and several instances (or a test JVM) may share one daemon.
+     */
     private void createSandboxNetwork(String envId, String networkName) {
-        int idx = (NETWORK_COUNTER.getAndIncrement() & 0x7FFF) % 250 + 1;
-        List<String> command = List.of(
+        Set<String> attempted = new LinkedHashSet<>();
+        RuntimeException lastOverlap = null;
+        List<long[]> used = listUsedIpv4Ranges();
+        for (int attempt = 0; attempt < SANDBOX_SUBNET_POOL_SIZE; attempt++) {
+            String subnet = nextFreeSandboxSubnet(attempted, used);
+            if (subnet == null) {
+                break;
+            }
+            attempted.add(subnet);
+            try {
+                executeCommand("Creating docker network", networkCreateCommand(envId, networkName, subnet));
+                return;
+            } catch (RuntimeException createFailure) {
+                // Another process may have claimed the same /24 between listing and creating.
+                if (!isSubnetPoolOverlap(createFailure)) {
+                    throw createFailure;
+                }
+                lastOverlap = createFailure;
+                used = listUsedIpv4Ranges();
+            }
+        }
+        throw new IllegalStateException(
+                "No free /24 in " + SANDBOX_SUBNET_PREFIX + "0.0/16 for sandbox network " + networkName, lastOverlap);
+    }
+
+    private List<String> networkCreateCommand(String envId, String networkName, String subnet) {
+        return List.of(
                 "docker",
                 "network",
                 "create",
                 "--subnet",
-                "10.210." + idx + ".0/24",
+                subnet,
                 "--label",
                 "kratis.instance.id=" + instanceId,
                 "--label",
@@ -492,7 +524,118 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                 "--label",
                 "kratis.role=network",
                 networkName);
-        executeCommand("Creating docker network", command);
+    }
+
+    private String nextFreeSandboxSubnet(Set<String> attempted, List<long[]> used) {
+        for (int idx = 0; idx < SANDBOX_SUBNET_POOL_SIZE; idx++) {
+            String candidate = SANDBOX_SUBNET_PREFIX + idx + ".0/24";
+            if (attempted.contains(candidate)) {
+                continue;
+            }
+            long[] candidateRange = Objects.requireNonNull(ipv4Range(candidate));
+            if (used.stream().noneMatch(range -> rangesOverlap(candidateRange, range))) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private List<long[]> listUsedIpv4Ranges() {
+        try {
+            ProcessExecutor.ProcessResult listed =
+                    processExecutor.execute(List.of("docker", "network", "ls", "--format", "{{.ID}}"), null, null);
+            if (listed.exitCode() != 0) {
+                throw new IllegalStateException("Docker network listing failed (exit " + listed.exitCode() + ")");
+            }
+            List<String> ids = splitWords(new String(listed.output()));
+            if (ids.isEmpty()) {
+                return List.of();
+            }
+            List<String> command =
+                    new ArrayList<>(List.of("docker", "network", "inspect", "--format", SUBNET_INSPECT_FORMAT));
+            command.addAll(ids);
+            ProcessExecutor.ProcessResult inspected = processExecutor.execute(command, null, null);
+            if (inspected.exitCode() == 0) {
+                return parseIpv4Ranges(new String(inspected.output()));
+            }
+            // A concurrently removed network fails batch inspect; re-inspect individually and skip vanished IDs.
+            List<long[]> ranges = new ArrayList<>();
+            for (String id : ids) {
+                ProcessExecutor.ProcessResult single = processExecutor.execute(
+                        List.of("docker", "network", "inspect", "--format", SUBNET_INSPECT_FORMAT, id), null, null);
+                if (single.exitCode() == 0) {
+                    ranges.addAll(parseIpv4Ranges(new String(single.output())));
+                }
+            }
+            return ranges;
+        } catch (IOException e) {
+            throw new IllegalStateException("Docker network listing failed", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Docker network listing interrupted", e);
+        }
+    }
+
+    private static List<long[]> parseIpv4Ranges(String output) {
+        List<long[]> ranges = new ArrayList<>();
+        for (String subnet : splitWords(output)) {
+            long[] range = ipv4Range(subnet);
+            if (range != null) {
+                ranges.add(range);
+            }
+        }
+        return ranges;
+    }
+
+    private static List<String> splitWords(String output) {
+        String trimmed = output.trim();
+        return trimmed.isEmpty() ? List.of() : List.of(trimmed.split("\\s+"));
+    }
+
+    /** Inclusive address range of an IPv4 CIDR; null for anything else, including IPv6 entries. */
+    static long[] ipv4Range(String cidr) {
+        int slash = cidr.indexOf('/');
+        if (slash < 0) {
+            return null;
+        }
+        String[] octets = cidr.substring(0, slash).split("\\.");
+        if (octets.length != 4) {
+            return null;
+        }
+        long address = 0;
+        for (String octet : octets) {
+            int value;
+            try {
+                value = Integer.parseInt(octet);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+            if (value < 0 || value > 255) {
+                return null;
+            }
+            address = (address << 8) | value;
+        }
+        int prefix;
+        try {
+            prefix = Integer.parseInt(cidr.substring(slash + 1));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        if (prefix < 0 || prefix > 32) {
+            return null;
+        }
+        long mask = prefix == 0 ? 0 : (0xFFFFFFFFL << (32 - prefix)) & 0xFFFFFFFFL;
+        long network = address & mask;
+        return new long[] {network, network | (~mask & 0xFFFFFFFFL)};
+    }
+
+    private static boolean rangesOverlap(long[] left, long[] right) {
+        return left[0] <= right[1] && right[0] <= left[1];
+    }
+
+    private static boolean isSubnetPoolOverlap(Throwable failure) {
+        String message = failure.getMessage();
+        return message != null && message.contains("Pool overlaps with other one on this address space");
     }
 
     private void spawnDindSibling(String envId, String networkName, String dindName) {

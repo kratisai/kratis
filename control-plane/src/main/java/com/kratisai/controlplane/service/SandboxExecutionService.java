@@ -223,6 +223,7 @@ public class SandboxExecutionService {
                 throw new RuntimeException("Failed to provision environment", e);
             }
         } else {
+            dispatchExecutor.execute(() -> finalizePriorEnvironmentKeys(environment.getId(), execution.getId()));
             dispatchExecutionIfConnected(execution, environment);
         }
 
@@ -391,31 +392,19 @@ public class SandboxExecutionService {
         }
         String taskPrompt =
                 ActiveTaskPrompt.buildTaskPrompt(canvas.getContent(), sandboxProperties.getActiveTaskFile());
-        dispatchAcpPrompt(execution, taskPrompt, true, false);
+        dispatchAcpPrompt(execution, taskPrompt, true, false, false);
     }
 
     public void dispatchSteeringPrompt(SandboxExecution execution, String promptText) {
-        dispatchAcpPrompt(execution, promptText, false, false);
+        dispatchAcpPrompt(execution, promptText, false, false, true);
     }
 
-    /** Prefix prepended to a recovery prompt dispatched after a fatal execution error. */
-    static final String RECOVERY_PROMPT_PREFIX = """
-            ### Session Recovery
-
-            The previous agent session in this workspace ended unexpectedly. A fresh agent \
-            session has been started in the same checkout. Before continuing, inspect the \
-            current state yourself (`git status`, `git diff`, recent files) to determine what \
-            was already completed, then continue with the request below.
-
-            """;
-
     private void dispatchAcpPrompt(
-            SandboxExecution execution, String promptText, boolean failOnError, boolean relaunch) {
+            SandboxExecution execution, String promptText, boolean failOnError, boolean relaunch, boolean isSteering) {
         UUID executionId = execution.getId();
         UUID environmentId = execution.getEnvironment().getId();
         String promptId = UUID.randomUUID().toString();
-        activePromptIds.put(executionId, promptId);
-        dispatchExecutor.execute(() -> {
+        Runnable task = () -> {
             try {
                 EnvironmentConnectorResult.AcpPrompt result = environmentRpcClient.request(
                         environmentId,
@@ -423,7 +412,7 @@ public class SandboxExecutionService {
                                 promptText != null ? promptText : "",
                                 executionId.toString(),
                                 promptId,
-                                failOnError ? null : Boolean.TRUE,
+                                isSteering ? Boolean.TRUE : null,
                                 relaunch ? Boolean.TRUE : null));
                 if (result == null || result.status() == PromptStatus.FAILED) {
                     handlePromptDispatchFailure(
@@ -437,7 +426,7 @@ public class SandboxExecutionService {
                             environmentId,
                             executionId,
                             promptId,
-                            relaunch ? " (relaunched agent session)" : "");
+                            relaunch ? " (reattached/relaunched agent session)" : "");
                 }
             } catch (EnvironmentRpcClient.EnvironmentRpcException e) {
                 logger.warn(
@@ -461,7 +450,21 @@ public class SandboxExecutionService {
                         e.getClass().getSimpleName(),
                         e.getMessage());
             }
-        });
+        };
+
+        // Run after commit so any fast PromptFailed callback sees the committed RUNNING status.
+        if (isSynchronizationActive()) {
+            registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    activePromptIds.put(executionId, promptId);
+                    dispatchExecutor.execute(task);
+                }
+            });
+        } else {
+            activePromptIds.put(executionId, promptId);
+            dispatchExecutor.execute(task);
+        }
     }
 
     private void handlePromptDispatchFailure(UUID executionId, String message, boolean failOnError) {
@@ -508,6 +511,8 @@ public class SandboxExecutionService {
         boolean recovering = execution.getStatus() == SandboxExecutionStatus.FAILED;
         touchExecutionGraph(execution);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
+        execution.setCompletedAt(null);
+        execution.setExitCode(null);
         sandboxExecutionRepository.save(execution);
         eventPublisher.publishEvent(
                 new ExecutionStatusChangedEvent(chat.getTeam().getId(), chatId, executionId));
@@ -515,9 +520,9 @@ public class SandboxExecutionService {
         String compiledPrompt = compileSteeringPrompt(request);
         if (recovering) {
             if (logger.isInfoEnabled()) {
-                logger.info("Recovering failed execution {} with fresh agent session", executionId);
+                logger.info("Recovering failed execution {} with steering prompt", executionId);
             }
-            dispatchAcpPrompt(execution, RECOVERY_PROMPT_PREFIX + compiledPrompt, true, true);
+            dispatchAcpPrompt(execution, compiledPrompt, true, true, true);
         } else {
             dispatchSteeringPrompt(execution, compiledPrompt);
         }
@@ -640,9 +645,18 @@ public class SandboxExecutionService {
         transactionTemplate.executeWithoutResult(status -> {
             SandboxExecution execution =
                     sandboxExecutionRepository.findById(executionId).orElse(null);
-            if (execution == null
-                    || execution.getStatus() == SandboxExecutionStatus.COMPLETED
-                    || execution.getStatus() == SandboxExecutionStatus.FAILED) {
+            if (execution == null || execution.getStatus() == SandboxExecutionStatus.COMPLETED) {
+                return;
+            }
+            if (execution.getStatus() == SandboxExecutionStatus.FAILED) {
+                if (execution.getEnvironment() != null) {
+                    eventPublisher.publishEvent(new SandboxExecutionSuspendedEvent(
+                            execution.getChat().getTeam().getId(),
+                            executionId,
+                            execution.getEnvironment().getId()));
+                } else {
+                    dispatchExecutor.execute(() -> finalizeUsageAndRevokeKey(executionId));
+                }
                 return;
             }
             activePromptIds.remove(executionId);
@@ -878,9 +892,12 @@ public class SandboxExecutionService {
                     return execution;
                 })
                 .orElse(null));
-        if (latest != null && latest.getStatus() == SandboxExecutionStatus.IDLE) {
+        if (latest != null
+                && (latest.getStatus() == SandboxExecutionStatus.IDLE
+                        || latest.getStatus() == SandboxExecutionStatus.FAILED)) {
             logger.info(
-                    "Relaunching agent for paused execution {} on resumed environment {}",
+                    "Relaunching agent for {} execution {} on resumed environment {}",
+                    latest.getStatus(),
                     latest.getId(),
                     event.environmentId());
             // Credentials live only in the connector's memory; the relaunched sandbox needs them too.
@@ -962,6 +979,11 @@ public class SandboxExecutionService {
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onSandboxExecutionCompleteEvent(SandboxExecutionCompleteEvent event) {
+        // IDLE and FAILED executions remain steerable while the sandbox is awake; their virtual key
+        // is revoked when the sandbox suspends/terminates or the execution finishes terminally.
+        if (event.status() != SandboxExecutionStatus.COMPLETED && event.status() != SandboxExecutionStatus.UNKNOWN) {
+            return;
+        }
         // FinalizeUsage blocks for 3+LiteLLM seconds. Don't block the sidecar-rpc
         // thread.
         dispatchExecutor.execute(() -> finalizeUsageAndRevokeKey(event.executionId()));
@@ -969,7 +991,24 @@ public class SandboxExecutionService {
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onSandboxExecutionSuspendedEvent(SandboxExecutionSuspendedEvent event) {
-        dispatchExecutor.execute(() -> finalizeUsageAndRevokeKey(event.executionId()));
+        dispatchExecutor.execute(() -> {
+            Set<UUID> executionIds = new LinkedHashSet<>();
+            executionIds.add(event.executionId());
+            executionIds.addAll(sandboxExecutionRepository.findExecutionIdsWithActiveVirtualKeysByEnvironmentId(
+                    event.environmentId()));
+            for (UUID executionId : executionIds) {
+                finalizeUsageAndRevokeKey(executionId);
+            }
+        });
+    }
+
+    private void finalizePriorEnvironmentKeys(UUID environmentId, UUID activeExecutionId) {
+        for (UUID executionId :
+                sandboxExecutionRepository.findExecutionIdsWithActiveVirtualKeysByEnvironmentId(environmentId)) {
+            if (!executionId.equals(activeExecutionId)) {
+                finalizeUsageAndRevokeKey(executionId);
+            }
+        }
     }
 
     private void finalizeUsageAndRevokeKey(UUID executionId) {

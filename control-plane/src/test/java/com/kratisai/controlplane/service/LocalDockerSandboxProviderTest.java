@@ -204,6 +204,145 @@ class LocalDockerSandboxProviderTest {
     }
 
     @Test
+    void testSpawnSandboxAllocatesSubnetAroundNetworksAlreadyOnTheDaemon() throws Exception {
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (isNetworkIdListing(cmd)) {
+                return result(0, "net-a net-b");
+            }
+            if (isSubnetInspection(cmd)) {
+                return result(0, "10.210.0.0/24 10.210.1.0/24 10.210.2.128/25 172.18.0.0/16\n");
+            }
+            return defaultMockResult(cmd);
+        });
+
+        provider.spawnSandbox(newEnvironment(UUID.randomUUID()));
+
+        verify(mockProcessExecutor)
+                .execute(
+                        argThat(cmd ->
+                                cmd.contains("create") && cmd.contains("network") && cmd.contains("10.210.3.0/24")),
+                        any(),
+                        any());
+    }
+
+    @Test
+    void testSpawnSandboxRetriesWhenTheSubnetIsClaimedConcurrently() throws Exception {
+        AtomicInteger creates = new AtomicInteger();
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (isNetworkIdListing(cmd) || isSubnetInspection(cmd)) {
+                return result(0, "");
+            }
+            if (cmd.contains("create") && cmd.contains("network")) {
+                return creates.getAndIncrement() == 0
+                        ? result(
+                                1,
+                                "Error response from daemon: invalid pool request:"
+                                        + " Pool overlaps with other one on this address space")
+                        : result(0, "network-id");
+            }
+            return defaultMockResult(cmd);
+        });
+
+        provider.spawnSandbox(newEnvironment(UUID.randomUUID()));
+
+        assertThat(creates).hasValue(2);
+        verify(mockProcessExecutor)
+                .execute(
+                        argThat(cmd ->
+                                cmd.contains("create") && cmd.contains("network") && cmd.contains("10.210.0.0/24")),
+                        any(),
+                        any());
+        verify(mockProcessExecutor)
+                .execute(
+                        argThat(cmd ->
+                                cmd.contains("create") && cmd.contains("network") && cmd.contains("10.210.1.0/24")),
+                        any(),
+                        any());
+    }
+
+    @Test
+    void testSpawnSandboxFailsWhenTheSandboxSubnetPoolIsExhausted() throws Exception {
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (isNetworkIdListing(cmd)) {
+                return result(0, "net-a");
+            }
+            if (isSubnetInspection(cmd)) {
+                return result(0, "10.210.0.0/16\n");
+            }
+            return defaultMockResult(cmd);
+        });
+
+        assertThatThrownBy(() -> provider.spawnSandbox(newEnvironment(UUID.randomUUID())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("No free /24");
+
+        verify(mockProcessExecutor, never())
+                .execute(argThat(cmd -> cmd.contains("create") && cmd.contains("network")), any(), any());
+    }
+
+    @Test
+    void testSpawnSandboxToleratesNetworkDeletedBetweenListAndInspect() throws Exception {
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (isNetworkIdListing(cmd)) {
+                return result(0, "net-live net-gone");
+            }
+            if (isSubnetInspection(cmd)) {
+                if (cmd.size() > 6) {
+                    return result(1, "Error response from daemon: network net-gone not found");
+                }
+                if (cmd.contains("net-live")) {
+                    return result(0, "10.210.0.0/24\n");
+                }
+                return result(1, "Error response from daemon: network net-gone not found");
+            }
+            return defaultMockResult(cmd);
+        });
+
+        provider.spawnSandbox(newEnvironment(UUID.randomUUID()));
+
+        verify(mockProcessExecutor)
+                .execute(
+                        argThat(cmd ->
+                                cmd.contains("create") && cmd.contains("network") && cmd.contains("10.210.1.0/24")),
+                        any(),
+                        any());
+    }
+
+    @Test
+    void testIpv4RangeParsesCidrsAndIgnoresOtherAddressFamilies() {
+        assertThat(LocalDockerSandboxProvider.ipv4Range("10.210.3.0/24")).containsExactly(0x0AD20300L, 0x0AD203FFL);
+        assertThat(LocalDockerSandboxProvider.ipv4Range("10.210.0.0/16")).containsExactly(0x0AD20000L, 0x0AD2FFFFL);
+        assertThat(LocalDockerSandboxProvider.ipv4Range("fd00::/64")).isNull();
+        assertThat(LocalDockerSandboxProvider.ipv4Range("10.210.3.0")).isNull();
+        assertThat(LocalDockerSandboxProvider.ipv4Range("10.210.3.0/33")).isNull();
+        assertThat(LocalDockerSandboxProvider.ipv4Range("10.210.3.0/not-a-prefix"))
+                .isNull();
+    }
+
+    private static ProcessExecutor.ProcessResult result(int exitCode, String output) {
+        return new ProcessExecutor.ProcessResult(exitCode, output.getBytes());
+    }
+
+    private static boolean isNetworkIdListing(List<String> cmd) {
+        return cmd.size() == 5
+                && cmd.get(0).equals("docker")
+                && cmd.get(1).equals("network")
+                && cmd.get(2).equals("ls");
+    }
+
+    private static boolean isSubnetInspection(List<String> cmd) {
+        return cmd.size() >= 6
+                && cmd.get(0).equals("docker")
+                && cmd.get(1).equals("network")
+                && cmd.get(2).equals("inspect")
+                && cmd.get(4).equals("{{range .IPAM.Config}}{{.Subnet}} {{end}}");
+    }
+
+    @Test
     void testSpawnSandboxUsesConfiguredRunnerImage() throws Exception {
         LocalDockerSandboxProvider customImageProvider = sandboxProvider(
                 mockProcessExecutor,
@@ -347,6 +486,12 @@ class LocalDockerSandboxProviderTest {
 
         when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
             List<String> cmd = invocation.getArgument(0);
+            if (isNetworkIdListing(cmd)) {
+                return result(0, "");
+            }
+            if (isSubnetInspection(cmd)) {
+                return result(0, "");
+            }
             if ((cmd.size() >= 5 && cmd.get(0).equals("docker") && cmd.get(1).equals("rm"))
                     || (cmd.size() >= 4
                             && cmd.get(0).equals("docker")
@@ -488,8 +633,13 @@ class LocalDockerSandboxProviderTest {
     void testSpawnSandboxFailureExitCode() throws Exception {
         ExecutionEnvironment env = newEnvironment(UUID.randomUUID());
 
-        when(mockProcessExecutor.execute(any(), any(), any()))
-                .thenReturn(new ProcessExecutor.ProcessResult(1, "error message".getBytes()));
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (isNetworkIdListing(cmd) || isSubnetInspection(cmd)) {
+                return result(0, "");
+            }
+            return result(1, "error message");
+        });
 
         assertThatThrownBy(() -> provider.spawnSandbox(env))
                 .isInstanceOf(RuntimeException.class)
@@ -500,7 +650,13 @@ class LocalDockerSandboxProviderTest {
     void testSpawnSandboxFailureException() throws Exception {
         ExecutionEnvironment env = newEnvironment(UUID.randomUUID());
 
-        when(mockProcessExecutor.execute(any(), any(), any())).thenThrow(new IOException("Simulated IO error"));
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (isNetworkIdListing(cmd) || isSubnetInspection(cmd)) {
+                return result(0, "");
+            }
+            throw new IOException("Simulated IO error");
+        });
 
         assertThatThrownBy(() -> provider.spawnSandbox(env))
                 .isInstanceOf(RuntimeException.class)

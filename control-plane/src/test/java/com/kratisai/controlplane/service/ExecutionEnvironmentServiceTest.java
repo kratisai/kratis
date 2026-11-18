@@ -264,6 +264,42 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
+    void suspendAfterLostRuntime_sealsFailedExecutionsWithoutChangingStatus() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        SandboxExecution failed = createRunningExecution(env);
+        failed.setStatus(SandboxExecutionStatus.FAILED);
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
+                .thenReturn(Optional.of(failed));
+
+        executionEnvironmentService.suspendAfterLostRuntime(env);
+
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, atLeastOnce()).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getAllValues())
+                .filteredOn(SandboxExecutionSuspendedEvent.class::isInstance)
+                .hasSize(1)
+                .first()
+                .isEqualTo(new SandboxExecutionSuspendedEvent(TEAM_ID, EXECUTION_ID, ENV_ID));
+        assertThat(failed.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+    }
+
+    @Test
+    void deleteEnvironment_revokesActiveVirtualKeysBeforeDeleting() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setType(ExecutionEnvironmentType.CONNECTOR);
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(executionEnvironmentRepository.findByTeamIdAndId(TEAM_ID, ENV_ID)).thenReturn(Optional.of(env));
+        when(sandboxExecutionRepository.findActiveVirtualKeysByEnvironmentId(ENV_ID))
+                .thenReturn(List.of("sk-abandoned-connector-key"));
+
+        executionEnvironmentService.deleteEnvironment(USER_ID, TEAM_ID, ENV_ID);
+
+        verify(virtualKeyService).revokeKey("sk-abandoned-connector-key");
+        verify(executionEnvironmentRepository).delete(env);
+    }
+
+    @Test
     void sleepEnvironment_withSuspendedProviderFailure_returns500AndKeepsEnvironment() {
         ExecutionEnvironment env = createSandboxEnvironment();
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
@@ -673,6 +709,26 @@ class ExecutionEnvironmentServiceTest {
                 .isEqualTo("Sandbox resources found to have been unexpectedly purged");
         assertThat(activityCaptor.getValue().getStatus()).isEqualTo(ActivityStatus.FAILED);
         assertThat(activityCaptor.getValue().getActivityType()).isEqualTo(ActivityType.ERROR);
+    }
+
+    @Test
+    void reconcilePurgedEnvironment_withFailedExecution_publishesSuspendedEvent() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        env.setStatus(EnvironmentStatus.CONNECTED);
+        env.setStateChangedAt(Instant.now());
+        SandboxExecution failed = createRunningExecution(env);
+        failed.setStatus(SandboxExecutionStatus.FAILED);
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
+                .thenReturn(Optional.of(failed));
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(failed));
+        when(activityRepository.findByExecutionIdAndActionId(EXECUTION_ID, "sandbox-purged"))
+                .thenReturn(Optional.empty());
+        when(activityRepository.nextSequence(EXECUTION_ID)).thenReturn(1L);
+
+        executionEnvironmentService.reconcilePurgedEnvironment(env);
+
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
+        verify(eventPublisher).publishEvent(new SandboxExecutionSuspendedEvent(TEAM_ID, EXECUTION_ID, ENV_ID));
     }
 
     @Test

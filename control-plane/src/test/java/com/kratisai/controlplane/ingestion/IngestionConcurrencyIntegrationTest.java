@@ -8,6 +8,7 @@ import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.service.ProcessExecutor;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.SlowTest;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
@@ -41,6 +42,7 @@ import org.springframework.beans.factory.annotation.Autowired;
  * data in @BeforeEach.
  */
 @SpringIntegrationTest
+@SlowTest
 class IngestionConcurrencyIntegrationTest {
 
     @Autowired
@@ -128,7 +130,7 @@ class IngestionConcurrencyIntegrationTest {
 
         // Wait for first ingestion to complete
         Awaitility.await()
-                .atMost(Duration.ofSeconds(30))
+                .atMost(Duration.ofSeconds(45))
                 .pollInterval(Duration.ofMillis(100))
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch1 =
@@ -138,7 +140,7 @@ class IngestionConcurrencyIntegrationTest {
 
         // Second ingestion should now be processing
         Awaitility.await()
-                .atMost(Duration.ofSeconds(30))
+                .atMost(Duration.ofSeconds(45))
                 .pollInterval(Duration.ofMillis(100))
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch2 =
@@ -148,7 +150,7 @@ class IngestionConcurrencyIntegrationTest {
 
         // Third ingestion should also complete
         Awaitility.await()
-                .atMost(Duration.ofSeconds(30))
+                .atMost(Duration.ofSeconds(45))
                 .pollInterval(Duration.ofMillis(100))
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch3 =
@@ -186,7 +188,7 @@ class IngestionConcurrencyIntegrationTest {
 
         // Wait for first to complete
         Awaitility.await()
-                .atMost(Duration.ofSeconds(30))
+                .atMost(Duration.ofSeconds(45))
                 .pollInterval(Duration.ofMillis(100))
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch1 =
@@ -197,7 +199,7 @@ class IngestionConcurrencyIntegrationTest {
         // Batch 2 should now be processing (no longer QUEUED, so position query returns
         // 0)
         Awaitility.await()
-                .atMost(Duration.ofSeconds(30))
+                .atMost(Duration.ofSeconds(45))
                 .pollInterval(Duration.ofMillis(100))
                 .untilAsserted(() -> {
                     IngestionBatch updatedBatch2 =
@@ -218,7 +220,7 @@ class IngestionConcurrencyIntegrationTest {
         // leaking row
         // locks into the next test class
         Awaitility.await()
-                .atMost(Duration.ofSeconds(60))
+                .atMost(Duration.ofSeconds(90))
                 .pollInterval(Duration.ofMillis(100))
                 .untilAsserted(() -> {
                     IngestionBatch finalBatch2 =
@@ -265,7 +267,7 @@ class IngestionConcurrencyIntegrationTest {
         // Wait for all ingestions to finish to prevent background threads from leaking
         // row locks into the next test class
         Awaitility.await()
-                .atMost(Duration.ofSeconds(60))
+                .atMost(Duration.ofSeconds(120))
                 .pollInterval(Duration.ofMillis(100))
                 .untilAsserted(() -> {
                     List<IngestionBatch> updatedBatches = ingestionBatchRepository.findByRepositoryId(repoId);

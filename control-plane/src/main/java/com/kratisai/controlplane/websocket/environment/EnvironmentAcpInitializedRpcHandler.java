@@ -3,6 +3,7 @@ package com.kratisai.controlplane.websocket.environment;
 import com.kratisai.controlplane.api.wsdto.EnvironmentResponsePayload;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.model.SandboxExecution;
+import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.event.SandboxExecutionAcpInitializedEvent;
 import com.kratisai.controlplane.service.SandboxExecutionService;
 import java.util.UUID;
@@ -67,11 +68,13 @@ public class EnvironmentAcpInitializedRpcHandler
         eventPublisher.publishEvent(new SandboxExecutionAcpInitializedEvent(
                 execution.getChat().getTeam().getId(), execution.getId(), acpSessionId, agentName, agentVersion));
 
-        if (Boolean.TRUE.equals(params.relaunch())) {
+        if (Boolean.TRUE.equals(params.relaunch()) || execution.getStatus() != SandboxExecutionStatus.RUNNING) {
             logger.info(
-                    "ACP session relaunched for execution {} (sessionId={}); skipping task prompt dispatch",
+                    "ACP session {} for execution {} (sessionId={}, status={}); skipping task prompt dispatch",
+                    Boolean.TRUE.equals(params.relaunch()) ? "relaunched" : "initialized",
                     execution.getId(),
-                    acpSessionId);
+                    acpSessionId,
+                    execution.getStatus());
         } else {
             sandboxExecutionService.dispatchAcpPrompt(execution);
         }

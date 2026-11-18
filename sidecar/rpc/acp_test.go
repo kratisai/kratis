@@ -3649,10 +3649,10 @@ sleep 10
 	c.Close()
 }
 
-// TestExecuteAcpPrompt_RelaunchSpawnsFreshSession verifies that a prompt with
-// relaunch=true tears down the existing agent (without emitting env.complete
-// for the teardown) and spawns a fresh session before sending the prompt.
-func TestExecuteAcpPrompt_RelaunchSpawnsFreshSession(t *testing.T) {
+// TestExecuteAcpPrompt_RelaunchReusesActiveSession verifies that a prompt with
+// relaunch=true reuses an already-active ACP session instead of terminating it
+// and losing session context.
+func TestExecuteAcpPrompt_RelaunchReusesActiveSession(t *testing.T) {
 	tempDir := t.TempDir()
 	pidsFile := filepath.Join(tempDir, "pids.txt")
 	scriptPath := filepath.Join(tempDir, "mock_agent.sh")
@@ -3753,31 +3753,25 @@ done
 		t.Fatal("Timeout waiting for first prompt response")
 	}
 
-	// Relaunching prompt: fresh session, same workspace and agent command.
+	// Recovery prompt while the agent session is still alive: reuses the active process/session.
 	go c.ExecuteAcpPrompt(AcpPromptParams{
-		TaskPrompt:  "Continue after recovery",
+		TaskPrompt:  "Continue after turn error",
 		ExecutionID: "exec-relaunch-test-1",
 		Relaunch:    true,
 	}, uint64(3103))
 	select {
 	case <-relaunchDone:
 	case <-time.After(10 * time.Second):
-		t.Fatal("Timeout waiting for relaunch prompt response")
+		t.Fatal("Timeout waiting for recovery prompt response")
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(sessionIds) != 2 {
-		t.Fatalf("expected 2 acp_initialized notifications (one per fresh session), got %d", len(sessionIds))
-	}
-	if sessionIds[0] == sessionIds[1] {
-		t.Errorf("expected a fresh session after relaunch, got same sessionId %q twice", sessionIds[0])
+	if len(sessionIds) != 1 {
+		t.Fatalf("expected 1 acp_initialized notification (active session reused), got %d", len(sessionIds))
 	}
 	if relaunchFlags[0] {
 		t.Error("expected the initial acp_initialized to have relaunch=false")
-	}
-	if !relaunchFlags[1] {
-		t.Error("expected the post-relaunch acp_initialized to have relaunch=true")
 	}
 
 	pidsRaw, err := os.ReadFile(pidsFile)
@@ -3785,8 +3779,8 @@ done
 		t.Fatalf("failed to read pids file: %v", err)
 	}
 	pidLines := strings.Split(strings.TrimSpace(string(pidsRaw)), "\n")
-	if len(pidLines) != 2 || pidLines[0] == pidLines[1] {
-		t.Errorf("expected two distinct agent processes, got pids: %v", pidLines)
+	if len(pidLines) != 1 {
+		t.Errorf("expected 1 agent process (reused), got pids: %v", pidLines)
 	}
 
 	// Both prompts must have been acknowledged (the terminal outcome arrives
@@ -3803,6 +3797,309 @@ done
 		if result.Status != PromptAccepted {
 			t.Errorf("expected prompt %d to be accepted, got status %q error %q", i, result.Status, result.Error)
 		}
+	}
+
+	c.Close()
+}
+
+// TestExecuteAcpPrompt_RelaunchAfterProcessExitReattachesPersistedSession verifies
+// that when the agent process has exited, relaunch=true spawns a new process and
+// reattaches to the persisted ACP session via session/resume.
+func TestExecuteAcpPrompt_RelaunchAfterProcessExitReattachesPersistedSession(t *testing.T) {
+	tempDir := t.TempDir()
+	pidsFile := filepath.Join(tempDir, "pids.txt")
+	resumedFile := filepath.Join(tempDir, "resumed.txt")
+	scriptPath := filepath.Join(tempDir, "mock_agent.sh")
+
+	scriptContent := fmt.Sprintf(`#!/bin/bash
+echo "$$" >> %q
+read -r line
+echo '{"jsonrpc":"2.0","result":{"protocolVersion":1,"agentCapabilities":{"sessionCapabilities":{"resume":{}}},"serverInfo":{"name":"mock-agent","version":"1.0.0"}},"id":1}'
+read -r line
+if echo "$line" | grep -q '"method":"session/resume"'; then
+  sid=$(printf '%%s' "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+  echo "$sid" >> %q
+  id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  echo "{\"jsonrpc\":\"2.0\",\"result\":{},\"id\":$id}"
+else
+  echo "{\"jsonrpc\":\"2.0\",\"result\":{\"sessionId\":\"session-persisted\"},\"id\":2}"
+fi
+while read -r line; do
+  if echo "$line" | grep -q '"method":"session/prompt"'; then
+    if [ "$(wc -l < %q)" -eq 1 ]; then
+      # First process crashes before answering the first prompt.
+      exit 1
+    fi
+    id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+    echo "{\"jsonrpc\":\"2.0\",\"result\":{\"stopReason\":\"end_turn\"},\"id\":$id}"
+  fi
+done
+`, pidsFile, resumedFile, pidsFile)
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil { //nolint:gosec // G306: test script must remain executable
+		t.Fatalf("failed to write mock agent script: %v", err)
+	}
+
+	var (
+		mu            sync.Mutex
+		sessionIds    []string
+		relaunchFlags []bool
+		completeCh    = make(chan struct{}, 2)
+		launchDone    = make(chan struct{})
+		relaunchDone  = make(chan struct{})
+		promptDone    = make(chan struct{})
+	)
+
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req JsonRpcRequest
+			if json.Unmarshal(msg, &req) != nil {
+				continue
+			}
+			ackDiffSync(conn, req)
+
+			switch req.Method {
+			case "env.acp_initialized":
+				var p AcpInitializedParams
+				b, _ := json.Marshal(req.Params)
+				_ = json.Unmarshal(b, &p)
+				mu.Lock()
+				sessionIds = append(sessionIds, p.SessionID)
+				relaunchFlags = append(relaunchFlags, p.Relaunch)
+				mu.Unlock()
+			case "env.complete":
+				select {
+				case completeCh <- struct{}{}:
+				default:
+				}
+			case "env.acp_prompt_complete":
+				close(promptDone)
+			}
+
+			if req.ID != nil {
+				idNum := uint64(req.ID.(float64))
+				switch idNum {
+				case 3201:
+					close(launchDone)
+				case 3203:
+					close(relaunchDone)
+				}
+			}
+		}
+	})
+
+	c := connectClient(t, wsURL(srv), "tok")
+	c.workspace = tempDir
+	errChan := make(chan error, 1)
+	go c.readLoop(errChan)
+
+	go c.ExecuteLaunchAcpAgent(LaunchAcpAgentParams{
+		AgentCommand: "/bin/bash " + scriptPath,
+		ExecutionID:  "exec-reattach-test-1",
+	}, uint64(3201))
+	select {
+	case <-launchDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Timeout waiting for agent launch")
+	}
+
+	// Trigger prompt on first process, which exits unexpectedly.
+	go c.ExecuteAcpPrompt(AcpPromptParams{
+		TaskPrompt:  "First turn crashes",
+		ExecutionID: "exec-reattach-test-1",
+	}, uint64(3202))
+	select {
+	case <-completeCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for crashed process env.complete")
+	}
+
+	// Wait for watchExit to clear the dead session before relaunching.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		sup := c.currentSupervisor()
+		if sup == nil || sup.Session() == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Recovery prompt with relaunch=true reattaches to session-persisted.
+	go c.ExecuteAcpPrompt(AcpPromptParams{
+		TaskPrompt:  "Continue after crash",
+		ExecutionID: "exec-reattach-test-1",
+		Relaunch:    true,
+	}, uint64(3203))
+	select {
+	case <-relaunchDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for relaunch prompt ack")
+	}
+	select {
+	case <-promptDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for recovered prompt completion")
+	}
+
+	resumedRaw, err := os.ReadFile(resumedFile)
+	if err != nil {
+		t.Fatalf("expected session/resume to be called, failed to read %s: %v", resumedFile, err)
+	}
+	if strings.TrimSpace(string(resumedRaw)) != "session-persisted" {
+		t.Errorf("expected resumed session 'session-persisted', got %q", string(resumedRaw))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sessionIds) != 2 {
+		t.Fatalf("expected 2 acp_initialized notifications, got %d", len(sessionIds))
+	}
+	if sessionIds[1] != "session-persisted" || !relaunchFlags[1] {
+		t.Errorf("expected second initialized notification for 'session-persisted' with relaunch=true, got id=%q relaunch=%v", sessionIds[1], relaunchFlags[1])
+	}
+
+	c.Close()
+}
+
+// TestExecuteAcpPrompt_RelaunchDuringWatchExitDrainReattachesCleanly verifies
+// that when an agent crashes mid-prompt while a child still holds stderr open
+// (so watchExit is blocked in DrainWait and has not yet cleared s.session),
+// a relaunch=true recovery prompt detects the dead stdout transport, calls
+// TerminateQuietly + reattaches, and does not send into the dead pipe or emit
+// a duplicate env.complete.
+func TestExecuteAcpPrompt_RelaunchDuringWatchExitDrainReattachesCleanly(t *testing.T) {
+	tempDir := t.TempDir()
+	pidsFile := filepath.Join(tempDir, "pids.txt")
+	scriptPath := filepath.Join(tempDir, "mock_agent.sh")
+
+	scriptContent := fmt.Sprintf(`#!/bin/bash
+echo "$$" >> %q
+read -r line
+echo '{"jsonrpc":"2.0","result":{"protocolVersion":1,"agentCapabilities":{"sessionCapabilities":{"resume":{}}},"serverInfo":{"name":"mock-agent","version":"1.0.0"}},"id":1}'
+read -r line
+if echo "$line" | grep -q '"method":"session/resume"'; then
+  id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  echo "{\"jsonrpc\":\"2.0\",\"result\":{},\"id\":$id}"
+else
+  echo '{"jsonrpc":"2.0","result":{"sessionId":"session-drain"},"id":2}'
+fi
+while read -r line; do
+  if echo "$line" | grep -q '"method":"session/prompt"'; then
+    if [ "$(wc -l < %q)" -eq 1 ]; then
+      # Keep stderr open briefly via a subshell so watchExit blocks in StderrDone drain,
+      # while the main process exits immediately (closing stdout).
+      (sleep 2) >&2 &
+      exit 1
+    fi
+    id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+    echo "{\"jsonrpc\":\"2.0\",\"result\":{\"stopReason\":\"end_turn\"},\"id\":$id}"
+  fi
+done
+`, pidsFile, pidsFile)
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil { //nolint:gosec // G306: test script must remain executable
+		t.Fatalf("failed to write mock agent script: %v", err)
+	}
+
+	var (
+		mu             sync.Mutex
+		completeCount  int
+		completeCh     = make(chan struct{}, 4)
+		launchDone     = make(chan struct{})
+		relaunchDone   = make(chan struct{})
+		promptComplete = make(chan struct{})
+	)
+
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req JsonRpcRequest
+			if json.Unmarshal(msg, &req) != nil {
+				continue
+			}
+			ackDiffSync(conn, req)
+
+			switch req.Method {
+			case "env.complete":
+				mu.Lock()
+				completeCount++
+				mu.Unlock()
+				select {
+				case completeCh <- struct{}{}:
+				default:
+				}
+			case "env.acp_prompt_complete":
+				close(promptComplete)
+			}
+
+			if req.ID != nil {
+				idNum := uint64(req.ID.(float64))
+				switch idNum {
+				case 3301:
+					close(launchDone)
+				case 3303:
+					close(relaunchDone)
+				}
+			}
+		}
+	})
+
+	c := connectClient(t, wsURL(srv), "tok")
+	c.workspace = tempDir
+	errChan := make(chan error, 1)
+	go c.readLoop(errChan)
+
+	go c.ExecuteLaunchAcpAgent(LaunchAcpAgentParams{
+		AgentCommand: "/bin/bash " + scriptPath,
+		ExecutionID:  "exec-drain-race-1",
+	}, uint64(3301))
+	select {
+	case <-launchDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Timeout waiting for agent launch")
+	}
+
+	// Trigger prompt on first process, which crashes immediately while a background
+	// subshell holds stderr open so watchExit has not yet cleared s.session.
+	go c.ExecuteAcpPrompt(AcpPromptParams{
+		TaskPrompt:  "Crash mid-prompt",
+		ExecutionID: "exec-drain-race-1",
+	}, uint64(3302))
+	select {
+	case <-completeCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for reportPromptFailure env.complete")
+	}
+
+	// Immediately issue recovery prompt WITHOUT waiting for watchExit to clear s.session.
+	go c.ExecuteAcpPrompt(AcpPromptParams{
+		TaskPrompt:  "Recover immediately",
+		ExecutionID: "exec-drain-race-1",
+		Relaunch:    true,
+	}, uint64(3303))
+	select {
+	case <-relaunchDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for relaunch prompt ack")
+	}
+	select {
+	case <-promptComplete:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for recovered prompt completion")
+	}
+
+	mu.Lock()
+	gotCompletes := completeCount
+	mu.Unlock()
+	if gotCompletes != 1 {
+		t.Errorf("expected exactly 1 env.complete (no duplicate from dead transport), got %d", gotCompletes)
 	}
 
 	c.Close()

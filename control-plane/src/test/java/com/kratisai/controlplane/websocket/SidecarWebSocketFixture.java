@@ -196,8 +196,16 @@ public class SidecarWebSocketFixture extends WebSocketFixture<SidecarWebSocketFi
     }
 
     /** The relaunch cannot start the agent (for example a missing binary in the snapshot). */
-    public SidecarWebSocketFixture withLaunchFailure(String error) {
-        return whenMethod("env.launch_acp_agent", (session, payload) -> {
+    public void withLaunchFailure(String error) {
+        whenMethod("env.launch_acp_agent", (session, payload) -> {
+            updateExecutionId(payload);
+            sendResult(session, payload, Map.of("status", "failed", "error", error));
+        });
+    }
+
+    /** Reject every env.acp_prompt dispatch immediately with PromptStatus.FAILED. */
+    public SidecarWebSocketFixture withAcpPromptFailure(String error) {
+        return whenMethod("env.acp_prompt", (session, payload) -> {
             updateExecutionId(payload);
             sendResult(session, payload, Map.of("status", "failed", "error", error));
         });

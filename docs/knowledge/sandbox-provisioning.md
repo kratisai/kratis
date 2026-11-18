@@ -96,13 +96,15 @@ segment with a fresh key, because sleep seals the old one.
 
 Sleep seals through `SandboxExecutionSuspendedEvent`, not through the complete event.
 `sleepEnvironmentInternal` publishes it for the latest execution after the `SLEEPING`
-commit. `suspendAfterLostRuntime` publishes it for each `IDLE` execution that stays
-resumable (`RUNNING` executions seal through the complete event on the same path).
-`SandboxExecutionService` handles the event `AFTER_COMMIT` on a worker thread. It seals
-the segment first, waits `usageFinalizeDelay`, fetches final usage from LiteLLM, applies
-the totals, publishes `ExecutionStatusChangedEvent`, and revokes the key. A fast resume
-inside the delay mints a fresh key because the old segment is already sealed. The usage
-refresher cancels its trailing refresh on suspend, so no refresh races the revoke.
+commit. `suspendAfterLostRuntime` publishes it for `IDLE` and `FAILED` executions that
+stay resumable (`RUNNING` executions seal through the complete event on the same path).
+`SandboxExecutionService` handles the event `AFTER_COMMIT` on a worker thread, sealing
+both the event's execution and any prior executions on that environment that still hold
+active keys. It seals the segment first, waits `usageFinalizeDelay`, fetches final usage
+from LiteLLM, applies the totals, publishes `ExecutionStatusChangedEvent`, and revokes
+the key. A fast resume inside the delay mints a fresh key because the old segment is
+already sealed. The usage refresher cancels its trailing refresh on suspend, so no
+refresh races the revoke.
 
 The UI gets no `execution_complete` on sleep. The sleep transaction already sends
 `TeamEntityChangedEvent(ENVIRONMENTS)` and `ExecutionStatusChangedEvent`, which refresh
@@ -171,15 +173,16 @@ absent, `origin/HEAD` (git's own default branch) is used. A workspace with an or
 remote is therefore never treated as new and never reports the whole tree in the diff.
 See [`publish-rebase-flow.md`](publish-rebase-flow.md).
 
-When the latest execution for a resumed environment is `IDLE` (a paused sandbox), the fresh
+When the latest execution for a resumed environment is `IDLE` or `FAILED`, the fresh
 `env.register` also **relaunches the agent**, after redeploying the git identity and auth (the new
 connector holds no credentials, and the relaunched agent needs them). The connector reads the ACP session id it persisted
 at `<credentials-dir>/acp_session_id` (inside the sandbox, so it survives the snapshot and is
 never seen by the control plane) and re-attaches with `session/resume` when the agent advertises
 `sessionCapabilities.resume`, else `session/load` when it advertises `loadSession`, else falls
 back to `session/new`. On re-attach the connector reports `env.acp_initialized` with
-`relaunch: true`, so the control plane does not re-dispatch the task prompt; the execution stays
-`IDLE` and steerable.
+`relaunch: true` (and `EnvironmentAcpInitializedRpcHandler` also skips initial prompt dispatch
+whenever the execution is not `RUNNING`), so the control plane does not re-dispatch the task
+prompt; the execution remains steerable.
 
 A resume mints a **fresh** LiteLLM virtual key (the previous one was revoked on sleep) and opens
 a new `sandbox_execution_usage` segment for it. The execution's reported totals are the sum of all
@@ -299,7 +302,11 @@ The sweep waits 2 minutes after boot so sidecars can reconnect.
 (`ExecutionProviderType.DOCKER`) manages sandboxes on the local Docker daemon. Per
 sandbox it creates three labelled resources:
 
-1. A Docker network (`kratis-net-<envId>`).
+1. A Docker network (`kratis-net-<envId>`). Its /24 subnet is the first free one in
+   `10.210.0.0/16` according to the daemon's live network list, so a control-plane restart,
+   a leaked network, or a second instance on the same daemon cannot collide with it. If a
+   concurrent process claims the same /24 between listing and creating, the provider retries
+   the next free one.
 2. A rootless Docker-in-Docker sibling (`kratis-dind-<envId>`, `docker:dind-rootless`,
    `seccomp=unconfined`, `systempaths=unconfined`) with `/dev/net/tun` and unprivileged
    user namespaces.

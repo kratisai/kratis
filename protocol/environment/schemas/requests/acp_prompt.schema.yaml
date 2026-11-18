@@ -16,5 +16,5 @@ properties:
     type: boolean
   relaunch:
     type: boolean
-    description: When true, the sidecar terminates any existing agent process and launches a fresh ACP session before sending the prompt. Used to recover a failed execution with a clean session in the same workspace.
+    description: When true, if no active ACP session exists, the sidecar launches the recorded agent command and reattaches to any persisted session before sending the prompt; if a session is already active, it is reused.
 additionalProperties: false

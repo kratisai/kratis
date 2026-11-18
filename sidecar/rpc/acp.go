@@ -139,7 +139,11 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 		c.mu.Unlock()
 	}
 
-	if params.Relaunch {
+	c.mu.Lock()
+	sup := c.supervisor
+	c.mu.Unlock()
+
+	if params.Relaunch && (sup == nil || !sup.IsSessionAlive()) {
 		if err := c.relaunchAgent(); err != nil {
 			log.Printf("[ACP] Relaunch before prompt failed: %v", err)
 			c.sendSuccessResponse(reqID, AcpPromptResult{
@@ -148,11 +152,10 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 			})
 			return
 		}
+		c.mu.Lock()
+		sup = c.supervisor
+		c.mu.Unlock()
 	}
-
-	c.mu.Lock()
-	sup := c.supervisor
-	c.mu.Unlock()
 
 	if sup == nil {
 		c.sendSuccessResponse(reqID, AcpPromptResult{
@@ -272,8 +275,8 @@ func (c *Client) reportPromptFailure(sessionID string, promptErr error, errMessa
 	})
 }
 
-// relaunchAgent tears down the current ACP agent (if any) and launches a fresh
-// session using the originally recorded agent command and log files. No
+// relaunchAgent tears down any stale ACP agent and launches the recorded
+// agent command, reattaching to the persisted ACP session when available. No
 // env.complete is reported for the teardown — the caller's prompt outcome
 // drives the terminal state.
 func (c *Client) relaunchAgent() error {
@@ -297,7 +300,7 @@ func (c *Client) relaunchAgent() error {
 		c.mu.Unlock()
 	}
 
-	if err := c.launchAcpAgentProcess(agentCommand, logFiles, ""); err != nil {
+	if err := c.launchAcpAgentProcess(agentCommand, logFiles, c.readPersistedSessionID()); err != nil {
 		return err
 	}
 

@@ -21,9 +21,6 @@ public interface SandboxExecutionRepository extends JpaRepository<SandboxExecuti
 
     boolean existsByEnvironmentIdAndStatus(UUID environmentId, SandboxExecutionStatus status);
 
-    List<SandboxExecution> findByEnvironmentIdAndStatusIn(
-            UUID environmentId, Collection<SandboxExecutionStatus> statuses);
-
     Optional<SandboxExecution> findFirstByEnvironmentIdOrderByStartedAtDesc(UUID environmentId);
 
     Optional<SandboxExecution> findFirstByChatIdOrderByStartedAtDesc(UUID chatId);
@@ -50,6 +47,10 @@ public interface SandboxExecutionRepository extends JpaRepository<SandboxExecuti
             + " WHERE u.execution.id = :executionId AND u.revokedAt IS NULL"
             + " ORDER BY u.startedAt DESC")
     List<String> findActiveVirtualKeysByExecutionId(@Param("executionId") UUID executionId);
+
+    @Query("SELECT DISTINCT u.execution.id FROM SandboxExecutionUsage u"
+            + " WHERE u.execution.environment.id = :environmentId AND u.revokedAt IS NULL")
+    List<UUID> findExecutionIdsWithActiveVirtualKeysByEnvironmentId(@Param("environmentId") UUID environmentId);
 
     @Modifying
     @Query(

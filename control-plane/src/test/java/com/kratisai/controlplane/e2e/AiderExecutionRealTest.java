@@ -42,8 +42,17 @@ class AiderExecutionRealTest extends AbstractAgentExecutionRealTest {
     protected void configureWireMockScenario() {
         LlmMockScenarios.openAiCompat(wireMockLlmServer);
 
+        // Handle Aider's background ChatSummary calls explicitly so they never steal the
+        // edit matcher and do not loop retrying non-summary responses.
         wireMockLlmServer.addMatcher(HttpRequestMatcher.builder()
+                .contains("summarize this partial conversation")
+                .sseResponse(LlmResponseBuilders.openAiSseText("I asked you to prepare the sandbox."))
+                .build());
+
+        wireMockLlmServer.addMatcher(HttpRequestMatcher.builder()
+                .contains("SEARCH/REPLACE")
                 .contains("Write a shell script")
+                .notContains("summarize this partial conversation")
                 // Aider applies changes via SEARCH/REPLACE blocks in the text response.
                 .sseResponse(LlmResponseBuilders.openAiSseText("""
                         I'll create the shell script.

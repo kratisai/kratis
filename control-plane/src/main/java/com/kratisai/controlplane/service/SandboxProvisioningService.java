@@ -237,7 +237,7 @@ public class SandboxProvisioningService {
         registerGitCredentials(execution);
 
         String initCommand =
-                "if [ -n \"$(ls -A | grep -v '^\\.kratis$')\" ]; then echo \"Workspace is not empty\" >&2; exit 1; fi; git init -b main && git commit --allow-empty -m \"Initial commit\"";
+                "if [ ! -d .git ]; then if [ -n \"$(ls -A | grep -v '^\\.kratis$')\" ]; then echo \"Workspace is not empty\" >&2; exit 1; fi; git init -b main && git commit --allow-empty -m \"Initial commit\"; fi";
         EnvironmentConnectorResult.Exec result = environmentRpcClient.request(
                 environmentId(execution),
                 new EnvironmentRpcPayload.Exec(

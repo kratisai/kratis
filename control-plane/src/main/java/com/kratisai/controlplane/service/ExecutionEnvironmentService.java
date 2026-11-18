@@ -263,6 +263,14 @@ public class ExecutionEnvironmentService {
             }
         }
 
+        for (String token : sandboxExecutionRepository.findActiveVirtualKeysByEnvironmentId(envId)) {
+            try {
+                virtualKeyService.revokeKey(token);
+            } catch (Exception e) {
+                logger.warn("Failed to revoke virtual key while deleting environment {}: {}", envId, e.getMessage());
+            }
+        }
+
         executionEnvironmentRepository.delete(env);
         eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
     }
@@ -521,6 +529,10 @@ public class ExecutionEnvironmentService {
                 .findFirstByEnvironmentIdOrderByStartedAtDesc(envId)
                 .ifPresent(execution -> {
                     executionActivityPersistenceService.recordSandboxPurged(execution.getId());
+                    if (execution.getStatus() == SandboxExecutionStatus.FAILED) {
+                        eventPublisher.publishEvent(
+                                new SandboxExecutionSuspendedEvent(teamId, execution.getId(), envId));
+                    }
                     eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
                             teamId, execution.getChat().getId(), execution.getId()));
                 });
@@ -537,21 +549,24 @@ public class ExecutionEnvironmentService {
 
     /**
      * Lost runtime that keeps its snapshot: the environment returns to SLEEPING for another
-     * resume attempt. RUNNING executions move to UNKNOWN; IDLE executions are unchanged.
+     * resume attempt. RUNNING executions move to UNKNOWN; IDLE and FAILED executions keep their
+     * status while sealing their active virtual key.
      */
     @Transactional
     public void suspendAfterLostRuntime(ExecutionEnvironment env) {
         rollbackFailedResume(env);
-        SandboxExecution active = findActiveExecution(env.getId());
-        if (active != null) {
-            if (active.getStatus() == SandboxExecutionStatus.RUNNING) {
-                terminationTemplate.executeWithoutResult(
-                        status -> forceTerminateExecution(active.getId(), UNAVAILABLE_ENVIRONMENT_REASON));
-            } else if (active.getStatus() == SandboxExecutionStatus.IDLE) {
-                eventPublisher.publishEvent(new SandboxExecutionSuspendedEvent(
-                        active.getChat().getTeam().getId(), active.getId(), env.getId()));
-            }
-        }
+        sandboxExecutionRepository
+                .findFirstByEnvironmentIdOrderByStartedAtDesc(env.getId())
+                .ifPresent(latest -> {
+                    if (latest.getStatus() == SandboxExecutionStatus.RUNNING) {
+                        terminationTemplate.executeWithoutResult(
+                                status -> forceTerminateExecution(latest.getId(), UNAVAILABLE_ENVIRONMENT_REASON));
+                    } else if (latest.getStatus() == SandboxExecutionStatus.IDLE
+                            || latest.getStatus() == SandboxExecutionStatus.FAILED) {
+                        eventPublisher.publishEvent(new SandboxExecutionSuspendedEvent(
+                                latest.getChat().getTeam().getId(), latest.getId(), env.getId()));
+                    }
+                });
     }
 
     private void terminateActiveExecution(UUID envId, String reason) {

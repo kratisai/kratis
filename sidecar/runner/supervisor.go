@@ -163,6 +163,38 @@ func (s *AgentSupervisor) Session() *acp.AcpSession {
 	return s.session
 }
 
+// IsSessionAlive reports whether the supervisor holds an active ACP session
+// whose agent process and stdout transport are still open. Checking StdoutDone
+// closes the window between process exit / stdout EOF and watchExit clearing
+// s.session after DrainWait.
+func (s *AgentSupervisor) IsSessionAlive() bool {
+	if s.terminating.Load() {
+		return false
+	}
+	s.stateLock.RLock()
+	session := s.session
+	transport := s.transport
+	state := s.state
+	exitDone := s.exitDone
+	s.stateLock.RUnlock()
+	if session == nil || transport == nil || state == StateTerminated || state == StateFailed {
+		return false
+	}
+	select {
+	case <-transport.StdoutDone():
+		return false
+	default:
+	}
+	if exitDone != nil {
+		select {
+		case <-exitDone:
+			return false
+		default:
+		}
+	}
+	return true
+}
+
 func (s *AgentSupervisor) StartProcess(cmd *exec.Cmd) error {
 	s.stateLock.Lock()
 	if s.state != StateUninitialized {

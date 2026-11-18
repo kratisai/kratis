@@ -2,6 +2,7 @@ package com.kratisai.controlplane.websocket;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kratisai.controlplane.api.restdto.SteerExecutionRequest;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.SandboxExecution;
@@ -9,6 +10,7 @@ import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
+import com.kratisai.controlplane.service.SandboxExecutionService;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SandboxExecutionScenarioFactory;
 import com.kratisai.controlplane.testsupport.SandboxExecutionScenarioFactory.ExecutionScenario;
@@ -52,6 +54,9 @@ class SandboxResumeWebSocketIntegrationTest {
 
     @Autowired
     private EnvironmentSessionRegistry sessionRegistry;
+
+    @Autowired
+    private SandboxExecutionService sandboxExecutionService;
 
     private TestDataFactory.AuthContext auth;
     private ChatEntity chat;
@@ -150,6 +155,71 @@ class SandboxResumeWebSocketIntegrationTest {
                     .as("the failed relaunch is visible in the activity log")
                     .isNotEmpty();
             assertThat(second.sidecar().receivedMessages()).isNotEmpty();
+        }
+    }
+
+    @Test
+    void reregisteringWithFailedExecutionRelaunchesAgentAndAllowsSteering() throws Exception {
+        ExecutionScenario scenario = runFirstLifetimeToIdle("failed-resume-plan", "failed-resume-repo");
+        SandboxExecution failed =
+                executionRepository.findById(scenario.executionId()).orElseThrow();
+        failed.setStatus(SandboxExecutionStatus.FAILED);
+        executionRepository.save(failed);
+
+        try (WsPair second =
+                WsPair.connectSidecar(port, scenario, sidecar -> sidecar.withPersistedSession("persisted-session")
+                        .expectTrigger("env.launch_acp_agent", 1)
+                        .expectTrigger("env.acp_prompt", 1))) {
+            assertThat(second.sidecar().awaitTrigger("env.launch_acp_agent", 15, TimeUnit.SECONDS))
+                    .isTrue();
+
+            List<String> methods = methodsReceived(second.sidecar());
+            assertThat(methods).contains("env.registerGitIdentity", "env.exec", "env.launch_acp_agent");
+            assertThat(methods).doesNotContain("env.checkout");
+
+            sandboxExecutionService.steerExecution(
+                    auth.user().getId(),
+                    chat.getId(),
+                    scenario.executionId(),
+                    new SteerExecutionRequest("Try editing the right file", List.of()));
+
+            assertThat(second.sidecar().awaitTrigger("env.acp_prompt", 15, TimeUnit.SECONDS))
+                    .isTrue();
+            Awaitility.await("steered recovery turn reaches IDLE")
+                    .atMost(Duration.ofSeconds(15))
+                    .untilAsserted(
+                            () -> assertThat(statusOf(scenario.executionId())).isEqualTo(SandboxExecutionStatus.IDLE));
+        }
+    }
+
+    @Test
+    void steerExecution_fromFailedWithImmediatePromptRejection_returnsToFailed() throws Exception {
+        ExecutionScenario scenario = runFirstLifetimeToIdle("steer-reject-plan", "steer-reject-repo");
+        SandboxExecution failed =
+                executionRepository.findById(scenario.executionId()).orElseThrow();
+        failed.setStatus(SandboxExecutionStatus.FAILED);
+        executionRepository.save(failed);
+
+        try (WsPair second =
+                WsPair.connectSidecar(port, scenario, sidecar -> sidecar.withPersistedSession("persisted-session")
+                        .withAcpPromptFailure("rejected immediately")
+                        .expectTrigger("env.launch_acp_agent", 1)
+                        .expectTrigger("env.acp_prompt", 1))) {
+            assertThat(second.sidecar().awaitTrigger("env.launch_acp_agent", 15, TimeUnit.SECONDS))
+                    .isTrue();
+
+            sandboxExecutionService.steerExecution(
+                    auth.user().getId(),
+                    chat.getId(),
+                    scenario.executionId(),
+                    new SteerExecutionRequest("Recover", List.of()));
+
+            assertThat(second.sidecar().awaitTrigger("env.acp_prompt", 15, TimeUnit.SECONDS))
+                    .isTrue();
+            Awaitility.await("rejected recovery prompt marks execution FAILED instead of stranding RUNNING")
+                    .atMost(Duration.ofSeconds(15))
+                    .untilAsserted(() ->
+                            assertThat(statusOf(scenario.executionId())).isEqualTo(SandboxExecutionStatus.FAILED));
         }
     }
 
