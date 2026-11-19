@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { PublishCapabilities } from '@/types/diff-types'
 
-import { PublishModal } from '@/components/session/diff/publish-modal'
+import { PublishModal, sanitizeBranchName } from '@/components/session/diff/publish-modal'
 import { ApiError } from '@/lib/auth-api'
 import * as diffApi from '@/lib/diff-api'
 import * as publishApi from '@/lib/publish-api'
@@ -357,4 +357,60 @@ describe('PublishModal', () => {
       expect(downloadSpy).toHaveBeenCalledWith('chat-123', '9b3c2a3f-55b7-47a7-83ac-6b9c592f2a07')
     },
   )
+
+  describe('sanitizeBranchName', () => {
+    it('replaces spaces and invalid git ref characters with underscores', () => {
+      expect(sanitizeBranchName('feat/my feature branch!')).toBe('feat/my_feature_branch_')
+      expect(sanitizeBranchName('feature:test*1?2~[3]^4')).toBe('feature_test_1_2__3__4')
+      expect(sanitizeBranchName('valid-branch.name_123/sub')).toBe('valid-branch.name_123/sub')
+    })
+
+    it('enforces git sequence-based ref rules (dots, slashes, and .lock components)', () => {
+      // consecutive dots
+      expect(sanitizeBranchName('feature..branch')).toBe('feature_branch')
+      // leading slash, dot, or dash
+      expect(sanitizeBranchName('/leading/slash')).toBe('_leading/slash')
+      expect(sanitizeBranchName('.leading.dot')).toBe('_leading.dot')
+      expect(sanitizeBranchName('-leading-dash')).toBe('_leading-dash')
+      // empty components (consecutive slashes)
+      expect(sanitizeBranchName('feature//branch')).toBe('feature/branch')
+      // component starting with dot
+      expect(sanitizeBranchName('feature/.hidden')).toBe('feature/_hidden')
+      // trailing slash and dot removed by default
+      expect(sanitizeBranchName('feature/branch/')).toBe('feature/branch')
+      expect(sanitizeBranchName('feature/branch.')).toBe('feature/branch')
+      // trailing or embedded .lock component replaced
+      expect(sanitizeBranchName('feature.lock')).toBe('feature_lock')
+      expect(sanitizeBranchName('feature.lock/sub')).toBe('feature_lock/sub')
+      // allowTrailingSlash retains single trailing slash while typing
+      expect(sanitizeBranchName('feature/', true)).toBe('feature/')
+    })
+  })
+
+  it('sanitizes branch name input in real time when entering spaces and invalid symbols', async () => {
+    vi.spyOn(publishApi, 'fetchPublishCapabilities').mockResolvedValue(makeCapabilities())
+
+    renderModal()
+
+    const branchInput = await screen.findByLabelText(/branch name/i)
+    fireEvent.change(branchInput, { target: { value: 'feature branch with spaces & symbols!' } })
+
+    expect(branchInput).toHaveValue('feature_branch_with_spaces___symbols_')
+  })
+
+  it('pre-fills with backend-provided target branch', async () => {
+    vi.spyOn(publishApi, 'fetchPublishCapabilities').mockResolvedValue(
+      makeCapabilities({
+        target: {
+          branchName: 'kratis/feature-123',
+          kind: 'OPEN_PR',
+        },
+      }),
+    )
+
+    renderModal()
+
+    const branchInput = await screen.findByLabelText(/branch name/i)
+    expect(branchInput).toHaveValue('kratis/feature-123')
+  })
 })

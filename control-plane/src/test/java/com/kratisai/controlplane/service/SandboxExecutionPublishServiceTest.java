@@ -739,6 +739,18 @@ class SandboxExecutionPublishServiceTest {
         assertThat(obsCaptor.getValue().headBranch()).isNull();
     }
 
+    @Test
+    void getPublishCapabilities_firstPublish_derivesFeatureBranchNotDefaultBranch() throws Exception {
+        stubExecutionLookup();
+        stubWorkspaceObserve();
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        String expectedBranch = "kratis/" + executionId.toString().substring(0, 8) + "-1";
+        assertThat(result.target().branchName()).isEqualTo(expectedBranch);
+        assertThat(result.target().branchName()).isNotEqualTo("main");
+    }
+
     private RepoCredential githubNewRepoCredential() {
         RepoCredential credential = new RepoCredential(team, "kratis-cred", CredentialType.PAT, "encrypted");
         credential.setProviderMetadata("{\"provider\":\"github\"}");
@@ -1314,6 +1326,139 @@ class SandboxExecutionPublishServiceTest {
                 ArgumentCaptor.forClass(EnvironmentRpcPayload.GitPush.class);
         verify(environmentRpcClient).request(eq(envId), pushCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
         assertThat(pushCaptor.getValue().force()).isFalse();
+    }
+
+    @Test
+    void publishPullRequest_noCustomBranchAndTargetMatchesBaseBranch_derivesBranch() throws Exception {
+        stubExecutionLookup();
+        stubWorkspaceObserve();
+
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        GitAuthMaterial auth = GitAuthMaterial.ofToken("pat-token");
+        when(credentialResolver.resolve(repository)).thenReturn(auth);
+
+        String expectedBranch = "kratis/" + executionId.toString().substring(0, 8) + "-1";
+        EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
+                "sha999", expectedBranch, "refs/heads/" + expectedBranch, "SUCCESS");
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(pushResult);
+
+        PullRequestResultDto expectedPr =
+                new PullRequestResultDto(102, "https://github.com/test/repo/pull/102", expectedBranch, "main");
+        when(repoProvider.createPullRequest(eq(repository), eq(auth), any(CreatePullRequestCommand.class)))
+                .thenReturn(expectedPr);
+
+        PublishPrRequestDto request =
+                new PublishPrRequestDto("", "main", "PR Title", "PR Body", false, false, null, null, null, true, null);
+        PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
+
+        assertThat(result.headBranch()).isEqualTo(expectedBranch);
+        ArgumentCaptor<EnvironmentRpcPayload.GitPush> pushCaptor =
+                ArgumentCaptor.forClass(EnvironmentRpcPayload.GitPush.class);
+        verify(environmentRpcClient).request(eq(envId), pushCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
+        assertThat(pushCaptor.getValue().branchName()).isEqualTo(expectedBranch);
+    }
+
+    @Test
+    void publishPullRequest_customBranchEqualsBaseBranch_throwsBadRequest() {
+        stubExecutionLookup();
+
+        PublishPrRequestDto request = new PublishPrRequestDto(
+                "main", "main", "PR Title", "PR Body", false, false, null, null, null, false, null);
+
+        org.springframework.web.server.ResponseStatusException ex = org.junit.jupiter.api.Assertions.assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> service.publishPullRequest(userId, chatId, executionId, request));
+
+        assertThat(ex.getStatusCode()).isEqualTo(org.springframework.http.HttpStatus.BAD_REQUEST);
+        assertThat(ex.getReason()).contains("Cannot publish directly to base branch");
+    }
+
+    @Test
+    void publishPullRequest_invalidGitRefBranch_throwsBadRequest() {
+        stubExecutionLookup();
+
+        PublishPrRequestDto request = new PublishPrRequestDto(
+                "-option-flag", "main", "PR Title", "PR Body", false, false, null, null, null, false, null);
+
+        org.springframework.web.server.ResponseStatusException ex = org.junit.jupiter.api.Assertions.assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> service.publishPullRequest(userId, chatId, executionId, request));
+
+        assertThat(ex.getStatusCode()).isEqualTo(org.springframework.http.HttpStatus.BAD_REQUEST);
+        assertThat(ex.getReason()).contains("Invalid git branch name");
+    }
+
+    @Test
+    void pushBranch_invalidOrBaseBranch_throwsBadRequest() {
+        stubExecutionLookup();
+
+        com.kratisai.controlplane.api.restdto.PushBranchRequestDto baseBranchRequest =
+                new com.kratisai.controlplane.api.restdto.PushBranchRequestDto("main", "commit msg", false, null);
+
+        org.springframework.web.server.ResponseStatusException exBase = org.junit.jupiter.api.Assertions.assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> service.pushBranch(userId, chatId, executionId, baseBranchRequest));
+        assertThat(exBase.getStatusCode()).isEqualTo(org.springframework.http.HttpStatus.BAD_REQUEST);
+        assertThat(exBase.getReason()).contains("Cannot publish directly to base branch");
+
+        com.kratisai.controlplane.api.restdto.PushBranchRequestDto invalidRefRequest =
+                new com.kratisai.controlplane.api.restdto.PushBranchRequestDto("--flag", "commit msg", false, null);
+
+        org.springframework.web.server.ResponseStatusException exRef = org.junit.jupiter.api.Assertions.assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> service.pushBranch(userId, chatId, executionId, invalidRefRequest));
+        assertThat(exRef.getStatusCode()).isEqualTo(org.springframework.http.HttpStatus.BAD_REQUEST);
+        assertThat(exRef.getReason()).contains("Invalid git branch name");
+    }
+
+    @Test
+    void isValidGitRefName_enforcesGitRefRules() {
+        // Valid
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("feature/add-login"))
+                .isTrue();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("kratis/feature-1_2.0"))
+                .isTrue();
+
+        // Invalid: leading dash/slash/dot
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("-option")).isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("/leading-slash"))
+                .isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName(".leading-dot"))
+                .isFalse();
+
+        // Invalid: trailing slash/dot
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("trailing/"))
+                .isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("trailing."))
+                .isFalse();
+
+        // Invalid: consecutive dots or slashes
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("foo..bar")).isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("foo//bar")).isFalse();
+
+        // Invalid: .lock component
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("feature.lock"))
+                .isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("feat/foo.lock/bar"))
+                .isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("feat/.dot/bar"))
+                .isFalse();
+
+        // Invalid: spaces or invalid chars
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("feat branch"))
+                .isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("feat~1")).isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("feat^1")).isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("feat:1")).isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("feat?1")).isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("feat*1")).isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("feat[1]")).isFalse();
+        assertThat(SandboxExecutionPublishService.isValidGitRefName("feat@{1}")).isFalse();
     }
 
     @Test

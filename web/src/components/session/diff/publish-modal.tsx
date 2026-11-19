@@ -190,9 +190,11 @@ export function PublishModal({
     if (!open || !capabilitiesQuery.data) return
     const data = capabilitiesQuery.data
     setBranchName(
-      data.target?.branchName ||
-        data.publishedBranch ||
-        `kratis/feature-${executionId.slice(0, 8)}`,
+      sanitizeBranchName(
+        data.target?.branchName ||
+          data.publishedBranch ||
+          `kratis/feature-${executionId.slice(0, 8)}`,
+      ),
     )
     setCommitMessage(data.suggestedTitle)
     setBody(data.suggestedBody)
@@ -206,7 +208,7 @@ export function PublishModal({
   const pushMutation = useMutation({
     mutationFn: () =>
       pushBranch(chatId, executionId, {
-        branchName: branchName.trim(),
+        branchName: sanitizeBranchName(branchName),
         commitMessage: commitMessage.trim() || undefined,
         credentialId: isNewRepo && credentialId.trim() ? credentialId.trim() : undefined,
         squash: isSquash,
@@ -226,7 +228,7 @@ export function PublishModal({
   const publishPrMutation = useMutation({
     mutationFn: () => {
       const request: PublishPrRequest = {
-        branchName: branchName.trim(),
+        branchName: sanitizeBranchName(branchName),
         digest: capabilities?.digest,
         squash: isSquash,
         title: commitMessage.trim(),
@@ -285,9 +287,13 @@ export function PublishModal({
       rebaseMutation.mutate()
       return
     }
-    if (!branchName.trim()) {
+    const sanitizedBranch = sanitizeBranchName(branchName)
+    if (!sanitizedBranch) {
       toast.error('Branch name is required')
       return
+    }
+    if (sanitizedBranch !== branchName) {
+      setBranchName(sanitizedBranch)
     }
     if (!commitMessage.trim()) {
       toast.error('Commit message is required')
@@ -630,7 +636,7 @@ export function PublishModal({
                   <Input
                     disabled={isPending}
                     id="branch-name"
-                    onChange={(e) => setBranchName(e.target.value)}
+                    onChange={(e) => setBranchName(sanitizeBranchName(e.target.value, true))}
                     value={branchName}
                   />
                 </div>
@@ -732,6 +738,24 @@ export function PublishModal({
       </DialogContent>
     </Dialog>
   )
+}
+
+export function sanitizeBranchName(name: string, allowTrailingSlash = false): string {
+  let sanitized = name
+    .replace(/[^a-zA-Z0-9/_.-]/g, '_')
+    .replace(/^[-./]+/, '_')
+    .replace(/\/{2,}/g, '/')
+    .replace(/\/\.+/g, '/_')
+    .replace(/\.{2,}/g, '_')
+    .replace(/\.lock(?=$|\/)/g, '_lock')
+
+  if (!allowTrailingSlash) {
+    sanitized = sanitized.replace(/[/.]*$/, '')
+  } else {
+    sanitized = sanitized.replace(/\.*$/, '')
+  }
+
+  return sanitized
 }
 
 function toActionError(err: Error, fallback: string): PublishActionError {

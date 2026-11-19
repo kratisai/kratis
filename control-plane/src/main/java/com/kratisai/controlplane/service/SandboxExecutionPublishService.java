@@ -208,8 +208,10 @@ public class SandboxExecutionPublishService {
         String suggestedNewBranch = null;
 
         if (latestChangeSet == null || prSnapshot == null) {
-            target = PublishCapabilitiesDto.TargetDto.openPr(
-                    targetHeadBranch != null ? targetHeadBranch : defaultBranch);
+            String initialBranch = targetHeadBranch != null && !targetHeadBranch.equals(defaultBranch)
+                    ? targetHeadBranch
+                    : deriveSuggestedBranch(execution, 1);
+            target = PublishCapabilitiesDto.TargetDto.openPr(initialBranch);
         } else if (prSnapshot.state() == PullRequestSnapshot.PullRequestState.OPEN) {
             target = PublishCapabilitiesDto.TargetDto.updatePr(prSnapshot.number(), prSnapshot.headBranch());
         } else if (prSnapshot.state() == PullRequestSnapshot.PullRequestState.MERGED) {
@@ -356,6 +358,10 @@ public class SandboxExecutionPublishService {
     public PushBranchResponseDto pushBranch(UUID userId, UUID chatId, UUID executionId, PushBranchRequestDto request) {
         Objects.requireNonNull(request, "request is required");
         SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
+        String baseBranch = resolveTargetBranch(execution);
+        String branchName = request.branchName() != null ? request.branchName().trim() : null;
+        validateBranchName(branchName, baseBranch);
+
         ExecutionEnvironment env = execution.getEnvironment();
         if (env == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution has no associated environment");
@@ -372,13 +378,7 @@ public class SandboxExecutionPublishService {
 
         boolean squash = Boolean.TRUE.equals(request.squash());
         EnvironmentConnectorResult.GitPush pushResult = executeGitPush(
-                env.getId(),
-                executionId,
-                request.branchName(),
-                request.commitMessage(),
-                false,
-                squash,
-                resolveTargetBranch(execution));
+                env.getId(), executionId, branchName, request.commitMessage(), false, squash, baseBranch);
 
         int nextSeq =
                 changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId).size() + 1;
@@ -403,6 +403,10 @@ public class SandboxExecutionPublishService {
             UUID userId, UUID chatId, UUID executionId, PublishPrRequestDto request) {
         Objects.requireNonNull(request, "request is required");
         SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
+        String baseBranch = resolveTargetBranch(execution);
+        if (request.branchName() != null && !request.branchName().isBlank()) {
+            validateBranchName(request.branchName().trim(), baseBranch);
+        }
         ExecutionEnvironment env = execution.getEnvironment();
         if (env == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution has no associated environment");
@@ -441,28 +445,25 @@ public class SandboxExecutionPublishService {
         }
 
         boolean squash = Boolean.TRUE.equals(request.squash());
-        String baseBranch = resolveTargetBranch(execution);
         PublishCapabilitiesDto.TargetDto target = currentCaps.target();
         boolean isUpdate = target.kind() == PublishCapabilitiesDto.TargetDto.TargetKind.UPDATE_PR;
         boolean createNewPr = Boolean.TRUE.equals(request.createNewPr()) || !isUpdate;
         if (createNewPr) {
             isUpdate = false;
         }
+        List<ChangeSet> changeSets = changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId);
         String branchName;
         if (Boolean.TRUE.equals(request.createNewPr())) {
-            branchName = deriveSuggestedBranch(
-                    execution,
-                    changeSetRepository
-                                    .findByExecutionIdOrderBySeqAsc(executionId)
-                                    .size()
-                            + 1);
+            branchName = deriveSuggestedBranch(execution, changeSets.size() + 1);
+        } else if (request.branchName() != null && !request.branchName().isBlank()) {
+            branchName = request.branchName();
+        } else if (target.branchName() != null && !target.branchName().equals(baseBranch)) {
+            branchName = target.branchName();
         } else {
-            branchName = request.branchName() != null && !request.branchName().isBlank()
-                    ? request.branchName()
-                    : target.branchName();
+            branchName = deriveSuggestedBranch(execution, changeSets.size() + 1);
         }
+        validateBranchName(branchName, baseBranch);
 
-        List<ChangeSet> changeSets = changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId);
         ChangeSet latestChangeSet = changeSets.stream()
                 .filter(cs -> cs.getPrNumber() != null)
                 .reduce((first, second) -> second)
@@ -879,6 +880,54 @@ public class SandboxExecutionPublishService {
         // Commit the selection so the token handler's separate transaction sees it.
         requiresNewTransactionTemplate.executeWithoutResult(
                 status -> sandboxExecutionRepository.updateNewRepoCredential(execution.getId(), credentialId));
+    }
+
+    public static void validateBranchName(String branchName, String baseBranch) {
+        if (branchName == null || branchName.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Branch name is required");
+        }
+        if (baseBranch != null && branchName.equals(baseBranch)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Cannot publish directly to base branch \"" + baseBranch + "\". Please specify a feature branch.");
+        }
+        if (!isValidGitRefName(branchName)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "Invalid git branch name: \"" + branchName + "\"");
+        }
+    }
+
+    public static boolean isValidGitRefName(String branchName) {
+        if (branchName == null || branchName.isBlank()) {
+            return false;
+        }
+        if (branchName.startsWith("-")
+                || branchName.startsWith("/")
+                || branchName.endsWith("/")
+                || branchName.startsWith(".")
+                || branchName.endsWith(".")) {
+            return false;
+        }
+        if (branchName.contains("..")
+                || branchName.contains("//")
+                || branchName.contains("@{")
+                || branchName.equals("@")) {
+            return false;
+        }
+        for (int i = 0; i < branchName.length(); i++) {
+            char c = branchName.charAt(i);
+            if (c <= 0x20 || c == 0x7F || c == '~' || c == '^' || c == ':' || c == '?' || c == '*' || c == '['
+                    || c == '\\') {
+                return false;
+            }
+        }
+        String[] components = branchName.split("/", -1);
+        for (String comp : components) {
+            if (comp.isEmpty() || comp.startsWith(".") || comp.endsWith(".lock")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static List<RepositoryVisibility> visibilityOptionsFor(RepositoryType type) {
