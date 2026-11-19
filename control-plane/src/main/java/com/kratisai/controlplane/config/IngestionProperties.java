@@ -37,6 +37,8 @@ public class IngestionProperties {
 
     private TeamWiki teamWiki = new TeamWiki();
 
+    private Parser parser = new Parser();
+
     public int getMaxConcurrent() {
         return maxConcurrent;
     }
@@ -83,6 +85,14 @@ public class IngestionProperties {
 
     public void setTeamWiki(TeamWiki teamWiki) {
         this.teamWiki = teamWiki;
+    }
+
+    public Parser getParser() {
+        return parser;
+    }
+
+    public void setParser(Parser parser) {
+        this.parser = parser;
     }
 
     /**
@@ -240,6 +250,58 @@ public class IngestionProperties {
 
         public void setMaxIterations(int maxIterations) {
             this.maxIterations = maxIterations;
+        }
+    }
+
+    /**
+     * External parser binaries used during ingestion.
+     */
+    public static class Parser {
+
+        private String binaryPath;
+        private String tempDir;
+        private String sccBinaryPath;
+        private int workers = 2;
+        private int memBudgetMb = 256;
+
+        public String getBinaryPath() {
+            return binaryPath;
+        }
+
+        public void setBinaryPath(String binaryPath) {
+            this.binaryPath = binaryPath;
+        }
+
+        public String getTempDir() {
+            return tempDir;
+        }
+
+        public void setTempDir(String tempDir) {
+            this.tempDir = tempDir;
+        }
+
+        public String getSccBinaryPath() {
+            return sccBinaryPath;
+        }
+
+        public void setSccBinaryPath(String sccBinaryPath) {
+            this.sccBinaryPath = sccBinaryPath;
+        }
+
+        public int getWorkers() {
+            return workers;
+        }
+
+        public void setWorkers(int workers) {
+            this.workers = workers;
+        }
+
+        public int getMemBudgetMb() {
+            return memBudgetMb;
+        }
+
+        public void setMemBudgetMb(int memBudgetMb) {
+            this.memBudgetMb = memBudgetMb;
         }
     }
 }

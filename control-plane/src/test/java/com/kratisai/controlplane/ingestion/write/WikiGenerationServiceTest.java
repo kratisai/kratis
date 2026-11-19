@@ -73,7 +73,7 @@ class WikiGenerationServiceTest {
     @Autowired
     private IngestionUsageTracker usageTracker;
 
-    @Value("${kratis.parser.scc-binary-path}")
+    @Value("${kratis.ingestion.parser.scc-binary-path}")
     private String sccBinaryPath;
 
     private IngestionBatch batch;

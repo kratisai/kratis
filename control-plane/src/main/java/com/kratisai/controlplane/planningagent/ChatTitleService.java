@@ -1,7 +1,7 @@
 package com.kratisai.controlplane.planningagent;
 
 import com.kratisai.controlplane.agentloop.ChatResponseAssembler;
-import com.kratisai.controlplane.config.TitlesProperties;
+import com.kratisai.controlplane.config.PlanningProperties;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.ChatService;
@@ -60,13 +60,14 @@ public class ChatTitleService {
             ChatModelFactory chatModelFactory,
             ChatMemory chatMemory,
             ChatService chatService,
-            TitlesProperties titlesProperties) {
+            PlanningProperties planningProperties) {
         this.chatModelFactory = chatModelFactory;
         this.chatMemory = chatMemory;
         this.chatService = chatService;
-        this.minWords = titlesProperties.getMinWords();
-        this.maxWords = titlesProperties.getMaxWords();
-        this.maxMessages = titlesProperties.getMaxMessages();
+        PlanningProperties.Titles titles = planningProperties.getTitles();
+        this.minWords = titles.getMinWords();
+        this.maxWords = titles.getMaxWords();
+        this.maxMessages = titles.getMaxMessages();
     }
 
     /**

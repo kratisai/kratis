@@ -6,7 +6,6 @@ import com.kratisai.controlplane.agentloop.ReActLoop;
 import com.kratisai.controlplane.agentloop.ReActLoopExhaustedException;
 import com.kratisai.controlplane.agentloop.ReActLoopFatalException;
 import com.kratisai.controlplane.config.IngestionProperties;
-import com.kratisai.controlplane.config.ParserProperties;
 import com.kratisai.controlplane.ingestion.IngestionBatchLogService;
 import com.kratisai.controlplane.ingestion.IngestionUsageTracker;
 import com.kratisai.controlplane.ingestion.ListWikiPagesTool;
@@ -75,8 +74,7 @@ public class WikiGenerationService {
             ObjectMapper objectMapper,
             CtxWikiPageRepository ctxWikiPageRepository,
             @Qualifier("agentTaskExecutor") Executor agentTaskExecutor,
-            IngestionProperties ingestionProperties,
-            ParserProperties parserProperties) {
+            IngestionProperties ingestionProperties) {
         this.chatModelFactory = chatModelFactory;
         this.litellmProvisioningService = litellmProvisioningService;
         this.repositoryIntelligenceTools = repositoryIntelligenceTools;
@@ -93,7 +91,7 @@ public class WikiGenerationService {
         this.ctxWikiPageRepository = ctxWikiPageRepository;
         this.agentTaskExecutor = agentTaskExecutor;
         this.baseCloneDir = ingestionProperties.getCloneDir();
-        this.sccBinaryPath = parserProperties.getSccBinaryPath();
+        this.sccBinaryPath = ingestionProperties.getParser().getSccBinaryPath();
     }
 
     private ChatClient chatClientFor(IngestionBatch batch) {

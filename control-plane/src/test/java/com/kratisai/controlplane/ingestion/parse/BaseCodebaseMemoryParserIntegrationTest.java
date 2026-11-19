@@ -3,7 +3,7 @@ package com.kratisai.controlplane.ingestion.parse;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kratisai.controlplane.config.ParserProperties;
+import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.CtxEdgeRepository;
 import com.kratisai.controlplane.repository.CtxNodeRepository;
@@ -44,7 +44,7 @@ abstract @SpringIntegrationTest class BaseCodebaseMemoryParserIntegrationTest {
     @Autowired
     protected DatabaseCleaner databaseCleaner;
 
-    @Value("${kratis.parser.binary-path}")
+    @Value("${kratis.ingestion.parser.binary-path}")
     protected String configuredBinaryPath;
 
     protected IngestionBatch batch;
@@ -78,12 +78,13 @@ abstract @SpringIntegrationTest class BaseCodebaseMemoryParserIntegrationTest {
 
     /** Create the parser service with the resolved binary path. */
     protected CodebaseMemoryParserService createParserService(File binaryFile) {
-        ParserProperties parserProperties = new ParserProperties();
-        parserProperties.setBinaryPath(binaryFile.getAbsolutePath());
-        parserProperties.setTempDir(
-                new File(System.getProperty("java.io.tmpdir"), "kratis-cbm-cache").getAbsolutePath());
+        IngestionProperties ingestionProperties = new IngestionProperties();
+        ingestionProperties.getParser().setBinaryPath(binaryFile.getAbsolutePath());
+        ingestionProperties
+                .getParser()
+                .setTempDir(new File(System.getProperty("java.io.tmpdir"), "kratis-cbm-cache").getAbsolutePath());
         return new CodebaseMemoryParserService(
-                ctxNodeRepository, ctxEdgeRepository, new ProcessExecutor(), objectMapper, parserProperties);
+                ctxNodeRepository, ctxEdgeRepository, new ProcessExecutor(), objectMapper, ingestionProperties);
     }
 
     /** Run the parser on the given sample directory. */

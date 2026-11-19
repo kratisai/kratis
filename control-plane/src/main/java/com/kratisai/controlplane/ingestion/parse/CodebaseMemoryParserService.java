@@ -5,7 +5,7 @@ import static org.apache.commons.lang3.StringUtils.isEmpty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.kratisai.controlplane.config.ParserProperties;
+import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.model.CtxEdge;
 import com.kratisai.controlplane.model.CtxNode;
 import com.kratisai.controlplane.model.IngestionBatch;
@@ -71,15 +71,16 @@ public class CodebaseMemoryParserService {
             CtxEdgeRepository ctxEdgeRepository,
             ProcessExecutor processExecutor,
             ObjectMapper objectMapper,
-            ParserProperties parserProperties) {
+            IngestionProperties ingestionProperties) {
         this.ctxNodeRepository = ctxNodeRepository;
         this.ctxEdgeRepository = ctxEdgeRepository;
         this.processExecutor = processExecutor;
         this.objectMapper = objectMapper;
-        this.binaryPath = parserProperties.getBinaryPath();
-        this.dbTempDir = parserProperties.getTempDir();
-        this.workers = parserProperties.getWorkers();
-        this.memBudgetMb = parserProperties.getMemBudgetMb();
+        IngestionProperties.Parser parser = ingestionProperties.getParser();
+        this.binaryPath = parser.getBinaryPath();
+        this.dbTempDir = parser.getTempDir();
+        this.workers = parser.getWorkers();
+        this.memBudgetMb = parser.getMemBudgetMb();
         if (isEmpty(dbTempDir)) {
             throw new IllegalArgumentException("dbTempDir must not be empty");
         }
