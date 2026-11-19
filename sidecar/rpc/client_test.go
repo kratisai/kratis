@@ -1555,6 +1555,151 @@ func TestRequestPermission_AsynchronousHitlResolvedNotification(t *testing.T) {
 	}
 }
 
+func TestDeliverSuggestion_FireAndForgetQuestion(t *testing.T) {
+	received := make(chan HitlActivityParams, 1)
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req JsonRpcRequest
+			if err := json.Unmarshal(msg, &req); err != nil {
+				continue
+			}
+			if req.Method != "env.hitl_activity" {
+				continue
+			}
+			raw, _ := json.Marshal(req.Params)
+			var params HitlActivityParams
+			_ = json.Unmarshal(raw, &params)
+			received <- params
+			// Deferred question: the control plane answers asynchronously via
+			// env.hitl_resolved and sends no RPC result frame for the request.
+			_ = conn.WriteJSON(JsonRpcRequest{
+				JsonRPC: "2.0",
+				Method:  "env.hitl_resolved",
+				Params: HitlResolvedParams{
+					ActionID: params.ActionID,
+					Response: HitlAnswered,
+					Content:  map[string]any{"followUp": "/review unpushed"},
+				},
+			})
+		}
+	})
+
+	c := connectClient(t, wsURL(srv), "tok")
+	defer c.Close()
+	errChan := make(chan error, 1)
+	go c.readLoop(errChan)
+	c.mu.Lock()
+	c.currentExecutionID = "exec-1"
+	c.mu.Unlock()
+
+	c.DeliverSuggestion(acp.SuggestionRequest{
+		ActionID: "call-suggest-9",
+		Message:  "Would you like to review the committed changes?",
+		Form:     map[string]any{"type": "object", "properties": map[string]any{}},
+	})
+
+	select {
+	case params := <-received:
+		if params.Kind != HitlQuestion {
+			t.Errorf("expected kind=question, got %q", params.Kind)
+		}
+		if params.ActionID != "call-suggest-9" {
+			t.Errorf("expected the toolCallId as actionId, got %q", params.ActionID)
+		}
+		if params.ExecutionID != "exec-1" {
+			t.Errorf("expected execution id baked in, got %q", params.ExecutionID)
+		}
+		if params.Form == nil {
+			t.Error("expected the suggestion form schema")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for env.hitl_activity")
+	}
+	// The registered waiter must drain on the resolution so re-registration
+	// reconciliation reports no stale pending HITL after it resolves.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		c.mu.Lock()
+		drained := len(c.pendingHitl) == 0
+		c.mu.Unlock()
+		if drained {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("suggestion waiter was never drained after resolution")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestDeliverSuggestion_FailureSurfacesAsStderrWarning(t *testing.T) {
+	outputs := make(chan OutputParams, 4)
+	srv := newTestServer(t, func(conn *websocket.Conn) {
+		defer func() { _ = conn.Close() }()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req JsonRpcRequest
+			if err := json.Unmarshal(msg, &req); err != nil {
+				continue
+			}
+			switch req.Method {
+			case "env.hitl_activity":
+				_ = conn.WriteJSON(JsonRpcResponse{
+					JsonRPC: "2.0",
+					Error:   &JsonRpcError{Code: -32002, Message: "no pending execution"},
+					ID:      req.ID,
+				})
+			case "env.output":
+				raw, _ := json.Marshal(req.Params)
+				var params OutputParams
+				_ = json.Unmarshal(raw, &params)
+				outputs <- params
+			}
+		}
+	})
+	_ = srv
+
+	c := connectClient(t, wsURL(srv), "tok")
+	defer c.Close()
+	errChan := make(chan error, 1)
+	go c.readLoop(errChan)
+
+	c.DeliverSuggestion(acp.SuggestionRequest{
+		ActionID: "call-suggest-err",
+		Message:  "Would you like to review the committed changes?",
+	})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		select {
+		case out := <-outputs:
+			if !strings.HasPrefix(out.Line, "[WARN] Suggestion") || out.Stream != StreamStderr {
+				continue
+			}
+			c.mu.Lock()
+			drained := len(c.pendingHitl) == 0
+			c.mu.Unlock()
+			if !drained {
+				t.Fatal("failed suggestion waiter must be drained")
+			}
+			return
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected a [WARN] Suggestion stderr line after the rpc failure")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func TestRequestPermission_Cancellation(t *testing.T) {
 	srv := newTestServer(t, func(conn *websocket.Conn) {
 		defer func() { _ = conn.Close() }()

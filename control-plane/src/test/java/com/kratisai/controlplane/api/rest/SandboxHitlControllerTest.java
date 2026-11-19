@@ -183,6 +183,32 @@ class SandboxHitlControllerTest {
         upsertPendingActivity(snapshot, ActivityType.ELICITATION, "Choose a deployment target");
     }
 
+    private void registerPendingSuggestionQuestion() throws Exception {
+        HitlRequestSnapshot snapshot = new HitlRequestSnapshot(
+                executionId,
+                "call-suggest-9",
+                HitlKind.QUESTION,
+                "Would you like to review the committed changes?",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                Map.of(
+                        "type",
+                        "object",
+                        "x-kratis-suggestion",
+                        true,
+                        "properties",
+                        Map.of(
+                                "followUp", Map.of("type", "string", "oneOf", List.of()),
+                                "direction", Map.of("type", "string"))),
+                null);
+        upsertPendingActivity(snapshot, ActivityType.ELICITATION, "Would you like to review the committed changes?");
+    }
+
     private void upsertPendingActivity(HitlRequestSnapshot snapshot, ActivityType type, String description)
             throws Exception {
         SandboxExecutionActivity row = activityRepository
@@ -677,15 +703,201 @@ class SandboxHitlControllerTest {
     }
 
     @Test
-    void resolveApproval_oversizedFeedback_returns400() throws Exception {
-        registerPendingApproval();
+    void resolveSuggestion_followUp_steersSelectedPrompt() throws Exception {
+        markExecutionIdle();
+        registerPendingSuggestionQuestion();
 
         ResolveHitlRequest request = new ResolveHitlRequest(
-                executionId, "tool-call-42", HitlResponse.DECLINED, "reject-once", null, null, "x".repeat(4001));
+                executionId, "call-suggest-9", HitlResponse.ANSWERED, null, Map.of("followUp", "/review unpushed"));
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        assertThat(sandboxExecutionRepository
+                        .findById(executionId)
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(SandboxExecutionStatus.RUNNING);
+        assertThat(activityRepository
+                        .findFirstByExecutionIdAndActionIdOrderBySequenceDesc(executionId, "call-suggest-9")
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(ActivityStatus.COMPLETED);
+    }
+
+    @Test
+    void resolveSuggestion_direction_steersAlternative() throws Exception {
+        markExecutionIdle();
+        registerPendingSuggestionQuestion();
+
+        ResolveHitlRequest request = new ResolveHitlRequest(
+                executionId,
+                "call-suggest-9",
+                HitlResponse.ANSWERED,
+                null,
+                Map.of("followUp", "/review unpushed", "direction", "Write the release notes first"));
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        assertThat(sandboxExecutionRepository
+                        .findById(executionId)
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(SandboxExecutionStatus.RUNNING);
+    }
+
+    @Test
+    void resolveSuggestion_noSelection_dismissesPendingHarnessTurn() throws Exception {
+        markExecutionIdle();
+        registerPendingSuggestionQuestion();
+
+        ResolveHitlRequest request =
+                new ResolveHitlRequest(executionId, "call-suggest-9", HitlResponse.ANSWERED, null, Map.of());
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        assertThat(sandboxExecutionRepository
+                        .findById(executionId)
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(SandboxExecutionStatus.RUNNING);
+    }
+
+    @Test
+    void resolveSuggestion_declined_dismissesPendingHarnessTurn() throws Exception {
+        markExecutionIdle();
+        registerPendingSuggestionQuestion();
+
+        ResolveHitlRequest request =
+                new ResolveHitlRequest(executionId, "call-suggest-9", HitlResponse.DECLINED, null, null);
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        assertThat(sandboxExecutionRepository
+                        .findById(executionId)
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(SandboxExecutionStatus.RUNNING);
+    }
+
+    @Test
+    void resolveQuestion_genericAnswered_withoutFeedback_keepsIdleExecution() throws Exception {
+        markExecutionIdle();
+        registerPendingQuestion();
+
+        ResolveHitlRequest request =
+                new ResolveHitlRequest(executionId, "el-1", HitlResponse.ANSWERED, null, Map.of("target", "staging"));
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        assertThat(sandboxExecutionRepository
+                        .findById(executionId)
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(SandboxExecutionStatus.IDLE);
+    }
+
+    @Test
+    void resolveQuestion_genericDeclined_withoutFeedback_keepsIdleExecution() throws Exception {
+        markExecutionIdle();
+        registerPendingQuestion();
+
+        ResolveHitlRequest request = new ResolveHitlRequest(executionId, "el-1", HitlResponse.DECLINED, null, null);
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        assertThat(sandboxExecutionRepository
+                        .findById(executionId)
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(SandboxExecutionStatus.IDLE);
+    }
+
+    @Test
+    void resolveSuggestion_oversizedFollowUp_returns400() throws Exception {
+        registerPendingSuggestionQuestion();
+
+        ResolveHitlRequest request = new ResolveHitlRequest(
+                executionId, "call-suggest-9", HitlResponse.ANSWERED, null, Map.of("followUp", "x".repeat(4001)));
         mockMvc.perform(post("/api/v1/hitl/resolve")
                         .header("Authorization", "Bearer " + userAuthToken)
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void resolveSuggestion_oversizedDirection_returns400() throws Exception {
+        registerPendingSuggestionQuestion();
+
+        ResolveHitlRequest request = new ResolveHitlRequest(
+                executionId, "call-suggest-9", HitlResponse.ANSWERED, null, Map.of("direction", "x".repeat(4001)));
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void resolveQuestion_genericSchemaReuseOfContractKeys_isNotHijacked() throws Exception {
+        markExecutionIdle();
+        HitlRequestSnapshot snapshot = new HitlRequestSnapshot(
+                executionId,
+                "el-generic",
+                HitlKind.QUESTION,
+                "Which region should I deploy to?",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                Map.of(
+                        "type",
+                        "object",
+                        "properties",
+                        Map.of(
+                                "followUp", Map.of("type", "string"),
+                                "direction", Map.of("type", "string"),
+                                "target", Map.of("type", "string"))),
+                null);
+        upsertPendingActivity(snapshot, ActivityType.ELICITATION, "Which region should I deploy to?");
+
+        ResolveHitlRequest request = new ResolveHitlRequest(
+                executionId,
+                "el-generic",
+                HitlResponse.ANSWERED,
+                null,
+                Map.of("direction", "x".repeat(4001), "target", "eu-west"));
+        mockMvc.perform(post("/api/v1/hitl/resolve")
+                        .header("Authorization", "Bearer " + userAuthToken)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        assertThat(sandboxExecutionRepository
+                        .findById(executionId)
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(SandboxExecutionStatus.IDLE);
     }
 }

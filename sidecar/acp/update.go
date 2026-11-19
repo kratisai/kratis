@@ -20,7 +20,6 @@ func (h *Handler) handleSessionUpdate(params map[string]interface{}) {
 	switch u.SessionUpdate {
 	case "tool_call", "tool_call_update":
 		h.resetChunkStream("tool activity: " + u.SessionUpdate)
-		h.debugSuggestionToolCall(u, params)
 		h.handleToolCallUpdate(u, updateAsMap(params))
 	case "agent_message_chunk":
 		h.handleMessageChunk(u, "agent", updateAsMap(params))
@@ -48,21 +47,46 @@ func (h *Handler) handleSessionUpdate(params map[string]interface{}) {
 	}
 }
 
-// debugSuggestionToolCall relays the raw wire payload of generic (kind "other")
-// or suggestion-titled tool calls to env.output so pending suggestions can be
-// diagnosed from the activity log. Payloads are bounded by boundDetail.
-func (h *Handler) debugSuggestionToolCall(u ToolCallUpdateMsg, params map[string]interface{}) {
-	if u.Kind != string(KindOther) && !strings.Contains(strings.ToLower(u.Title), "suggest") {
-		return
+// gateSuggestionLocked translates a suggestion-shaped kind-other tool call
+// (Kilo's `suggest`) into a HITL question instead of a command activity, and
+// reports whether the normal tool-call path must be skipped. The shell row is
+// deferred while no signature has arrived (Kilo emits rawInput {} on the
+// pending tool_call and carries the payload on the in_progress update) and is
+// suppressed entirely once delivered, so the question row is the single
+// record; the harness's own terminal output still reaches the terminal relay.
+// Suspect calls that never grow a signature fall back to the plain relay at a
+// terminal status so no data is lost.
+func (h *Handler) gateSuggestionLocked(info *ToolCallInfo, u ToolCallUpdateMsg, newStatus ActivityStatus) bool {
+	terminal := newStatus == ActivityCompleted || newStatus == ActivityFailed
+	if !isSuggestionSuspect(info.Kind, info.Title) {
+		return false
 	}
-	raw, err := json.Marshal(params["update"])
-	if err != nil {
-		return
+	if info.SuggestionDelivered {
+		info.Status = newStatus
+		if terminal {
+			h.relayToolCallOutputLocked(info, u, newStatus)
+		}
+		return true
 	}
-	payload, _ := boundDetail(string(raw))
-	h.debugf("[ACP][TOOL] %s toolCallId=%q kind=%q title=%q status=%q rawInput=%t rawOutput=%t payload=%s",
-		u.SessionUpdate, u.ToolCallID, u.Kind, u.Title, u.Status,
-		len(u.RawInput) > 0, len(u.RawOutput) > 0, payload)
+	sug := parseSuggestion(info.RawInputMap)
+	if sug == nil {
+		if terminal {
+			return false
+		}
+		info.Status = newStatus
+		return true
+	}
+	info.SuggestionDelivered = true
+	info.Status = newStatus
+	h.debugf("[ACP][SUGGEST] toolCallId=%q translated to env.hitl_activity question (question=%q actions=%d)",
+		info.ToolCallID, sug.Question, len(sug.Actions))
+	h.sink.SendOutput("[Suggestion] "+sug.Question, "stdout")
+	h.sink.DeliverSuggestion(SuggestionRequest{
+		ActionID: info.ToolCallID,
+		Message:  sug.Question,
+		Form:     suggestionFormSchema(sug),
+	})
+	return true
 }
 
 // handleToolCallUpdate merges one tool_call update into the per-toolCallId
@@ -111,6 +135,10 @@ func (h *Handler) handleToolCallUpdate(u ToolCallUpdateMsg, _ map[string]any) {
 		}
 		h.debugf("[ACP][TERM] toolCallId=%q finalized as %s from terminal_exit (wire status=%q exit=%v signal=%v)",
 			u.ToolCallID, newStatus, u.Status, info.ExitCode, info.ExitSignal)
+	}
+
+	if h.gateSuggestionLocked(info, u, newStatus) {
+		return
 	}
 
 	h.relayToolCallOutputLocked(info, u, newStatus)

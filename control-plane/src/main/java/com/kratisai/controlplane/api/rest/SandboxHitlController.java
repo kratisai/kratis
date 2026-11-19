@@ -31,6 +31,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +54,10 @@ import org.springframework.web.server.ResponseStatusException;
 public class SandboxHitlController {
 
     private static final Logger logger = LoggerFactory.getLogger(SandboxHitlController.class);
+
+    static final String DISMISSED_SUGGESTION_NOTICE =
+            "System notice: the agent's suggestion was dismissed without a follow-up being applied; "
+                    + "nothing to act on. Continue the task appropriately or wait for explicit direction.";
 
     private final SandboxExecutionRepository sandboxExecutionRepository;
     private final HitlRuleRepository hitlRuleRepository;
@@ -86,7 +91,10 @@ public class SandboxHitlController {
     @Operation(
             summary = "Resolve a pending HITL request",
             description =
-                    "Resolves approvals with approved/declined/cancelled (+ optionId) and questions with answered/declined/cancelled (+ content). An optional feedback note is delivered to the agent as steering guidance after the resolution.")
+                    "Resolves approvals with approved/declined/cancelled (+ optionId) and questions with answered/declined/cancelled (+ content). "
+                            + "Suggestion questions (harness suggestion tool calls) steer the agent per their form: content.direction (an alternative user direction) "
+                            + "wins over content.followUp (the chosen suggested prompt); an empty answer or declined/cancelled dismisses the suggestion. "
+                            + "An optional feedback note is delivered to the agent as steering guidance after the resolution; it replaces the dismissal steer when present.")
     @Transactional
     public ResponseEntity<Void> resolveHitl(@Valid @RequestBody ResolveHitlRequest request) {
         UUID userId = SecurityUtil.getCurrentUserId();
@@ -119,6 +127,9 @@ public class SandboxHitlController {
             persistRememberedRules(request, response, execution, teamId, resolvingUser);
         } else {
             validateQuestionResponse(response);
+            if (isSuggestionForm(hitl.form())) {
+                validateQuestionContent(request.content());
+            }
             if (request.rules() != null && !request.rules().isEmpty()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "rules are only valid for approvals");
             }
@@ -135,7 +146,7 @@ public class SandboxHitlController {
                         request.content(),
                         HitlResolver.user(userId, resolvingUser.getDisplayName()))));
 
-        dispatchFeedbackSteering(request, execution);
+        dispatchFeedbackSteering(request, execution, kind, hitl);
 
         logger.info(
                 "Resolved HITL '{}' (kind={}, response={}) for execution {} by user {}",
@@ -147,12 +158,87 @@ public class SandboxHitlController {
         return ResponseEntity.noContent().build();
     }
 
-    private void dispatchFeedbackSteering(ResolveHitlRequest request, SandboxExecution execution) {
-        String feedback = request.feedback();
-        if (feedback == null) {
+    private void dispatchFeedbackSteering(
+            ResolveHitlRequest request, SandboxExecution execution, HitlKind kind, ActivityHitl hitl) {
+        if (kind == HitlKind.APPROVAL) {
+            if (request.feedback() != null) {
+                steeringAfterCommit(execution, approvalFeedbackPrompt(request.feedback()));
+            }
             return;
         }
-        String prompt = "The user attached this guidance while responding to the approval request: " + feedback.trim();
+        if (!isSuggestionForm(hitl.form())) {
+            // Generic elicitation: only the feedback note steers, as before.
+            if (request.feedback() != null) {
+                steeringAfterCommit(execution, questionFeedbackPrompt(request.feedback()));
+            }
+            return;
+        }
+        String target = suggestionSteeringTarget(request.content());
+        if (target != null) {
+            steeringAfterCommit(execution, target);
+            return;
+        }
+        if (request.feedback() != null) {
+            steeringAfterCommit(execution, questionFeedbackPrompt(request.feedback()));
+            return;
+        }
+        steeringAfterCommit(execution, DISMISSED_SUGGESTION_NOTICE);
+    }
+
+    /** Resolves the suggestion answer into the text to dispatch: an explicit alternative direction wins over the suggested prompt; null when neither was provided. */
+    static String suggestionSteeringTarget(Map<String, Object> content) {
+        if (content == null) {
+            return null;
+        }
+        String direction = contentText(content, "direction");
+        if (direction != null) {
+            return "Instead of the agent's suggestion, the user directs: " + direction;
+        }
+        String followUp = contentText(content, "followUp");
+        if (followUp != null) {
+            return "The user applied the agent's suggested follow-up. Address exactly this: " + followUp;
+        }
+        return null;
+    }
+
+    /** Marker key the sidecar embeds in its own question form; generic elicitations that merely define followUp/direction keys must not match. */
+    private static final String SUGGESTION_FORM_MARKER = "x-kratis-suggestion";
+
+    static boolean isSuggestionForm(Map<String, Object> form) {
+        return form != null && Boolean.TRUE.equals(form.get(SUGGESTION_FORM_MARKER));
+    }
+
+    private static String contentText(Map<String, Object> content, String key) {
+        Object value = content.get(key);
+        return value instanceof String text && !text.isBlank() ? text.trim() : null;
+    }
+
+    private static final int MAX_QUESTION_ANSWER_TEXT = 4000;
+
+    /** Bounded steering payloads: only the suggestion contract keys, sparing generic schema answers. */
+    private static void validateQuestionContent(Map<String, Object> content) {
+        if (content == null) {
+            return;
+        }
+        for (String key : List.of("followUp", "direction")) {
+            Object value = content.get(key);
+            if (value instanceof String text && text.length() > MAX_QUESTION_ANSWER_TEXT) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "Question answer '" + key + "' exceeds " + MAX_QUESTION_ANSWER_TEXT + " characters");
+            }
+        }
+    }
+
+    static String approvalFeedbackPrompt(String feedback) {
+        return "The user attached this guidance while responding to the approval request: " + feedback.trim();
+    }
+
+    static String questionFeedbackPrompt(String feedback) {
+        return "The user attached this guidance while responding to the agent's question: " + feedback.trim();
+    }
+
+    private void steeringAfterCommit(SandboxExecution execution, String prompt) {
         UUID executionId = execution.getId();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override

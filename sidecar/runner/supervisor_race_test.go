@@ -73,6 +73,8 @@ func (m *mockEventSink) CreateElicitation(_ acp.ElicitationRequest) (acp.Elicita
 	return acp.ElicitationResult{Action: "cancel"}, nil
 }
 
+func (m *mockEventSink) DeliverSuggestion(_ acp.SuggestionRequest) {}
+
 func (m *mockEventSink) CancelPendingHitl() {
 	m.cancelOnce.Do(func() {
 		close(m.permCancelChan)

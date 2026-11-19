@@ -126,6 +126,7 @@ type EventSink interface {
 	SendComplete(info CompletionInfo)
 	RequestPermission(req acp.PermissionRequest) (selectedOptionID string, err error)
 	CreateElicitation(req acp.ElicitationRequest) (acp.ElicitationResult, error)
+	DeliverSuggestion(req acp.SuggestionRequest)
 	PermissionCancelChan() <-chan struct{}
 	CancelPendingHitl()
 }

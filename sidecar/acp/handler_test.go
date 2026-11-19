@@ -2076,6 +2076,7 @@ type mockEventSink struct {
 	outputs      []capturedOutput
 	activities   []capturedActivity
 	permRequests []capturedPermissionRequest
+	suggestions  []capturedSuggestion
 	cancelChan   chan struct{}
 	// Optional approval result; when zero-value the sink blocks on cancelChan.
 	approveResult string
@@ -2084,6 +2085,12 @@ type mockEventSink struct {
 	// Optional elicitation result; zero-value returns cancel.
 	elicResult ElicitationResult
 	elicErr    error
+}
+
+type capturedSuggestion struct {
+	actionID string
+	message  string
+	form     map[string]any
 }
 
 type capturedOutput struct {
@@ -2137,6 +2144,14 @@ func (m *mockEventSink) RequestPermission(req PermissionRequest) (string, error)
 	}
 	<-m.cancelChan
 	return "", fmt.Errorf("permission request cancelled")
+}
+
+func (m *mockEventSink) DeliverSuggestion(req SuggestionRequest) {
+	m.suggestions = append(m.suggestions, capturedSuggestion{
+		actionID: req.ActionID,
+		message:  req.Message,
+		form:     req.Form,
+	})
 }
 
 func (m *mockEventSink) PermissionCancelChan() <-chan struct{} {
@@ -2424,7 +2439,7 @@ func extractRawOutputText(update map[string]interface{}) string {
 	return ""
 }
 
-func TestHandleSessionUpdate_SuggestionToolCallRawPayloadRelayed(t *testing.T) {
+func TestHandleSessionUpdate_SuggestionToolCallTranslated(t *testing.T) {
 	sink := &mockEventSink{}
 	h := NewHandler(sink, nil, "")
 	h.SetDebug(false)
@@ -2441,15 +2456,28 @@ func TestHandleSessionUpdate_SuggestionToolCallRawPayloadRelayed(t *testing.T) {
 		},
 	}})
 
-	var found bool
-	for _, o := range sink.outputs {
-		if strings.HasPrefix(o.line, "[ACP][TOOL] tool_call toolCallId=\"sug-1\" kind=\"other\" title=\"Suggest\" status=\"pending\" rawInput=true rawOutput=false") &&
-			strings.Contains(o.line, "/review uncommitted") {
-			found = true
-		}
+	if len(sink.suggestions) != 1 {
+		t.Fatalf("expected one suggestion question, got %d", len(sink.suggestions))
 	}
-	if !found {
-		t.Fatalf("expected [ACP][TOOL] raw payload line, got outputs: %+v", sink.outputs)
+	delivered := sink.suggestions[0]
+	if delivered.actionID != "sug-1" {
+		t.Errorf("unexpected actionID %q", delivered.actionID)
+	}
+	if delivered.message != "Would you like to review the changes?" {
+		t.Errorf("unexpected message %q", delivered.message)
+	}
+	props, ok := delivered.form["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected form properties, got %+v", delivered.form)
+	}
+	if _, ok := props["followUp"]; !ok {
+		t.Error("expected followUp option to carry the action prompt")
+	}
+	if _, ok := props["direction"]; !ok {
+		t.Error("expected direction property for alternative steering")
+	}
+	if len(sink.activities) != 0 {
+		t.Errorf("suggestion must not emit a command activity, got %+v", sink.activities)
 	}
 }
 

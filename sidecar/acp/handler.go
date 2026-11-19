@@ -16,6 +16,7 @@ type EventSink interface {
 	SendActivity(activity Activity)
 	RequestPermission(req PermissionRequest) (selectedOptionID string, err error)
 	CreateElicitation(req ElicitationRequest) (ElicitationResult, error)
+	DeliverSuggestion(req SuggestionRequest)
 	PermissionCancelChan() <-chan struct{}
 }
 
@@ -123,19 +124,20 @@ func runeCeilBoundary(s string, n int) int {
 // ToolCallInfo is the accumulated state of one ACP tool call, keyed by
 // toolCallId.
 type ToolCallInfo struct {
-	ToolCallID       string
-	Kind             string
-	Title            string
-	Status           ActivityStatus
-	ApprovalDecided  bool
-	Approved         bool
-	ObservedInUpdate bool
-	Command          string
-	FilePath         string
-	Locations        []ToolLocation
-	RawInputMap      map[string]any
-	Meta             map[string]any
-	RawOutputRaw     json.RawMessage
+	ToolCallID          string
+	Kind                string
+	Title               string
+	Status              ActivityStatus
+	ApprovalDecided     bool
+	SuggestionDelivered bool
+	Approved            bool
+	ObservedInUpdate    bool
+	Command             string
+	FilePath            string
+	Locations           []ToolLocation
+	RawInputMap         map[string]any
+	Meta                map[string]any
+	RawOutputRaw        json.RawMessage
 	// Todos: TodoWrite list from rawInput.todos; non-empty → relay as PLAN.
 	Todos []PlanEntry
 
@@ -227,7 +229,7 @@ func (h *Handler) debugf(format string, args ...interface{}) {
 	log.Printf("%s", msg)
 	if !h.debug {
 		for _, prefix := range []string{
-			"[NOTIF]", "[REQ]", "[PERM]", "[ACP][TERM]", "[ACP][PERM]", "[ACP][FS]", "[ACP][TIMING]", "[ACP][MSGID]",
+			"[NOTIF]", "[REQ]", "[PERM]", "[ACP][TERM]", "[ACP][PERM]", "[ACP][FS]", "[ACP][TIMING]", "[ACP][MSGID]", "[ACP][SUGGEST]",
 		} {
 			if strings.HasPrefix(msg, prefix) {
 				return

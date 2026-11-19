@@ -1372,6 +1372,41 @@ func (c *Client) CreateElicitation(req acp.ElicitationRequest) (acp.ElicitationR
 	}
 }
 
+// DeliverSuggestion forwards a harness suggestion tool call to the control
+// plane as an asynchronous HITL question. Unlike CreateElicitation there is no
+// agent-side request to answer in-band: the waiting agent turn only advances
+// on the user's next prompt, which the control plane dispatches itself after
+// the resolution. The goroutine keeps a pendingHitl waiter registered so
+// re-registration reconciliation still reports the live question; its decision
+// is consumed here and carries no side effect.
+func (c *Client) DeliverSuggestion(req acp.SuggestionRequest) {
+	if req.ActionID == "" {
+		req.ActionID = newHitlID()
+	}
+	c.mu.Lock()
+	execID := c.currentExecutionID
+	c.mu.Unlock()
+	go func() {
+		result, err := c.requestHitl(HitlActivityParams{
+			ActionID:    req.ActionID,
+			Message:     req.Message,
+			Kind:        HitlQuestion,
+			ExecutionID: execID,
+			Form:        req.Form,
+		})
+		if err != nil {
+			log.Printf("[HITL] suggestion %q ended without decision: %v", req.ActionID, err)
+			warn := fmt.Sprintf(
+				"[WARN] Suggestion %q could not be delivered to the control plane (%v); the pending suggestion resolves on the next prompt",
+				req.ActionID, err)
+			c.SendOutput(warn, "stderr")
+			return
+		}
+		log.Printf("[HITL] suggestion %q resolved (response=%q); control plane steers the agent",
+			req.ActionID, result.Response)
+	}()
+}
+
 // requestHitl sends one env.hitl_activity to the control plane and waits for
 // either the immediate acknowledgement result (auto-resolved requests) or the
 // asynchronous env.hitl_resolved notification. A dropped connection does not
