@@ -34,8 +34,16 @@ public interface IngestionBatchRepository extends JpaRepository<IngestionBatch, 
 
     @Modifying(clearAutomatically = true)
     @Query(
-            "UPDATE IngestionBatch ib SET ib.status = 'QUEUED', ib.errorMessage = 'Reset on startup: was orphaned in PROCESSING state' WHERE ib.status = 'PROCESSING'")
-    int resetOrphanedProcessingBatches();
+            "UPDATE IngestionBatch ib SET ib.status = 'QUEUED', ib.errorMessage = 'Reset on startup: was orphaned in PROCESSING state' WHERE ib.id = :batchId AND ib.status = 'PROCESSING'")
+    int resetOrphanedProcessingBatch(@Param("batchId") UUID batchId);
+
+    @Modifying(clearAutomatically = true)
+    @Query(
+            "UPDATE IngestionBatch ib SET ib.status = 'FAILED', ib.errorMessage = :errorMessage, ib.completedAt = :completedAt, ib.isActive = false WHERE ib.id = :batchId AND ib.status = 'PROCESSING'")
+    int failOrphanedProcessingBatch(
+            @Param("batchId") UUID batchId,
+            @Param("errorMessage") String errorMessage,
+            @Param("completedAt") Instant completedAt);
 
     /**
      * Calculate queue position: count how many QUEUED batches were started before this one. Returns

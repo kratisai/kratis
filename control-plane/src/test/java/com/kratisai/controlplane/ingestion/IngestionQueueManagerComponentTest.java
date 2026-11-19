@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.ingestion;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -57,6 +58,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.AdditionalAnswers;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -126,12 +128,23 @@ class IngestionQueueManagerComponentTest {
     void setUp() {
         databaseCleaner.cleanAll();
         ingestionWorker = mock(IngestionWorker.class);
-        queueManager = new IngestionQueueManager(
+        queueManager = queueManager(ctxEdgeRepository);
+
+        TestDataFactory.TestContext ctx = testDataFactory.createUserAndTeam();
+        team = ctx.team();
+        repository = new Repository(
+                "recovery-repo", "https://github.com/kratisai/recovery-repo.git", "main", RepositoryType.GITHUB);
+        repository.setTeam(team);
+        repository = repositoryRepository.saveAndFlush(repository);
+    }
+
+    private IngestionQueueManager queueManager(CtxEdgeRepository edgeRepository) {
+        return new IngestionQueueManager(
                 ingestionBatchRepository,
                 ingestionWorker,
                 transactionManager,
                 ctxNodeRepository,
-                ctxEdgeRepository,
+                edgeRepository,
                 ctxDimensionRepository,
                 ctxNodeDimensionRepository,
                 ctxEmbeddingRepository,
@@ -141,13 +154,6 @@ class IngestionQueueManagerComponentTest {
                 ctxRepoRelationRepository,
                 ctxRepoSynopsisRepository,
                 ingestionBatchLogRepository);
-
-        TestDataFactory.TestContext ctx = testDataFactory.createUserAndTeam();
-        team = ctx.team();
-        repository = new Repository(
-                "recovery-repo", "https://github.com/kratisai/recovery-repo.git", "main", RepositoryType.GITHUB);
-        repository.setTeam(team);
-        repository = repositoryRepository.saveAndFlush(repository);
     }
 
     @AfterEach
@@ -266,4 +272,75 @@ class IngestionQueueManagerComponentTest {
         verify(ingestionWorker, never()).runIngestion(peerBatch.getId());
         verify(ingestionWorker, never()).runIngestion(failedBatch.getId());
     }
+
+    @Test
+    void recoverAndResubmit_multipleOrphanedBatchesClearsEveryEdgeWithoutStaleDeletes() {
+        Orphan first = createOrphan("src/FirstA.java", "src/FirstB.java");
+        Orphan second = createOrphan("src/SecondA.java", "src/SecondB.java");
+
+        queueManager.recoverAndResubmit();
+
+        assertThat(ingestionBatchRepository
+                        .findById(first.batchId())
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(IngestionStatus.QUEUED);
+        assertThat(ingestionBatchRepository
+                        .findById(second.batchId())
+                        .orElseThrow()
+                        .getStatus())
+                .isEqualTo(IngestionStatus.QUEUED);
+        assertThat(ctxEdgeRepository.findById(first.edgeId())).isEmpty();
+        assertThat(ctxEdgeRepository.findById(second.edgeId())).isEmpty();
+        assertThat(ctxNodeRepository.findById(first.sourceNodeId())).isEmpty();
+        assertThat(ctxNodeRepository.findById(first.targetNodeId())).isEmpty();
+        assertThat(ctxNodeRepository.findById(second.sourceNodeId())).isEmpty();
+        assertThat(ctxNodeRepository.findById(second.targetNodeId())).isEmpty();
+        verify(ingestionWorker).runIngestion(first.batchId());
+        verify(ingestionWorker).runIngestion(second.batchId());
+    }
+
+    @Test
+    void recoverAndResubmit_marksFailedCleanupFailedAndStillRecoversOtherBatches() {
+        Orphan failing = createOrphan("src/FailingA.java", "src/FailingB.java");
+        Orphan healthy = createOrphan("src/HealthyA.java", "src/HealthyB.java");
+
+        CtxEdgeRepository edgeRepository =
+                mock(CtxEdgeRepository.class, AdditionalAnswers.delegatesTo(ctxEdgeRepository));
+        doThrow(new IllegalStateException("simulated delete failure"))
+                .when(edgeRepository)
+                .deleteByBatchId(failing.batchId());
+        IngestionQueueManager resilientQueueManager = queueManager(edgeRepository);
+
+        resilientQueueManager.recoverAndResubmit();
+
+        IngestionBatch failedBatch =
+                ingestionBatchRepository.findById(failing.batchId()).orElseThrow();
+        assertThat(failedBatch.getStatus()).isEqualTo(IngestionStatus.FAILED);
+        assertThat(failedBatch.getErrorMessage()).contains("Startup recovery failed", "simulated delete failure");
+        assertThat(ctxEdgeRepository.findById(failing.edgeId())).isPresent();
+
+        IngestionBatch recoveredBatch =
+                ingestionBatchRepository.findById(healthy.batchId()).orElseThrow();
+        assertThat(recoveredBatch.getStatus()).isEqualTo(IngestionStatus.QUEUED);
+        assertThat(ctxEdgeRepository.findById(healthy.edgeId())).isEmpty();
+
+        verify(ingestionWorker).runIngestion(healthy.batchId());
+        verify(ingestionWorker, never()).runIngestion(failing.batchId());
+    }
+
+    private Orphan createOrphan(String sourcePath, String targetPath) {
+        IngestionBatch batch = new IngestionBatch(repository);
+        batch.setStatus(IngestionStatus.PROCESSING);
+        batch = ingestionBatchRepository.saveAndFlush(batch);
+        CtxNode sourceNode = ctxNodeRepository.saveAndFlush(
+                new CtxNode(batch, team.getId(), repository.getName(), NodeType.FILE, sourcePath));
+        CtxNode targetNode = ctxNodeRepository.saveAndFlush(
+                new CtxNode(batch, team.getId(), repository.getName(), NodeType.FILE, targetPath));
+        CtxEdge edge = ctxEdgeRepository.saveAndFlush(
+                new CtxEdge(batch, team.getId(), sourceNode, targetNode, RelationType.CALLS));
+        return new Orphan(batch.getId(), sourceNode.getId(), targetNode.getId(), edge.getId());
+    }
+
+    private record Orphan(UUID batchId, UUID sourceNodeId, UUID targetNodeId, UUID edgeId) {}
 }

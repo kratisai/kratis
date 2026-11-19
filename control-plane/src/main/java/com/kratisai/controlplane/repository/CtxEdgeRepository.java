@@ -68,6 +68,9 @@ public interface CtxEdgeRepository extends JpaRepository<CtxEdge, UUID> {
             "SELECT e FROM CtxEdge e JOIN FETCH e.sourceNode JOIN FETCH e.targetNode WHERE e.batch.id = :batchId AND e.relationType IN (com.kratisai.controlplane.model.RelationType.INHERITS, com.kratisai.controlplane.model.RelationType.IMPLEMENTS)")
     List<CtxEdge> findInheritanceEdgesByBatchId(@Param("batchId") UUID batchId);
 
+    // Must stay a bulk delete: a derived fetch-then-delete schedules entity removals that are only
+    // flushed while the next orphaned batch is processed, after this batch's node delete has already
+    // cascade-deleted the edges.
     @Modifying
     @Query("DELETE FROM CtxEdge e WHERE e.batch.id = :batchId")
     void deleteByBatchId(@Param("batchId") UUID batchId);

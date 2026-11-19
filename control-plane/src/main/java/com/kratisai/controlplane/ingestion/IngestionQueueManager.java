@@ -3,6 +3,7 @@ package com.kratisai.controlplane.ingestion;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionStatus;
 import com.kratisai.controlplane.repository.*;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -80,38 +81,19 @@ public class IngestionQueueManager {
     /**
      * Recover and resubmit queued batches on application startup.
      *
-     * <p>This method is called once when the application is ready. It resets any orphaned
-     * PROCESSING batches to QUEUED, then submits all QUEUED batches to the async worker.
+     * <p>This method is called once when the application is ready. Each orphaned PROCESSING batch is
+     * cleared and reset in its own transaction. A batch that cannot be cleared is marked FAILED, so
+     * one bad batch cannot stop the application from starting or block recovery of the others.
      */
     @EventListener(ApplicationReadyEvent.class)
     public void recoverAndResubmit() {
-        // Transaction 1: Clear data and reset orphaned PROCESSING batches to QUEUED
-        transactionTemplate.execute(status -> {
-            List<UUID> processingBatchIds = ingestionBatchRepository.findProcessingBatchIds();
-            for (UUID batchId : processingBatchIds) {
-                logger.info("Clearing data for orphaned PROCESSING batch {}", batchId);
-                // Bulk deletes run immediately in FK-safe order: scheduled per-entity removals would
-                // interact with the node delete's DB cascade and the context-clearing reset update.
-                ctxEmbeddingRepository.deleteByBatchId(batchId);
-                ctxArchitecturePatternRepository.deleteByBatchId(batchId);
-                ctxNodeDimensionRepository.deleteByBatchId(batchId);
-                ctxDimensionRepository.deleteByBatchId(batchId);
-                ctxEdgeRepository.deleteByBatchId(batchId);
-                ctxSurfaceRepository.deleteByBatchId(batchId);
-                ctxRepoRelationRepository.deleteByBatchId(batchId);
-                ctxRepoSynopsisRepository.deleteByBatchId(batchId);
-                ctxWikiPageRepository.deleteByBatchId(batchId);
-                ctxNodeRepository.deleteByBatchId(batchId);
-                ingestionBatchLogRepository.deleteByBatchId(batchId);
-            }
-            int resetCount = ingestionBatchRepository.resetOrphanedProcessingBatches();
-            if (resetCount > 0) {
-                logger.info("Reset {} orphaned PROCESSING batches to QUEUED", resetCount);
-            }
-            return null;
-        });
+        List<UUID> processingBatchIds =
+                transactionTemplate.execute(status -> ingestionBatchRepository.findProcessingBatchIds());
+        for (UUID batchId : processingBatchIds) {
+            recoverBatch(batchId);
+        }
 
-        // Transaction 2: Find all QUEUED batches (after reset committed)
+        // Read QUEUED batches after every reset has committed.
         List<UUID> queuedBatchIds = transactionTemplate.execute(status -> {
             List<IngestionBatch> queuedBatches = ingestionBatchRepository.findByStatus(IngestionStatus.QUEUED);
             return queuedBatches.stream().map(IngestionBatch::getId).toList();
@@ -127,6 +109,43 @@ public class IngestionQueueManager {
             logger.info("Resubmitted {} queued batches to ingestion queue", queuedBatchIds.size());
         } else {
             logger.info("No queued batches to resubmit on startup");
+        }
+    }
+
+    private void recoverBatch(UUID batchId) {
+        try {
+            transactionTemplate.executeWithoutResult(status -> {
+                logger.info("Clearing data for orphaned PROCESSING batch {}", batchId);
+                // Bulk deletes run immediately in FK-safe order: scheduled per-entity removals would
+                // interact with the node delete's DB cascade and the context-clearing reset update.
+                ctxEmbeddingRepository.deleteByBatchId(batchId);
+                ctxArchitecturePatternRepository.deleteByBatchId(batchId);
+                ctxNodeDimensionRepository.deleteByBatchId(batchId);
+                ctxDimensionRepository.deleteByBatchId(batchId);
+                ctxEdgeRepository.deleteByBatchId(batchId);
+                ctxSurfaceRepository.deleteByBatchId(batchId);
+                ctxRepoRelationRepository.deleteByBatchId(batchId);
+                ctxRepoSynopsisRepository.deleteByBatchId(batchId);
+                ctxWikiPageRepository.deleteByBatchId(batchId);
+                ctxNodeRepository.deleteByBatchId(batchId);
+                ingestionBatchLogRepository.deleteByBatchId(batchId);
+                if (ingestionBatchRepository.resetOrphanedProcessingBatch(batchId) > 0) {
+                    logger.info("Reset orphaned PROCESSING batch {} to QUEUED", batchId);
+                }
+            });
+        } catch (RuntimeException recoveryFailure) {
+            logger.error("Failed to recover orphaned PROCESSING batch {}; marking it FAILED", batchId, recoveryFailure);
+            markRecoveryFailed(batchId, recoveryFailure);
+        }
+    }
+
+    private void markRecoveryFailed(UUID batchId, RuntimeException recoveryFailure) {
+        try {
+            transactionTemplate.executeWithoutResult(status -> ingestionBatchRepository.failOrphanedProcessingBatch(
+                    batchId, "Startup recovery failed: " + recoveryFailure.getMessage(), Instant.now()));
+        } catch (RuntimeException markFailure) {
+            recoveryFailure.addSuppressed(markFailure);
+            logger.error("Could not mark orphaned batch {} FAILED; it remains PROCESSING", batchId, markFailure);
         }
     }
 }

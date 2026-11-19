@@ -9,6 +9,7 @@ import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,7 +51,7 @@ class IngestionQueueManagerTest {
 
     @Test
     @Transactional
-    void resetOrphanedProcessingBatches_shouldResetProcessingToQueued() {
+    void resetOrphanedProcessingBatch_shouldResetProcessingToQueued() {
         // Create an orphaned PROCESSING batch
         IngestionBatch orphanedBatch = new IngestionBatch(repository);
         orphanedBatch.setStatus(IngestionStatus.PROCESSING);
@@ -67,8 +68,7 @@ class IngestionQueueManagerTest {
         assertThat(ingestionBatchRepository.findByStatus(IngestionStatus.QUEUED))
                 .hasSize(1);
 
-        // Run the reset query directly
-        int resetCount = ingestionBatchRepository.resetOrphanedProcessingBatches();
+        int resetCount = ingestionBatchRepository.resetOrphanedProcessingBatch(orphanedBatch.getId());
 
         // Verify one batch was reset
         assertThat(resetCount).isEqualTo(1);
@@ -86,16 +86,34 @@ class IngestionQueueManagerTest {
 
     @Test
     @Transactional
-    void resetOrphanedProcessingBatches_shouldReturnZeroWhenNoProcessingBatches() {
+    void resetOrphanedProcessingBatch_shouldReturnZeroWhenBatchIsNotProcessing() {
         // Create only QUEUED batches
         IngestionBatch queuedBatch = new IngestionBatch(repository);
-        ingestionBatchRepository.saveAndFlush(queuedBatch);
+        queuedBatch = ingestionBatchRepository.saveAndFlush(queuedBatch);
 
-        // Run the reset query
-        int resetCount = ingestionBatchRepository.resetOrphanedProcessingBatches();
+        int resetCount = ingestionBatchRepository.resetOrphanedProcessingBatch(queuedBatch.getId());
 
-        // Verify no batches were reset
         assertThat(resetCount).isEqualTo(0);
+    }
+
+    @Test
+    @Transactional
+    void failOrphanedProcessingBatch_shouldMarkProcessingBatchFailed() {
+        IngestionBatch orphanedBatch = new IngestionBatch(repository);
+        orphanedBatch.setStatus(IngestionStatus.PROCESSING);
+        orphanedBatch.setActive(true);
+        orphanedBatch = ingestionBatchRepository.saveAndFlush(orphanedBatch);
+
+        int failedCount = ingestionBatchRepository.failOrphanedProcessingBatch(
+                orphanedBatch.getId(), "Startup recovery failed: boom", Instant.parse("2026-11-18T00:00:00Z"));
+
+        assertThat(failedCount).isEqualTo(1);
+        IngestionBatch failedBatch =
+                ingestionBatchRepository.findById(orphanedBatch.getId()).orElseThrow();
+        assertThat(failedBatch.getStatus()).isEqualTo(IngestionStatus.FAILED);
+        assertThat(failedBatch.getErrorMessage()).contains("Startup recovery failed");
+        assertThat(failedBatch.getCompletedAt()).isEqualTo(Instant.parse("2026-11-18T00:00:00Z"));
+        assertThat(failedBatch.isActive()).isFalse();
     }
 
     @Test
