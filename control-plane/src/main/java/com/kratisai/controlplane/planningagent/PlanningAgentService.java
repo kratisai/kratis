@@ -178,11 +178,13 @@ public class PlanningAgentService {
         // The turn owns the registry entry. Subscriber disconnects must not cancel the run or
         // remove the entry, so reconnecting clients can replay the stream while it is active.
         chatFluxRegistry.register(chatId, stream);
+        chatService.publishChatsChanged(teamId);
         try {
             agentTaskExecutor.execute(
                     () -> execute(chatClient, context, sink, stream, modelProvider, modelName, virtualKey));
         } catch (RuntimeException e) {
             chatFluxRegistry.remove(chatId, stream);
+            chatService.publishChatsChanged(teamId);
             throw e;
         }
         return stream;
@@ -419,6 +421,7 @@ public class PlanningAgentService {
         } finally {
             chatFluxRegistry.remove(context.chatId(), stream);
             chatUsageSessionService.syncUsage(context.chatId(), virtualKey);
+            chatService.publishChatsChanged(context.teamId());
         }
         if (!Thread.currentThread().isInterrupted()) {
             try {

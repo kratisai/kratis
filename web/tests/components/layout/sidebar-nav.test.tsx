@@ -70,6 +70,17 @@ vi.mock('@/hooks/use-chats', () => ({
         },
         {
           archivedAt: null,
+          createdAt: recent,
+          createdByDisplayName: 'User 1',
+          id: 'session-7',
+          lastActivityAt: recent,
+          status: 'Planning',
+          teamId: 'team-1',
+          title: 'Planning Session',
+          updatedAt: recent,
+        },
+        {
+          archivedAt: null,
           createdAt: '2020-01-01T00:00:00Z',
           createdByDisplayName: 'User 1',
           id: 'session-6',
@@ -200,6 +211,7 @@ describe('SidebarNav', () => {
     expect(screen.getByText('MR pushed')).toHaveClass('text-emerald-400')
     expect(screen.getByText('Blocked')).toHaveClass('text-amber-400')
     expect(screen.getByText('Failed')).toHaveClass('text-red-400')
+    expect(screen.getByText('Planning')).toHaveClass('text-purple-400')
   })
 
   it('renders the last activity date for topics inactive for more than a week', () => {

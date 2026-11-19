@@ -52,6 +52,7 @@ public class ChatService {
     private final SandboxExecutionRepository sandboxExecutionRepository;
     private final SandboxExecutionActivityRepository activityRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final ChatFluxRegistry chatFluxRegistry;
 
     public ChatService(
             ChatRepository chatRepository,
@@ -62,7 +63,8 @@ public class ChatService {
             ChatUsageSessionRepository chatUsageSessionRepository,
             SandboxExecutionRepository sandboxExecutionRepository,
             SandboxExecutionActivityRepository activityRepository,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            ChatFluxRegistry chatFluxRegistry) {
         this.chatRepository = chatRepository;
         this.teamRepository = teamRepository;
         this.userRepository = userRepository;
@@ -72,6 +74,13 @@ public class ChatService {
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.activityRepository = activityRepository;
         this.eventPublisher = eventPublisher;
+        this.chatFluxRegistry = chatFluxRegistry;
+    }
+
+    /** Publish a CHATS team-entity event so subscribed clients refresh the sidebar. */
+    @Transactional
+    public void publishChatsChanged(UUID teamId) {
+        eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.CHATS));
     }
 
     /** Create a new chat for a user in a team. */
@@ -248,11 +257,14 @@ public class ChatService {
                 completionTokens,
                 usageLastUpdatedAt,
                 chat.isAllowAllPermissions(),
-                deriveStatus(latest),
+                deriveStatus(chat, latest),
                 deriveLastActivityAt(chat, latest));
     }
 
-    private TopicStatus deriveStatus(SandboxExecution latest) {
+    private TopicStatus deriveStatus(ChatEntity chat, SandboxExecution latest) {
+        if (chatFluxRegistry.containsKey(chat.getId())) {
+            return TopicStatus.PLANNING;
+        }
         if (latest == null) {
             return TopicStatus.IDLE;
         }

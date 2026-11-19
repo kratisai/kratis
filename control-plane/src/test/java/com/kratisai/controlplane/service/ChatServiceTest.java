@@ -36,6 +36,7 @@ class ChatServiceTest {
     private ChatUsageSessionRepository chatUsageSessionRepository;
     private SandboxExecutionRepository sandboxExecutionRepository;
     private SandboxExecutionActivityRepository activityRepository;
+    private ChatFluxRegistry chatFluxRegistry;
     private ChatService chatService;
 
     @BeforeEach
@@ -49,6 +50,7 @@ class ChatServiceTest {
         sandboxExecutionRepository = mock(SandboxExecutionRepository.class);
         activityRepository = mock(SandboxExecutionActivityRepository.class);
         ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        chatFluxRegistry = mock(ChatFluxRegistry.class);
 
         chatService = new ChatService(
                 chatRepository,
@@ -59,7 +61,8 @@ class ChatServiceTest {
                 chatUsageSessionRepository,
                 sandboxExecutionRepository,
                 activityRepository,
-                eventPublisher);
+                eventPublisher,
+                chatFluxRegistry);
     }
 
     @Test
@@ -124,6 +127,16 @@ class ChatServiceTest {
 
         assertThat(dto.status()).isEqualTo(TopicStatus.IDLE);
         assertThat(dto.lastActivityAt()).isEqualTo(updatedAt);
+    }
+
+    @Test
+    void listChatsForTeam_planningTurnInProgress_returnsPlanning() {
+        ChatEntity chat = persistedChat(Instant.parse("2026-05-01T10:00:00Z"));
+        when(chatFluxRegistry.containsKey(chat.getId())).thenReturn(true);
+        when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
+                .thenReturn(Optional.empty());
+
+        assertThat(listSingleChat(chat).status()).isEqualTo(TopicStatus.PLANNING);
     }
 
     @Test

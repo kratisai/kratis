@@ -32,6 +32,7 @@ const STATUS_STYLES: Record<TopicStatus, string> = {
   Failed: 'text-red-400',
   Idle: 'text-yellow-400',
   'MR pushed': 'text-emerald-400',
+  Planning: 'text-purple-400',
   working: 'text-white font-semibold',
 }
 

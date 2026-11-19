@@ -25,7 +25,7 @@ export interface CreateChatResponse {
   id: string
 }
 
-export type TopicStatus = 'Blocked' | 'Failed' | 'Idle' | 'MR pushed' | 'working'
+export type TopicStatus = 'Blocked' | 'Failed' | 'Idle' | 'MR pushed' | 'Planning' | 'working'
 
 export async function archiveChatApi(chatId: string): Promise<void> {
   const response = await fetchWithAuth(`/api/v1/chats/${encodeURIComponent(chatId)}/archive`, {
