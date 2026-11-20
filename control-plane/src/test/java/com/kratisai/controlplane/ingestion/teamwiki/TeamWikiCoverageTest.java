@@ -226,6 +226,7 @@ class TeamWikiCoverageTest {
                 usageService.getUsageLogs(userId, teamId, "7d", null, null, "all", null, null, PageRequest.of(0, 10));
         assertThat(logs.getContent()).hasSize(1);
         assertThat(logs.getContent().getFirst().activityTitle()).contains("Team Wiki Build");
+        assertThat(logs.getContent().getFirst().targetUrl()).isEqualTo("/wiki");
 
         var summary = usageService.getUsageSummary(userId, teamId, "7d", null, null);
         assertThat(summary.totalCost()).isEqualTo(0.25);

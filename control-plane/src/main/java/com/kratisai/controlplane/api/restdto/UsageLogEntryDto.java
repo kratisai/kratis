@@ -18,7 +18,8 @@ public record UsageLogEntryDto(
         Set<String> modelIdentifiers,
         String usageType, // "CHAT", "EXECUTION", "INGESTION"
         Long totalTokens,
-        Double totalSpend) {
+        Double totalSpend,
+        String targetUrl) {
     public UsageLogEntryDto {
         Objects.requireNonNull(modelIdentifiers, "modelIdentifiers is required");
         TreeSet<String> sorted = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);

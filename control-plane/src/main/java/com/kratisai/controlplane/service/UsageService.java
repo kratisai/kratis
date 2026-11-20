@@ -132,6 +132,9 @@ public class UsageService {
             }
             // Active time only: IDLE gaps (between turns or while the sandbox sleeps) are excluded.
             Long duration = exec.getTotalActiveSeconds();
+            String targetUrl = exec.getChat() != null && exec.getChat().getId() != null
+                    ? "/chats/" + exec.getChat().getId() + "/executions/" + exec.getId()
+                    : null;
 
             allEntries.add(new UsageLogEntryDto(
                     "exec-" + exec.getId(),
@@ -144,7 +147,8 @@ public class UsageService {
                     models,
                     "EXECUTION",
                     exec.getTotalTokens(),
-                    exec.getTotalSpend()));
+                    exec.getTotalSpend(),
+                    targetUrl));
         }
 
         // 2. Fetch Ingestion Batches for team
@@ -176,6 +180,10 @@ public class UsageService {
                     .map(IngestionModelUsage::getModelIdentifier)
                     .filter(identifier -> identifier != null && !identifier.isBlank())
                     .collect(Collectors.toCollection(() -> new TreeSet<>(String.CASE_INSENSITIVE_ORDER)));
+            String targetUrl =
+                    batch.getRepository() != null && batch.getRepository().getId() != null
+                            ? "/repos/" + batch.getRepository().getId()
+                            : null;
 
             allEntries.add(new UsageLogEntryDto(
                     "ingest-" + batch.getId(),
@@ -192,7 +200,8 @@ public class UsageService {
                             .sum(),
                     batch.getModelUsage().stream()
                             .mapToDouble(usage -> usage.getTotalSpend() != null ? usage.getTotalSpend() : 0.0)
-                            .sum()));
+                            .sum(),
+                    targetUrl));
         }
 
         // 2b. Fetch Team Wiki Batches for team
@@ -231,7 +240,8 @@ public class UsageService {
                             .sum(),
                     twBatch.getModelUsage().stream()
                             .mapToDouble(usage -> usage.getTotalSpend() != null ? usage.getTotalSpend() : 0.0)
-                            .sum()));
+                            .sum(),
+                    "/wiki"));
         }
 
         // 3. Fetch Chat Usage Sessions for team
@@ -256,6 +266,7 @@ public class UsageService {
                             session.getModel() != null && !session.getModel().isBlank()
                                     ? Set.of(session.getModel())
                                     : Set.of("unknown");
+                    String targetUrl = chat.getId() != null ? "/chats/" + chat.getId() : null;
 
                     allEntries.add(new UsageLogEntryDto(
                             "chat-session-" + session.getId(),
@@ -268,7 +279,8 @@ public class UsageService {
                             models,
                             "CHAT",
                             tokens,
-                            spend));
+                            spend,
+                            targetUrl));
                 }
             }
         }

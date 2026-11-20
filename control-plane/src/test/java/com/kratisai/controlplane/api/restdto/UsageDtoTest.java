@@ -29,7 +29,8 @@ class UsageDtoTest {
                 Set.of("gpt-4o"),
                 "EXECUTION",
                 100L,
-                0.05);
+                0.05,
+                "/chats/chat-1/executions/exec-1");
         assertThat(dto.id()).isEqualTo("id-1");
         assertThat(dto.timestamp()).isEqualTo(now);
         assertThat(dto.durationSeconds()).isEqualTo(10L);
@@ -41,6 +42,7 @@ class UsageDtoTest {
         assertThat(dto.usageType()).isEqualTo("EXECUTION");
         assertThat(dto.totalTokens()).isEqualTo(100L);
         assertThat(dto.totalSpend()).isEqualTo(0.05);
+        assertThat(dto.targetUrl()).isEqualTo("/chats/chat-1/executions/exec-1");
     }
 
     @Test
@@ -56,8 +58,28 @@ class UsageDtoTest {
                 Set.of("text-embedding-3-small", "gpt-4o"),
                 "INGESTION",
                 500L,
-                0.01);
+                0.01,
+                "/repos/repo-1");
         assertThat(dto.modelIdentifiers()).containsExactly("gpt-4o", "text-embedding-3-small");
+        assertThat(dto.targetUrl()).isEqualTo("/repos/repo-1");
+    }
+
+    @Test
+    void usageLogEntryDto_allowsNullTargetUrl() {
+        UsageLogEntryDto dto = new UsageLogEntryDto(
+                "id-4",
+                Instant.now(),
+                null,
+                "Orphan Entry",
+                "Agent",
+                SandboxExecutionStatus.COMPLETED,
+                "user@example.com",
+                Set.of("gpt-4o"),
+                "EXECUTION",
+                10L,
+                0.0,
+                null);
+        assertThat(dto.targetUrl()).isNull();
     }
 
     @Test
@@ -73,7 +95,8 @@ class UsageDtoTest {
                         null,
                         "INGESTION",
                         0L,
-                        0.0))
+                        0.0,
+                        null))
                 .isInstanceOf(NullPointerException.class);
     }
 

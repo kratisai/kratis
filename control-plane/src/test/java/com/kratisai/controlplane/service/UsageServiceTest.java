@@ -106,10 +106,15 @@ class UsageServiceTest {
         Page<UsageLogEntryDto> logs = usageService.getUsageLogs(
                 user.getId(), team.getId(), "7d", null, null, "all", "gpt-4o", "OpenCode", PageRequest.of(0, 10));
         assertThat(logs).isNotNull();
+        assertThat(logs.getContent()).hasSize(1);
+        UsageLogEntryDto execEntry = logs.getContent().getFirst();
+        assertThat(execEntry.targetUrl()).isEqualTo("/chats/" + chat.getId() + "/executions/" + exec.getId());
 
         Page<UsageLogEntryDto> ingestionLogs = usageService.getUsageLogs(
                 user.getId(), team.getId(), "7d", null, null, "INGESTION", null, null, PageRequest.of(0, 10));
         assertThat(ingestionLogs).isNotNull();
+        assertThat(ingestionLogs.getContent()).hasSize(1);
+        assertThat(ingestionLogs.getContent().getFirst().targetUrl()).isEqualTo("/repos/" + repo.getId());
 
         Page<UsageLogEntryDto> chatLogs = usageService.getUsageLogs(
                 user.getId(), team.getId(), "7d", null, null, "CHAT", null, null, PageRequest.of(0, 10));
@@ -123,6 +128,7 @@ class UsageServiceTest {
         assertThat(chatEntry.modelIdentifiers()).containsExactly("gpt-4o");
         assertThat(chatEntry.totalTokens()).isEqualTo(250L);
         assertThat(chatEntry.totalSpend()).isEqualTo(0.003);
+        assertThat(chatEntry.targetUrl()).isEqualTo("/chats/" + chat.getId());
 
         UsageSummaryDto summary = usageService.getUsageSummary(user.getId(), team.getId(), "30d", null, null);
         assertThat(summary).isNotNull();
@@ -279,6 +285,9 @@ class UsageServiceTest {
                 .filteredOn(entry -> entry.modelIdentifiers().contains("gpt-4o"))
                 .singleElement()
                 .satisfies(entry -> assertThat(entry.agentName()).isEqualTo("Claude Code"));
+        logs.getContent().forEach(entry -> assertThat(entry.targetUrl())
+                .isEqualTo(
+                        "/chats/" + chat.getId() + "/executions/" + entry.id().substring("exec-".length())));
     }
 
     @Test

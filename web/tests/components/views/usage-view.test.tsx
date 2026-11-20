@@ -1,30 +1,47 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { UsageLogEntry } from '@/types/usage-types'
 
 import { UsageView } from '@/components/views/usage-view'
+
+vi.mock('@tanstack/react-router', async () => {
+  const actual = await vi.importActual('@tanstack/react-router')
+  return {
+    ...actual,
+    Link: ({ children, to, ...props }: React.ComponentProps<'a'> & { to?: string }) => (
+      <a href={to} {...props}>
+        {children}
+      </a>
+    ),
+  }
+})
+
+const entryTemplate: UsageLogEntry = {
+  activityTitle: 'Test Agent Task',
+  agentName: 'OpenCode',
+  durationSeconds: 5,
+  id: 'exec-1',
+  modelIdentifiers: ['gpt-4o'],
+  status: 'COMPLETED',
+  targetUrl: '/chats/chat-1/executions/exec-1',
+  timestamp: new Date().toISOString(),
+  totalSpend: 0.03,
+  totalTokens: 1200,
+  usageType: 'EXECUTION',
+  userEmail: 'user@kratis.ai',
+}
+
+let logEntries: UsageLogEntry[]
 
 vi.mock('@/hooks/use-usage', () => ({
   useUsageLogs: () => ({
     data: {
-      content: [
-        {
-          activityTitle: 'Test Agent Task',
-          agentName: 'OpenCode',
-          durationSeconds: 5,
-          id: 'exec-1',
-          modelIdentifiers: ['gpt-4o'],
-          status: 'COMPLETED',
-          timestamp: new Date().toISOString(),
-          totalSpend: 0.03,
-          totalTokens: 1200,
-          usageType: 'EXECUTION',
-          userEmail: 'user@kratis.ai',
-        },
-      ],
+      content: logEntries,
       number: 0,
       size: 15,
-      totalElements: 1,
+      totalElements: logEntries.length,
       totalPages: 1,
     },
     isLoading: false,
@@ -55,6 +72,10 @@ vi.mock('@/store/auth-store', () => ({
 }))
 
 describe('UsageView', () => {
+  beforeEach(() => {
+    logEntries = [entryTemplate]
+  })
+
   it('renders usage dashboard summary cards and table entries', () => {
     render(<UsageView />)
 
@@ -64,6 +85,22 @@ describe('UsageView', () => {
     expect(screen.getByText('Total Tokens Used')).toBeDefined()
     expect(screen.getByText('15,000')).toBeDefined()
     expect(screen.getByText('Test Agent Task')).toBeDefined()
+  })
+
+  it('renders the activity title as a link to the underlying execution when targetUrl is present', () => {
+    render(<UsageView />)
+
+    expect(screen.getByRole('link', { name: 'Test Agent Task' })).toHaveAttribute(
+      'href',
+      '/chats/chat-1/executions/exec-1',
+    )
+  })
+
+  it('renders the activity title as plain text when targetUrl is missing', () => {
+    logEntries = [{ ...entryTemplate, targetUrl: null }]
+    render(<UsageView />)
+
+    expect(screen.getByText('Test Agent Task').closest('a')).toBeNull()
   })
 
   it('renders every model behind a multi-model ingestion entry', () => {

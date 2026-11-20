@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router'
 import { formatDistanceToNow } from 'date-fns'
 import {
   Activity,
@@ -368,9 +369,18 @@ export function UsageView() {
 
                         {/* 2. Activity & Status */}
                         <td>
-                          <div className="text-foreground line-clamp-1 font-medium">
-                            {entry.activityTitle}
-                          </div>
+                          {entry.targetUrl ? (
+                            <Link
+                              className="text-foreground hover:text-primary line-clamp-1 font-medium hover:underline"
+                              to={entry.targetUrl as never}
+                            >
+                              {entry.activityTitle}
+                            </Link>
+                          ) : (
+                            <div className="text-foreground line-clamp-1 font-medium">
+                              {entry.activityTitle}
+                            </div>
+                          )}
                           <div className="mt-1 flex items-center gap-2">
                             {entry.agentName && (
                               <span className="bg-secondary text-secondary-foreground inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium">

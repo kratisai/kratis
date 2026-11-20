@@ -13,6 +13,7 @@ export interface UsageLogEntry {
   id: string
   modelIdentifiers: string[]
   status: 'COMPLETED' | 'FAILED' | 'IDLE' | 'RUNNING' | null
+  targetUrl?: null | string
   timestamp: string
   totalSpend: number
   totalTokens: number
