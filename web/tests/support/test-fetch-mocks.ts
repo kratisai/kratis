@@ -3,6 +3,7 @@ import { afterEach, beforeEach, vi } from 'vitest'
 import type { ChatDto } from '@/lib/chat-api'
 import type { ExecutionEnvironmentDto } from '@/lib/environment-api'
 import type { AuthTokensResponse, ModelEntryDto, RepositoryDto, TeamDto } from '@/types/auth-types'
+import type { PublishCapabilities } from '@/types/diff-types'
 
 import { useWebSocketStore } from '@/store/websocket-store'
 
@@ -54,7 +55,9 @@ export function mockCancelPermission(shouldFail = false) {
 // Lifecycle hooks – call once at the top of each describe block
 // ---------------------------------------------------------------------------
 
-export function mockCreateChat(response = { createdAt: new Date().toISOString(), id: 'new-session-id' }) {
+export function mockCreateChat(
+  response = { createdAt: new Date().toISOString(), id: 'new-session-id' },
+) {
   addFetchHandler((url, options) => {
     const isExactSessionUrl = url.endsWith('/api/v1/chats') || url.includes('/api/v1/chats?')
     if (isExactSessionUrl && options.method === 'POST') {
@@ -210,10 +213,7 @@ export function mockDeleteCredential(credentialId: string, deletedIds: string[] 
 
 export function mockDeleteEnvironment(envId: string) {
   addFetchHandler((url, options) => {
-    if (
-      url.includes(`/environments/${envId}`) &&
-      options.method === 'DELETE'
-    ) {
+    if (url.includes(`/environments/${envId}`) && options.method === 'DELETE') {
       return new Response(null, { status: 204 })
     }
     return null
@@ -302,7 +302,10 @@ export function mockGetWikiPage(pageId: string, page: Record<string, unknown>) {
 
 export function mockHaltExecution(chatId: string, executionId: string) {
   addFetchHandler((url, options) => {
-    if (url.includes(`/chats/${chatId}/executions/${executionId}/halt`) && options.method === 'POST') {
+    if (
+      url.includes(`/chats/${chatId}/executions/${executionId}/halt`) &&
+      options.method === 'POST'
+    ) {
       return new Response(null, { status: 202 })
     }
     return null
@@ -311,11 +314,7 @@ export function mockHaltExecution(chatId: string, executionId: string) {
 
 export function mockInviteMember() {
   addFetchHandler((url, options) => {
-    if (
-      url.includes('/api/v1/teams/') &&
-      url.includes('/members') &&
-      options.method === 'POST'
-    ) {
+    if (url.includes('/api/v1/teams/') && url.includes('/members') && options.method === 'POST') {
       return jsonResponse(
         {
           displayName: 'New Member',
@@ -366,9 +365,7 @@ export function mockListCredentials(credentials: Array<Record<string, unknown>> 
   })
 }
 
-export function mockListEnvironments(
-  environments: Array<Partial<ExecutionEnvironmentDto>> = [],
-) {
+export function mockListEnvironments(environments: Array<Partial<ExecutionEnvironmentDto>> = []) {
   addFetchHandler((url, options) => {
     const match = url.match(/\/api\/v1\/teams\/[^/]+\/environments$/)
     if (match && (!options.method || options.method === 'GET')) {
@@ -378,7 +375,9 @@ export function mockListEnvironments(
   })
 }
 
-export function mockListHarnesses(harnesses: Array<{ name: string; value: string }> = [{ name: 'OpenCode', value: 'OPENCODE' }]) {
+export function mockListHarnesses(
+  harnesses: Array<{ name: string; value: string }> = [{ name: 'OpenCode', value: 'OPENCODE' }],
+) {
   addFetchHandler((url, options) => {
     const match = url.match(/\/api\/v1\/teams\/[^/]+\/harnesses$/)
     if (match && (!options.method || options.method === 'GET')) {
@@ -496,6 +495,23 @@ export function mockLoginShouldFail(errorMessage = 'Invalid credentials') {
   addFetchHandler((url, options) => {
     if (url.includes('/api/v1/auth/login') && options.method === 'POST') {
       return jsonResponse({ message: errorMessage }, 401)
+    }
+    return null
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Publish mocks
+// ---------------------------------------------------------------------------
+
+export function mockPublishCapabilities(
+  chatId: string,
+  executionId: string,
+  response: PublishCapabilities,
+) {
+  addFetchHandler((url) => {
+    if (url === `/api/v1/chats/${chatId}/executions/${executionId}/publish-capabilities`) {
+      return jsonResponse(response)
     }
     return null
   })
@@ -706,11 +722,7 @@ export function setupFetchMock() {
       'fetch',
       vi.fn(async (input: Request | string | URL, init?: RequestInit) => {
         const url =
-          typeof input === 'string'
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
         const options = init ?? {}
 
         for (const handler of fetchHandlers) {

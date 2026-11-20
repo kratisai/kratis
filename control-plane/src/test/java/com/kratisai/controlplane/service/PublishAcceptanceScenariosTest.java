@@ -38,6 +38,8 @@ import com.kratisai.controlplane.repository.RepoCredentialRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
+import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -135,19 +137,13 @@ class PublishAcceptanceScenariosTest {
         team.setIngestionProvider(modelProvider);
         team.setIngestionModel("gpt-4o");
 
-        org.springframework.ai.chat.model.ChatModel mockChatModel =
-                org.mockito.Mockito.mock(org.springframework.ai.chat.model.ChatModel.class);
-        org.springframework.ai.chat.model.ChatResponse mockResponse =
-                org.mockito.Mockito.mock(org.springframework.ai.chat.model.ChatResponse.class);
-        org.springframework.ai.chat.model.Generation mockGeneration =
-                org.mockito.Mockito.mock(org.springframework.ai.chat.model.Generation.class);
-        when(mockGeneration.getOutput())
-                .thenReturn(new org.springframework.ai.chat.messages.AssistantMessage(
-                        "{\"title\": \"feat: test\", \"body\": \"desc\"}"));
-        when(mockResponse.getResult()).thenReturn(mockGeneration);
-        when(mockChatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
-                .thenReturn(mockResponse);
-        when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(mockChatModel);
+        FakeChatModel fakeChatModel = new FakeChatModel();
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains("Return ONLY valid JSON matching this schema")
+                .response("{\"title\": \"feat: test\", \"body\": \"desc\", \"branchName\": \"feat/acceptance-branch\"}")
+                .maxMatches(1)
+                .build());
+        when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(fakeChatModel);
 
         User user = new User("user@kratis.ai", "hash", "User");
         user.setId(userId);
@@ -428,7 +424,8 @@ class PublishAcceptanceScenariosTest {
 
         PublishCapabilitiesDto caps = service.getPublishCapabilities(userId, chatId, executionId);
         assertThat(caps.target().kind()).isEqualTo(PublishCapabilitiesDto.TargetDto.TargetKind.OPEN_PR_NEW_BRANCH);
-        assertThat(caps.target().branchName()).startsWith("kratis/");
+        assertThat(caps.target().branchName()).isEqualTo("feat/acceptance-branch");
+        assertThat(caps.suggestedNewBranch()).isEqualTo("feat/acceptance-branch");
     }
 
     @Test

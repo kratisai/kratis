@@ -230,6 +230,15 @@ executing before the preceding `session/update` recorded the new tool call. Guar
 
 E2E harnesses spawn real containers on the host Docker daemon (`kratis-e2e-test`, `kratis-runner-base`) in addition to reusable Testcontainers (Postgres, LiteLLM). They are critical path tests and must stay green. Timeouts or intermittent agent failures after a killed suite almost always mean **leftover containers or volumes**, not test nondeterminism.
 
+### Sandbox subnet reservation
+
+`LocalDockerSandboxProvider` allocates sandbox networks from the first free `/24` inside
+`10.210.0.0/16`. Under a nested daemon, `host.docker.internal` is pinned to the control-plane
+container's own address. When that address falls in the first free `/24`, the sandbox network
+would swallow it as an on-link route and no runner could reach the control plane
+(`dial tcp ... no route to host` in `sidecar.log`). The allocator therefore reserves the
+`/24` that contains the control-plane address before it picks a subnet.
+
 ### What owns cleanup
 
 | Resource | Owner | When it runs |

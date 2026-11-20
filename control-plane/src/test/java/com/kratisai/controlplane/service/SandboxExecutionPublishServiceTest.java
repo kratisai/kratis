@@ -43,6 +43,8 @@ import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.*;
+import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
+import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -52,18 +54,12 @@ import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -72,6 +68,8 @@ import org.springframework.web.server.ResponseStatusException;
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class SandboxExecutionPublishServiceTest {
+
+    private static final String PUBLISH_SUMMARY_PROMPT_MARKER = "Return ONLY valid JSON matching this schema";
 
     @Mock
     private SandboxExecutionRepository sandboxExecutionRepository;
@@ -112,6 +110,8 @@ class SandboxExecutionPublishServiceTest {
     @Mock
     private PlatformTransactionManager transactionManager;
 
+    private FakeChatModel fakeChatModel;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private SandboxExecutionPublishService service;
@@ -129,6 +129,8 @@ class SandboxExecutionPublishServiceTest {
 
     @BeforeEach
     void setUp() {
+        fakeChatModel = new FakeChatModel();
+
         userId = UUID.randomUUID();
         chatId = UUID.randomUUID();
         executionId = UUID.randomUUID();
@@ -166,6 +168,8 @@ class SandboxExecutionPublishServiceTest {
         execution.setModelProvider(modelProvider);
         execution.setModelName("gpt-4o");
 
+        when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(fakeChatModel);
+
         service = new SandboxExecutionPublishService(
                 sandboxExecutionRepository,
                 changeSetRepository,
@@ -202,21 +206,48 @@ class SandboxExecutionPublishServiceTest {
                         new EnvironmentConnectorResult.GitChangeSetStats(0, 0, List.of(), "digest-empty")));
     }
 
-    private ChatModel createMockChatModel(String responseJson) {
-        return createMockChatModel(new ChatResponse(List.of(new Generation(new AssistantMessage(responseJson)))));
+    private void stubObserveWithChanges() throws Exception {
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(new EnvironmentConnectorResult.GitObservePublish(
+                        "main",
+                        "sha-main",
+                        "sha-main",
+                        true,
+                        0,
+                        1,
+                        false,
+                        null,
+                        new EnvironmentConnectorResult.GitChangeSetStats(
+                                15,
+                                3,
+                                List.of(new EnvironmentConnectorResult.GitChangeSetFile(
+                                        "src/App.tsx", "modified", 10, 2)),
+                                "digest-changes")));
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private ChatModel createMockChatModel(ChatResponse chatResponse) {
-        ChatModel mockChatModel = mock(ChatModel.class);
-        ChatOptions mockOptions = mock(ChatOptions.class);
-        ChatOptions.Builder mockBuilder = mock(ChatOptions.Builder.class, Answers.RETURNS_SELF);
-        when(mockOptions.mutate()).thenReturn(mockBuilder);
-        when(mockBuilder.build()).thenReturn(mockOptions);
-        when(mockChatModel.getDefaultOptions()).thenReturn(mockOptions);
+    private void stubPublishSummary(String responseJson) {
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains(PUBLISH_SUMMARY_PROMPT_MARKER)
+                .response(responseJson)
+                .maxMatches(1)
+                .build());
+    }
 
-        when(mockChatModel.call(any(Prompt.class))).thenReturn(chatResponse);
-        return mockChatModel;
+    private void stubPublishSummaryChunks(List<String> responseChunks) {
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains(PUBLISH_SUMMARY_PROMPT_MARKER)
+                .responseChunks(responseChunks)
+                .maxMatches(1)
+                .build());
+    }
+
+    private String publishPromptText() {
+        List<FakeChatModel.Invocation> invocations = fakeChatModel.getInvocations();
+        assertThat(invocations).isNotEmpty();
+        Prompt prompt = invocations.getFirst().prompt();
+        assertThat(prompt).isNotNull();
+        return prompt.getContents();
     }
 
     @Test
@@ -309,8 +340,7 @@ class SandboxExecutionPublishServiceTest {
 
         String jsonResponse =
                 "```json\n{\n  \"title\": \"feat: add user profile with test verification\",\n  \"body\": \"- Implemented profile view\\n- Ran full test suite\"\n}\n```";
-        ChatModel mockChatModel = createMockChatModel(jsonResponse);
-        when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(mockChatModel);
+        stubPublishSummary(jsonResponse);
 
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
 
@@ -359,8 +389,7 @@ class SandboxExecutionPublishServiceTest {
 
         String jsonResponse =
                 "```json\n{\n  \"title\": \"feat: synthesized multi-commit title\",\n  \"body\": \"- Summary item 1\\n- Summary item 2\"\n}\n```";
-        ChatModel mockChatModel = createMockChatModel(jsonResponse);
-        when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(mockChatModel);
+        stubPublishSummary(jsonResponse);
 
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
 
@@ -404,8 +433,7 @@ class SandboxExecutionPublishServiceTest {
 
         String jsonResponse =
                 "{\n  \"title\": \"refactor: update app components\",\n  \"body\": \"- Updates App.tsx\\n- Adds New.tsx\"\n}";
-        ChatModel mockChatModel = createMockChatModel(jsonResponse);
-        when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(mockChatModel);
+        stubPublishSummary(jsonResponse);
 
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
 
@@ -444,10 +472,8 @@ class SandboxExecutionPublishServiceTest {
         when(sandboxExecutionActivityRepository.findByExecutionIdOrderBySequenceAsc(executionId))
                 .thenReturn(List.of());
 
-        ChatModel mockChatModel = createMockChatModel(new ChatResponse(List.of(
-                new Generation(new AssistantMessage("{\n  \"title\": \"refactor: update app ")),
-                new Generation(new AssistantMessage("components\",\n  \"body\": \"- Updates App.tsx\"\n}")))));
-        when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(mockChatModel);
+        stubPublishSummaryChunks(List.of(
+                "{\n  \"title\": \"refactor: update app ", "components\",\n  \"body\": \"- Updates App.tsx\"\n}"));
 
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
 
@@ -487,6 +513,10 @@ class SandboxExecutionPublishServiceTest {
         assertThat(result.stats().hasChanges()).isTrue();
         assertThat(result.suggestedTitle()).isEmpty();
         assertThat(result.suggestedBody()).isEmpty();
+        // The failing LLM call contributes no branch either; the target falls back to the
+        // mechanical derivation so the dialog still pre-fills a publishable name.
+        String mechanicalBranch = "kratis/" + executionId.toString().substring(0, 8) + "-1";
+        assertThat(result.target().branchName()).isEqualTo(mechanicalBranch);
     }
 
     @Test
@@ -527,8 +557,7 @@ class SandboxExecutionPublishServiceTest {
         when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
 
         String jsonResponse = "{\"title\": \"test: update\", \"body\": \"body\"}";
-        ChatModel mockChatModel = createMockChatModel(jsonResponse);
-        when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(mockChatModel);
+        stubPublishSummary(jsonResponse);
 
         EnvironmentConnectorResult.GitObservePublish obs1 = new EnvironmentConnectorResult.GitObservePublish(
                 "main",
@@ -617,9 +646,9 @@ class SandboxExecutionPublishServiceTest {
         when(sandboxExecutionActivityRepository.findByExecutionIdOrderBySequenceAsc(executionId))
                 .thenReturn(List.of());
 
-        String jsonResponse = "{\"title\": \"fix: incremental delta\", \"body\": \"- fixes\"}";
-        ChatModel mockChatModel = createMockChatModel(jsonResponse);
-        when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(mockChatModel);
+        String jsonResponse =
+                "{\"title\": \"fix: incremental delta\", \"body\": \"- fixes\", \"branchName\": \"feat/from-llm\"}";
+        stubPublishSummary(jsonResponse);
 
         service.getPublishCapabilities(userId, chatId, executionId);
 
@@ -627,6 +656,38 @@ class SandboxExecutionPublishServiceTest {
                 ArgumentCaptor.forClass(EnvironmentRpcPayload.GitObservePublish.class);
         verify(environmentRpcClient).request(eq(envId), obsCaptor.capture(), anyLong(), eq(TimeUnit.SECONDS));
         assertThat(obsCaptor.getValue().headBranch()).isEqualTo("kratis/feature-123");
+    }
+
+    @Test
+    void getPublishCapabilities_afterPublish_preFillsFromPersistedBranchOverLlmSuggestion() throws Exception {
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId))
+                .thenReturn(List.of(new ChangeSet(
+                        execution,
+                        1,
+                        "base",
+                        "push",
+                        "kratis/feature-123",
+                        42L,
+                        "https://pr/42",
+                        "main",
+                        Instant.now())));
+        stubExecutionLookup();
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+        // Provider fetch fails, so prSnapshot is null and the persisted branch must win.
+        when(repoProvider.getPullRequest(eq(repository), any(), eq(42L)))
+                .thenThrow(new RuntimeException("provider down"));
+
+        stubObserveWithChanges();
+
+        stubPublishSummary("{\"title\": \"feat: persisted\", \"body\": \"- b\", \"branchName\": \"feat/from-llm\"}");
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        assertThat(result.target().kind()).isEqualTo(PublishCapabilitiesDto.TargetDto.TargetKind.OPEN_PR);
+        assertThat(result.target().branchName()).isEqualTo("kratis/feature-123");
+        assertThat(result.suggestedTitle()).isEqualTo("feat: persisted");
     }
 
     @Test
@@ -728,8 +789,7 @@ class SandboxExecutionPublishServiceTest {
                 .thenReturn(List.of());
 
         String jsonResponse = "{\"title\": \"feat: first publish\", \"body\": \"- changes\"}";
-        ChatModel mockChatModel = createMockChatModel(jsonResponse);
-        when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(mockChatModel);
+        stubPublishSummary(jsonResponse);
 
         service.getPublishCapabilities(userId, chatId, executionId);
 
@@ -1650,10 +1710,264 @@ class SandboxExecutionPublishServiceTest {
                         eq(envId), any(EnvironmentRpcPayload.GitObservePublish.class), anyLong(), eq(TimeUnit.SECONDS)))
                 .thenReturn(obs);
 
+        stubPublishSummary(
+                "{\"title\": \"feat: follow-up\", \"body\": \"- next round\", \"branchName\": \"feat/after-merge\"}");
+
         PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
 
         assertThat(result.previousPrMerged()).isTrue();
-        assertThat(result.suggestedNewBranch()).startsWith("kratis/");
+        assertThat(result.suggestedNewBranch()).isEqualTo("feat/after-merge");
+        assertThat(result.target().branchName()).isEqualTo("feat/after-merge");
+    }
+
+    @Test
+    void getPublishCapabilities_llmBranchName_preFillsSanitizedTargetBranch() throws Exception {
+        stubExecutionLookup();
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        stubObserveWithChanges();
+
+        stubPublishSummary(
+                "{\"title\": \"feat: add login\", \"body\": \"- adds login\", \"branchName\": \"feat/add user profile!\"}");
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        // Same character replacement rules as the web sanitizeBranchName, then git-ref checks.
+        assertThat(result.target().branchName()).isEqualTo("feat/add_user_profile_");
+        assertThat(result.suggestedTitle()).isEqualTo("feat: add login");
+        assertThat(result.suggestedBody()).isEqualTo("- adds login");
+
+        String prompt = publishPromptText();
+        assertThat(prompt).contains("Repository: my-repo");
+        assertThat(prompt).contains("Base branch: main");
+        assertThat(prompt).contains("suitable git branch name representing the summarized changes");
+    }
+
+    @Test
+    void getPublishCapabilities_llmBranchNameBlank_fallsBackToMechanicalBranch() throws Exception {
+        stubExecutionLookup();
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        stubObserveWithChanges();
+
+        stubPublishSummary("{\"title\": \"feat: blank branch\", \"body\": \"- b\", \"branchName\": \"   \"}");
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        String mechanicalBranch = "kratis/" + executionId.toString().substring(0, 8) + "-1";
+        assertThat(result.target().branchName()).isEqualTo(mechanicalBranch);
+        assertThat(result.suggestedTitle()).isEqualTo("feat: blank branch");
+    }
+
+    @Test
+    void getPublishCapabilities_llmBranchNameEqualsBase_fallsBackToMechanicalBranch() throws Exception {
+        stubExecutionLookup();
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        stubObserveWithChanges();
+
+        stubPublishSummary("{\"title\": \"feat: base\", \"body\": \"- b\", \"branchName\": \"main\"}");
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        String mechanicalBranch = "kratis/" + executionId.toString().substring(0, 8) + "-1";
+        assertThat(result.target().branchName()).isEqualTo(mechanicalBranch);
+    }
+
+    @Test
+    void getPublishCapabilities_llmBranchNameInvalidAfterSanitize_fallsBackToMechanicalBranch() throws Exception {
+        stubExecutionLookup();
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        stubObserveWithChanges();
+
+        // "feat.lock." sanitizes to "feat.lock" (trailing dots are trimmed after the .lock
+        // replacement), which still fails isValidGitRefName.
+        stubPublishSummary("{\"title\": \"feat: locky\", \"body\": \"- b\", \"branchName\": \"feat.lock.\"}");
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        String mechanicalBranch = "kratis/" + executionId.toString().substring(0, 8) + "-1";
+        assertThat(result.target().branchName()).isEqualTo(mechanicalBranch);
+    }
+
+    @Test
+    void getPublishCapabilities_llmBranchNameWrongJsonType_fallsBackToMechanicalBranch() throws Exception {
+        stubExecutionLookup();
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        stubObserveWithChanges();
+
+        stubPublishSummary("{\"title\": \"feat: numeric\", \"body\": \"- b\", \"branchName\": 42}");
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        String mechanicalBranch = "kratis/" + executionId.toString().substring(0, 8) + "-1";
+        assertThat(result.target().branchName()).isEqualTo(mechanicalBranch);
+        assertThat(result.suggestedTitle()).isEqualTo("feat: numeric");
+    }
+
+    @Test
+    void getPublishCapabilities_llmBranchNameMissing_keepsSuggestionsAndFallsBack() throws Exception {
+        stubExecutionLookup();
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        stubObserveWithChanges();
+
+        stubPublishSummary("{\"title\": \"feat: no branch field\", \"body\": \"- b\"}");
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        String mechanicalBranch = "kratis/" + executionId.toString().substring(0, 8) + "-1";
+        assertThat(result.target().branchName()).isEqualTo(mechanicalBranch);
+        assertThat(result.suggestedTitle()).isEqualTo("feat: no branch field");
+        assertThat(result.suggestedBody()).isEqualTo("- b");
+    }
+
+    @Test
+    void getPublishCapabilities_digestStableAcrossDifferentLlmSuggestions() throws Exception {
+        stubExecutionLookup();
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        stubObserveWithChanges();
+
+        stubPublishSummary("{\"title\": \"feat: first take\", \"body\": \"- b\", \"branchName\": \"feat/one\"}");
+        PublishCapabilitiesDto first = service.getPublishCapabilities(userId, chatId, executionId);
+        assertThat(first.target().branchName()).isEqualTo("feat/one");
+
+        fakeChatModel.reset();
+        stubPublishSummary("{\"title\": \"fix: second take\", \"body\": \"- c\", \"branchName\": \"feat/two\"}");
+        PublishCapabilitiesDto second = service.getPublishCapabilities(userId, chatId, executionId);
+
+        assertThat(second.target().branchName()).isEqualTo("feat/two");
+        assertThat(second.suggestedTitle()).isEqualTo("fix: second take");
+        assertThat(second.digest()).isEqualTo(first.digest());
+    }
+
+    @Test
+    void getPublishCapabilities_updatePr_keepsLiveHeadBranchOverLlmSuggestion() throws Exception {
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId))
+                .thenReturn(List.of(new ChangeSet(
+                        execution,
+                        1,
+                        "base",
+                        "push",
+                        "existing-branch",
+                        77L,
+                        "https://github.com/test/repo/pull/77",
+                        "main",
+                        Instant.now())));
+        stubExecutionLookup();
+
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+        when(repoProvider.getPullRequest(eq(repository), any(), eq(77L)))
+                .thenReturn(new PullRequestSnapshot(
+                        77L,
+                        PullRequestSnapshot.PullRequestState.OPEN,
+                        "https://github.com/test/repo/pull/77",
+                        "existing-branch",
+                        "main",
+                        "sha777"));
+
+        stubObserveWithChanges();
+
+        stubPublishSummary("{\"title\": \"feat: live pr\", \"body\": \"- b\", \"branchName\": \"feat/from-llm\"}");
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        assertThat(result.target().kind()).isEqualTo(PublishCapabilitiesDto.TargetDto.TargetKind.UPDATE_PR);
+        assertThat(result.target().branchName()).isEqualTo("existing-branch");
+        assertThat(result.suggestedTitle()).isEqualTo("feat: live pr");
+    }
+
+    @Test
+    void getPublishCapabilities_closedPr_keepsPrHeadBranchOverLlmSuggestion() throws Exception {
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId))
+                .thenReturn(List.of(new ChangeSet(
+                        execution,
+                        1,
+                        "base",
+                        "push",
+                        "kratis/feature-1",
+                        77L,
+                        "https://github.com/test/repo/pull/77",
+                        "main",
+                        Instant.now())));
+        stubExecutionLookup();
+
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+        when(repoProvider.getPullRequest(eq(repository), any(), eq(77L)))
+                .thenReturn(new PullRequestSnapshot(
+                        77L,
+                        PullRequestSnapshot.PullRequestState.CLOSED,
+                        "https://github.com/test/repo/pull/77",
+                        "kratis/feature-1",
+                        "main",
+                        "sha777"));
+
+        stubObserveWithChanges();
+
+        stubPublishSummary("{\"title\": \"feat: closed pr\", \"body\": \"- b\", \"branchName\": \"feat/from-llm\"}");
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        assertThat(result.target().kind()).isEqualTo(PublishCapabilitiesDto.TargetDto.TargetKind.OPEN_PR);
+        assertThat(result.target().branchName()).isEqualTo("kratis/feature-1");
+    }
+
+    @Test
+    void getPublishCapabilities_newRepoExecution_promptNamesTheNewRepository() throws Exception {
+        execution.setRepository(null);
+        execution.setNewRepoName("fresh-repo");
+        execution.setNewRepoCredential(githubNewRepoCredential());
+        stubExecutionLookup();
+
+        RepoProvider provider = newRepoProvider(true, true);
+        when(providerRegistry.getProvider(RepositoryType.GITHUB)).thenReturn(provider);
+
+        stubObserveWithChanges();
+
+        PublishCapabilitiesDto result = service.getPublishCapabilities(userId, chatId, executionId);
+
+        assertThat(publishPromptText()).contains("Repository: fresh-repo");
+        assertThat(publishPromptText()).contains("Base branch: main");
+        String mechanicalBranch = "kratis/" + executionId.toString().substring(0, 8) + "-1";
+        assertThat(result.target().branchName()).isEqualTo(mechanicalBranch);
+    }
+
+    @Test
+    void getPublishCapabilities_noRepository_promptSkipsRepositoryLine() throws Exception {
+        execution.setRepository(null);
+        stubExecutionLookup();
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(false);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        stubObserveWithChanges();
+
+        service.getPublishCapabilities(userId, chatId, executionId);
+
+        String prompt = publishPromptText();
+        assertThat(prompt).doesNotContain("Repository:");
+        assertThat(prompt).contains("Base branch: main");
     }
 
     @Test

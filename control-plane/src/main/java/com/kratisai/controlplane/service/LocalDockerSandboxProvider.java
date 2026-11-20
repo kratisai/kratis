@@ -487,7 +487,7 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
     private void createSandboxNetwork(String envId, String networkName) {
         Set<String> attempted = new LinkedHashSet<>();
         RuntimeException lastOverlap = null;
-        List<long[]> used = listUsedIpv4Ranges();
+        List<long[]> used = usedSandboxSubnetRanges();
         for (int attempt = 0; attempt < SANDBOX_SUBNET_POOL_SIZE; attempt++) {
             String subnet = nextFreeSandboxSubnet(attempted, used);
             if (subnet == null) {
@@ -503,11 +503,37 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                     throw createFailure;
                 }
                 lastOverlap = createFailure;
-                used = listUsedIpv4Ranges();
+                used = usedSandboxSubnetRanges();
             }
         }
         throw new IllegalStateException(
                 "No free /24 in " + SANDBOX_SUBNET_PREFIX + "0.0/16 for sandbox network " + networkName, lastOverlap);
+    }
+
+    private List<long[]> usedSandboxSubnetRanges() {
+        List<long[]> used = listUsedIpv4Ranges();
+        String controlPlaneAddress = hostInternalAddressCandidate();
+        if (controlPlaneAddress != null) {
+            long[] self = ipv4Range(controlPlaneAddress + "/32");
+            if (self != null) {
+                // The runner dials the control plane at host.docker.internal, pinned to this
+                // container's own address under a nested daemon. A /24 that contains it would
+                // swallow the address as an on-link route with no owner, so reserve that subnet.
+                List<long[]> reserved = new ArrayList<>(used);
+                reserved.add(self);
+                used = reserved;
+            }
+        }
+        return used;
+    }
+
+    // Only a nested daemon (`/.dockerenv` + a tcp DOCKER_HOST) pins host.docker.internal to this
+    // container's own address; a direct daemon uses the sandbox gateway, which is inside its
+    // network by design. Null means nothing to reserve.
+    String hostInternalAddressCandidate() {
+        return usesNestedDaemon(System.getenv("DOCKER_HOST"), Files.exists(Path.of("/.dockerenv")))
+                ? localHostAddress(null)
+                : null;
     }
 
     private List<String> networkCreateCommand(String envId, String networkName, String subnet) {

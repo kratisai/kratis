@@ -11,6 +11,8 @@ import { ApiError } from '@/lib/auth-api'
 import * as diffApi from '@/lib/diff-api'
 import * as publishApi from '@/lib/publish-api'
 
+import { mockPublishCapabilities, setupFetchMock } from '../../../support/test-fetch-mocks'
+
 let queryClient: QueryClient
 
 vi.mock('@/hooks/use-credentials', () => ({
@@ -92,6 +94,8 @@ function renderModal(props: Partial<ComponentProps<typeof PublishModal>> = {}) {
 }
 
 describe('PublishModal', () => {
+  setupFetchMock()
+
   beforeEach(() => {
     vi.restoreAllMocks()
     queryClient = new QueryClient({
@@ -207,7 +211,9 @@ describe('PublishModal', () => {
     renderModal()
 
     await waitFor(() => {
-      expect(screen.getByText(/main has 3 new commits\. rebase required before publish\./i)).toBeInTheDocument()
+      expect(
+        screen.getByText(/main has 3 new commits\. rebase required before publish\./i),
+      ).toBeInTheDocument()
     })
 
     const rebaseBtns = screen.getAllByRole('button', { name: /rebase onto main/i })
@@ -412,5 +418,42 @@ describe('PublishModal', () => {
 
     const branchInput = await screen.findByLabelText(/branch name/i)
     expect(branchInput).toHaveValue('kratis/feature-123')
+  })
+
+  it('pre-fills the branch input with the LLM-suggested branch from capabilities', async () => {
+    mockPublishCapabilities(
+      'chat-123',
+      '9b3c2a3f-55b7-47a7-83ac-6b9c592f2a07',
+      makeCapabilities({
+        suggestedBody: '- Implements profile view\n- Runs the full test suite',
+        suggestedTitle: 'feat: add user profile',
+        target: { branchName: 'feat/add-user-profile', kind: 'OPEN_PR' },
+      }),
+    )
+
+    renderModal()
+
+    const branchInput = await screen.findByLabelText(/branch name/i)
+    expect(branchInput).toHaveValue('feat/add-user-profile')
+    expect(screen.getByLabelText(/pull request title/i)).toHaveValue('feat: add user profile')
+    expect(screen.getByText(/opens a new pr/i)).toBeInTheDocument()
+  })
+
+  it('shows the LLM-suggested branch on the new-PR banner after the previous PR merged', async () => {
+    mockPublishCapabilities(
+      'chat-123',
+      '9b3c2a3f-55b7-47a7-83ac-6b9c592f2a07',
+      makeCapabilities({
+        previousPrMerged: true,
+        suggestedNewBranch: 'feat/after-merge',
+        target: { branchName: 'feat/after-merge', kind: 'OPEN_PR_NEW_BRANCH' },
+      }),
+    )
+
+    renderModal()
+
+    await screen.findByLabelText(/branch name/i)
+    expect(screen.getByLabelText(/branch name/i)).toHaveValue('feat/after-merge')
+    expect(screen.getByText(/opens a new pr on feat\/after-merge/i)).toBeInTheDocument()
   })
 })

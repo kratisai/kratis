@@ -20,10 +20,10 @@ The default is `main`.
 
 | Live PR state | Target | Branch rule |
 |---|---|---|
-| No prior PR | `OPEN_PR` | Requested branch. If it exists with no PR, update it under a lease. |
-| OPEN | `UPDATE_PR` | Current head branch, force-with-lease on its observed SHA. |
+| No prior PR | `OPEN_PR` | Requested branch, LLM-suggested when available. If it exists with no PR, update it under a lease. |
+| OPEN | `UPDATE_PR` | Current head branch, force-with-lease on its observed SHA. The LLM suggestion does not apply. |
 | CLOSED, not merged | `OPEN_PR` | Same head branch, lease on its observed SHA. The user edits before publish. |
-| MERGED | `OPEN_PR_NEW_BRANCH` | `kratis/<executionId>-<n>`. The merged branch is not changed. |
+| MERGED | `OPEN_PR_NEW_BRANCH` | Mechanical `kratis/<executionId>-<n>`, with the LLM suggestion as the pre-fill and the mechanical name as the fallback. The merged branch is not changed. |
 | Provider unavailable, prior PR exists | none | Blocked with `PROVIDER_UNAVAILABLE`. |
 
 `env.checkout` always clones with an `origin` remote.
@@ -106,6 +106,12 @@ The git remote decides the state; the database is a cache for rendering.
    `previousBranchMerged`.
 
 Branch names chosen by the user are kept unless the sidecar had to derive one.
+
+For a fresh publish, `publish-capabilities` asks the ingestion model for a suitable
+branch name together with the title and body. The service sanitizes the answer and uses
+the mechanical name when the suggestion is not usable. The suggestion is a dialog
+pre-fill only. Nothing stores it before publish. After a publish, the dialog pre-fills
+from the last published branch (`change_sets.branch_name`), not from a new model answer.
 
 ## Squash
 

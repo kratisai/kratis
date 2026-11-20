@@ -52,6 +52,14 @@ class LocalDockerSandboxProviderTest {
         return env;
     }
 
+    // Subnet allocation depends on whether the daemon is nested; pin the candidate so the
+    // expectations are identical on both a developer host and inside a sandbox.
+    private LocalDockerSandboxProvider providerWithControlPlaneAddress(String address) throws Exception {
+        LocalDockerSandboxProvider spied = spy(provider);
+        doReturn(address).when(spied).hostInternalAddressCandidate();
+        return spied;
+    }
+
     @BeforeEach
     void setUp() {
         mockProcessExecutor = mock(ProcessExecutor.class);
@@ -215,8 +223,9 @@ class LocalDockerSandboxProviderTest {
             }
             return defaultMockResult(cmd);
         });
+        LocalDockerSandboxProvider pinned = providerWithControlPlaneAddress(null);
 
-        provider.spawnSandbox(newEnvironment(UUID.randomUUID()));
+        pinned.spawnSandbox(newEnvironment(UUID.randomUUID()));
 
         verify(mockProcessExecutor)
                 .execute(
@@ -244,8 +253,9 @@ class LocalDockerSandboxProviderTest {
             }
             return defaultMockResult(cmd);
         });
+        LocalDockerSandboxProvider pinned = providerWithControlPlaneAddress(null);
 
-        provider.spawnSandbox(newEnvironment(UUID.randomUUID()));
+        pinned.spawnSandbox(newEnvironment(UUID.randomUUID()));
 
         assertThat(creates).hasValue(2);
         verify(mockProcessExecutor)
@@ -274,13 +284,59 @@ class LocalDockerSandboxProviderTest {
             }
             return defaultMockResult(cmd);
         });
+        LocalDockerSandboxProvider pinned = providerWithControlPlaneAddress(null);
 
-        assertThatThrownBy(() -> provider.spawnSandbox(newEnvironment(UUID.randomUUID())))
+        assertThatThrownBy(() -> pinned.spawnSandbox(newEnvironment(UUID.randomUUID())))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("No free /24");
 
         verify(mockProcessExecutor, never())
                 .execute(argThat(cmd -> cmd.contains("create") && cmd.contains("network")), any(), any());
+    }
+
+    @Test
+    void testSpawnSandboxSkipsTheSubnetThatContainsTheControlPlaneAddress() throws Exception {
+        // No networks are on the daemon; the first free /24 is 10.210.0.0/24, which would
+        // swallow the pinned control plane address 10.210.0.3 as an unowned on-link address.
+        when(mockProcessExecutor.execute(any(), any(), any()))
+                .thenAnswer(invocation -> defaultMockResult(invocation.getArgument(0)));
+        LocalDockerSandboxProvider pinned = providerWithControlPlaneAddress("10.210.0.3");
+
+        pinned.spawnSandbox(newEnvironment(UUID.randomUUID()));
+
+        verify(mockProcessExecutor)
+                .execute(
+                        argThat(cmd ->
+                                cmd.contains("create") && cmd.contains("network") && cmd.contains("10.210.1.0/24")),
+                        any(),
+                        any());
+        verify(mockProcessExecutor, never())
+                .execute(argThat(cmd -> cmd.contains("network") && cmd.contains("10.210.0.0/24")), any(), any());
+    }
+
+    @Test
+    void testSpawnSandboxSkipsTheReservedSubnetForEveryAttemptedAddressFamily() throws Exception {
+        when(mockProcessExecutor.execute(any(), any(), any())).thenAnswer(invocation -> {
+            List<String> cmd = invocation.getArgument(0);
+            if (isNetworkIdListing(cmd)) {
+                return result(0, "net-a net-b net-c");
+            }
+            if (isSubnetInspection(cmd)) {
+                return result(0, "10.210.0.0/24 10.210.1.0/24 fd00::/64\n");
+            }
+            return defaultMockResult(cmd);
+        });
+        LocalDockerSandboxProvider pinned = providerWithControlPlaneAddress("10.210.2.5");
+
+        pinned.spawnSandbox(newEnvironment(UUID.randomUUID()));
+
+        verify(mockProcessExecutor)
+                .execute(
+                        argThat(cmd ->
+                                cmd.contains("create") && cmd.contains("network") && cmd.contains("10.210.3.0/24")),
+                        any(),
+                        any());
+        verify(mockProcessExecutor, never()).execute(argThat(cmd -> cmd.contains("10.210.2.0/24")), any(), any());
     }
 
     @Test
@@ -301,8 +357,9 @@ class LocalDockerSandboxProviderTest {
             }
             return defaultMockResult(cmd);
         });
+        LocalDockerSandboxProvider pinned = providerWithControlPlaneAddress(null);
 
-        provider.spawnSandbox(newEnvironment(UUID.randomUUID()));
+        pinned.spawnSandbox(newEnvironment(UUID.randomUUID()));
 
         verify(mockProcessExecutor)
                 .execute(

@@ -204,23 +204,6 @@ public class SandboxExecutionPublishService {
                 ? PublishCapabilitiesDto.PublishStatus.REBASE_REQUIRED
                 : PublishCapabilitiesDto.PublishStatus.UP_TO_DATE;
 
-        PublishCapabilitiesDto.TargetDto target;
-        String suggestedNewBranch = null;
-
-        if (latestChangeSet == null || prSnapshot == null) {
-            String initialBranch = targetHeadBranch != null && !targetHeadBranch.equals(defaultBranch)
-                    ? targetHeadBranch
-                    : deriveSuggestedBranch(execution, 1);
-            target = PublishCapabilitiesDto.TargetDto.openPr(initialBranch);
-        } else if (prSnapshot.state() == PullRequestSnapshot.PullRequestState.OPEN) {
-            target = PublishCapabilitiesDto.TargetDto.updatePr(prSnapshot.number(), prSnapshot.headBranch());
-        } else if (prSnapshot.state() == PullRequestSnapshot.PullRequestState.MERGED) {
-            suggestedNewBranch = deriveSuggestedBranch(execution, changeSets.size() + 1);
-            target = PublishCapabilitiesDto.TargetDto.openPrNewBranch(suggestedNewBranch);
-        } else { // CLOSED
-            target = PublishCapabilitiesDto.TargetDto.openPr(prSnapshot.headBranch());
-        }
-
         List<PublishCapabilitiesDto.ChangeSetFileDto> files = obsResult.changeSet().files().stream()
                 .map(f ->
                         new PublishCapabilitiesDto.ChangeSetFileDto(f.path(), f.status(), f.additions(), f.deletions()))
@@ -251,8 +234,11 @@ public class SandboxExecutionPublishService {
         PublishCapabilitiesDto.PublishStatsDto stats = new PublishCapabilitiesDto.PublishStatsDto(
                 commitsAhead, stagedFiles, modifiedCount, additions, deletions, hasChanges, formattedSummary);
 
+        // The summary and branch suggestion ride the same LLM call; the suggestion is a
+        // pre-fill only and is never stored before publish.
         String suggestedTitle = "";
         String suggestedBody = "";
+        String llmBranchName = "";
         if (hasChanges) {
             List<SandboxExecutionActivity> activities =
                     activityRepository.findByExecutionIdOrderBySequenceAsc(executionId);
@@ -265,14 +251,35 @@ public class SandboxExecutionPublishService {
                     generatePublishSummary(execution, obsResult.changeSet().files(), List.of(), agentMessages);
             suggestedTitle = msg.title();
             suggestedBody = msg.body();
+            llmBranchName = msg.branchName();
         }
 
+        PublishCapabilitiesDto.TargetDto target;
+        String suggestedNewBranch = null;
+
+        if (latestChangeSet == null || prSnapshot == null) {
+            String initialBranch = targetHeadBranch != null && !targetHeadBranch.equals(defaultBranch)
+                    ? targetHeadBranch
+                    : resolveSuggestedBranchName(llmBranchName, execution, defaultBranch, 1);
+            target = PublishCapabilitiesDto.TargetDto.openPr(initialBranch);
+        } else if (prSnapshot.state() == PullRequestSnapshot.PullRequestState.OPEN) {
+            target = PublishCapabilitiesDto.TargetDto.updatePr(prSnapshot.number(), prSnapshot.headBranch());
+        } else if (prSnapshot.state() == PullRequestSnapshot.PullRequestState.MERGED) {
+            suggestedNewBranch =
+                    resolveSuggestedBranchName(llmBranchName, execution, defaultBranch, changeSets.size() + 1);
+            target = PublishCapabilitiesDto.TargetDto.openPrNewBranch(suggestedNewBranch);
+        } else { // CLOSED
+            target = PublishCapabilitiesDto.TargetDto.openPr(prSnapshot.headBranch());
+        }
+
+        // Digest covers git observables and non-editable plan parts only: the branch, title,
+        // and body are user-editable LLM suggestions that vary between fetches, and keeping
+        // them as digest inputs would raise spurious PLAN_CHANGED (409) before publish.
         String digestInputs = String.format(
-                "%s:%s:%s:%s:%s:%s",
+                "%s:%s:%s:%s:%s",
                 obsResult.defaultSha(),
                 obsResult.executionBaseSha(),
                 target.kind(),
-                target.branchName(),
                 target.prNumber(),
                 obsResult.changeSet().digest());
         String digest = hexDigest(digestInputs);
@@ -304,6 +311,31 @@ public class SandboxExecutionPublishService {
     private String deriveSuggestedBranch(SandboxExecution execution, int iteration) {
         String suffix = execution.getId() != null ? execution.getId().toString().substring(0, 8) : "feature";
         return "kratis/" + suffix + "-" + iteration;
+    }
+
+    private String resolveSuggestedBranchName(
+            String llmBranchName, SandboxExecution execution, String baseBranch, int fallbackIteration) {
+        String candidate = sanitizeBranchName(llmBranchName);
+        if (!candidate.isBlank() && !candidate.equals(baseBranch) && isValidGitRefName(candidate)) {
+            return candidate;
+        }
+        return deriveSuggestedBranch(execution, fallbackIteration);
+    }
+
+    // Mirrors sanitizeBranchName in web publish-modal.tsx so the suggestion that survives here
+    // is what the dialog would show and the push would accept.
+    private static String sanitizeBranchName(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        return raw.trim()
+                .replaceAll("[^a-zA-Z0-9/_.-]", "_")
+                .replaceAll("^[-./]+", "_")
+                .replaceAll("/{2,}", "/")
+                .replaceAll("/\\.{1,}", "/_")
+                .replaceAll("\\.{2,}", "_")
+                .replaceAll("\\.lock(?=$|/)", "_lock")
+                .replaceAll("[/.]*$", "");
     }
 
     private String hexDigest(String input) {
@@ -537,7 +569,13 @@ public class SandboxExecutionPublishService {
         return String.join(", ", parts) + " (+" + additions + ", -" + deletions + " lines)";
     }
 
-    private record SuggestedMessage(String title, String body) {}
+    private record SuggestedMessage(String title, String body, String branchName) {
+        private SuggestedMessage {
+            Objects.requireNonNull(title, "title is required");
+            Objects.requireNonNull(body, "body is required");
+            Objects.requireNonNull(branchName, "branchName is required");
+        }
+    }
 
     private SuggestedMessage generatePublishSummary(
             SandboxExecution execution,
@@ -551,12 +589,19 @@ public class SandboxExecutionPublishService {
                     HttpStatus.INTERNAL_SERVER_ERROR, "No ingestion model provider configured for team");
         }
 
+        String baseBranch = resolveTargetBranch(execution);
+        String repoName =
+                execution.getRepository() != null ? execution.getRepository().getName() : execution.getNewRepoName();
         String modelName = team.getIngestionModel();
         try {
             ChatModel model = chatModelFactory.createChatModel(provider, modelName);
             StringBuilder promptBuilder = new StringBuilder();
             promptBuilder.append(
-                    "You are generating a concise Pull Request title and structured description summarizing the changes made by an AI development agent.\n\n");
+                    "You are generating a concise Pull Request title, a structured description, and a suggested git branch name summarizing the changes made by an AI development agent.\n\n");
+            if (repoName != null && !repoName.isBlank()) {
+                promptBuilder.append("Repository: ").append(repoName).append("\n");
+            }
+            promptBuilder.append("Base branch: ").append(baseBranch).append("\n\n");
 
             if (agentMessages != null && !agentMessages.isEmpty()) {
                 promptBuilder.append("Agent messages and feedback:\n");
@@ -602,7 +647,7 @@ public class SandboxExecutionPublishService {
 
             promptBuilder.append("Return ONLY valid JSON matching this schema:\n");
             promptBuilder.append(
-                    "{\n  \"title\": \"conventional commit title under 72 chars\",\n  \"body\": \"concise bulleted markdown summary of changes including agent feedback and verification\"\n}\n");
+                    "{\n  \"title\": \"conventional commit title under 72 chars\",\n  \"body\": \"concise bulleted markdown summary of changes including agent feedback and verification\",\n  \"branchName\": \"suitable git branch name representing the summarized changes\"\n}\n");
 
             String prompt = promptBuilder.toString();
             logger.debug(
@@ -631,10 +676,12 @@ public class SandboxExecutionPublishService {
                 JsonNode json = objectMapper.readTree(cleanJson.trim());
                 String title = json.path("title").asText("");
                 String body = json.path("body").asText("");
-                return new SuggestedMessage(title, body);
+                JsonNode branchNode = json.path("branchName");
+                String branchName = branchNode.isTextual() ? branchNode.asText() : "";
+                return new SuggestedMessage(title, body, branchName);
             }
             logger.warn("LLM publish summary had no usable response; returning empty suggestion");
-            return new SuggestedMessage("", "");
+            return new SuggestedMessage("", "", "");
         } catch (Exception e) {
             logger.warn(
                     "ChatModel generation failed for PR publish summary: provider={} model={} error={}",
@@ -642,7 +689,7 @@ public class SandboxExecutionPublishService {
                     modelName,
                     e.getMessage(),
                     e);
-            return new SuggestedMessage("", "");
+            return new SuggestedMessage("", "", "");
         }
     }
 
