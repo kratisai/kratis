@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import React, { useEffect, useRef, useState } from 'react'
 
+import type { WikiPageDto } from '@/lib/wiki-api'
 import type { ArchitecturePatternDto, DimensionStatDto } from '@/types/auth-types'
 
 import { IngestionStatusBadge } from '@/components/repos/ingestion-status-badge'
@@ -36,6 +37,7 @@ import {
 import { useStartChat } from '@/hooks/use-start-chat'
 import { formatDurationSeconds, formatRelativeTime, formatSpend } from '@/lib/format'
 import { downloadIngestionLogsCsv } from '@/lib/ingestion-log-export'
+import { buildWikiTreeFromList, type WikiTree } from '@/lib/wiki-tree'
 
 export function RepositoryDrilldownView() {
   const { repoId } = useParams({ from: '/repos/$repoId' })
@@ -605,24 +607,11 @@ export function RepositoryDrilldownView() {
                 )}
 
                 {/* Wiki Pages */}
-                {batchStats.wikiPageSlugs.length > 0 && (
+                {batchStats.wikiPages.length > 0 && (
                   <div>
                     <h3 className="mb-2 text-sm font-medium">Generated Wiki Pages</h3>
                     <div className="rounded-lg border p-4">
-                      <ul className="space-y-1 text-sm">
-                        {batchStats.wikiPageSlugs.map((slug) => (
-                          <li key={slug}>
-                            <Link
-                              className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 hover:underline"
-                              params={{ pageSlug: slug, repoId: repo.id }}
-                              to="/wiki/$repoId/$pageSlug"
-                            >
-                              <FileText className="h-3.5 w-3.5 flex-shrink-0" />
-                              {slug}
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
+                      <WikiPagesOutline pages={batchStats.wikiPages} repoId={repo.id} />
                     </div>
                   </div>
                 )}
@@ -632,6 +621,74 @@ export function RepositoryDrilldownView() {
         </Card>
       </div>
     </div>
+  )
+}
+
+function WikiPageOutlineNode({
+  page,
+  repoId,
+  tree,
+  visited,
+}: {
+  page: WikiPageDto
+  repoId: string
+  tree: WikiTree
+  visited: Set<string>
+}) {
+  // Guards circular/disconnected parent references so a branch can never render itself twice.
+  if (visited.has(page.id)) return null
+  const path = new Set(visited)
+  path.add(page.id)
+  const children = (tree.childrenMap.get(page.id) ?? []).filter((child) => !path.has(child.id))
+
+  return (
+    <li data-depth={path.size} data-testid="wiki-page-node">
+      <Link
+        className="text-muted-foreground hover:text-foreground flex items-start gap-1.5 hover:underline"
+        params={{ pageSlug: page.pageSlug, repoId }}
+        title={page.pageSlug}
+        to="/wiki/$repoId/$pageSlug"
+      >
+        <FileText className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+        <span className="truncate">{page.title}</span>
+        <code className="bg-muted mt-0.5 rounded px-1 py-0.5 font-mono text-[10px] leading-none">
+          {page.pageSlug}
+        </code>
+      </Link>
+      {children.length > 0 && (
+        <div className="border-border/60 mt-1 ml-2.5 border-l pl-3">
+          <ul className="space-y-1.5">
+            {children.map((child) => (
+              <WikiPageOutlineNode
+                key={child.id}
+                page={child}
+                repoId={repoId}
+                tree={tree}
+                visited={path}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
+    </li>
+  )
+}
+
+function WikiPagesOutline({ pages, repoId }: { pages: WikiPageDto[]; repoId: string }) {
+  const tree = buildWikiTreeFromList(pages)
+
+  return (
+    <ul className="space-y-2" data-testid="wiki-pages-outline">
+      {tree.topLevel.map((page) => (
+        <WikiPageOutlineNode
+          key={page.id}
+          page={page}
+          repoId={repoId}
+          tree={tree}
+          visited={new Set<string>()}
+        />
+      ))}
+    </ul>
   )
 }
 

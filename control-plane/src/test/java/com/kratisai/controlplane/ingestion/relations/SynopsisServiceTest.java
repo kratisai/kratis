@@ -457,7 +457,7 @@ class SynopsisServiceTest {
         verify(missingBatch.synopses, never()).save(any());
 
         var missingWiki = new SynthesisFixture();
-        when(missingWiki.wikis.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(missingWiki.batchId))
+        when(missingWiki.wikis.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(missingWiki.batchId))
                 .thenReturn(List.of());
         assertThatThrownBy(() -> missingWiki.service.synthesize(missingWiki.batchId, missingWiki.logger))
                 .isInstanceOf(IllegalStateException.class)
@@ -561,7 +561,7 @@ class SynopsisServiceTest {
             when(wiki.getPageSlug()).thenReturn("root");
             when(wiki.getTitle()).thenReturn("Root");
             when(batches.findByIdWithRepositoryAndTeam(batchId)).thenReturn(Optional.of(batch));
-            when(wikis.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(batchId))
+            when(wikis.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId))
                     .thenReturn(List.of(wiki));
             when(clients.chatClientFor(batch))
                     .thenReturn(ChatClient.builder(model).build());

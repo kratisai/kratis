@@ -3,6 +3,7 @@ package com.kratisai.controlplane.ingestion.teamwiki;
 import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.agentloop.KratisToolException;
 import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import java.util.List;
 import java.util.UUID;
@@ -49,8 +50,9 @@ public class DeleteTeamWikiPageTool {
     }
 
     private int deleteRecursively(UUID batchId, CtxWikiPage page) {
-        List<CtxWikiPage> children =
-                ctxWikiPageRepository.findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(batchId, page.getId());
+        List<CtxWikiPage> children = CtxWikiPages.childPages(
+                ctxWikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId),
+                page.getId());
         int count = 0;
         for (CtxWikiPage child : children) {
             count += deleteRecursively(batchId, child);

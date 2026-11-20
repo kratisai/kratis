@@ -5,6 +5,7 @@ import com.kratisai.controlplane.agentloop.KratisToolException;
 import com.kratisai.controlplane.model.CtxSurface;
 import com.kratisai.controlplane.model.CtxSurfaceAttribute;
 import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.repository.CtxSurfaceRepository;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import java.util.List;
@@ -35,14 +36,15 @@ public class TeamWikiRepoReadTools {
     public String listRepoWikiPages(
             @ToolParam(description = "Repository name") String repoName, ToolContext toolContext) {
         UUID repoBatchId = resolveRepoBatchId(repoName, toolContext);
-        List<CtxWikiPage> roots =
-                ctxWikiPageRepository.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(repoBatchId);
+        List<CtxWikiPage> pages =
+                ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(repoBatchId);
+        List<CtxWikiPage> roots = CtxWikiPages.topLevelPages(pages);
         if (roots.isEmpty()) {
             return "No wiki pages exist for repository '" + repoName + "'.";
         }
         StringBuilder builder = new StringBuilder();
         for (CtxWikiPage root : roots) {
-            appendHierarchy(repoBatchId, root, 0, builder);
+            appendHierarchy(pages, root, 0, builder);
         }
         return builder.toString().stripTrailing();
     }
@@ -108,17 +110,15 @@ public class TeamWikiRepoReadTools {
         return batchId;
     }
 
-    private void appendHierarchy(UUID batchId, CtxWikiPage page, int depth, StringBuilder builder) {
+    private void appendHierarchy(List<CtxWikiPage> pages, CtxWikiPage page, int depth, StringBuilder builder) {
         builder.repeat("  ", depth)
                 .append("- ")
                 .append(page.getPageSlug())
                 .append(" (")
                 .append(page.getTitle())
                 .append(")\n");
-        List<CtxWikiPage> children =
-                ctxWikiPageRepository.findByBatchIdAndParentPageIdOrderByOrderIndexAsc(batchId, page.getId());
-        for (CtxWikiPage child : children) {
-            appendHierarchy(batchId, child, depth + 1, builder);
+        for (CtxWikiPage child : CtxWikiPages.childPages(pages, page.getId())) {
+            appendHierarchy(pages, child, depth + 1, builder);
         }
     }
 }

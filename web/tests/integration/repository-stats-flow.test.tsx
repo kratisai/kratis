@@ -67,7 +67,7 @@ const stats: IngestionBatchStatsDto = {
   totalTokens: 1000,
   totalToolCalls: 3,
   usageLastUpdatedAt: null,
-  wikiPageSlugs: [],
+  wikiPages: [],
 }
 
 describe('Repository stats surfaces and relations', () => {

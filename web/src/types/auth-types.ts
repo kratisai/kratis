@@ -1,5 +1,7 @@
 // API types matching backend DTOs
 
+import type { WikiPageDto } from '@/lib/wiki-api'
+
 export interface AddTeamMemberRequest {
   email: string
   role: 'MEMBER' | 'OWNER'
@@ -67,7 +69,7 @@ export interface IngestionBatchStatsDto {
   totalTokens: null | number
   totalToolCalls: null | number
   usageLastUpdatedAt: null | string
-  wikiPageSlugs: string[]
+  wikiPages: WikiPageDto[]
 }
 
 export type IngestionStatus = 'FAILED' | 'PROCESSING' | 'QUEUED' | 'SUCCESS'

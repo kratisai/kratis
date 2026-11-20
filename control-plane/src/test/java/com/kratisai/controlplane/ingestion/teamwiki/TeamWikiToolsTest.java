@@ -70,13 +70,10 @@ class TeamWikiToolsTest {
         child.setId(UUID.randomUUID());
         child.setPageSlug("cluster");
         child.setTitle("Cluster");
+        child.setParentPage(root);
 
-        when(wikiPageRepository.findByTeamWikiBatchIdAndParentPageIsNullOrderByOrderIndexAsc(twBatchId))
-                .thenReturn(List.of(root));
-        when(wikiPageRepository.findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(twBatchId, root.getId()))
-                .thenReturn(List.of(child));
-        when(wikiPageRepository.findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(twBatchId, child.getId()))
-                .thenReturn(List.of());
+        when(wikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(twBatchId))
+                .thenReturn(List.of(root, child));
         when(wikiPageRepository.findByTeamWikiBatchIdAndPageSlug(twBatchId, "root"))
                 .thenReturn(Optional.of(root));
 
@@ -98,13 +95,12 @@ class TeamWikiToolsTest {
         CtxWikiPage child = new CtxWikiPage();
         child.setId(UUID.randomUUID());
         child.setPageSlug("old-child");
+        child.setParentPage(parent);
 
         when(wikiPageRepository.findByTeamWikiBatchIdAndPageSlug(twBatchId, "old-cluster"))
                 .thenReturn(Optional.of(parent));
-        when(wikiPageRepository.findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(twBatchId, parent.getId()))
-                .thenReturn(List.of(child));
-        when(wikiPageRepository.findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(twBatchId, child.getId()))
-                .thenReturn(List.of());
+        when(wikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(twBatchId))
+                .thenReturn(List.of(parent, child));
 
         String result = deleteTool.deleteTeamWikiPage("old-cluster", toolContext);
         assertThat(result).contains("2 page(s) removed");
@@ -120,10 +116,8 @@ class TeamWikiToolsTest {
         repoPage.setTitle("Architecture");
         repoPage.setContent("Arch details");
 
-        when(wikiPageRepository.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(repoBatchId))
+        when(wikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(repoBatchId))
                 .thenReturn(List.of(repoPage));
-        when(wikiPageRepository.findByBatchIdAndParentPageIdOrderByOrderIndexAsc(repoBatchId, repoPage.getId()))
-                .thenReturn(List.of());
         when(wikiPageRepository.findByBatchIdAndPageSlug(repoBatchId, "arch")).thenReturn(Optional.of(repoPage));
 
         CtxSurface surface = new CtxSurface(

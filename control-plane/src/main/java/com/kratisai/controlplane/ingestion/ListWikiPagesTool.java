@@ -2,6 +2,7 @@ package com.kratisai.controlplane.ingestion;
 
 import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import java.util.List;
 import java.util.UUID;
@@ -24,7 +25,8 @@ public class ListWikiPagesTool {
     public String listWikiPages(ToolContext toolContext) {
         UUID batchId = BatchContext.requireBatchId(toolContext, "ListWikiPagesTool");
 
-        List<CtxWikiPage> roots = ctxWikiPageRepository.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(batchId);
+        List<CtxWikiPage> pages = ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId);
+        List<CtxWikiPage> roots = CtxWikiPages.topLevelPages(pages);
         if (roots.isEmpty()) {
             return "No wiki pages have been written yet."
                     + " Write the single top-level page first (omit parentPageSlug).";
@@ -32,22 +34,20 @@ public class ListWikiPagesTool {
 
         StringBuilder builder = new StringBuilder();
         for (CtxWikiPage root : roots) {
-            appendHierarchy(batchId, root, 0, builder);
+            appendHierarchy(pages, root, 0, builder);
         }
         return builder.toString().stripTrailing();
     }
 
-    private void appendHierarchy(UUID batchId, CtxWikiPage page, int depth, StringBuilder builder) {
+    private void appendHierarchy(List<CtxWikiPage> pages, CtxWikiPage page, int depth, StringBuilder builder) {
         builder.repeat("  ", depth)
                 .append("- ")
                 .append(page.getPageSlug())
                 .append(" (")
                 .append(page.getTitle())
                 .append(")\n");
-        List<CtxWikiPage> children =
-                ctxWikiPageRepository.findByBatchIdAndParentPageIdOrderByOrderIndexAsc(batchId, page.getId());
-        for (CtxWikiPage child : children) {
-            appendHierarchy(batchId, child, depth + 1, builder);
+        for (CtxWikiPage child : CtxWikiPages.childPages(pages, page.getId())) {
+            appendHierarchy(pages, child, depth + 1, builder);
         }
     }
 }

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import type { WikiPageDto } from '@/lib/wiki-api'
 import type { IngestionStatus } from '@/types/auth-types.ts'
 
 import {
@@ -675,7 +676,7 @@ describe('Repository Drilldown - Ingestion Statistics', () => {
           nodeTypeCounts: {},
           relations: [],
           surfaces: [],
-          wikiPageSlugs: [],
+          wikiPages: [],
           ...stats,
         })
       }
@@ -1030,7 +1031,7 @@ describe('Repository Drilldown - Batch Selection', () => {
           nodeTypeCounts: {},
           relations: [],
           surfaces: [],
-          wikiPageSlugs: [],
+          wikiPages: [],
           ...(stats as Record<string, unknown>),
         })
         if (url.includes('batch-1'))
@@ -1292,7 +1293,7 @@ describe('Repository Drilldown - Dimension Categories & Wiki Pages', () => {
           nodeTypeCounts: {},
           relations: [],
           surfaces: [],
-          wikiPageSlugs: [],
+          wikiPages: [],
           ...stats,
         })
       }
@@ -1422,18 +1423,52 @@ describe('Repository Drilldown - Dimension Categories & Wiki Pages', () => {
     expect(screen.queryByText('Top files')).not.toBeInTheDocument()
   })
 
-  it('displays wiki page slugs when present in stats', async () => {
-    const mockStats = {
+  it('displays wiki page titles and slugs when present in stats', async () => {
+    const withPages = (wikiPages: WikiPageDto[]) => ({
       batchId: 'batch-1',
       edgeTypeCounts: {},
       nodeTypeCounts: {},
       totalDurationSeconds: 60,
       totalEdges: 0,
       totalNodes: 0,
-      wikiPageSlugs: ['architecture-overview', 'api-reference', 'deployment-guide'],
-    }
+      wikiPages,
+    })
 
-    setupMocksWithStats([], mockStats)
+    setupMocksWithStats(
+      [],
+      withPages([
+        {
+          content: '',
+          hasChildren: false,
+          id: 'page-1',
+          orderIndex: 10,
+          pageSlug: 'architecture-overview',
+          parentPageId: null,
+          repoName: 'frontend-app',
+          title: 'Architecture Overview',
+        },
+        {
+          content: '',
+          hasChildren: false,
+          id: 'page-2',
+          orderIndex: 20,
+          pageSlug: 'api-reference',
+          parentPageId: null,
+          repoName: 'frontend-app',
+          title: 'API Reference',
+        },
+        {
+          content: '',
+          hasChildren: false,
+          id: 'page-3',
+          orderIndex: 30,
+          pageSlug: 'deployment-guide',
+          parentPageId: null,
+          repoName: 'frontend-app',
+          title: 'Deployment Guide',
+        },
+      ]),
+    )
     setAuthenticated({ teamId: 'team-1' })
 
     renderWithRouter(['/repos/repo-1'])
@@ -1441,23 +1476,48 @@ describe('Repository Drilldown - Dimension Categories & Wiki Pages', () => {
     await waitFor(() => {
       expect(screen.getByText('Generated Wiki Pages')).toBeInTheDocument()
     })
+    expect(screen.getByText('Architecture Overview')).toBeInTheDocument()
     expect(screen.getByText('architecture-overview')).toBeInTheDocument()
-    expect(screen.getByText('api-reference')).toBeInTheDocument()
-    expect(screen.getByText('deployment-guide')).toBeInTheDocument()
+    expect(screen.getByText('API Reference')).toBeInTheDocument()
+    expect(screen.getByText('Deployment Guide')).toBeInTheDocument()
   })
 
-  it('renders wiki page slugs as links pointing to the wiki page route', async () => {
-    const mockStats = {
+  it('renders wiki page entries as links pointing to the wiki page route', async () => {
+    const withPages = (wikiPages: WikiPageDto[]) => ({
       batchId: 'batch-1',
       edgeTypeCounts: {},
       nodeTypeCounts: {},
       totalDurationSeconds: 60,
       totalEdges: 0,
       totalNodes: 0,
-      wikiPageSlugs: ['architecture-overview', 'api-reference'],
-    }
+      wikiPages,
+    })
 
-    setupMocksWithStats([], mockStats)
+    setupMocksWithStats(
+      [],
+      withPages([
+        {
+          content: '',
+          hasChildren: false,
+          id: 'page-1',
+          orderIndex: 10,
+          pageSlug: 'architecture-overview',
+          parentPageId: null,
+          repoName: 'frontend-app',
+          title: 'Architecture Overview',
+        },
+        {
+          content: '',
+          hasChildren: false,
+          id: 'page-2',
+          orderIndex: 20,
+          pageSlug: 'api-reference',
+          parentPageId: null,
+          repoName: 'frontend-app',
+          title: 'API Reference',
+        },
+      ]),
+    )
     setAuthenticated({ teamId: 'team-1' })
 
     renderWithRouter(['/repos/repo-1'])
@@ -1705,5 +1765,205 @@ describe('Repository Drilldown - Relative Time Formatting', () => {
     await waitFor(() => {
       expect(screen.getByText('just now')).toBeInTheDocument()
     })
+  })
+})
+
+describe('Repository Drilldown - Wiki Page Key Structure', () => {
+  setupFetchMock()
+
+  beforeEach(() => {
+    setUnauthenticated()
+  })
+
+  function setupMocksWithStats(stats: Record<string, unknown>) {
+    mockListTeams([
+      {
+        createdAt: '2024-01-01T00:00:00Z',
+        id: 'team-1',
+        isDefault: true,
+        name: 'Test Team',
+        role: 'owner',
+        tavilyApiKeyConfigured: false,
+      },
+    ])
+    mockListRepositories([
+      {
+        branch: 'main',
+        commitHash: 'abc123def456',
+        createdAt: '2024-01-01T00:00:00Z',
+        id: 'repo-1',
+        ingestionStatus: 'SUCCESS',
+        lastIngestedAt: '2024-01-15T10:00:00Z',
+        latestBatchId: 'batch-1',
+        name: 'frontend-app',
+        repositoryType: 'GENERIC',
+        teamId: 'team-1',
+        updatedAt: '2024-01-01T00:00:00Z',
+        url: 'https://github.com/user/frontend-app.git',
+      },
+    ])
+
+    addFetchHandler((url) => {
+      if (url.includes('/batches/') && url.includes('/logs')) {
+        return jsonResponse([])
+      }
+      if (url.includes('/batches/') && url.includes('/stats')) {
+        // The stats protocol guarantees these collections are always present.
+        return jsonResponse({
+          architecturePatterns: [],
+          dimensions: [],
+          edgeTypeCounts: {},
+          nodeTypeCounts: {},
+          relations: [],
+          surfaces: [],
+          wikiPages: [],
+          ...stats,
+        })
+      }
+      if (url.includes('/batches') && !url.includes('/logs') && !url.includes('/stats')) {
+        return jsonResponse([])
+      }
+      return null
+    })
+  }
+
+  const rootPage = {
+    content: '',
+    hasChildren: true,
+    id: 'page-root',
+    orderIndex: 10,
+    pageSlug: 'overview',
+    parentPageId: null,
+    repoName: 'frontend-app',
+    title: 'System Overview',
+  }
+
+  it('renders wiki pages as a hierarchical tree with titles, slugs, and depth', async () => {
+    const mockStats = {
+      batchId: 'batch-1',
+      totalDurationSeconds: 60,
+      totalEdges: 0,
+      totalNodes: 0,
+      wikiPages: [
+        rootPage,
+        {
+          content: '',
+          hasChildren: false,
+          id: 'page-arch',
+          orderIndex: 20,
+          pageSlug: 'architecture',
+          parentPageId: 'page-root',
+          repoName: 'frontend-app',
+          title: 'Architecture',
+        },
+      ],
+    }
+
+    setupMocksWithStats(mockStats)
+    setAuthenticated({ teamId: 'team-1' })
+
+    renderWithRouter(['/repos/repo-1'])
+
+    await waitFor(() => {
+      expect(screen.getByText('Generated Wiki Pages')).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('System Overview')).toBeInTheDocument()
+    expect(screen.getByText('Architecture')).toBeInTheDocument()
+    expect(screen.getByText('overview')).toBeInTheDocument()
+    expect(screen.getByText('architecture')).toBeInTheDocument()
+
+    expect(screen.getAllByTestId('wiki-page-node')).toHaveLength(2)
+
+    const rootDepth = screen.getByText('System Overview').closest('li')
+    expect(rootDepth).toHaveAttribute('data-depth', '1')
+    const childDepth = screen.getByText('Architecture').closest('li')
+    expect(childDepth).toHaveAttribute('data-depth', '2')
+  })
+
+  it('links wiki tree entries directly to their wiki page route', async () => {
+    const mockStats = {
+      batchId: 'batch-1',
+      totalDurationSeconds: 60,
+      totalEdges: 0,
+      totalNodes: 0,
+      wikiPages: [
+        rootPage,
+        {
+          content: '',
+          hasChildren: false,
+          id: 'page-arch',
+          orderIndex: 20,
+          pageSlug: 'architecture',
+          parentPageId: 'page-root',
+          repoName: 'frontend-app',
+          title: 'Architecture',
+        },
+      ],
+    }
+
+    setupMocksWithStats(mockStats)
+    setAuthenticated({ teamId: 'team-1' })
+
+    renderWithRouter(['/repos/repo-1'])
+
+    await waitFor(() => {
+      expect(screen.getByText('Generated Wiki Pages')).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('link', { name: /System Overview/ })).toHaveAttribute(
+      'href',
+      '/wiki/repo-1/overview',
+    )
+    expect(screen.getByRole('link', { name: /Architecture/ })).toHaveAttribute(
+      'href',
+      '/wiki/repo-1/architecture',
+    )
+  })
+
+  it('orders wiki tree siblings by orderIndex then title', async () => {
+    const mockStats = {
+      batchId: 'batch-1',
+      totalDurationSeconds: 60,
+      totalEdges: 0,
+      totalNodes: 0,
+      wikiPages: [
+        { ...rootPage, orderIndex: 0 },
+        {
+          content: '',
+          hasChildren: false,
+          id: 'page-zulu',
+          orderIndex: 10,
+          pageSlug: 'zulu',
+          parentPageId: 'page-root',
+          repoName: 'frontend-app',
+          title: 'Zulu',
+        },
+        {
+          content: '',
+          hasChildren: false,
+          id: 'page-alpha',
+          orderIndex: 10,
+          pageSlug: 'alpha',
+          parentPageId: 'page-root',
+          repoName: 'frontend-app',
+          title: 'Alpha',
+        },
+      ],
+    }
+
+    setupMocksWithStats(mockStats)
+    setAuthenticated({ teamId: 'team-1' })
+
+    const { container } = renderWithRouter(['/repos/repo-1'])
+
+    await waitFor(() => {
+      expect(screen.getByText('Generated Wiki Pages')).toBeInTheDocument()
+    })
+
+    const slugs = Array.from(container.querySelectorAll('[data-testid="wiki-page-node"]')).map((node) =>
+      node.querySelector('code')?.textContent,
+    )
+    expect(slugs).toEqual(['overview', 'alpha', 'zulu'])
   })
 })

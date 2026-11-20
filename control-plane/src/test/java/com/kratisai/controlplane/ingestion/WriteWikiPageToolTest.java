@@ -77,7 +77,7 @@ class WriteWikiPageToolTest {
                 .thenReturn(Optional.empty());
 
         String result =
-                writeWikiPageTool.writeWikiPage("overview", "System Overview", VALID_CONTENT, null, toolContext);
+                writeWikiPageTool.writeWikiPage("overview", "System Overview", VALID_CONTENT, null, null, toolContext);
 
         assertThat(result).isEqualTo("SUCCESS: Wiki page 'overview' created successfully.");
 
@@ -90,10 +90,72 @@ class WriteWikiPageToolTest {
         assertThat(saved.getPageSlug()).isEqualTo("overview");
         assertThat(saved.getTitle()).isEqualTo("System Overview");
         assertThat(saved.getContent()).isEqualTo(VALID_CONTENT);
-        assertThat(saved.getOrderIndex()).isZero();
+        assertThat(saved.getOrderIndex()).isEqualTo(10);
         assertThat(saved.getParentPage()).isNull();
         verify(wikiBatchLogger)
                 .info(eq("GENERATE_WIKI"), contains("Created wiki page \"System Overview\" (slug=overview"));
+    }
+
+    @Test
+    void writeWikiPage_withSiblingPages_autoIncrementsOrderIndex() {
+        CtxWikiPage sibling = new CtxWikiPage();
+        sibling.setBatch(batch);
+        sibling.setPageSlug("sibling");
+        sibling.setOrderIndex(20);
+
+        when(ingestionBatchRepository.findById(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "overview"))
+                .thenReturn(Optional.empty());
+        when(ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId))
+                .thenReturn(List.of(sibling));
+
+        String result =
+                writeWikiPageTool.writeWikiPage("overview", "System Overview", VALID_CONTENT, null, null, toolContext);
+
+        assertThat(result).isEqualTo("SUCCESS: Wiki page 'overview' created successfully.");
+        ArgumentCaptor<CtxWikiPage> captor = ArgumentCaptor.forClass(CtxWikiPage.class);
+        verify(ctxWikiPageRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getOrderIndex()).isEqualTo(30);
+    }
+
+    @Test
+    void writeWikiPage_withParentPage_autoIncrementsOrderIndexAmongParentSiblings() {
+        CtxWikiPage parent = new CtxWikiPage();
+        parent.setId(UUID.randomUUID());
+        parent.setBatch(batch);
+        parent.setPageSlug("parent");
+        CtxWikiPage sibling = new CtxWikiPage();
+        sibling.setBatch(batch);
+        sibling.setPageSlug("sibling");
+        sibling.setParentPage(parent);
+        sibling.setOrderIndex(0);
+
+        when(ingestionBatchRepository.findById(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "overview"))
+                .thenReturn(Optional.empty());
+        when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "parent")).thenReturn(Optional.of(parent));
+        when(ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId))
+                .thenReturn(List.of(sibling));
+
+        writeWikiPageTool.writeWikiPage("overview", "Child", VALID_CONTENT, "parent", null, toolContext);
+
+        ArgumentCaptor<CtxWikiPage> captor = ArgumentCaptor.forClass(CtxWikiPage.class);
+        verify(ctxWikiPageRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getParentPage()).isEqualTo(parent);
+        assertThat(captor.getValue().getOrderIndex()).isEqualTo(10);
+    }
+
+    @Test
+    void writeWikiPage_withExplicitOrderIndex_persistsIt() {
+        when(ingestionBatchRepository.findById(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "overview"))
+                .thenReturn(Optional.empty());
+
+        writeWikiPageTool.writeWikiPage("overview", "System Overview", VALID_CONTENT, null, 15, toolContext);
+
+        ArgumentCaptor<CtxWikiPage> captor = ArgumentCaptor.forClass(CtxWikiPage.class);
+        verify(ctxWikiPageRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getOrderIndex()).isEqualTo(15);
     }
 
     @Test
@@ -104,16 +166,39 @@ class WriteWikiPageToolTest {
         existing.setPageSlug("overview");
         existing.setTitle("Old Title");
         existing.setContent("Old content");
+        existing.setOrderIndex(7);
 
         when(ingestionBatchRepository.findById(batchId)).thenReturn(Optional.of(batch));
         when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "overview"))
                 .thenReturn(Optional.of(existing));
 
-        String result = writeWikiPageTool.writeWikiPage("overview", "New Title", VALID_CONTENT, null, toolContext);
+        String result =
+                writeWikiPageTool.writeWikiPage("overview", "New Title", VALID_CONTENT, null, null, toolContext);
 
         assertThat(result).isEqualTo("SUCCESS: Wiki page 'overview' updated successfully.");
         assertThat(existing.getTitle()).isEqualTo("New Title");
         assertThat(existing.getContent()).isEqualTo(VALID_CONTENT);
+        assertThat(existing.getOrderIndex()).isEqualTo(7);
+        verify(ctxWikiPageRepository).saveAndFlush(existing);
+    }
+
+    @Test
+    void writeWikiPage_withExistingPageAndExplicitOrderIndex_updatesOrderIndex() {
+        CtxWikiPage existing = new CtxWikiPage();
+        existing.setId(UUID.randomUUID());
+        existing.setBatch(batch);
+        existing.setPageSlug("overview");
+        existing.setTitle("Old Title");
+        existing.setContent("Old content");
+        existing.setOrderIndex(7);
+
+        when(ingestionBatchRepository.findById(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "overview"))
+                .thenReturn(Optional.of(existing));
+
+        writeWikiPageTool.writeWikiPage("overview", "New Title", VALID_CONTENT, null, 42, toolContext);
+
+        assertThat(existing.getOrderIndex()).isEqualTo(42);
         verify(ctxWikiPageRepository).saveAndFlush(existing);
     }
 
@@ -129,7 +214,8 @@ class WriteWikiPageToolTest {
                 .thenReturn(Optional.empty());
         when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "parent")).thenReturn(Optional.of(parent));
 
-        String result = writeWikiPageTool.writeWikiPage("overview", "Child", VALID_CONTENT, "parent", toolContext);
+        String result =
+                writeWikiPageTool.writeWikiPage("overview", "Child", VALID_CONTENT, "parent", null, toolContext);
 
         assertThat(result).isEqualTo("SUCCESS: Wiki page 'overview' created successfully.");
 
@@ -140,21 +226,21 @@ class WriteWikiPageToolTest {
 
     @Test
     void writeWikiPage_withBlankPageSlug_throwsToolException() {
-        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("  ", "Title", "Content", null, toolContext))
+        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("  ", "Title", "Content", null, null, toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("pageSlug must not be blank");
     }
 
     @Test
     void writeWikiPage_withBlankTitle_throwsToolException() {
-        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("slug", "  ", "Content", null, toolContext))
+        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("slug", "  ", "Content", null, null, toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("title must not be blank");
     }
 
     @Test
     void writeWikiPage_withBlankContent_throwsToolException() {
-        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("slug", "Title", "  ", null, toolContext))
+        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("slug", "Title", "  ", null, null, toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("content must not be blank");
     }
@@ -165,6 +251,7 @@ class WriteWikiPageToolTest {
                         "authentication",
                         "Authentication & Security",
                         "# Authentication & Security\n",
+                        null,
                         null,
                         toolContext))
                 .isInstanceOf(KratisToolException.class)
@@ -188,7 +275,7 @@ class WriteWikiPageToolTest {
                 ```
                 """;
 
-        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("overview", "Title", content, null, toolContext))
+        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("overview", "Title", content, null, null, toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("Invalid Mermaid diagram syntax in content")
                 .hasMessageContaining("diagram #2, line 2");
@@ -210,7 +297,7 @@ class WriteWikiPageToolTest {
                 ```
                 """;
 
-        String result = writeWikiPageTool.writeWikiPage("overview", "Title", content, null, toolContext);
+        String result = writeWikiPageTool.writeWikiPage("overview", "Title", content, null, null, toolContext);
 
         assertThat(result).isEqualTo("SUCCESS: Wiki page 'overview' created successfully.");
         ArgumentCaptor<CtxWikiPage> captor = ArgumentCaptor.forClass(CtxWikiPage.class);
@@ -222,7 +309,8 @@ class WriteWikiPageToolTest {
     void writeWikiPage_withMissingBatchId_throwsException() {
         ToolContext emptyContext = new ToolContext(Map.of());
 
-        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("slug", "Title", VALID_CONTENT, null, emptyContext))
+        assertThatThrownBy(
+                        () -> writeWikiPageTool.writeWikiPage("slug", "Title", VALID_CONTENT, null, null, emptyContext))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("batchId not found");
     }
@@ -231,7 +319,8 @@ class WriteWikiPageToolTest {
     void writeWikiPage_withInvalidBatchId_throwsException() {
         ToolContext invalidContext = new ToolContext(Map.of("batchId", "not-a-uuid"));
 
-        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("slug", "Title", VALID_CONTENT, null, invalidContext))
+        assertThatThrownBy(() ->
+                        writeWikiPageTool.writeWikiPage("slug", "Title", VALID_CONTENT, null, null, invalidContext))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Invalid batchId format");
     }
@@ -240,7 +329,8 @@ class WriteWikiPageToolTest {
     void writeWikiPage_withMissingBatch_throwsToolException() {
         when(ingestionBatchRepository.findById(batchId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("slug", "Title", VALID_CONTENT, null, toolContext))
+        assertThatThrownBy(
+                        () -> writeWikiPageTool.writeWikiPage("slug", "Title", VALID_CONTENT, null, null, toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("Batch not found");
     }
@@ -258,7 +348,8 @@ class WriteWikiPageToolTest {
         when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "home")).thenReturn(Optional.empty());
         when(ctxWikiPageRepository.findByBatchId(batchId)).thenReturn(List.of(existing));
 
-        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("child", "Child", VALID_CONTENT, "home", toolContext))
+        assertThatThrownBy(() ->
+                        writeWikiPageTool.writeWikiPage("child", "Child", VALID_CONTENT, "home", null, toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("'home'")
                 .hasMessageContaining("overview")
@@ -273,7 +364,8 @@ class WriteWikiPageToolTest {
         when(ctxWikiPageRepository.findByBatchIdAndPageSlug(batchId, "home")).thenReturn(Optional.empty());
         when(ctxWikiPageRepository.findByBatchId(batchId)).thenReturn(List.of());
 
-        assertThatThrownBy(() -> writeWikiPageTool.writeWikiPage("child", "Child", VALID_CONTENT, "home", toolContext))
+        assertThatThrownBy(() ->
+                        writeWikiPageTool.writeWikiPage("child", "Child", VALID_CONTENT, "home", null, toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("No wiki pages have been written yet")
                 .hasMessageContaining("Fix and retry");
@@ -291,7 +383,7 @@ class WriteWikiPageToolTest {
                 ```
                 """;
 
-        String result = writeWikiPageTool.writeWikiPage("arch", "Arch", input, null, toolContext);
+        String result = writeWikiPageTool.writeWikiPage("arch", "Arch", input, null, null, toolContext);
 
         assertThat(result).isEqualTo("SUCCESS: Wiki page 'arch' created successfully.");
         ArgumentCaptor<CtxWikiPage> captor = ArgumentCaptor.forClass(CtxWikiPage.class);

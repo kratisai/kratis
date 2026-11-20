@@ -79,12 +79,8 @@ class WikiToolTest {
         CtxWikiPage rootPage = createWikiPage("overview", "Overview", null, "Root content");
         CtxWikiPage childPage = createWikiPage("architecture", "Architecture", rootPage, "Child content");
 
-        when(ctxWikiPageRepository.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(batchId))
-                .thenReturn(List.of(rootPage));
-        when(ctxWikiPageRepository.findByBatchIdAndParentPageIdOrderByOrderIndexAsc(batchId, rootPage.getId()))
-                .thenReturn(List.of(childPage));
-        when(ctxWikiPageRepository.findByBatchIdAndParentPageIdOrderByOrderIndexAsc(batchId, childPage.getId()))
-                .thenReturn(List.of());
+        when(ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId))
+                .thenReturn(List.of(rootPage, childPage));
 
         List<WikiTool.WikiPageSummary> result = wikiTool.listWikiPages("test-repo", toolContext);
 
@@ -106,10 +102,8 @@ class WikiToolTest {
 
         CtxWikiPage page = createWikiPage("empty", "Empty Page", null, null);
 
-        when(ctxWikiPageRepository.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(batchId))
+        when(ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId))
                 .thenReturn(List.of(page));
-        when(ctxWikiPageRepository.findByBatchIdAndParentPageIdOrderByOrderIndexAsc(batchId, page.getId()))
-                .thenReturn(List.of());
 
         List<WikiTool.WikiPageSummary> result = wikiTool.listWikiPages("test-repo", toolContext);
 
@@ -120,7 +114,7 @@ class WikiToolTest {
     @Test
     void listWikiPages_withNoPages_returnsEmptyList() {
         when(batchResolutionService.resolveActiveBatch(teamId, "test-repo")).thenReturn(batch);
-        when(ctxWikiPageRepository.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(batchId))
+        when(ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId))
                 .thenReturn(List.of());
 
         List<WikiTool.WikiPageSummary> result = wikiTool.listWikiPages("test-repo", toolContext);
@@ -253,10 +247,8 @@ class WikiToolTest {
         when(teamWikiBatchRepository.findByTeamIdAndIsActiveTrue(teamId)).thenReturn(Optional.of(teamBatch));
 
         CtxWikiPage rootPage = createTeamWikiPage("team-overview", "Team Overview", null, "Team root");
-        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndParentPageIsNullOrderByOrderIndexAsc(twId))
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(twId))
                 .thenReturn(List.of(rootPage));
-        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(twId, rootPage.getId()))
-                .thenReturn(List.of());
 
         List<WikiTool.WikiPageSummary> result = wikiTool.listWikiPages(null, toolContext);
 

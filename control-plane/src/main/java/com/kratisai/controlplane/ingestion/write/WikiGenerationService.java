@@ -13,6 +13,7 @@ import com.kratisai.controlplane.ingestion.ReadFileTool;
 import com.kratisai.controlplane.ingestion.ReadWikiPageTool;
 import com.kratisai.controlplane.ingestion.WriteWikiPageTool;
 import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.ModelKind;
@@ -132,7 +133,8 @@ public class WikiGenerationService {
                 Please use the suggested target number of pages as a guide. A simpler repository should have fewer pages (e.g. 2 pages) while a complex repository should have more pages (up to 20 pages) to cover the repository's topics accurately but concisely. Ensure content is sufficient for a high-level technical review.
 
                 Use the write_wiki_page tool to create or update wiki pages. Provide a unique pageSlug, a title, and the markdown content.
-                Write the single top-level page FIRST, before any child page. A child page MUST set parentPageSlug to a pageSlug that already exists in this batch. Call list_wiki_pages to confirm valid slugs, and never reference a parent you have not written yet.
+                Write the single top-level page FIRST (with no parentPageSlug). For child pages, specify parentPageSlug and an orderIndex (e.g. 10, 20, 30) to establish logical narrative order. An orderIndex is expected for every child page; when one is missing, the page is appended after its current siblings.
+                A child page MUST set parentPageSlug to a pageSlug that already exists in this batch. Call list_wiki_pages to confirm valid slugs, and never reference a parent you have not written yet.
                 If a tool call returns an ERROR, do not give up: read the error, correct the arguments, and retry that tool. Unknown parent slugs and invalid Mermaid syntax are recoverable errors.
                 Once you have gathered the required information and written the necessary wiki pages, your final response MUST be a simple confirmation message like "Wiki generation complete."
                 Do not return a JSON object. Just confirm completion.
@@ -214,8 +216,8 @@ public class WikiGenerationService {
             throw new IllegalStateException(message);
         }
 
-        int rootCount = ctxWikiPageRepository
-                .findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(batch.getId())
+        int rootCount = CtxWikiPages.topLevelPages(
+                        ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batch.getId()))
                 .size();
         if (rootCount > 1) {
             batchLogger.error(

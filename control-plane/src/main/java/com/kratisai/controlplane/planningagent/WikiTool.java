@@ -3,6 +3,7 @@ package com.kratisai.controlplane.planningagent;
 import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.model.CtxEmbedding;
 import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.Team;
@@ -68,22 +69,22 @@ public class WikiTool {
             TeamWikiBatch teamBatch = teamWikiBatchRepository
                     .findByTeamIdAndIsActiveTrue(teamId)
                     .orElseThrow(() -> new IllegalArgumentException("No active team wiki for team " + teamId));
-            List<CtxWikiPage> rootPages =
-                    ctxWikiPageRepository.findByTeamWikiBatchIdAndParentPageIsNullOrderByOrderIndexAsc(
+            List<CtxWikiPage> pages =
+                    ctxWikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(
                             teamBatch.getId());
-            for (CtxWikiPage root : rootPages) {
-                collectTeamPageHierarchy(root, teamBatch.getId(), 0, result);
+            for (CtxWikiPage root : CtxWikiPages.topLevelPages(pages)) {
+                collectTeamPageHierarchy(root, pages, 0, result);
             }
             return result;
         }
 
         IngestionBatch batch = batchResolutionService.resolveActiveBatch(teamId, repoName);
 
-        List<CtxWikiPage> rootPages =
-                ctxWikiPageRepository.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(batch.getId());
+        List<CtxWikiPage> pages =
+                ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batch.getId());
 
-        for (CtxWikiPage root : rootPages) {
-            collectPageHierarchy(root, batch.getId(), 0, result);
+        for (CtxWikiPage root : CtxWikiPages.topLevelPages(pages)) {
+            collectPageHierarchy(root, pages, 0, result);
         }
         return result;
     }
@@ -169,32 +170,29 @@ public class WikiTool {
         return new WikiSearchResponse(results);
     }
 
-    private void collectPageHierarchy(CtxWikiPage page, UUID batchId, int depth, List<WikiPageSummary> result) {
+    private void collectPageHierarchy(
+            CtxWikiPage page, List<CtxWikiPage> pages, int depth, List<WikiPageSummary> result) {
         result.add(new WikiPageSummary(
                 page.getPageSlug(),
                 page.getTitle(),
                 depth,
                 page.getContent() != null ? page.getContent().length() : 0));
 
-        List<CtxWikiPage> children =
-                ctxWikiPageRepository.findByBatchIdAndParentPageIdOrderByOrderIndexAsc(batchId, page.getId());
-        for (CtxWikiPage child : children) {
-            collectPageHierarchy(child, batchId, depth + 1, result);
+        for (CtxWikiPage child : CtxWikiPages.childPages(pages, page.getId())) {
+            collectPageHierarchy(child, pages, depth + 1, result);
         }
     }
 
     private void collectTeamPageHierarchy(
-            CtxWikiPage page, UUID teamWikiBatchId, int depth, List<WikiPageSummary> result) {
+            CtxWikiPage page, List<CtxWikiPage> pages, int depth, List<WikiPageSummary> result) {
         result.add(new WikiPageSummary(
                 page.getPageSlug(),
                 page.getTitle(),
                 depth,
                 page.getContent() != null ? page.getContent().length() : 0));
 
-        List<CtxWikiPage> children = ctxWikiPageRepository.findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(
-                teamWikiBatchId, page.getId());
-        for (CtxWikiPage child : children) {
-            collectTeamPageHierarchy(child, teamWikiBatchId, depth + 1, result);
+        for (CtxWikiPage child : CtxWikiPages.childPages(pages, page.getId())) {
+            collectTeamPageHierarchy(child, pages, depth + 1, result);
         }
     }
 

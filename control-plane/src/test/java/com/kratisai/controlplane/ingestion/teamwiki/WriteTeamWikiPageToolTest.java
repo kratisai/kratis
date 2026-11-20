@@ -79,6 +79,7 @@ class WriteTeamWikiPageToolTest {
                 VALID_CONTENT + " See [Orders API](/wiki/repo/orders-api) and"
                         + " [Arch](/wiki/repo/orders-api/architecture).",
                 null,
+                null,
                 toolContext);
 
         assertThat(result).contains("SUCCESS");
@@ -86,6 +87,57 @@ class WriteTeamWikiPageToolTest {
         verify(ctxWikiPageRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getTeamWikiBatch()).isEqualTo(batch);
         assertThat(captor.getValue().getRepoName()).isNull();
+        assertThat(captor.getValue().getOrderIndex()).isEqualTo(10);
+    }
+
+    @Test
+    void writeTeamWikiPage_autoIncrementsOrderIndexAmongSiblings() {
+        when(teamWikiBatchRepository.findByIdForUpdate(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "overview"))
+                .thenReturn(Optional.empty());
+        CtxWikiPage sibling = new CtxWikiPage(batch, batch.getTeam().getId(), null, "sibling", "Sibling", 30, "Body");
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId))
+                .thenReturn(List.of(sibling));
+
+        tool.writeTeamWikiPage("overview", "Team Overview", VALID_CONTENT, null, null, toolContext);
+
+        ArgumentCaptor<CtxWikiPage> captor = ArgumentCaptor.forClass(CtxWikiPage.class);
+        verify(ctxWikiPageRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getOrderIndex()).isEqualTo(40);
+    }
+
+    @Test
+    void writeTeamWikiPage_autoIncrementsChildOrderIndexAmongParentSiblings() {
+        CtxWikiPage parent = new CtxWikiPage();
+        parent.setId(UUID.randomUUID());
+        when(teamWikiBatchRepository.findByIdForUpdate(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "overview"))
+                .thenReturn(Optional.empty());
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "parent"))
+                .thenReturn(Optional.of(parent));
+        CtxWikiPage sibling = new CtxWikiPage(batch, batch.getTeam().getId(), parent, "sibling", "Sibling", 10, "Body");
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId))
+                .thenReturn(List.of(sibling));
+
+        tool.writeTeamWikiPage("overview", "Cluster Detail", VALID_CONTENT, "parent", null, toolContext);
+
+        ArgumentCaptor<CtxWikiPage> captor = ArgumentCaptor.forClass(CtxWikiPage.class);
+        verify(ctxWikiPageRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getParentPage()).isEqualTo(parent);
+        assertThat(captor.getValue().getOrderIndex()).isEqualTo(20);
+    }
+
+    @Test
+    void writeTeamWikiPage_withExplicitOrderIndex_persistsIt() {
+        when(teamWikiBatchRepository.findByIdForUpdate(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "overview"))
+                .thenReturn(Optional.empty());
+
+        tool.writeTeamWikiPage("overview", "Team Overview", VALID_CONTENT, null, 25, toolContext);
+
+        ArgumentCaptor<CtxWikiPage> captor = ArgumentCaptor.forClass(CtxWikiPage.class);
+        verify(ctxWikiPageRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getOrderIndex()).isEqualTo(25);
     }
 
     @Test
@@ -102,6 +154,7 @@ class WriteTeamWikiPageToolTest {
                 VALID_CONTENT + " See [Booking](/wiki/repo/glark-newco/BookingService) and"
                         + " [Details](/wiki/repo/glark-newco/BookingService/booking-service).",
                 null,
+                null,
                 toolContext);
 
         assertThat(result).contains("SUCCESS");
@@ -113,6 +166,7 @@ class WriteTeamWikiPageToolTest {
                         "overview",
                         "Overview",
                         VALID_CONTENT + " See [Missing](/wiki/repo/unknown-repo).",
+                        null,
                         null,
                         toolContext))
                 .isInstanceOf(KratisToolException.class)
@@ -132,6 +186,7 @@ class WriteTeamWikiPageToolTest {
                         "Overview",
                         VALID_CONTENT + " See [Broken](/wiki/repo/orders-api/missing-slug).",
                         null,
+                        null,
                         toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("missing-slug")
@@ -144,6 +199,7 @@ class WriteTeamWikiPageToolTest {
                         "authentication",
                         "Authentication & Security",
                         "# Authentication & Security\n",
+                        null,
                         null,
                         toolContext))
                 .isInstanceOf(KratisToolException.class)
@@ -158,23 +214,38 @@ class WriteTeamWikiPageToolTest {
                 .thenReturn(Optional.empty());
         when(ctxWikiPageRepository.findByTeamWikiBatchId(batchId)).thenReturn(List.of());
 
-        assertThatThrownBy(() -> tool.writeTeamWikiPage("child", "Child", VALID_CONTENT, "missing-parent", toolContext))
+        assertThatThrownBy(() ->
+                        tool.writeTeamWikiPage("child", "Child", VALID_CONTENT, "missing-parent", null, toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("missing-parent");
     }
 
     @Test
-    void writeTeamWikiPage_updatesExistingPage() {
-        CtxWikiPage existing = new CtxWikiPage(batch, batch.getTeam().getId(), null, "overview", "Old", 0, "Old");
+    void writeTeamWikiPage_updatesExistingPageAndPreservesOrderIndex() {
+        CtxWikiPage existing = new CtxWikiPage(batch, batch.getTeam().getId(), null, "overview", "Old", 7, "Old");
         when(teamWikiBatchRepository.findByIdForUpdate(batchId)).thenReturn(Optional.of(batch));
         when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "overview"))
                 .thenReturn(Optional.of(existing));
 
-        String result = tool.writeTeamWikiPage("overview", "New Title", VALID_CONTENT, null, toolContext);
+        String result = tool.writeTeamWikiPage("overview", "New Title", VALID_CONTENT, null, null, toolContext);
 
         assertThat(result).contains("updated successfully");
         verify(ctxWikiPageRepository).saveAndFlush(any(CtxWikiPage.class));
         assertThat(existing.getTitle()).isEqualTo("New Title");
+        assertThat(existing.getOrderIndex()).isEqualTo(7);
+    }
+
+    @Test
+    void writeTeamWikiPage_updatesExistingPageWithExplicitOrderIndex() {
+        CtxWikiPage existing = new CtxWikiPage(batch, batch.getTeam().getId(), null, "overview", "Old", 7, "Old");
+        when(teamWikiBatchRepository.findByIdForUpdate(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "overview"))
+                .thenReturn(Optional.of(existing));
+
+        tool.writeTeamWikiPage("overview", "New Title", VALID_CONTENT, null, 50, toolContext);
+
+        assertThat(existing.getOrderIndex()).isEqualTo(50);
+        verify(ctxWikiPageRepository).saveAndFlush(existing);
     }
 
     @Test
@@ -190,7 +261,7 @@ class WriteTeamWikiPageToolTest {
         when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "root"))
                 .thenReturn(Optional.of(root));
 
-        assertThatThrownBy(() -> tool.writeTeamWikiPage("root", "Root", VALID_CONTENT, "child", toolContext))
+        assertThatThrownBy(() -> tool.writeTeamWikiPage("root", "Root", VALID_CONTENT, "child", null, toolContext))
                 .isInstanceOf(KratisToolException.class)
                 .hasMessageContaining("descendant");
     }

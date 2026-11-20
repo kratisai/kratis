@@ -13,6 +13,7 @@ import {
   triggerTeamWikiRebuild,
   type WikiPageDto,
 } from '@/lib/wiki-api'
+import { compareWikiPages } from '@/lib/wiki-tree'
 import { useAuthStore } from '@/store/auth-store'
 
 export function useTeamWikiBatchLogs(batchId: null | string, enabled = true) {
@@ -141,9 +142,17 @@ async function buildWikiTree(
 
   await Promise.all(level1Promises)
 
+  // Defensive: sibling order comes from the backend, but re-sort client-side so the
+  // menu ignores any incidental database ordering (orderIndex ASC, then title, then slug).
+  const sortedTopLevel = [...topLevel].sort(compareWikiPages)
+  const sortedChildrenMap = new Map<string, WikiPageDto[]>()
+  for (const [parentId, siblings] of childrenMap.entries()) {
+    sortedChildrenMap.set(parentId, [...siblings].sort(compareWikiPages))
+  }
+
   return {
     allPagesMap,
-    childrenMap,
-    topLevel,
+    childrenMap: sortedChildrenMap,
+    topLevel: sortedTopLevel,
   }
 }

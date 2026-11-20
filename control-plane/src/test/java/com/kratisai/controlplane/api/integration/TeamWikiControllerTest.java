@@ -193,6 +193,65 @@ class TeamWikiControllerTest {
     }
 
     @Test
+    void endpoints_orderTeamWikiPagesByOrderIndexThenTitle_whenTied() throws Exception {
+        TeamWikiBatch activeBatch = new TeamWikiBatch(
+                team,
+                TeamWikiBuildMode.FULL,
+                TeamWikiTriggerKind.AUTOMATIC,
+                snapshotService.captureCurrentState(teamId).snapshot());
+        activeBatch.setStatus(IngestionStatus.SUCCESS);
+        activeBatch.setActive(true);
+        activeBatch.setCompletedAt(Instant.now());
+        teamWikiBatchRepository.saveAndFlush(activeBatch);
+
+        CtxWikiPage root = wikiPageRepository.saveAndFlush(
+                new CtxWikiPage(activeBatch, teamId, null, "a-wave", "Alpha Page", 1, "Alpha content"));
+        wikiPageRepository.saveAndFlush(
+                new CtxWikiPage(activeBatch, teamId, null, "z-wave", "Zulu Page", 1, "Zulu content"));
+        wikiPageRepository.saveAndFlush(
+                new CtxWikiPage(activeBatch, teamId, root, "child-b", "Child Beta", 0, "Beta content"));
+        wikiPageRepository.saveAndFlush(
+                new CtxWikiPage(activeBatch, teamId, root, "child-a", "Child Alpha", 0, "Alpha content"));
+
+        mockMvc.perform(get("/api/v1/teams/{teamId}/wiki/pages", teamId).header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].title").value("Alpha Page"))
+                .andExpect(jsonPath("$[1].title").value("Zulu Page"));
+
+        mockMvc.perform(get("/api/v1/teams/{teamId}/wiki/pages/{pageId}/children", teamId, root.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].title").value("Child Alpha"))
+                .andExpect(jsonPath("$[1].title").value("Child Beta"));
+    }
+
+    @Test
+    void endpoints_orderFullTiesBySlug_whenOrderIndexAndTitleIdentical() throws Exception {
+        TeamWikiBatch activeBatch = new TeamWikiBatch(
+                team,
+                TeamWikiBuildMode.FULL,
+                TeamWikiTriggerKind.AUTOMATIC,
+                snapshotService.captureCurrentState(teamId).snapshot());
+        activeBatch.setStatus(IngestionStatus.SUCCESS);
+        activeBatch.setActive(true);
+        activeBatch.setCompletedAt(Instant.now());
+        teamWikiBatchRepository.saveAndFlush(activeBatch);
+
+        wikiPageRepository.saveAndFlush(
+                new CtxWikiPage(activeBatch, teamId, null, "zeta", "Same Title", 1, "Zeta content"));
+        wikiPageRepository.saveAndFlush(
+                new CtxWikiPage(activeBatch, teamId, null, "alpha", "Same Title", 1, "Alpha content"));
+
+        mockMvc.perform(get("/api/v1/teams/{teamId}/wiki/pages", teamId).header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].pageSlug").value("alpha"))
+                .andExpect(jsonPath("$[1].pageSlug").value("zeta"));
+    }
+
+    @Test
     void endpoints_forNonMember_returnForbidden() throws Exception {
         User outsider = new User();
         outsider.setEmail("outsider-" + UUID.randomUUID() + "@example.com");

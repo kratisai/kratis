@@ -36,7 +36,7 @@ class ListWikiPagesToolTest {
 
     @Test
     void listWikiPages_withNoPages_tellsModelToWriteRootFirst() {
-        when(ctxWikiPageRepository.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(batchId))
+        when(ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId))
                 .thenReturn(List.of());
 
         String result = listWikiPagesTool.listWikiPages(toolContext);
@@ -51,12 +51,8 @@ class ListWikiPagesToolTest {
         CtxWikiPage root = page(rootId, "overview", "Overview", null);
         CtxWikiPage child = page(childId, "architecture", "Architecture", root);
 
-        when(ctxWikiPageRepository.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(batchId))
-                .thenReturn(List.of(root));
-        when(ctxWikiPageRepository.findByBatchIdAndParentPageIdOrderByOrderIndexAsc(batchId, rootId))
-                .thenReturn(List.of(child));
-        when(ctxWikiPageRepository.findByBatchIdAndParentPageIdOrderByOrderIndexAsc(batchId, childId))
-                .thenReturn(List.of());
+        when(ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId))
+                .thenReturn(List.of(root, child));
 
         String result = listWikiPagesTool.listWikiPages(toolContext);
 
@@ -70,10 +66,8 @@ class ListWikiPagesToolTest {
         CtxWikiPage root = page(rootId, "overview", "Overview", null);
         ToolContext stringContext = new ToolContext(Map.of("batchId", batchId.toString()));
 
-        when(ctxWikiPageRepository.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(batchId))
+        when(ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId))
                 .thenReturn(List.of(root));
-        when(ctxWikiPageRepository.findByBatchIdAndParentPageIdOrderByOrderIndexAsc(batchId, rootId))
-                .thenReturn(List.of());
 
         assertThat(listWikiPagesTool.listWikiPages(stringContext)).contains("overview");
     }

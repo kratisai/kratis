@@ -5,6 +5,7 @@ import static org.apache.commons.lang3.StringUtils.isEmpty;
 import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.agentloop.KratisToolException;
 import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.model.TeamWikiBatch;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
@@ -63,6 +64,12 @@ public class WriteTeamWikiPageTool {
                                             + " use list_team_wiki_pages to find valid slugs.",
                             required = false)
                     String parentPageSlug,
+            @ToolParam(
+                            description = "Reading order among sibling pages, e.g. 10, 20, 30. Provide it so pages"
+                                    + " appear in a logical narrative order; when omitted the page is appended"
+                                    + " after its current siblings.",
+                            required = false)
+                    Integer orderIndex,
             ToolContext toolContext) {
         if (pageSlug == null || pageSlug.isBlank()) {
             throw new KratisToolException("pageSlug must not be blank.");
@@ -108,17 +115,29 @@ public class WriteTeamWikiPageTool {
             existingPage.setTitle(title);
             existingPage.setContent(content);
             existingPage.setParentPage(parentPage);
+            if (orderIndex != null) {
+                existingPage.setOrderIndex(orderIndex);
+            }
             ctxWikiPageRepository.saveAndFlush(existingPage);
             logger.info("WriteTeamWikiPageTool: Updated team wiki page: {}", pageSlug);
             logPageWrite(toolContext, "Updated", title, pageSlug, content);
             return "SUCCESS: Team wiki page '" + pageSlug + "' updated successfully.";
         }
 
-        CtxWikiPage newPage = new CtxWikiPage(batch, batch.getTeam().getId(), parentPage, pageSlug, title, 0, content);
+        int effectiveOrderIndex = orderIndex != null ? orderIndex : nextSiblingOrderIndex(batchId, parentPage);
+        CtxWikiPage newPage = new CtxWikiPage(
+                batch, batch.getTeam().getId(), parentPage, pageSlug, title, effectiveOrderIndex, content);
         ctxWikiPageRepository.saveAndFlush(newPage);
         logger.info("WriteTeamWikiPageTool: Created team wiki page: {}", pageSlug);
         logPageWrite(toolContext, "Created", title, pageSlug, content);
         return "SUCCESS: Team wiki page '" + pageSlug + "' created successfully.";
+    }
+
+    private int nextSiblingOrderIndex(UUID batchId, CtxWikiPage parentPage) {
+        int maxOrderIndex = CtxWikiPages.maxSiblingOrderIndex(
+                ctxWikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId),
+                parentPage);
+        return maxOrderIndex + 10;
     }
 
     private static void ensureNoParentCycle(CtxWikiPage existingPage, CtxWikiPage candidateParent) {

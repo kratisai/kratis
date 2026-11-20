@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.kratisai.controlplane.api.restdto.DimensionStatDto;
 import com.kratisai.controlplane.api.restdto.IngestionBatchStatsDto;
 import com.kratisai.controlplane.api.restdto.RelationSide;
+import com.kratisai.controlplane.api.restdto.WikiPageDto;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
@@ -56,6 +57,9 @@ class IngestionStatsServiceTest {
 
     @Autowired
     private CtxRepoRelationRepository ctxRepoRelationRepository;
+
+    @Autowired
+    private CtxWikiPageRepository ctxWikiPageRepository;
 
     @Autowired
     private TestDataFactory testDataFactory;
@@ -582,5 +586,62 @@ class IngestionStatsServiceTest {
         assertThat(stats.getCompletionTokens()).isEqualTo(1200L);
         assertThat(stats.getTotalToolCalls()).isEqualTo(7L);
         assertThat(stats.getUsageLastUpdatedAt()).isNotNull();
+    }
+
+    @Test
+    void shouldReturnWikiPageSummariesSortedByOrderIndexThenTitle() {
+        CtxWikiPage rootB = new CtxWikiPage(
+                batch, team.getId(), repository.getName(), null, "zulu-root", "Zulu Root", 20, "Zulu root body");
+        CtxWikiPage rootA = new CtxWikiPage(
+                batch, team.getId(), repository.getName(), null, "alpha-root", "Alpha Root", 10, "Alpha root body");
+        ctxWikiPageRepository.saveAllAndFlush(List.of(rootB, rootA));
+
+        CtxWikiPage childBeta = new CtxWikiPage(
+                batch, team.getId(), repository.getName(), rootA, "beta-child", "Beta Child", 0, "Beta child body");
+        CtxWikiPage childAlpha = new CtxWikiPage(
+                batch, team.getId(), repository.getName(), rootA, "alpha-child", "Alpha Child", 0, "Alpha child body");
+        ctxWikiPageRepository.saveAllAndFlush(List.of(childBeta, childAlpha));
+
+        Optional<IngestionBatchStatsDto> statsOpt = ingestionStatsService.getBatchStats(batch.getId());
+
+        assertThat(statsOpt).isPresent();
+        IngestionBatchStatsDto stats = statsOpt.get();
+
+        List<WikiPageDto> wikiPages = stats.getWikiPages();
+        assertThat(wikiPages)
+                .extracting(WikiPageDto::pageSlug)
+                .containsExactly("alpha-child", "beta-child", "alpha-root", "zulu-root");
+
+        WikiPageDto alphaRoot = wikiPages.stream()
+                .filter(p -> "alpha-root".equals(p.pageSlug()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(alphaRoot.parentPageId()).isNull();
+        assertThat(alphaRoot.title()).isEqualTo("Alpha Root");
+        assertThat(alphaRoot.orderIndex()).isEqualTo(10);
+        assertThat(alphaRoot.repoName()).isEqualTo(repository.getName());
+        assertThat(alphaRoot.content()).isNull();
+        assertThat(alphaRoot.hasChildren()).isTrue();
+
+        WikiPageDto zuluRoot = wikiPages.stream()
+                .filter(p -> "zulu-root".equals(p.pageSlug()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(zuluRoot.hasChildren()).isFalse();
+
+        WikiPageDto alphaChild = wikiPages.stream()
+                .filter(p -> "alpha-child".equals(p.pageSlug()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(alphaChild.parentPageId()).isEqualTo(rootA.getId());
+        assertThat(alphaChild.hasChildren()).isFalse();
+    }
+
+    @Test
+    void shouldReturnEmptyWikiPagesWhenBatchHasNoWiki() {
+        Optional<IngestionBatchStatsDto> statsOpt = ingestionStatsService.getBatchStats(batch.getId());
+
+        assertThat(statsOpt).isPresent();
+        assertThat(statsOpt.get().getWikiPages()).isEmpty();
     }
 }

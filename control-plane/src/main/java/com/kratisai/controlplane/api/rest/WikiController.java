@@ -3,6 +3,7 @@ package com.kratisai.controlplane.api.rest;
 import com.kratisai.controlplane.api.restdto.WikiPageDto;
 import com.kratisai.controlplane.config.SecurityUtil;
 import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
@@ -78,10 +79,15 @@ public class WikiController {
                 hasChildren);
     }
 
+    private List<CtxWikiPage> orderedPages(IngestionBatch activeBatch) {
+        return wikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(activeBatch.getId());
+    }
+
     @GetMapping("/pages")
     @Operation(
             summary = "List top-level wiki pages",
-            description = "Returns all top-level wiki pages for the repository, ordered by orderIndex")
+            description =
+                    "Returns all top-level wiki pages for the repository, ordered by orderIndex, then title, then slug")
     @ApiResponses(
             value = {
                 @ApiResponse(
@@ -97,16 +103,10 @@ public class WikiController {
         resolveRepo(teamId, repoId);
         IngestionBatch activeBatch = resolveActiveBatch(repoId);
 
-        List<CtxWikiPage> pages =
-                wikiPageRepository.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(activeBatch.getId());
+        List<CtxWikiPage> pages = orderedPages(activeBatch);
 
-        List<WikiPageDto> dtos = pages.stream()
-                .map(p -> {
-                    boolean hasChildren = !wikiPageRepository
-                            .findByBatchIdAndParentPageIdOrderByOrderIndexAsc(activeBatch.getId(), p.getId())
-                            .isEmpty();
-                    return toDto(p, hasChildren);
-                })
+        List<WikiPageDto> dtos = CtxWikiPages.topLevelPages(pages).stream()
+                .map(p -> toDto(p, CtxWikiPages.hasChildren(pages, p)))
                 .toList();
 
         return ResponseEntity.ok(dtos);
@@ -115,7 +115,8 @@ public class WikiController {
     @GetMapping("/pages/{pageId}/children")
     @Operation(
             summary = "List child wiki pages",
-            description = "Returns all direct child pages of the specified wiki page, ordered by orderIndex")
+            description =
+                    "Returns all direct child pages of the specified wiki page, ordered by orderIndex, then title, then slug")
     @ApiResponses(
             value = {
                 @ApiResponse(
@@ -132,16 +133,10 @@ public class WikiController {
         resolveRepo(teamId, repoId);
         IngestionBatch activeBatch = resolveActiveBatch(repoId);
 
-        List<CtxWikiPage> children =
-                wikiPageRepository.findByBatchIdAndParentPageIdOrderByOrderIndexAsc(activeBatch.getId(), pageId);
+        List<CtxWikiPage> pages = orderedPages(activeBatch);
 
-        List<WikiPageDto> dtos = children.stream()
-                .map(p -> {
-                    boolean hasChildren = !wikiPageRepository
-                            .findByBatchIdAndParentPageIdOrderByOrderIndexAsc(activeBatch.getId(), p.getId())
-                            .isEmpty();
-                    return toDto(p, hasChildren);
-                })
+        List<WikiPageDto> dtos = CtxWikiPages.childPages(pages, pageId).stream()
+                .map(p -> toDto(p, CtxWikiPages.hasChildren(pages, p)))
                 .toList();
 
         return ResponseEntity.ok(dtos);
@@ -171,9 +166,7 @@ public class WikiController {
                 .findByBatchIdAndId(activeBatch.getId(), pageId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Wiki page not found"));
 
-        boolean hasChildren = !wikiPageRepository
-                .findByBatchIdAndParentPageIdOrderByOrderIndexAsc(activeBatch.getId(), pageId)
-                .isEmpty();
+        boolean hasChildren = CtxWikiPages.hasChildren(orderedPages(activeBatch), page);
 
         return ResponseEntity.ok(toDto(page, hasChildren));
     }

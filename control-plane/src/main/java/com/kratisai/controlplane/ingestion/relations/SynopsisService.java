@@ -12,6 +12,7 @@ import com.kratisai.controlplane.model.CtxDimension;
 import com.kratisai.controlplane.model.CtxRepoSynopsis;
 import com.kratisai.controlplane.model.CtxSurface;
 import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.SurfaceRole;
 import com.kratisai.controlplane.repository.CtxArchitecturePatternRepository;
@@ -145,12 +146,12 @@ public class SynopsisService {
     }
 
     private SynopsisInputs loadInputs(UUID batchId) {
-        CtxWikiPage wikiRoot =
-                ctxWikiPageRepository.findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(batchId).stream()
-                        .findFirst()
-                        .orElseThrow(
-                                () -> new IllegalStateException(
-                                        "The batch has no wiki root page; SYNTHESIZE_SYNOPSIS cannot run before GENERATE_WIKI."));
+        CtxWikiPage wikiRoot = CtxWikiPages.topLevelPages(
+                        ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId))
+                .stream()
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "The batch has no wiki root page; SYNTHESIZE_SYNOPSIS cannot run before GENERATE_WIKI."));
         return new SynopsisInputs(
                 ctxDimensionRepository.findByBatchId(batchId),
                 ctxArchitecturePatternRepository.findByBatchId(batchId),

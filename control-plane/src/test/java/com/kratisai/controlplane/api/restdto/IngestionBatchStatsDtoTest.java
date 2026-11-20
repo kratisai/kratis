@@ -37,7 +37,8 @@ class IngestionBatchStatsDtoTest {
         assertThat(dto.getSurfaces().getFirst().description()).isEqualTo("HTTP API");
         assertThat(dto.getRelations()).hasSize(1);
         assertThat(dto.getRelations().getFirst().otherRepositoryName()).isEqualTo("billing-service");
-        assertThat(dto.getWikiPageSlugs()).containsExactly("home", "architecture");
+        assertThat(dto.getWikiPages()).hasSize(2);
+        assertThat(dto.getWikiPages()).extracting(WikiPageDto::pageSlug).containsExactly("home", "architecture");
         assertThat(dto.getTotalSpend()).isEqualTo(0.42);
         assertThat(dto.getTotalTokens()).isEqualTo(1234L);
         assertThat(dto.getPromptTokens()).isEqualTo(900L);
@@ -62,7 +63,7 @@ class IngestionBatchStatsDtoTest {
         dto.setArchitecturePatterns(List.of());
         dto.setSurfaces(List.of());
         dto.setRelations(List.of());
-        dto.setWikiPageSlugs(List.of());
+        dto.setWikiPages(List.of());
         dto.setTotalSpend(0.01);
         dto.setTotalTokens(10L);
         dto.setPromptTokens(5L);
@@ -80,7 +81,7 @@ class IngestionBatchStatsDtoTest {
         assertThat(dto.getArchitecturePatterns()).isEmpty();
         assertThat(dto.getSurfaces()).isEmpty();
         assertThat(dto.getRelations()).isEmpty();
-        assertThat(dto.getWikiPageSlugs()).isEmpty();
+        assertThat(dto.getWikiPages()).isEmpty();
         assertThat(dto.getTotalSpend()).isEqualTo(0.01);
         assertThat(dto.getTotalTokens()).isEqualTo(10L);
         assertThat(dto.getPromptTokens()).isEqualTo(5L);
@@ -108,7 +109,7 @@ class IngestionBatchStatsDtoTest {
                         UUID.fromString("00000000-0000-0000-0000-000000000002"),
                         "billing-service",
                         List.of("Client calls the billing API"))),
-                List.of("home", "architecture"),
+                List.of(),
                 0.42,
                 1234L,
                 900L,
@@ -140,6 +141,10 @@ class IngestionBatchStatsDtoTest {
                 .contains("totalTokens=1234");
     }
 
+    private static WikiPageDto wikiPage(String slug, String title) {
+        return new WikiPageDto(null, "repo-1", null, slug, title, 0, null, false);
+    }
+
     private static IngestionBatchStatsDto createFullyPopulatedDto() {
         return new IngestionBatchStatsDto(
                 "batch-1",
@@ -158,7 +163,7 @@ class IngestionBatchStatsDtoTest {
                         UUID.fromString("00000000-0000-0000-0000-000000000002"),
                         "billing-service",
                         List.of("Client calls the billing API"))),
-                List.of("home", "architecture"),
+                List.of(wikiPage("home", "Home"), wikiPage("architecture", "Architecture")),
                 0.42,
                 1234L,
                 900L,

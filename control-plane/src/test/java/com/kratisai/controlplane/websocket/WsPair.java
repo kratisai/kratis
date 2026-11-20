@@ -16,7 +16,9 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
  */
 public final class WsPair implements AutoCloseable {
 
-    static final int CONNECT_TIMEOUT_SECONDS = 5;
+    // Handshake + server-side subscription registration must survive heavily loaded CI forked
+    // JVMs; 5s intermittently expired before the WS upgrade answered (CI TimeoutException at WsPair.connect).
+    static final int CONNECT_TIMEOUT_SECONDS = 15;
 
     private final ClientWebSocketFixture clientFixture;
     private final SidecarWebSocketFixture sidecarFixture;

@@ -7,6 +7,7 @@ import com.kratisai.controlplane.api.restdto.IngestionBatchStatsDto;
 import com.kratisai.controlplane.api.restdto.RelationSide;
 import com.kratisai.controlplane.api.restdto.RelationStatDto;
 import com.kratisai.controlplane.api.restdto.SurfaceStatDto;
+import com.kratisai.controlplane.api.restdto.WikiPageDto;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.DimensionCategory;
 import com.kratisai.controlplane.model.Direction;
@@ -107,10 +108,10 @@ public class IngestionStatsService {
         int totalEdges =
                 edgeTypeCounts.values().stream().mapToInt(Integer::intValue).sum();
 
-        // Get archetype, and wiki page stats
-        List<String> wikiPageSlugs = ctxWikiPageRepository.findByBatchId(batchId).stream()
-                .map(CtxWikiPage::getPageSlug)
-                .collect(Collectors.toList());
+        // Get archetype, and wiki page stats ordered deterministically (orderIndex ASC, title ASC, pageSlug ASC)
+        List<CtxWikiPage> wikiPagesList =
+                ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId);
+        List<WikiPageDto> wikiPages = wikiSummaries(wikiPagesList);
         List<ArchitecturePatternDto> architecturePatterns =
                 ctxArchitecturePatternRepository.findByBatchId(batchId).stream()
                         .map(pattern -> new ArchitecturePatternDto(pattern.getName(), pattern.getDescription()))
@@ -176,7 +177,7 @@ public class IngestionStatsService {
                 architecturePatterns,
                 surfaces,
                 relations,
-                wikiPageSlugs,
+                wikiPages,
                 totalSpend,
                 totalTokens,
                 promptTokens,
@@ -187,6 +188,23 @@ public class IngestionStatsService {
         logger.trace("getBatchStats: {}", dto);
 
         return Optional.of(dto);
+    }
+
+    private static List<WikiPageDto> wikiSummaries(List<CtxWikiPage> pages) {
+        Map<UUID, Long> childCounts = pages.stream()
+                .filter(page -> page.getParentPage() != null)
+                .collect(Collectors.groupingBy(page -> page.getParentPage().getId(), Collectors.counting()));
+        return pages.stream()
+                .map(page -> new WikiPageDto(
+                        page.getId(),
+                        page.getRepoName(),
+                        page.getParentPage() != null ? page.getParentPage().getId() : null,
+                        page.getPageSlug(),
+                        page.getTitle(),
+                        page.getOrderIndex(),
+                        null,
+                        childCounts.getOrDefault(page.getId(), 0L) > 0))
+                .toList();
     }
 
     private List<SurfaceStatDto> getSurfaceStats(UUID batchId) {

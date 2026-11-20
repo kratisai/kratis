@@ -108,11 +108,11 @@ class SandboxExecutionWebSocketIntegrationTest {
                 sidecar -> sidecar.withAcpErrorOutput("bwrap: No permissions to create a new namespace")
                         .expectTrigger("env.launch_acp_agent", 1)
                         .expectTrigger("env.acp_prompt", 1))) {
-            assertThat(pair.sidecar().awaitTrigger("env.launch_acp_agent", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("env.launch_acp_agent", 15, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 15, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.client().awaitTrigger("execution_output", 5, TimeUnit.SECONDS))
+            assertThat(pair.client().awaitTrigger("execution_output", 15, TimeUnit.SECONDS))
                     .isTrue();
             assertThat(pair.client().hasReceivedMessageContaining("execution_output", "Hello World From Sidecar"))
                     .isTrue();
@@ -122,7 +122,7 @@ class SandboxExecutionWebSocketIntegrationTest {
 
             sandboxExecutionService.terminateExecution(executionId);
 
-            assertThat(pair.client().awaitTrigger("execution_complete", 5, TimeUnit.SECONDS))
+            assertThat(pair.client().awaitTrigger("execution_complete", 15, TimeUnit.SECONDS))
                     .isTrue();
             assertThat(pair.client().hasReceivedMessageContaining("execution_complete", "IDLE"))
                     .isTrue();
@@ -154,7 +154,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                         .expectTrigger("env.acp_prompt", 1)
                         .expectTrigger("\"optionId\":\"allow\"", 1)
                         .expectTrigger("\"id\":101", 1))) {
-            assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 15, TimeUnit.SECONDS))
                     .isTrue();
 
             Thread.sleep(500);
@@ -162,7 +162,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                     .as("HITL command should NOT receive an immediate response")
                     .isFalse();
 
-            assertThat(hitlNotificationLatch.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(hitlNotificationLatch.await(15, TimeUnit.SECONDS)).isTrue();
             assertThat(pair.client().hasReceivedMessageContaining("awaiting_human"))
                     .isTrue();
 
@@ -182,12 +182,12 @@ class SandboxExecutionWebSocketIntegrationTest {
                             .content(objectMapper.writeValueAsString(approveRequest)))
                     .andExpect(status().isNoContent());
 
-            assertThat(pair.sidecar().awaitTrigger("\"optionId\":\"allow\"", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("\"optionId\":\"allow\"", 15, TimeUnit.SECONDS))
                     .isTrue();
             assertThat(pair.sidecar().hasReceivedMessageContaining("100", "\"optionId\":\"allow\""))
                     .isTrue();
 
-            assertThat(resolvedNotificationLatch.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(resolvedNotificationLatch.await(15, TimeUnit.SECONDS)).isTrue();
             assertThat(pair.client().hasReceivedMessageContaining("\"state\":\"resolved\""))
                     .isTrue();
             assertThat(pair.client().hasReceivedMessageContaining("\"response\":\"approved\""))
@@ -205,7 +205,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                     101);
             pair.sidecarSession().sendMessage(new TextMessage(objectMapper.writeValueAsString(secondPermRequest)));
 
-            assertThat(pair.sidecar().awaitTrigger("\"id\":101", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("\"id\":101", 15, TimeUnit.SECONDS))
                     .isTrue();
             assertThat(pair.sidecar().hasReceivedMessageContaining("\"id\":101", "\"optionId\":\"allow\""))
                     .isTrue();
@@ -231,7 +231,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                 sidecar -> sidecar.withAcpCommand("rm -rf /")
                         .expectTrigger("env.acp_prompt", 1)
                         .expectTrigger("\"response\":\"cancelled\"", 1))) {
-            assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 15, TimeUnit.SECONDS))
                     .isTrue();
 
             Thread.sleep(500);
@@ -239,7 +239,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                     .as("HITL command should NOT receive an immediate response")
                     .isFalse();
 
-            assertThat(hitlNotificationLatch.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(hitlNotificationLatch.await(15, TimeUnit.SECONDS)).isTrue();
             assertThat(pair.client().hasReceivedMessageContaining("awaiting_human"))
                     .isTrue();
 
@@ -254,12 +254,12 @@ class SandboxExecutionWebSocketIntegrationTest {
                             .content(objectMapper.writeValueAsString(rejectRequest)))
                     .andExpect(status().isNoContent());
 
-            assertThat(pair.sidecar().awaitTrigger("\"response\":\"cancelled\"", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("\"response\":\"cancelled\"", 15, TimeUnit.SECONDS))
                     .isTrue();
             assertThat(pair.sidecar().hasReceivedMessageContaining("100", "\"response\":\"cancelled\""))
                     .isTrue();
 
-            assertThat(resolvedNotificationLatch.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(resolvedNotificationLatch.await(15, TimeUnit.SECONDS)).isTrue();
             assertThat(pair.client().hasReceivedMessageContaining("\"state\":\"resolved\""))
                     .isTrue();
             assertThat(pair.client().hasReceivedMessageContaining("\"response\":\"cancelled\""))
@@ -283,20 +283,20 @@ class SandboxExecutionWebSocketIntegrationTest {
                 sidecar -> sidecar.withAcpCommand("rm -rf /")
                         .expectTrigger("env.acp_prompt", 1)
                         .expectTrigger("env.cancel_agent", 1))) {
-            assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 15, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.client().awaitTrigger("awaiting_human", 5, TimeUnit.SECONDS))
+            assertThat(pair.client().awaitTrigger("awaiting_human", 15, TimeUnit.SECONDS))
                     .isTrue();
 
             sandboxExecutionService.terminateExecution(executionId);
 
-            assertThat(pair.sidecar().awaitTrigger("env.cancel_agent", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("env.cancel_agent", 15, TimeUnit.SECONDS))
                     .as("Sidecar should receive env.cancel_agent on termination")
                     .isTrue();
-            assertThat(pair.client().awaitTrigger("\"state\":\"resolved\"", 5, TimeUnit.SECONDS))
+            assertThat(pair.client().awaitTrigger("\"state\":\"resolved\"", 15, TimeUnit.SECONDS))
                     .as("UI client should receive resolved state so the pending approval clears")
                     .isTrue();
-            assertThat(pair.client().awaitTrigger("execution_complete", 5, TimeUnit.SECONDS))
+            assertThat(pair.client().awaitTrigger("execution_complete", 15, TimeUnit.SECONDS))
                     .as("UI client should receive execution_complete after termination")
                     .isTrue();
         }
@@ -313,9 +313,9 @@ class SandboxExecutionWebSocketIntegrationTest {
                 scenario,
                 client -> client.expectTrigger("execution_complete", 1),
                 sidecar -> sidecar.expectTrigger("env.launch_acp_agent", 1).expectTrigger("env.acp_prompt", 1))) {
-            assertThat(pair.sidecar().awaitTrigger("env.launch_acp_agent", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("env.launch_acp_agent", 15, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 15, TimeUnit.SECONDS))
                     .isTrue();
 
             // The original session's in-flight output may be dropped once it closes: notifications
@@ -350,8 +350,8 @@ class SandboxExecutionWebSocketIntegrationTest {
 
             try (WebSocketSession reconnectSession = new StandardWebSocketClient()
                     .execute(reconnectFixture, WsPair.envUrl(port))
-                    .get(5, TimeUnit.SECONDS)) {
-                assertThat(reconnectFixture.awaitTrigger("reconnected", 5, TimeUnit.SECONDS))
+                    .get(15, TimeUnit.SECONDS)) {
+                assertThat(reconnectFixture.awaitTrigger("reconnected", 15, TimeUnit.SECONDS))
                         .as("Sidecar should receive reconnected status after reconnect")
                         .isTrue();
 
@@ -364,7 +364,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                         null);
                 reconnectSession.sendMessage(new TextMessage(objectMapper.writeValueAsString(outputLine)));
 
-                await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> assertThat(
+                await().atMost(15, TimeUnit.SECONDS).untilAsserted(() -> assertThat(
                                 pair.client().hasReceivedMessageContaining("execution_output", "Post-reconnect output"))
                         .as("UI client should receive output after reconnect")
                         .isTrue());
@@ -387,18 +387,18 @@ class SandboxExecutionWebSocketIntegrationTest {
                 scenario,
                 client -> client.expectTrigger("execution_status_changed", 1).expectTrigger("execution_output", 1),
                 sidecar -> sidecar.expectTrigger("env.launch_acp_agent", 1).expectTrigger("env.acp_prompt", 1))) {
-            assertThat(pair.sidecar().awaitTrigger("env.launch_acp_agent", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("env.launch_acp_agent", 15, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 5, TimeUnit.SECONDS))
+            assertThat(pair.sidecar().awaitTrigger("env.acp_prompt", 15, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.client().awaitTrigger("execution_output", 5, TimeUnit.SECONDS))
+            assertThat(pair.client().awaitTrigger("execution_output", 15, TimeUnit.SECONDS))
                     .isTrue();
-            assertThat(pair.client().awaitTrigger("execution_status_changed", 5, TimeUnit.SECONDS))
+            assertThat(pair.client().awaitTrigger("execution_status_changed", 15, TimeUnit.SECONDS))
                     .isTrue();
             assertThat(pair.client().hasReceivedMessageContaining("execution_status_changed", executionId.toString()))
                     .isTrue();
 
-            await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> {
+            await().atMost(15, TimeUnit.SECONDS).untilAsserted(() -> {
                 SandboxExecution updatedExec =
                         sandboxExecutionRepository.findById(executionId).orElseThrow();
                 assertThat(updatedExec.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);

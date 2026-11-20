@@ -19,7 +19,7 @@ public class IngestionBatchStatsDto {
     private List<ArchitecturePatternDto> architecturePatterns;
     private List<SurfaceStatDto> surfaces;
     private List<RelationStatDto> relations;
-    private List<String> wikiPageSlugs;
+    private List<WikiPageDto> wikiPages;
     private Double totalSpend;
     private Long totalTokens;
     private Long promptTokens;
@@ -38,7 +38,7 @@ public class IngestionBatchStatsDto {
             List<ArchitecturePatternDto> architecturePatterns,
             List<SurfaceStatDto> surfaces,
             List<RelationStatDto> relations,
-            List<String> wikiPageSlugs,
+            List<WikiPageDto> wikiPages,
             Double totalSpend,
             Long totalTokens,
             Long promptTokens,
@@ -55,7 +55,7 @@ public class IngestionBatchStatsDto {
         this.architecturePatterns = Objects.requireNonNull(architecturePatterns, "architecturePatterns is required");
         this.surfaces = Objects.requireNonNull(surfaces, "surfaces is required");
         this.relations = Objects.requireNonNull(relations, "relations is required");
-        this.wikiPageSlugs = Objects.requireNonNull(wikiPageSlugs, "wikiPageSlugs is required");
+        this.wikiPages = Objects.requireNonNull(wikiPages, "wikiPages is required");
         this.totalSpend = totalSpend;
         this.totalTokens = totalTokens;
         this.promptTokens = promptTokens;
@@ -77,7 +77,7 @@ public class IngestionBatchStatsDto {
                 + size(architecturePatterns) + ", surfaceCount="
                 + size(surfaces) + ", relationCount="
                 + size(relations) + ", wikiPageCount="
-                + size(wikiPageSlugs) + ", totalSpend="
+                + size(wikiPages) + ", totalSpend="
                 + totalSpend + ", totalTokens="
                 + totalTokens + ", promptTokens="
                 + promptTokens + ", completionTokens="
@@ -146,12 +146,12 @@ public class IngestionBatchStatsDto {
         this.dimensions = dimensions;
     }
 
-    public List<String> getWikiPageSlugs() {
-        return wikiPageSlugs;
+    public List<WikiPageDto> getWikiPages() {
+        return wikiPages;
     }
 
-    public void setWikiPageSlugs(List<String> wikiPageSlugs) {
-        this.wikiPageSlugs = wikiPageSlugs;
+    public void setWikiPages(List<WikiPageDto> wikiPages) {
+        this.wikiPages = wikiPages;
     }
 
     public List<ArchitecturePatternDto> getArchitecturePatterns() {

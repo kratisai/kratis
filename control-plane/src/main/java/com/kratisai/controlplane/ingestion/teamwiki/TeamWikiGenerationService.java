@@ -12,6 +12,7 @@ import com.kratisai.controlplane.model.CtxDimension;
 import com.kratisai.controlplane.model.CtxRepoRelation;
 import com.kratisai.controlplane.model.CtxRepoSynopsis;
 import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.RelationRationales;
@@ -172,8 +173,9 @@ public class TeamWikiGenerationService {
             throw new IllegalStateException(message);
         }
 
-        int rootCount = transactionTemplate.execute(status -> ctxWikiPageRepository
-                .findByTeamWikiBatchIdAndParentPageIsNullOrderByOrderIndexAsc(teamWikiBatchId)
+        int rootCount = transactionTemplate.execute(status -> CtxWikiPages.topLevelPages(
+                        ctxWikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(
+                                teamWikiBatchId))
                 .size());
         if (rootCount > 1) {
             batchLogger.warn(
@@ -426,6 +428,9 @@ public class TeamWikiGenerationService {
                   """ : """
                   Build Mode: FULL REBUILD.
                   Write the single top-level root page FIRST (omit `parentPageSlug`), then create child pages beneath it.
+                  For child pages, specify parentPageSlug and an orderIndex (e.g. 10, 20, 30) to establish logical
+                  narrative order. An orderIndex is expected for every child page; when one is missing, the page is
+                  appended after its current siblings.
                   """;
 
         return """

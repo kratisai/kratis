@@ -14,9 +14,7 @@ import org.springframework.stereotype.Repository;
 public interface CtxWikiPageRepository extends JpaRepository<CtxWikiPage, UUID> {
     List<CtxWikiPage> findByBatchId(UUID batchId);
 
-    List<CtxWikiPage> findByBatchIdAndParentPageIsNullOrderByOrderIndexAsc(UUID batchId);
-
-    List<CtxWikiPage> findByBatchIdAndParentPageIdOrderByOrderIndexAsc(UUID batchId, UUID parentPageId);
+    List<CtxWikiPage> findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(UUID batchId);
 
     Optional<CtxWikiPage> findByBatchIdAndId(UUID batchId, UUID id);
 
@@ -24,9 +22,7 @@ public interface CtxWikiPageRepository extends JpaRepository<CtxWikiPage, UUID> 
 
     List<CtxWikiPage> findByTeamWikiBatchId(UUID teamWikiBatchId);
 
-    List<CtxWikiPage> findByTeamWikiBatchIdAndParentPageIsNullOrderByOrderIndexAsc(UUID teamWikiBatchId);
-
-    List<CtxWikiPage> findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(UUID teamWikiBatchId, UUID parentPageId);
+    List<CtxWikiPage> findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(UUID teamWikiBatchId);
 
     Optional<CtxWikiPage> findByTeamWikiBatchIdAndId(UUID teamWikiBatchId, UUID id);
 

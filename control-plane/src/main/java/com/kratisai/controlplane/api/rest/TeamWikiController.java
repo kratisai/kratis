@@ -10,6 +10,7 @@ import com.kratisai.controlplane.ingestion.teamwiki.TeamWikiBatchLogService;
 import com.kratisai.controlplane.ingestion.teamwiki.TeamWikiSchedulerService;
 import com.kratisai.controlplane.ingestion.teamwiki.TeamWikiSchedulerService.TeamWikiScheduleStatus;
 import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.model.TeamWikiBatch;
 import com.kratisai.controlplane.model.TeamWikiBuildMode;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
@@ -147,14 +148,9 @@ public class TeamWikiController {
         requireTeamMembership(userId, teamId);
         TeamWikiBatch activeBatch = resolveActiveBatch(teamId);
         List<CtxWikiPage> pages =
-                wikiPageRepository.findByTeamWikiBatchIdAndParentPageIsNullOrderByOrderIndexAsc(activeBatch.getId());
-        List<WikiPageDto> dtos = pages.stream()
-                .map(p -> {
-                    boolean hasChildren = !wikiPageRepository
-                            .findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(activeBatch.getId(), p.getId())
-                            .isEmpty();
-                    return toPageDto(p, hasChildren);
-                })
+                wikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(activeBatch.getId());
+        List<WikiPageDto> dtos = CtxWikiPages.topLevelPages(pages).stream()
+                .map(p -> toPageDto(p, CtxWikiPages.hasChildren(pages, p)))
                 .toList();
         return ResponseEntity.ok(dtos);
     }
@@ -173,15 +169,10 @@ public class TeamWikiController {
         UUID userId = SecurityUtil.getCurrentUserId();
         requireTeamMembership(userId, teamId);
         TeamWikiBatch activeBatch = resolveActiveBatch(teamId);
-        List<CtxWikiPage> children = wikiPageRepository.findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(
-                activeBatch.getId(), pageId);
-        List<WikiPageDto> dtos = children.stream()
-                .map(p -> {
-                    boolean hasChildren = !wikiPageRepository
-                            .findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(activeBatch.getId(), p.getId())
-                            .isEmpty();
-                    return toPageDto(p, hasChildren);
-                })
+        List<CtxWikiPage> pages =
+                wikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(activeBatch.getId());
+        List<WikiPageDto> dtos = CtxWikiPages.childPages(pages, pageId).stream()
+                .map(p -> toPageDto(p, CtxWikiPages.hasChildren(pages, p)))
                 .toList();
         return ResponseEntity.ok(dtos);
     }
@@ -203,9 +194,9 @@ public class TeamWikiController {
         CtxWikiPage page = wikiPageRepository
                 .findByTeamWikiBatchIdAndId(activeBatch.getId(), pageId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Team wiki page not found"));
-        boolean hasChildren = !wikiPageRepository
-                .findByTeamWikiBatchIdAndParentPageIdOrderByOrderIndexAsc(activeBatch.getId(), pageId)
-                .isEmpty();
+        boolean hasChildren = CtxWikiPages.hasChildren(
+                wikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(activeBatch.getId()),
+                page);
         return ResponseEntity.ok(toPageDto(page, hasChildren));
     }
 

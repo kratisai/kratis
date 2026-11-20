@@ -5,6 +5,7 @@ import static org.apache.commons.lang3.StringUtils.isEmpty;
 import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.agentloop.KratisToolException;
 import com.kratisai.controlplane.model.CtxWikiPage;
+import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
@@ -56,6 +57,12 @@ public class WriteWikiPageTool {
                                             + " use list_wiki_pages to find valid slugs.",
                             required = false)
                     String parentPageSlug,
+            @ToolParam(
+                            description = "Reading order among sibling pages, e.g. 10, 20, 30. Provide it so pages"
+                                    + " appear in a logical narrative order; when omitted the page is appended"
+                                    + " after its current siblings.",
+                            required = false)
+                    Integer orderIndex,
             ToolContext toolContext) {
         if (pageSlug == null || pageSlug.isBlank()) {
             throw new KratisToolException("pageSlug must not be blank.");
@@ -97,11 +104,15 @@ public class WriteWikiPageTool {
         if (existingPage != null) {
             existingPage.setTitle(title);
             existingPage.setContent(content);
+            if (orderIndex != null) {
+                existingPage.setOrderIndex(orderIndex);
+            }
             ctxWikiPageRepository.saveAndFlush(existingPage);
             logger.info("WriteWikiPageTool: Updated existing wiki page: {}", pageSlug);
             logPageWrite(toolContext, "Updated", title, pageSlug, content);
             return "SUCCESS: Wiki page '" + pageSlug + "' updated successfully.";
         } else {
+            int effectiveOrderIndex = orderIndex != null ? orderIndex : nextSiblingOrderIndex(batchId, parentPage);
             CtxWikiPage newPage = new CtxWikiPage(
                     batch,
                     team.getId(),
@@ -109,13 +120,19 @@ public class WriteWikiPageTool {
                     parentPage,
                     pageSlug,
                     title,
-                    0, // orderIndex
+                    effectiveOrderIndex,
                     content);
             ctxWikiPageRepository.saveAndFlush(newPage);
             logger.info("WriteWikiPageTool: Created new wiki page: {}", pageSlug);
             logPageWrite(toolContext, "Created", title, pageSlug, content);
             return "SUCCESS: Wiki page '" + pageSlug + "' created successfully.";
         }
+    }
+
+    private int nextSiblingOrderIndex(UUID batchId, CtxWikiPage parentPage) {
+        int maxOrderIndex = CtxWikiPages.maxSiblingOrderIndex(
+                ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId), parentPage);
+        return maxOrderIndex + 10;
     }
 
     private static void logPageWrite(

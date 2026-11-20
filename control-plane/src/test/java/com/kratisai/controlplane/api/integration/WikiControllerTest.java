@@ -127,6 +127,32 @@ class WikiControllerTest {
     }
 
     @Test
+    void getTopLevelPages_ordersTiesByTitle_whenOrderIndexIdentical() throws Exception {
+        createPage(activeBatch, "second", "Second Page", 1);
+        createPage(activeBatch, "first", "First Page", 1);
+
+        mockMvc.perform(get("/api/v1/teams/{teamId}/repositories/{repoId}/wiki/pages", teamId, repoId)
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].title").value("First Page"))
+                .andExpect(jsonPath("$[1].title").value("Second Page"));
+    }
+
+    @Test
+    void getTopLevelPages_ordersFullTiesBySlug_whenOrderIndexAndTitleIdentical() throws Exception {
+        createPage(activeBatch, "zeta", "Same Title", 1);
+        createPage(activeBatch, "alpha", "Same Title", 1);
+
+        mockMvc.perform(get("/api/v1/teams/{teamId}/repositories/{repoId}/wiki/pages", teamId, repoId)
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].pageSlug").value("alpha"))
+                .andExpect(jsonPath("$[1].pageSlug").value("zeta"));
+    }
+
+    @Test
     void getTopLevelPages_hasChildrenFlag_isTrue_whenChildrenExist() throws Exception {
         CtxWikiPage parent = createPage(activeBatch, "parent", "Parent Page", 0);
         createChildPage(activeBatch, parent, "child", "Child Page", 0);
@@ -189,6 +215,28 @@ class WikiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].title").value("Active Child"));
+    }
+
+    @Test
+    void getChildPages_ordersByOrderIndexThenTitle_whenTied() throws Exception {
+        CtxWikiPage parent = createPage(activeBatch, "parent", "Parent", 0);
+        createChildPage(activeBatch, parent, "gamma", "Gamma", 10);
+        createChildPage(activeBatch, parent, "beta", "Beta", 0);
+        createChildPage(activeBatch, parent, "alpha", "Beta Again", 10);
+        createChildPage(activeBatch, parent, "delta", "Alpha", -5);
+
+        mockMvc.perform(get(
+                                "/api/v1/teams/{teamId}/repositories/{repoId}/wiki/pages/{pageId}/children",
+                                teamId,
+                                repoId,
+                                parent.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(4))
+                .andExpect(jsonPath("$[0].title").value("Alpha"))
+                .andExpect(jsonPath("$[1].title").value("Beta"))
+                .andExpect(jsonPath("$[2].title").value("Beta Again"))
+                .andExpect(jsonPath("$[3].title").value("Gamma"));
     }
 
     @Test
