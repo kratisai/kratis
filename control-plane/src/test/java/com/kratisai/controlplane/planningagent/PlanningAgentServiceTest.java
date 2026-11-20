@@ -12,6 +12,7 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.kratisai.controlplane.agentloop.ReActLoopPausedException;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.config.PlanningProperties;
 import com.kratisai.controlplane.model.ChatUsageSession;
@@ -60,6 +61,7 @@ class PlanningAgentServiceTest {
     private ChatService chatService;
     private ChatUsageSessionService chatUsageSessionService;
     private LiteLLMProvisioningService liteLLMProvisioningService;
+    private ChatTitleService chatTitleService;
     private ChatFluxRegistry chatFluxRegistry;
     private PlanningAgentService planningAgentService;
 
@@ -70,6 +72,7 @@ class PlanningAgentServiceTest {
         chatService = mock(ChatService.class);
         chatUsageSessionService = mock(ChatUsageSessionService.class);
         liteLLMProvisioningService = mock(LiteLLMProvisioningService.class);
+        chatTitleService = mock(ChatTitleService.class);
         chatFluxRegistry = new ChatFluxRegistry();
         AsyncTaskExecutor agentTaskExecutor = new SimpleAsyncTaskExecutor("test-agent-");
 
@@ -79,7 +82,7 @@ class PlanningAgentServiceTest {
                 chatService,
                 chatUsageSessionService,
                 liteLLMProvisioningService,
-                mock(ChatTitleService.class),
+                chatTitleService,
                 mock(ChatMemory.class),
                 mock(CanvasTool.class),
                 mock(RepositoryTool.class),
@@ -302,6 +305,60 @@ class PlanningAgentServiceTest {
 
         verify(chatService).saveInterstitialMessage(eq(chatId), eq("paused"), eq("max_iterations"), any());
         verify(chatService, never()).saveAssistantErrorMessage(any(), anyString(), anyInt());
+    }
+
+    @Test
+    void execute_reactLoopPausedByShutdown_persistsInterstitialWithoutErrorOrTitle() throws Exception {
+        UUID teamId = UUID.randomUUID();
+        UUID providerId = UUID.randomUUID();
+        UUID chatId = UUID.randomUUID();
+
+        ModelProvider provider = new ModelProvider("TestProvider", ProviderType.OPENAI, "key", "url");
+        when(modelProviderRepository.findByTeamIdAndId(teamId, providerId)).thenReturn(Optional.of(provider));
+        when(liteLLMProvisioningService.buildLiteLLMModelName(any(), any())).thenReturn("litellm-model");
+
+        ChatUsageSession session = mock(ChatUsageSession.class);
+        LlmUsage usage = mock(LlmUsage.class);
+        when(usage.getVirtualKey()).thenReturn("vk-123");
+        when(session.getUsage()).thenReturn(usage);
+        when(chatUsageSessionService.getOrCreateActiveSession(chatId, "gpt-4o", "litellm-model"))
+                .thenReturn(session);
+
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModelFactory.createChatModelViaLiteLLM(any(), any(), any(), eq(true)))
+                .thenReturn(chatModel);
+
+        PlanningAgentLoop mockLoop = mock(PlanningAgentLoop.class);
+        org.mockito.Mockito.doThrow(
+                        new ReActLoopPausedException("Agent task pool rejected a tool call", new RuntimeException()))
+                .when(mockLoop)
+                .run(any(), any(), any());
+
+        Field orchestrationLoopField = PlanningAgentService.class.getDeclaredField("orchestrationLoop");
+        orchestrationLoopField.setAccessible(true);
+        orchestrationLoopField.set(planningAgentService, mockLoop);
+
+        Flux<ClientPayload.ChatStreamPayload> flux =
+                planningAgentService.streamMessage(teamId, providerId, "gpt-4o", chatId, "Hello");
+
+        List<ClientPayload.ChatStreamPayload> received = new ArrayList<>();
+        CountDownLatch completeLatch = new CountDownLatch(1);
+        flux.subscribe(received::add, error -> completeLatch.countDown(), completeLatch::countDown);
+
+        assertThat(completeLatch.await(3, TimeUnit.SECONDS)).isTrue();
+        assertThat(received).hasSize(1);
+        assertThat(received.getFirst()).isInstanceOf(ClientPayload.PlanningStatusResult.class);
+        ClientPayload.PlanningStatusResult status = (ClientPayload.PlanningStatusResult) received.getFirst();
+        assertThat(status.status()).isEqualTo("paused");
+        assertThat(status.reason()).isEqualTo(PlanningAgentService.PAUSED_REASON_SHUTDOWN);
+        assertThat(status.metadata()).containsEntry("directive", PlanningAgentService.DEFAULT_CONTINUATION_DIRECTIVE);
+
+        verify(chatService)
+                .saveInterstitialMessage(
+                        eq(chatId), eq("paused"), eq(PlanningAgentService.PAUSED_REASON_SHUTDOWN), any());
+        verify(chatService, never()).saveAssistantErrorMessage(any(), anyString(), anyInt());
+        verify(chatTitleService, never()).maybeUpdateTitle(any(), anyString(), any(), any());
+        assertThat(chatFluxRegistry.containsKey(chatId)).isFalse();
     }
 
     @Test

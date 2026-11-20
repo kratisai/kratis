@@ -196,6 +196,10 @@ public final class ReActLoop<T> {
                     onToolCallCount.accept(toolCalls.size());
                 }
                 history.add(toolInvoker.executeParallel(assistantMessage, toolContext, executor, llmTurn.attempt()));
+            } catch (ReActLoopPausedException paused) {
+                // Do not retry the LLM: the executor cannot accept further tool batches.
+                log.info("ReAct loop paused: {}", paused.getMessage());
+                throw paused;
             } catch (StructuredOutputValidationException e) {
                 lastValidationError = e.getMessage();
                 log.debug(

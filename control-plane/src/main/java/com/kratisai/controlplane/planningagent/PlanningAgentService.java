@@ -4,6 +4,7 @@ import com.kratisai.controlplane.agentloop.ChatResponseAssembler;
 import com.kratisai.controlplane.agentloop.LlmErrorCategory;
 import com.kratisai.controlplane.agentloop.ReActLoopExhaustedException;
 import com.kratisai.controlplane.agentloop.ReActLoopFatalException;
+import com.kratisai.controlplane.agentloop.ReActLoopPausedException;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.api.wsdto.JsonRpcErrorCodes;
 import com.kratisai.controlplane.config.PlanningProperties;
@@ -50,6 +51,8 @@ public class PlanningAgentService {
 
     public static final String DEFAULT_CONTINUATION_DIRECTIVE =
             "Resume planning by utilizing existing findings and completing remaining tasks without repeating completed research.";
+
+    static final String PAUSED_REASON_SHUTDOWN = "server_shutdown";
 
     private static final int DIRECTIVE_TRANSCRIPT_MAX_MESSAGES = 40;
     private static final int DIRECTIVE_TRANSCRIPT_MAX_MESSAGE_CHARS = 4000;
@@ -380,6 +383,7 @@ public class PlanningAgentService {
             ModelProvider provider,
             String modelName,
             String virtualKey) {
+        boolean pausedByShutdown = false;
         try {
             orchestrationLoop.run(chatClient, context, sink);
             if (Thread.currentThread().isInterrupted()) {
@@ -392,17 +396,13 @@ public class PlanningAgentService {
         } catch (ReActLoopExhaustedException exhausted) {
             logger.info("Planning agent reached maximum iterations for chat {}", context.chatId());
             String directive = evaluateContinuationDirective(chatClient, exhausted.history());
-            Map<String, Object> metadata = Map.of(
-                    "interstitial", true, "status", "paused", "reason", "max_iterations", "directive", directive);
-            try {
-                chatService.saveInterstitialMessage(context.chatId(), "paused", "max_iterations", directive);
-            } catch (Exception persistError) {
-                logger.warn("Failed to persist interstitial status for chat {}", context.chatId(), persistError);
-            }
-            ClientPayload.PlanningStatusResult statusResult =
-                    new ClientPayload.PlanningStatusResult(context.chatId(), "paused", "max_iterations", metadata);
-            sink.tryEmitNext(statusResult);
-            sink.tryEmitComplete();
+            pauseTurn(context, sink, "max_iterations", directive);
+        } catch (ReActLoopPausedException paused) {
+            // The executor is shutting down, so skip LLM work like title generation or a
+            // directive digest; the persisted scratchpad carries the findings across restart.
+            logger.info("Planning agent paused for chat {} because the server is shutting down", context.chatId());
+            pausedByShutdown = true;
+            pauseTurn(context, sink, PAUSED_REASON_SHUTDOWN, DEFAULT_CONTINUATION_DIRECTIVE);
         } catch (Exception e) {
             if (isCancellation(e)) {
                 logger.info("Planning agent cancelled for chat {}", context.chatId());
@@ -423,13 +423,29 @@ public class PlanningAgentService {
             chatUsageSessionService.syncUsage(context.chatId(), virtualKey);
             chatService.publishChatsChanged(context.teamId());
         }
-        if (!Thread.currentThread().isInterrupted()) {
+        if (!Thread.currentThread().isInterrupted() && !pausedByShutdown) {
             try {
                 chatTitleService.maybeUpdateTitle(provider, modelName, context.teamId(), context.chatId());
             } catch (Exception e) {
                 logger.warn("Failed to auto-generate title for chat {}", context.chatId(), e);
             }
         }
+    }
+
+    private void pauseTurn(
+            PlanningContext context,
+            Sinks.Many<ClientPayload.ChatStreamPayload> sink,
+            String reason,
+            String directive) {
+        Map<String, Object> metadata =
+                Map.of("interstitial", true, "status", "paused", "reason", reason, "directive", directive);
+        try {
+            chatService.saveInterstitialMessage(context.chatId(), "paused", reason, directive);
+        } catch (Exception persistError) {
+            logger.warn("Failed to persist interstitial status for chat {}", context.chatId(), persistError);
+        }
+        sink.tryEmitNext(new ClientPayload.PlanningStatusResult(context.chatId(), "paused", reason, metadata));
+        sink.tryEmitComplete();
     }
 
     private static boolean isCancellation(Exception e) {

@@ -2,6 +2,7 @@ package com.kratisai.controlplane.agentloop;
 
 import com.kratisai.controlplane.agentloop.ReActLoop.ToolEventListener;
 import com.kratisai.controlplane.agentloop.ReActLoop.ToolPhase;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -30,17 +31,48 @@ final class ReActToolInvoker {
 
     ToolResponseMessage executeParallel(
             AssistantMessage assistantMessage, ToolContext toolContext, Executor executor, int attempt) {
-        List<CompletableFuture<ToolResponse>> futures = assistantMessage.getToolCalls().stream()
-                .map(toolCall -> CompletableFuture.supplyAsync(() -> execute(toolCall, toolContext, attempt), executor))
-                .toList();
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        List<ToolResponse> responses =
-                futures.stream().map(CompletableFuture::join).toList();
+        List<AssistantMessage.ToolCall> toolCalls = assistantMessage.getToolCalls();
+        List<String> taskIds = new ArrayList<>(toolCalls.size());
+        List<CompletableFuture<ToolResponse>> futures = new ArrayList<>(toolCalls.size());
+        for (AssistantMessage.ToolCall toolCall : toolCalls) {
+            String taskId = UUID.randomUUID().toString();
+            taskIds.add(taskId);
+            try {
+                futures.add(
+                        CompletableFuture.supplyAsync(() -> execute(toolCall, toolContext, attempt, taskId), executor));
+            } catch (RuntimeException e) {
+                // Unbounded-queue executors only reject while shutting down, and every
+                // submission in the batch would reject too. Pause the turn so no later
+                // request replays this assistant message without its tool responses
+                // (providers reject a request ending on a model turn).
+                throw new ReActLoopPausedException(
+                        "Agent task pool rejected tool call " + toolCall.name() + " because it is shutting down", e);
+            }
+        }
+        List<ToolResponse> responses = new ArrayList<>(futures.size());
+        for (int i = 0; i < futures.size(); i++) {
+            responses.add(await(futures.get(i), taskIds.get(i), toolCalls.get(i), attempt));
+        }
         return ToolResponseMessage.builder().responses(responses).build();
     }
 
-    ToolResponse execute(AssistantMessage.ToolCall toolCall, ToolContext toolContext, int attempt) {
-        String taskId = UUID.randomUUID().toString();
+    private ToolResponse await(
+            CompletableFuture<ToolResponse> future, String taskId, AssistantMessage.ToolCall toolCall, int attempt) {
+        try {
+            return future.join();
+        } catch (RuntimeException e) {
+            // A tool that threw an Error (not Exception) bypasses execute()'s wrapping but must
+            // still yield a matching response so the assistant turn stays answerable.
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            String message = cause.getMessage() != null
+                    ? cause.getMessage()
+                    : cause.getClass().getSimpleName();
+            emit(attempt, taskId, toolCall.name(), ToolPhase.ERROR, message);
+            return new ToolResponse(toolCall.id(), toolCall.name(), JsonParser.toJson(Map.of("error", message)));
+        }
+    }
+
+    ToolResponse execute(AssistantMessage.ToolCall toolCall, ToolContext toolContext, int attempt, String taskId) {
         PreparedCall prepared = prepare(toolCall.arguments(), toolCall.name());
         emit(attempt, taskId, toolCall.name(), ToolPhase.START, prepared.innerThought());
         try {

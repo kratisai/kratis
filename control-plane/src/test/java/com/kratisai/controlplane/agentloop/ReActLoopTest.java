@@ -33,6 +33,7 @@ import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import reactor.core.publisher.Flux;
 
 class ReActLoopTest {
@@ -178,6 +179,28 @@ class ReActLoopTest {
                         .contains("tool calls"));
 
         assertThat(executed).containsExactly("echo");
+    }
+
+    @Test
+    void run_toolExecutorRejectsWhileShuttingDown_pausesWithoutSecondLlmCall() {
+        AssistantMessage.ToolCall toolCall = toolCall("call_1", "echo", "{}");
+        FakeChatModel model = new FakeChatModel();
+        model.addMatcher(PromptMatcher.builder()
+                .response(assistantWithTools(toolCall))
+                .maxMatches(1)
+                .build());
+        model.addMatcher(PromptMatcher.builder().response("should never run").build());
+        ThreadPoolTaskExecutor shuttingDownPool = new ThreadPoolTaskExecutor();
+        shuttingDownPool.setCorePoolSize(1);
+        shuttingDownPool.initialize();
+        shuttingDownPool.shutdown();
+
+        assertThatThrownBy(() -> ReActLoop.text(client(model), new ToolCallback[] {tool("{}")})
+                        .executor(shuttingDownPool)
+                        .run(List.of(new UserMessage("go")), TOOL_CONTEXT))
+                .isInstanceOf(ReActLoopPausedException.class);
+
+        assertThat(model.getInvocations()).hasSize(1);
     }
 
     @Test

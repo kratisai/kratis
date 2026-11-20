@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.agentloop;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
@@ -13,10 +14,13 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage.ToolResponse;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
+import org.springframework.core.task.TaskRejectedException;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 class ReActToolInvokerTest {
 
@@ -38,7 +42,8 @@ class ReActToolInvokerTest {
                         "test_tool",
                         "{\"innerThought\":\"thinking about this\",\"actualArg\":\"value\"}"),
                 TOOL_CONTEXT,
-                2);
+                2,
+                "task-1");
 
         assertThat(response.responseData()).isEqualTo("result");
         assertThat(events).extracting(Event::attempt).containsOnly(2);
@@ -59,8 +64,8 @@ class ReActToolInvokerTest {
                 (attempt, taskId, toolName, phase, detail) ->
                         events.add(new Event(attempt, taskId, toolName, phase, detail)));
 
-        ToolResponse response =
-                invoker.execute(new AssistantMessage.ToolCall("id", "function", "missing", "{}"), TOOL_CONTEXT, 1);
+        ToolResponse response = invoker.execute(
+                new AssistantMessage.ToolCall("id", "function", "missing", "{}"), TOOL_CONTEXT, 1, "task-2");
 
         assertThat(response.responseData()).contains("Tool not found: missing");
         assertThat(events).extracting(Event::phase).containsExactly(ToolPhase.START, ToolPhase.ERROR);
@@ -76,8 +81,8 @@ class ReActToolInvokerTest {
         when(tool.call(any(), any())).thenThrow(new RuntimeException("boom"));
 
         ReActToolInvoker invoker = new ReActToolInvoker(new ToolCallback[] {tool}, null);
-        ToolResponse response =
-                invoker.execute(new AssistantMessage.ToolCall("id", "function", "failing", "{}"), TOOL_CONTEXT, 1);
+        ToolResponse response = invoker.execute(
+                new AssistantMessage.ToolCall("id", "function", "failing", "{}"), TOOL_CONTEXT, 1, "task-3");
 
         assertThat(response.responseData()).contains("boom");
     }
@@ -96,15 +101,18 @@ class ReActToolInvokerTest {
         invoker.execute(
                 new AssistantMessage.ToolCall("dup-id", "function", "list_repositories", innerThoughtArgs),
                 TOOL_CONTEXT,
-                1);
+                1,
+                "task-4");
         invoker.execute(
                 new AssistantMessage.ToolCall("dup-id", "function", "list_dimensions", innerThoughtArgs),
                 TOOL_CONTEXT,
-                1);
+                1,
+                "task-5");
         invoker.execute(
                 new AssistantMessage.ToolCall("dup-id", "function", "save_scratchpad", innerThoughtArgs),
                 TOOL_CONTEXT,
-                1);
+                1,
+                "task-6");
 
         List<Event> starts =
                 events.stream().filter(e -> e.phase() == ToolPhase.START).toList();
@@ -118,6 +126,57 @@ class ReActToolInvokerTest {
         assertThat(errors).hasSize(1);
         assertThat(errors.getFirst().detail()).contains("Tool not found: save_scratchpad");
         assertThat(completes).hasSize(2);
+    }
+
+    @Test
+    void executeParallel_executorRejectsSubmission_pausesTurnWithoutEvents() {
+        ToolCallback tool = tool("test_tool", "result");
+        List<Event> events = new ArrayList<>();
+        ReActToolInvoker invoker = new ReActToolInvoker(
+                new ToolCallback[] {tool},
+                (attempt, taskId, toolName, phase, detail) ->
+                        events.add(new Event(attempt, taskId, toolName, phase, detail)));
+        ThreadPoolTaskExecutor shuttingDownPool = new ThreadPoolTaskExecutor();
+        shuttingDownPool.setCorePoolSize(1);
+        shuttingDownPool.initialize();
+        shuttingDownPool.shutdown();
+
+        assertThatThrownBy(() -> invoker.executeParallel(
+                        assistantWithToolCalls(new AssistantMessage.ToolCall("call_1", "function", "test_tool", "{}")),
+                        TOOL_CONTEXT,
+                        shuttingDownPool,
+                        1))
+                .isInstanceOf(ReActLoopPausedException.class)
+                .hasMessageContaining("shutting down")
+                .hasCauseInstanceOf(TaskRejectedException.class);
+
+        assertThat(events).isEmpty();
+    }
+
+    @Test
+    void executeParallel_toolThrowsError_convertsToMatchingErrorResponse() {
+        ToolCallback tool = mock(ToolCallback.class);
+        ToolDefinition definition = mock(ToolDefinition.class);
+        when(definition.name()).thenReturn("failing");
+        when(tool.getToolDefinition()).thenReturn(definition);
+        when(tool.call(any(), any())).thenThrow(new AssertionError("fatal boom"));
+        List<Event> events = new ArrayList<>();
+        ReActToolInvoker invoker = new ReActToolInvoker(
+                new ToolCallback[] {tool},
+                (attempt, taskId, toolName, phase, detail) ->
+                        events.add(new Event(attempt, taskId, toolName, phase, detail)));
+
+        ToolResponseMessage message = invoker.executeParallel(
+                assistantWithToolCalls(new AssistantMessage.ToolCall("call_1", "function", "failing", "{}")),
+                TOOL_CONTEXT,
+                Runnable::run,
+                1);
+
+        assertThat(message.getResponses()).hasSize(1);
+        assertThat(message.getResponses().getFirst().responseData()).contains("fatal boom");
+        assertThat(events).extracting(Event::phase).containsExactly(ToolPhase.START, ToolPhase.ERROR);
+        assertThat(events.get(0).taskId()).isEqualTo(events.get(1).taskId());
+        assertThat(events.get(1).detail()).contains("fatal boom");
     }
 
     @Test
@@ -155,6 +214,10 @@ class ReActToolInvokerTest {
     }
 
     private record Event(int attempt, String taskId, String toolName, ToolPhase phase, String detail) {}
+
+    private static AssistantMessage assistantWithToolCalls(AssistantMessage.ToolCall... toolCalls) {
+        return AssistantMessage.builder().toolCalls(List.of(toolCalls)).build();
+    }
 
     private static ToolCallback tool(String name, String result) {
         ToolCallback tool = mock(ToolCallback.class);
