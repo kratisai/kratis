@@ -73,7 +73,8 @@ describe('Execution Activity Log', () => {
 
     // Assert thinking card appears with the "Thinking" prefix
     await waitFor(() => {
-      expect(screen.getByText('Thinking ... Analyzing the codebase structure')).toBeInTheDocument()
+      expect(screen.getByText('Thinking ...')).toBeInTheDocument()
+      expect(screen.getByText(/Analyzing the codebase structure/)).toBeInTheDocument()
     })
   })
 

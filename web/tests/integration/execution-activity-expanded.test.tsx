@@ -145,11 +145,9 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     await user.click(summary.closest('[role="button"]')!)
 
     await waitFor(() => {
-      const expanded = screen.getByText(
-        'Thinking ... I need to analyze the project structure first.',
-      )
-      expect(expanded.className).not.toContain('truncate')
-      expect(expanded.className).toContain('whitespace-pre-wrap')
+      expect(screen.getByText('Thinking ...')).toBeInTheDocument()
+      expect(screen.getByText('I need to analyze the project structure first.')).toBeInTheDocument()
+      expect(document.querySelector('.prose-activity')).not.toBeNull()
     })
   })
 
@@ -169,7 +167,8 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     ])
 
     await waitFor(() => {
-      expect(screen.getByText('Thinking ... Processing the request...')).toBeInTheDocument()
+      expect(screen.getByText('Thinking ...')).toBeInTheDocument()
+      expect(screen.getByText('Processing the request...')).toBeInTheDocument()
     })
   })
 
@@ -395,8 +394,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     })
     await waitFor(() => {
       const open = screen.getByText('Here is the result')
-      expect(open.className).toContain('text-sm')
-      expect(open.className).toContain('whitespace-pre-wrap')
+      expect(open.closest('.prose-activity')).not.toBeNull()
     })
     expect(screen.queryByText('Agent')).not.toBeInTheDocument()
 
@@ -724,7 +722,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     })
     const expandedMsg = screen.getByText('Task has been completed.')
     expect(expandedMsg.className).not.toContain('truncate')
-    expect(expandedMsg.className).toContain('whitespace-pre-wrap')
+    expect(expandedMsg.closest('.prose-activity')).not.toBeNull()
   })
 
   it('collapses all expanded activities when clicking "Collapse all"', async () => {
@@ -791,7 +789,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     const textEl = await screen.findByText(
       'Selectable agent output text that should remain visible',
     )
-    expect(textEl.className).toContain('select-text')
+    expect(textEl.closest('.prose-activity')).not.toBeNull()
 
     const selectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({
       toString: () => 'agent output text',
@@ -824,10 +822,8 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       },
     ])
 
-    const thoughtEl = await screen.findByText(
-      'Thinking ... Step-by-step thinking content to select and copy',
-    )
-    expect(thoughtEl.className).toContain('select-text')
+    const thoughtEl = await screen.findByText('Step-by-step thinking content to select and copy')
+    expect(thoughtEl.closest('.prose-activity')).not.toBeNull()
 
     const selectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({
       toString: () => 'thinking content',
@@ -838,7 +834,7 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       await user.click(collapseButton)
 
       expect(thoughtEl.className).not.toContain('truncate')
-      expect(thoughtEl.className).toContain('whitespace-pre-wrap')
+      expect(thoughtEl.closest('.prose-activity')).not.toBeNull()
     } finally {
       selectionSpy.mockRestore()
     }
@@ -905,7 +901,78 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
     await waitFor(() => {
       const expandedText = screen.getByText('Detailed message line 1 Detailed message line 2')
       expect(expandedText.className).not.toContain('truncate')
-      expect(expandedText.className).toContain('whitespace-pre-wrap')
+      expect(expandedText.closest('.prose-activity')).not.toBeNull()
     })
+  })
+
+  it('renders agent markdown as formatted activity content', async () => {
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        actionId: 'msg-markdown-1',
+        collapsed: false,
+        detail: { messageId: 'msg-markdown-1', role: 'agent' },
+        executionId: EXECUTION_ID,
+        id: 'msg-markdown-1',
+        role: 'agent',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        text: '### Review\n\n- **Backend** check\n- `web` check',
+        type: 'message',
+      },
+    ])
+
+    const heading = await screen.findByRole('heading', { name: 'Review' })
+    expect(heading.closest('.prose-activity')).not.toBeNull()
+    expect(screen.getByText('Backend').tagName).toBe('STRONG')
+    expect(screen.getByText('web').tagName).toBe('CODE')
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+  })
+
+  it('strips markdown markers from a collapsed agent message summary', async () => {
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        actionId: 'msg-summary-1',
+        collapsed: true,
+        detail: { messageId: 'msg-summary-1', role: 'agent' },
+        executionId: EXECUTION_ID,
+        id: 'msg-summary-1',
+        role: 'agent',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        text: '### Summary of **Changes**\n\n- `web`',
+        type: 'message',
+      },
+    ])
+
+    const summary = await screen.findByText('Summary of Changes web')
+    expect(summary.className).toContain('truncate')
+  })
+
+  it('renders user steering guidance as formatted activity content', async () => {
+    const { user } = renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    seedActivities([
+      {
+        actionId: 'msg-user-1',
+        collapsed: true,
+        detail: { messageId: 'msg-user-1', role: 'user' },
+        executionId: EXECUTION_ID,
+        id: 'msg-user-1',
+        role: 'user',
+        startedAt: '2024-06-15T10:30:00.000Z',
+        state: 'completed',
+        text: '### Code Review Feedback\n\n1. Fix the **branch** guard.',
+        type: 'message',
+      },
+    ])
+
+    await user.click(await screen.findByText('User'))
+
+    expect(await screen.findByRole('heading', { name: 'Code Review Feedback' })).toBeInTheDocument()
+    expect(screen.getByText('branch').tagName).toBe('STRONG')
   })
 })

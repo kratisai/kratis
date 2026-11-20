@@ -27,11 +27,13 @@ import type {
   WarningActivity,
 } from '@/types/execution-activity-types'
 
+import { MarkdownMessage } from '@/components/chat/markdown-message'
 import { ActivityApproval } from '@/components/session/activities/activity-approval'
 import { ActivityElicitation } from '@/components/session/activities/activity-elicitation'
 import { PlanEntriesList, planSummaryLabel } from '@/components/session/plan-entries'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { markdownToText } from '@/lib/markdown-to-text'
 import { cn } from '@/lib/utils'
 import { activityCommand, activityTitle, useActivityStore } from '@/store/activity-store'
 
@@ -343,11 +345,7 @@ function ActivityTextShell({
           {chevron}
           {icon}
         </div>
-        <div
-          className={cn('min-w-0 flex-1 break-words whitespace-pre-wrap select-text', className)}
-        >
-          {children}
-        </div>
+        <div className="min-w-0 flex-1 break-words select-text">{children}</div>
       </div>
     </div>
   )
@@ -547,9 +545,11 @@ function MessageActivityItem({
         activity={activity}
         className="text-sm"
         executionId={executionId}
-        summary={singleLine(activity.text)}
+        summary={singleLine(markdownToText(activity.text))}
       >
-        {activity.text}
+        <div className="text-sm">
+          <MarkdownMessage content={activity.text} variant="activity" />
+        </div>
       </ActivityTextShell>
     )
   }
@@ -558,10 +558,8 @@ function MessageActivityItem({
     <ActivityItemShell
       activity={activity}
       content={
-        <div className="mt-1 pl-5">
-          <p className="text-muted-foreground text-xs break-words whitespace-pre-wrap">
-            {activity.text}
-          </p>
+        <div className="text-muted-foreground mt-1 pl-5 text-xs">
+          <MarkdownMessage content={activity.text} variant="activity" />
         </div>
       }
       executionId={executionId}
@@ -627,9 +625,12 @@ function ThinkingActivityItem({
       className="text-muted-foreground text-xs italic"
       executionId={executionId}
       icon={statusIcon(activity)}
-      summary={singleLine(`${THINKING_LABEL} ${activity.thought}`)}
+      summary={singleLine(`${THINKING_LABEL} ${markdownToText(activity.thought)}`)}
     >
-      {`${THINKING_LABEL} ${activity.thought.replace(/^\s+/, '')}`}
+      <div className="text-muted-foreground text-xs">
+        <span className="block">{THINKING_LABEL}</span>
+        <MarkdownMessage content={activity.thought.replace(/^\s+/, '')} variant="activity" />
+      </div>
     </ActivityTextShell>
   )
 }

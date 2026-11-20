@@ -14,10 +14,11 @@ import { copyToClipboard } from '@/lib/clipboard'
 import { recognize } from '@/lib/mermaid'
 import { cn } from '@/lib/utils'
 
-type MarkdownVariant = 'chat' | 'document' | 'wiki'
+type MarkdownVariant = 'activity' | 'chat' | 'document' | 'wiki'
 
-const VARIANT_SIZES: Record<MarkdownVariant, string> = {
-  chat: 'prose-xs',
+const VARIANT_CLASSES: Record<MarkdownVariant, string> = {
+  activity: 'prose-activity',
+  chat: 'prose-chat',
   document: 'prose-document',
   wiki: 'prose-wiki',
 }
@@ -120,14 +121,12 @@ interface MarkdownMessageProps {
 }
 
 export function MarkdownMessage({ content, onNavigate, variant = 'chat' }: MarkdownMessageProps) {
-  const unclosedMermaid = findUnclosedMermaidFence(content)
+  const isActivity = variant === 'activity'
+  const unclosedMermaid = isActivity ? null : findUnclosedMermaidFence(content)
 
   return (
     <div
-      className={cn(
-        'prose dark:prose-invert max-w-none overflow-x-auto leading-relaxed',
-        VARIANT_SIZES[variant],
-      )}
+      className={cn('prose dark:prose-invert max-w-none overflow-x-auto', VARIANT_CLASSES[variant])}
     >
       <ReactMarkdown
         components={{
@@ -166,7 +165,7 @@ export function MarkdownMessage({ content, onNavigate, variant = 'chat' }: Markd
           },
           code({ children, className, node, ...props }) {
             const match = /language-([\w+-]+)/.exec(className || '')
-            if (match?.[1] === 'mermaid') {
+            if (!isActivity && match?.[1] === 'mermaid') {
               const chart = codeText(children).replace(/\n$/, '')
               const incomplete =
                 unclosedMermaid !== null && node?.position?.start.line === unclosedMermaid
@@ -187,6 +186,7 @@ export function MarkdownMessage({ content, onNavigate, variant = 'chat' }: Markd
           pre({ children, node: _node, ...props }) {
             const first = Children.toArray(children)[0]
             if (
+              !isActivity &&
               isValidElement<{ className?: string }>(first) &&
               typeof first.props.className === 'string' &&
               first.props.className.includes('language-mermaid')
@@ -203,7 +203,7 @@ export function MarkdownMessage({ content, onNavigate, variant = 'chat' }: Markd
             )
           },
         }}
-        rehypePlugins={[rehypeHighlight]}
+        rehypePlugins={isActivity ? [] : [rehypeHighlight]}
         remarkPlugins={[remarkGfm]}
       >
         {content}

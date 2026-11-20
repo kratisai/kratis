@@ -24,14 +24,18 @@ vi.mock('next-themes', () => ({
 vi.mock('mermaid', () => ({
   default: {
     initialize: vi.fn(),
-    render: vi.fn().mockResolvedValue({ diagramType: 'flowchart', svg: '<svg>Mocked Mermaid Diagram</svg>' }),
+    render: vi
+      .fn()
+      .mockResolvedValue({ diagramType: 'flowchart', svg: '<svg>Mocked Mermaid Diagram</svg>' }),
   },
 }))
 
 describe('MarkdownMessage', () => {
   beforeEach(() => {
     vi.mocked(mermaid.render).mockReset()
-    vi.mocked(mermaid.render).mockResolvedValue(mockMermaidRenderResult('<svg>Mocked Mermaid Diagram</svg>'))
+    vi.mocked(mermaid.render).mockResolvedValue(
+      mockMermaidRenderResult('<svg>Mocked Mermaid Diagram</svg>'),
+    )
     mockResolvedTheme.mockReturnValue('light')
   })
 
@@ -45,16 +49,18 @@ describe('MarkdownMessage', () => {
     const { container } = render(<MarkdownMessage content="hello **world**" />)
     const prose = container.querySelector('.prose')
     expect(prose).not.toBeNull()
-    expect(prose).toHaveClass('overflow-x-auto', 'prose-xs', 'max-w-none')
+    expect(prose).toHaveClass('overflow-x-auto', 'prose-chat', 'max-w-none')
   })
 
-  it.each([['document' as const, 'prose-document'], ['wiki' as const, 'prose-wiki']])(
-    'applies the %s density class for long-form reading',
-    (variant, expectedClass) => {
-      const { container } = render(<MarkdownMessage content="hello" variant={variant} />)
-      expect(container.querySelector('.prose')).toHaveClass(expectedClass)
-    },
-  )
+  it.each([
+    ['activity' as const, 'prose-activity'],
+    ['chat' as const, 'prose-chat'],
+    ['document' as const, 'prose-document'],
+    ['wiki' as const, 'prose-wiki'],
+  ])('applies the %s density class for its rendering profile', (variant, expectedClass) => {
+    const { container } = render(<MarkdownMessage content="hello" variant={variant} />)
+    expect(container.querySelector('.prose')).toHaveClass(expectedClass)
+  })
 
   it('wraps tables in a rounded scroll container', () => {
     const { container } = render(<MarkdownMessage content={'| a | b |\n|---|---|\n| 1 | 2 |'} />)
@@ -138,14 +144,14 @@ describe('MarkdownMessage', () => {
     expect(mermaid.render).toHaveBeenCalledTimes(1)
   })
 
-  it.each([
-    '> ```mermaid\n> flowchart TD\n> A --> B',
-    '- ```mermaid\n  flowchart TD\n  A --> B',
-  ])('does not render an unclosed nested Mermaid fence', (content) => {
-    render(<MarkdownMessage content={content} />)
-    expect(screen.getByText('Incomplete Mermaid diagram')).toBeInTheDocument()
-    expect(mermaid.render).not.toHaveBeenCalled()
-  })
+  it.each(['> ```mermaid\n> flowchart TD\n> A --> B', '- ```mermaid\n  flowchart TD\n  A --> B'])(
+    'does not render an unclosed nested Mermaid fence',
+    (content) => {
+      render(<MarkdownMessage content={content} />)
+      expect(screen.getByText('Incomplete Mermaid diagram')).toBeInTheDocument()
+      expect(mermaid.render).not.toHaveBeenCalled()
+    },
+  )
 
   it('detects a streaming Mermaid fence after an implicitly closed blockquote fence', () => {
     const content = '> ```text\noutside\n```mermaid\nflowchart TD\nA --> B'
@@ -178,7 +184,9 @@ describe('MarkdownMessage', () => {
 
   it('does not confuse an identical streaming diagram with a completed diagram', async () => {
     const chart = 'flowchart TD\nA --> B'
-    render(<MarkdownMessage content={`\`\`\`mermaid\n${chart}\n\`\`\`\n\n\`\`\`mermaid\n${chart}`} />)
+    render(
+      <MarkdownMessage content={`\`\`\`mermaid\n${chart}\n\`\`\`\n\n\`\`\`mermaid\n${chart}`} />,
+    )
     await screen.findByText('Mocked Mermaid Diagram')
     expect(screen.getByText('Incomplete Mermaid diagram')).toBeInTheDocument()
     expect(mermaid.render).toHaveBeenCalledTimes(1)
@@ -199,10 +207,21 @@ describe('MarkdownMessage', () => {
     expect(screen.getByText(/const x = 1;/)).toBeInTheDocument()
   })
 
+  it('renders mermaid as plain code in the activity profile', () => {
+    const { container } = render(
+      <MarkdownMessage content={'```mermaid\nflowchart TD\nA --> B\n```'} variant="activity" />,
+    )
+    expect(mermaid.render).not.toHaveBeenCalled()
+    expect(screen.getByText(/flowchart TD/)).toBeInTheDocument()
+    expect(container.querySelector('.hljs')).toBeNull()
+  })
+
   it('re-renders mermaid diagram when theme changes', async () => {
     mockResolvedTheme.mockReturnValue('light')
     const mermaidContent = 'flowchart TD\nA --> B'
-    const { rerender } = render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
+    const { rerender } = render(
+      <MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />,
+    )
 
     await waitFor(() => {
       expect(screen.getByText('Mocked Mermaid Diagram')).toBeInTheDocument()
@@ -253,7 +272,9 @@ describe('MarkdownMessage', () => {
 
     const mermaidContent = 'flowchart TD\nA --> B'
     mockResolvedTheme.mockReturnValue('light')
-    const { container, rerender } = render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
+    const { container, rerender } = render(
+      <MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />,
+    )
 
     // The first render starts but is not yet resolved.
 
@@ -367,7 +388,9 @@ describe('MarkdownMessage', () => {
     const mermaidContent = 'flowchart TD\nA --> B'
     render(<MarkdownMessage content={`\`\`\`mermaid\n${mermaidContent}\n\`\`\``} />)
 
-    expect(screen.queryByRole('button', { name: /view diagram fullscreen/i })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /view diagram fullscreen/i }),
+    ).not.toBeInTheDocument()
 
     // Cleanup: resolve the pending render so it doesn't leak into other tests
     resolveRender(mockMermaidRenderResult('<svg>Mocked Mermaid Diagram</svg>'))
@@ -401,7 +424,9 @@ describe('MarkdownMessage', () => {
     'rejects unsafe and unsupported diagrams in %s without invoking Mermaid',
     (variant) => {
       const chart = 'flowchart LR\nA --> B\nclick A "https://example.com"'
-      const { container } = render(<MarkdownMessage content={`\`\`\`mermaid\n${chart}\n\`\`\``} variant={variant} />)
+      const { container } = render(
+        <MarkdownMessage content={`\`\`\`mermaid\n${chart}\n\`\`\``} variant={variant} />,
+      )
       expect(screen.getByText('Failed to render Mermaid diagram')).toBeInTheDocument()
       expect(mermaid.render).not.toHaveBeenCalled()
       expect(container.querySelector('.mermaid-diagram')).toBeNull()
@@ -411,9 +436,13 @@ describe('MarkdownMessage', () => {
   )
 
   it('replaces an earlier rendered diagram with a closed error for invalid updates', async () => {
-    const { container, rerender } = render(<MarkdownMessage content={'```mermaid\nflowchart LR\nA --> B\n```'} />)
+    const { container, rerender } = render(
+      <MarkdownMessage content={'```mermaid\nflowchart LR\nA --> B\n```'} />,
+    )
     await screen.findByText('Mocked Mermaid Diagram')
-    rerender(<MarkdownMessage content={'```mermaid\nflowchart LR\nclick A "javascript:alert(1)"\n```'} />)
+    rerender(
+      <MarkdownMessage content={'```mermaid\nflowchart LR\nclick A "javascript:alert(1)"\n```'} />,
+    )
     expect(screen.getByText('Failed to render Mermaid diagram')).toBeInTheDocument()
     expect(container.querySelector('svg')).toBeNull()
     expect(mermaid.render).toHaveBeenCalledTimes(1)

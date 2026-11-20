@@ -27,15 +27,32 @@ describe('index.css app-shell lock', () => {
 })
 
 describe('index.css prose density', () => {
-  function lineHeightFor(selector: string): number {
+  function scaleFor(selector: string): number {
     const rule = indexCss.match(new RegExp(`\\.${selector}\\s*\\{[^}]*\\}`))
     if (!rule) throw new Error(`No rule found for .${selector}`)
-    const lineHeight = /line-height:\s*([\d.]+)/.exec(rule[0])
-    if (!lineHeight) throw new Error(`No line-height declared for .${selector}`)
-    return Number(lineHeight[1])
+    const scale = /--md-scale:\s*([\d.]+)/.exec(rule[0])
+    if (!scale) throw new Error(`No --md-scale declared for .${selector}`)
+    return Number(scale[1])
   }
 
   it('keeps canvas document prose tighter than editorial wiki prose', () => {
-    expect(lineHeightFor('prose-document')).toBeLessThan(lineHeightFor('prose-wiki'))
+    expect(scaleFor('prose-document')).toBeLessThan(scaleFor('prose-wiki'))
+  })
+
+  it('caps chat headings at the former prose-xs heading scale', () => {
+    expect(indexCss).toMatch(/\.prose-chat\s*\{[^}]*--md-heading-max-size:\s*1\.4em/s)
+  })
+
+  it('uses an activity tone override through shared markdown rules', () => {
+    expect(indexCss).toContain('--md-tone-override: currentColor;')
+    expect(indexCss).toContain('var(--md-tone-override, var(--md-heading))')
+    expect(indexCss).toContain('--md-surface-mix: 6%;')
+    expect(indexCss).toContain('--md-pre-max-height: 16em;')
+    expect(indexCss).not.toMatch(/\.prose-activity\s+(:where|pre|blockquote|thead)/)
+  })
+
+  it('derives font size and rhythm from a single scale multiplier', () => {
+    expect(indexCss).toMatch(/\.prose\s*\{[^}]*font-size:\s*calc\(1rem \* var\(--md-scale\)\)/s)
+    expect(indexCss).toMatch(/\.prose\s*\{[^}]*line-height:\s*1\.5/s)
   })
 })
