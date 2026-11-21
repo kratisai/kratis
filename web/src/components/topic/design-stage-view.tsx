@@ -1,15 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
-import { Check, Copy } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { memo, useCallback, useEffect, useRef } from 'react'
+
+import type { CanvasDocument } from '@/types/canvas-types'
 
 import { CanvasPanel } from '@/components/canvas/canvas-panel'
-import { AgentWorkingBlock } from '@/components/chat/agent-working-block'
-import { MarkdownMessage } from '@/components/chat/markdown-message'
+import { ChatMessageRow } from '@/components/chat/chat-message-row'
 import { PLAN_REQUEST_MESSAGE, PlanShortcut } from '@/components/chat/plan-shortcut'
 import { UserMessageInput } from '@/components/chat/user-message-input'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { useIsMobile } from '@/hooks/use-is-mobile'
 import { useResetAfterDelay } from '@/hooks/use-reset-after-delay'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -18,23 +16,28 @@ import { canonicalizeMermaidMarkdown } from '@/lib/mermaid/markdown'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth-store'
 import { useCanvasStore } from '@/store/canvas-store'
-import { useChatStore } from '@/store/chat-store'
+import { type ChatMessage, useChatStore } from '@/store/chat-store'
 import { useWebSocketStore } from '@/store/websocket-store'
 
 interface DesignStageViewProps {
   chatId: string
 }
 
-export function DesignStageView({ chatId }: DesignStageViewProps) {
+const NO_MESSAGES: ChatMessage[] = []
+const NO_CANVASES: CanvasDocument[] = []
+
+export const DesignStageView = memo(function DesignStageView({ chatId }: DesignStageViewProps) {
   const { docId } = useParams({ strict: false })
   const queryClient = useQueryClient()
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const addMessage = useChatStore((state) => state.addMessage)
   const sendMessage = useChatStore((state) => state.sendMessage)
   const isConnected = useWebSocketStore((state) => state.isConnected)
-  const messages = useChatStore((state) => state.messages)
+  const chatMessages =
+    useChatStore((state): ChatMessage[] | undefined => state.messages[chatId]) ?? NO_MESSAGES
   const sendingChatIds = useChatStore((state) => state.sendingChatIds)
-  const canvases = useCanvasStore((state) => state.canvases)
+  const chatCanvases =
+    useCanvasStore((state): CanvasDocument[] | undefined => state.canvases[chatId]) ?? NO_CANVASES
   const unreadCanvasDocIds = useCanvasStore((state) => state.unreadCanvasDocIds)
   const clearCanvasActivity = useCanvasStore((state) => state.clearCanvasActivity)
 
@@ -45,17 +48,16 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
   const isWidescreen = !useIsMobile(1280)
   const [copiedMessageId, setCopiedMessageId] = useResetAfterDelay<null | string>(null, null, 1500)
 
-  const handleCopyMessage = (messageId: string, content: string) => {
-    void copyToClipboard(canonicalizeMermaidMarkdown(content)).then((copied) => {
-      if (copied) setCopiedMessageId(messageId)
-    })
-  }
+  const handleCopyMessage = useCallback(
+    (messageId: string, content: string) => {
+      void copyToClipboard(canonicalizeMermaidMarkdown(content)).then((copied) => {
+        if (copied) setCopiedMessageId(messageId)
+      })
+    },
+    [setCopiedMessageId],
+  )
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- messages[chatId] can be undefined at runtime despite the Record type
-  const chatMessages = chatId ? messages[chatId] || [] : []
   const hasMessages = chatMessages.length > 0
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- canvases[chatId] can be undefined at runtime despite the Record type
-  const chatCanvases = chatId ? canvases[chatId] || [] : []
   const hasCanvases = chatCanvases.length > 0
 
   // The plan shortcut appears once the agent finished responding and no
@@ -165,54 +167,15 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
                   Start a conversation to refine requirements and generate canvas specs.
                 </p>
               )}
-              {chatMessages.map((msg) =>
-                msg.role === 'working' ? (
-                  <AgentWorkingBlock
-                    chatId={chatId}
-                    endTime={msg.endTime}
-                    isPaused={msg.isPaused}
-                    isStreaming={msg.isStreaming}
-                    items={msg.items}
-                    key={msg.id}
-                    pauseReason={msg.pauseReason}
-                    startTime={msg.startTime}
-                  />
-                ) : (
-                  <Card
-                    className={cn(
-                      'group relative overflow-x-auto',
-                      msg.role === 'user' ? 'ml-auto max-w-[85%]' : 'mr-auto max-w-[85%]',
-                      msg.isError && 'border-destructive/50 bg-destructive/5',
-                    )}
-                    key={msg.id}
-                  >
-                    <CardContent className="p-3">
-                      {msg.role === 'user' ? (
-                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                      ) : msg.isError ? (
-                        <p className="text-destructive text-sm">{msg.content}</p>
-                      ) : (
-                        <MarkdownMessage content={msg.content} />
-                      )}
-                    </CardContent>
-                    {msg.role !== 'user' && !msg.isError && (
-                      <Button
-                        aria-label="Copy message"
-                        className="text-muted-foreground pointer-events-none absolute right-1.5 bottom-1.5 h-6 w-6 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
-                        onClick={() => handleCopyMessage(msg.id, msg.content)}
-                        size="icon"
-                        variant="ghost"
-                      >
-                        {copiedMessageId === msg.id ? (
-                          <Check className="h-3.5 w-3.5" />
-                        ) : (
-                          <Copy className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    )}
-                  </Card>
-                ),
-              )}
+              {chatMessages.map((msg) => (
+                <ChatMessageRow
+                  chatId={chatId}
+                  isCopied={copiedMessageId === msg.id}
+                  key={msg.id}
+                  message={msg}
+                  onCopy={handleCopyMessage}
+                />
+              ))}
               <div ref={messagesEndRef} />
             </div>
           </div>
@@ -257,4 +220,4 @@ export function DesignStageView({ chatId }: DesignStageViewProps) {
       </div>
     </div>
   )
-}
+})

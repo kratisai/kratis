@@ -1,5 +1,5 @@
 import { AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
-import { useState } from 'react'
+import { memo, useState } from 'react'
 
 import type { WorkingItem } from '@/types/telemetry-types'
 
@@ -101,8 +101,8 @@ export function AgentWorkingBlock({
             <div
               className={cn('space-y-1.5 px-3 pb-3', !isStreaming && 'border-border border-t pt-2')}
             >
-              {items.map((item, index) => (
-                <WorkingItemRow item={item} key={index} />
+              {items.map((item) => (
+                <WorkingItemRow item={item} key={workingItemKey(item)} />
               ))}
             </div>
           </div>
@@ -121,7 +121,11 @@ function formatDuration(endMs: null | number, startMs: null | number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
-function WorkingItemRow({ item }: { item: WorkingItem }) {
+function workingItemKey(item: WorkingItem): string {
+  return item.type === 'thought' ? item.id : `tool-${item.attempt}-${item.taskId}`
+}
+
+const WorkingItemRow = memo(function WorkingItemRow({ item }: { item: WorkingItem }) {
   if (item.type === 'thought') {
     return (
       <div className="text-muted-foreground flex items-start gap-2 text-xs">
@@ -166,4 +170,4 @@ function WorkingItemRow({ item }: { item: WorkingItem }) {
       </div>
     </div>
   )
-}
+})

@@ -601,4 +601,48 @@ describe('DesignStageView', () => {
       expect(screen.queryByTestId('plan-shortcut')).not.toBeInTheDocument()
     })
   })
+
+  it('does not remount earlier messages or the canvas while a new chunk streams in', async () => {
+    useCanvasStore.setState({
+      canvases: { 'chat-1': [canvasDoc({ content: '```js\nconst canvas = 1\n```' })] },
+    })
+    useChatStore.setState({
+      messages: {
+        'chat-1': [
+          {
+            content: 'Here is the code\n\n```js\nconst a = 1\n```',
+            id: 'stream-earlier',
+            role: 'assistant',
+            timestamp: new Date(),
+          },
+        ],
+      },
+    })
+
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <DesignStageView chatId="chat-1" />
+      </QueryClientProvider>,
+    )
+    const earlierCode = container.querySelector('[data-testid="design-chat-history"] pre')
+    const canvasCode = container.querySelector('[data-testid="design-canvas-pane"] pre')
+    expect(earlierCode).not.toBeNull()
+    expect(canvasCode).not.toBeNull()
+
+    act(() => {
+      useChatStore.getState().handleMessageChunkResult({
+        attempt: 1,
+        chatId: 'chat-1',
+        content: 'Streaming reply',
+        messageId: 'stream-latest',
+        role: 'assistant',
+        timestamp: new Date().toISOString(),
+        type: 'message_chunk',
+      })
+    })
+
+    expect(await screen.findByText('Streaming reply')).toBeInTheDocument()
+    expect(container.querySelector('[data-testid="design-chat-history"] pre')).toBe(earlierCode)
+    expect(container.querySelector('[data-testid="design-canvas-pane"] pre')).toBe(canvasCode)
+  })
 })

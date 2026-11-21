@@ -195,12 +195,17 @@ function streamingContentFor(messageId: string): string {
 }
 
 // Replaces the content of the text message with the given id, leaving working
-// messages (which have no content field) untouched.
+// messages (which have no content field) untouched. Returns the same array when no
+// message changes so unrelated chat subscribers do not re-render on every flush.
 function updateMessageContent(
   messages: ChatMessage[],
   messageId: string,
   content: string,
 ): ChatMessage[] {
+  const changes = messages.some(
+    (msg) => msg.id === messageId && msg.role !== 'working' && msg.content !== content,
+  )
+  if (!changes) return messages
   return messages.map((msg) =>
     msg.id === messageId && msg.role !== 'working' ? { ...msg, content } : msg,
   )
@@ -739,11 +744,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const existing = chatMessages[openIndex]
         if (existing.role !== 'working') return state
 
+        const items = applyTelemetryEvent(existing.items, event, telemetryResult.attempt)
+        if (items === existing.items) return state
+
         const updatedMessages = [...chatMessages]
-        updatedMessages[openIndex] = {
-          ...existing,
-          items: applyTelemetryEvent(existing.items, event, telemetryResult.attempt),
-        }
+        updatedMessages[openIndex] = { ...existing, items }
         return {
           messages: {
             ...state.messages,

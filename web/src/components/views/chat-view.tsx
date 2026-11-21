@@ -32,16 +32,13 @@ export function ChatView() {
 
   const terminalEndRef = useRef<HTMLDivElement>(null)
 
-  const {
-    logs,
-    requestLogs,
-    setTerminalFullscreen,
-    setTerminalHeight,
-    setTerminalOpen,
-    terminalFullscreen,
-    terminalHeight,
-    terminalOpen,
-  } = useExecutionStore()
+  const requestLogs = useExecutionStore((state) => state.requestLogs)
+  const setTerminalFullscreen = useExecutionStore((state) => state.setTerminalFullscreen)
+  const setTerminalHeight = useExecutionStore((state) => state.setTerminalHeight)
+  const setTerminalOpen = useExecutionStore((state) => state.setTerminalOpen)
+  const terminalFullscreen = useExecutionStore((state) => state.terminalFullscreen)
+  const terminalHeight = useExecutionStore((state) => state.terminalHeight)
+  const terminalOpen = useExecutionStore((state) => state.terminalOpen)
 
   const chatId = id || currentChatId
   const { data: executions = [] } = useChatExecutions(chatId)
@@ -50,7 +47,10 @@ export function ChatView() {
     .find((e) => e.status === 'RUNNING' || e.status === 'IDLE')
   const activeExecutionId = routeExecutionId ?? latestRunning?.id ?? null
   const activeExecution = executions.find((e) => e.id === activeExecutionId)
-  const activeLogs = activeExecutionId ? (logs[activeExecutionId] ?? []) : []
+  const activeLogs =
+    useExecutionStore((state): string[] | undefined =>
+      activeExecutionId ? state.logs[activeExecutionId] : undefined,
+    ) ?? []
   const showTerminal = terminalOpen && activeExecutionId !== null
   const activeEnvironmentId = activeExecution?.environmentId ?? undefined
   const activeEnvironmentStatus = activeExecution?.environmentStatus

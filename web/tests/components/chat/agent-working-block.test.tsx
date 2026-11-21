@@ -24,7 +24,9 @@ describe('AgentWorkingBlock', () => {
   })
 
   it('scrolls wide generated content horizontally instead of widening the page', () => {
-    const items: WorkingItem[] = [{ attempt: 1, id: 'thought-1', text: 'A generated thought', type: 'thought' }]
+    const items: WorkingItem[] = [
+      { attempt: 1, id: 'thought-1', text: 'A generated thought', type: 'thought' },
+    ]
     const { container } = render(
       <AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />,
     )
@@ -42,9 +44,7 @@ describe('AgentWorkingBlock', () => {
       },
     ]
 
-    render(
-      <AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />,
-    )
+    render(<AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />)
 
     // Bold/italic markdown should be rendered as actual elements, not raw asterisks.
     expect(screen.getByText('Assessing Performance Implications').tagName).toBe('STRONG')
@@ -62,9 +62,7 @@ describe('AgentWorkingBlock', () => {
       },
     ]
 
-    render(
-      <AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />,
-    )
+    render(<AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />)
 
     expect(screen.getByText('First point').closest('li')).not.toBeNull()
     expect(screen.getByText('Second point').closest('li')).not.toBeNull()
@@ -76,9 +74,7 @@ describe('AgentWorkingBlock', () => {
       { attempt: 1, id: 'thought-2', text: 'Second *italic* thought', type: 'thought' },
     ]
 
-    render(
-      <AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />,
-    )
+    render(<AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />)
 
     expect(screen.getByText('bold').tagName).toBe('STRONG')
     expect(screen.getByText('italic').tagName).toBe('EM')
@@ -96,9 +92,7 @@ describe('AgentWorkingBlock', () => {
       },
     ]
 
-    render(
-      <AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />,
-    )
+    render(<AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />)
 
     // Tool "thought" text is rendered verbatim (raw markdown syntax visible), not parsed.
     expect(screen.getByText('Checking the **repo** for issues')).toBeInTheDocument()
@@ -117,9 +111,7 @@ describe('AgentWorkingBlock', () => {
       },
     ]
 
-    render(
-      <AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />,
-    )
+    render(<AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />)
 
     // Check indicator icon and thought
     const errorIcon = screen.getByLabelText('Tool failed')
@@ -154,9 +146,7 @@ describe('AgentWorkingBlock', () => {
       },
     ]
 
-    render(
-      <AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />,
-    )
+    render(<AgentWorkingBlock endTime={null} isStreaming items={items} startTime={Date.now()} />)
 
     expect(screen.getByLabelText('Tool failed')).toBeInTheDocument()
     expect(screen.getByText('Probing endpoint')).toBeInTheDocument()
@@ -312,5 +302,52 @@ describe('AgentWorkingBlock', () => {
       expect(button).toBeDisabled()
       expect(continuePlanningMock).toHaveBeenCalledWith('chat-1')
     })
+  })
+
+  it('keeps existing working rows mounted when a new tool step is appended', () => {
+    const startTime = Date.now()
+    const thought: WorkingItem = {
+      attempt: 1,
+      id: 'thought-1',
+      text: 'Reading the repository layout',
+      type: 'thought',
+    }
+    const firstTool: WorkingItem = {
+      attempt: 1,
+      status: 'running',
+      taskId: 'task-1',
+      thought: 'Listing files',
+      toolName: 'list_files',
+      type: 'tool',
+    }
+    const secondTool: WorkingItem = {
+      attempt: 1,
+      status: 'running',
+      taskId: 'task-2',
+      thought: 'Reading README',
+      toolName: 'read_file',
+      type: 'tool',
+    }
+    const { rerender } = render(
+      <AgentWorkingBlock
+        endTime={null}
+        isStreaming
+        items={[thought, firstTool]}
+        startTime={startTime}
+      />,
+    )
+    const thoughtRow = screen.getByText('Reading the repository layout')
+
+    rerender(
+      <AgentWorkingBlock
+        endTime={null}
+        isStreaming
+        items={[thought, firstTool, secondTool]}
+        startTime={startTime}
+      />,
+    )
+
+    expect(screen.getByText('Reading README')).toBeInTheDocument()
+    expect(screen.getByText('Reading the repository layout')).toBe(thoughtRow)
   })
 })

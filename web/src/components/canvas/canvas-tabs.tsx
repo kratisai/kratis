@@ -14,6 +14,8 @@ import { useAuthStore } from '@/store/auth-store'
 import { useCanvasStore } from '@/store/canvas-store'
 import { useExecutionStore } from '@/store/execution-store'
 
+const NO_CANVASES: CanvasDocument[] = []
+
 import { CanvasDeleteDialog } from './canvas-delete-dialog'
 import { ExecutionLaunchDialog, type LaunchTarget } from './execution-launch-dialog'
 
@@ -25,10 +27,10 @@ interface CanvasTabsProps {
 
 export function CanvasTabs({ chatId, className, docId }: CanvasTabsProps) {
   const navigate = useNavigate()
-  const canvases = useCanvasStore((state) => state.canvases)
   const removeCanvasDocument = useCanvasStore((state) => state.removeCanvasDocument)
 
-  const { clearLogs, setTerminalOpen } = useExecutionStore()
+  const clearLogs = useExecutionStore((state) => state.clearLogs)
+  const setTerminalOpen = useExecutionStore((state) => state.setTerminalOpen)
 
   const teamId = useAuthStore((state) => state.currentTeamId)
   const allowAllPermissions = useChatPermissions(chatId)
@@ -45,8 +47,8 @@ export function CanvasTabs({ chatId, className, docId }: CanvasTabsProps) {
   const [docToDelete, setDocToDelete] = useState<CanvasDocument | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- canvases[chatId] can be undefined at runtime despite the Record type
-  const chatCanvases = canvases[chatId] || []
+  const chatCanvases =
+    useCanvasStore((state): CanvasDocument[] | undefined => state.canvases[chatId]) ?? NO_CANVASES
 
   if (chatCanvases.length === 0) {
     return null

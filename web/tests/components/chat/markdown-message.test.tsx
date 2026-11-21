@@ -475,4 +475,32 @@ describe('MarkdownMessage', () => {
     await userEvent.click(summary)
     expect(screen.getByText(/A --> B/)).toBeInTheDocument()
   })
+
+  it('keeps code blocks and tables mounted when streamed content grows', () => {
+    const base = 'Intro\n\n```js\nconst a = 1\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n'
+    const { container, rerender } = render(<MarkdownMessage content={base} />)
+    const code = container.querySelector('code')
+    const table = container.querySelector('table')
+
+    rerender(<MarkdownMessage content={`${base}\nMore streamed text`} />)
+
+    expect(container.querySelector('code')).toBe(code)
+    expect(container.querySelector('table')).toBe(table)
+    expect(container).toHaveTextContent('More streamed text')
+  })
+
+  it('keeps the last rendered diagram in place while an updated diagram is still rendering', async () => {
+    vi.mocked(mermaid.render).mockResolvedValueOnce(
+      mockMermaidRenderResult('<svg>Old diagram</svg>'),
+    )
+    const { rerender } = render(
+      <MarkdownMessage content={'```mermaid\nflowchart TD\nA --> B\n```'} />,
+    )
+    await screen.findByText('Old diagram')
+
+    vi.mocked(mermaid.render).mockImplementation(() => new Promise(() => {}))
+    rerender(<MarkdownMessage content={'```mermaid\nflowchart TD\nA --> C\n```'} />)
+
+    expect(screen.getByText('Old diagram')).toBeInTheDocument()
+  })
 })

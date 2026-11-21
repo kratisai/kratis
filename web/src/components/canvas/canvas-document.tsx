@@ -1,12 +1,16 @@
 import { Check, Copy } from 'lucide-react'
 
+import type { CanvasDocument as CanvasDocumentType } from '@/types/canvas-types'
+
 import { MarkdownMessage } from '@/components/chat/markdown-message'
 import { Button } from '@/components/ui/button'
 import { useResetAfterDelay } from '@/hooks/use-reset-after-delay'
 import { copyToClipboard } from '@/lib/clipboard'
 import { canonicalizeMermaidMarkdown } from '@/lib/mermaid/markdown'
 import { useCanvasStore } from '@/store/canvas-store'
-import { useChatStore } from '@/store/chat-store'
+import { type ChatMessage, useChatStore } from '@/store/chat-store'
+
+const NO_CANVASES: CanvasDocumentType[] = []
 
 interface CanvasDocumentProps {
   chatId: string
@@ -14,30 +18,16 @@ interface CanvasDocumentProps {
 }
 
 export function CanvasDocument({ chatId, documentId }: CanvasDocumentProps) {
-  const canvases = useCanvasStore((state) => state.canvases)
-  const messages = useChatStore((state) => state.messages)
+  const chatCanvases =
+    useCanvasStore((state): CanvasDocumentType[] | undefined => state.canvases[chatId]) ??
+    NO_CANVASES
+  const doc = chatCanvases.find((d) => d.documentId === documentId)
+  const isUpdating = useChatStore((state) => hasRunningCanvasWrite(state.messages[chatId]))
   const [copied, setCopied] = useResetAfterDelay(false, false, 1500)
 
   const handleCopy = (content: string) => {
     void copyToClipboard(canonicalizeMermaidMarkdown(content)).then(setCopied)
   }
-
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- messages[chatId] can be undefined at runtime despite the Record type
-  const chatMessagesForUpdateCheck = chatId ? messages[chatId] || [] : []
-  const isUpdating = chatMessagesForUpdateCheck.some(
-    (msg) =>
-      msg.role === 'working' &&
-      msg.items.some(
-        (item) =>
-          item.type === 'tool' &&
-          (item.toolName === 'write_canvas' || item.toolName === 'patch_canvas') &&
-          item.status === 'running',
-      ),
-  )
-
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- canvases[chatId] can be undefined at runtime despite the Record type
-  const chatCanvases = canvases[chatId] || []
-  const doc = chatCanvases.find((d) => d.documentId === documentId)
 
   if (!doc) {
     return (
@@ -70,5 +60,18 @@ export function CanvasDocument({ chatId, documentId }: CanvasDocumentProps) {
         <MarkdownMessage content={doc.content} variant="document" />
       </div>
     </div>
+  )
+}
+
+function hasRunningCanvasWrite(messages: ChatMessage[] | undefined): boolean {
+  return (messages ?? []).some(
+    (msg) =>
+      msg.role === 'working' &&
+      msg.items.some(
+        (item) =>
+          item.type === 'tool' &&
+          (item.toolName === 'write_canvas' || item.toolName === 'patch_canvas') &&
+          item.status === 'running',
+      ),
   )
 }

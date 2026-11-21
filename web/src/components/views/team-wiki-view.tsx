@@ -14,7 +14,7 @@ import {
   Terminal,
   XCircle,
 } from 'lucide-react'
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 
 import type { TeamWikiBatchDto, TeamWikiStatusDto, WikiPageDto } from '@/lib/wiki-api'
 
@@ -110,9 +110,12 @@ export function TeamWikiView() {
     })
   }
 
-  const handleMarkdownNavigate = (path: string) => {
-    void navigate({ to: path })
-  }
+  const handleMarkdownNavigate = useCallback(
+    (path: string) => {
+      void navigate({ to: path })
+    },
+    [navigate],
+  )
 
   const breadcrumbs: WikiPageDto[] = []
   if (tree && selectedPage) {

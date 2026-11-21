@@ -2,7 +2,7 @@
 
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { ArrowLeft, BookOpen, ChevronRight, Loader2 } from 'lucide-react'
-import React, { useEffect } from 'react'
+import React, { useCallback, useEffect } from 'react'
 
 import type { WikiPageDto } from '@/lib/wiki-api'
 
@@ -81,9 +81,12 @@ export function WikiView() {
     }
   }
 
-  const handleMarkdownNavigate = (path: string) => {
-    void navigate({ to: path })
-  }
+  const handleMarkdownNavigate = useCallback(
+    (path: string) => {
+      void navigate({ to: path })
+    },
+    [navigate],
+  )
 
   const breadcrumbs: WikiPageDto[] = []
   if (tree && selectedPage) {

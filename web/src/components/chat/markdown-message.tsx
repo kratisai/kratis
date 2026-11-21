@@ -3,8 +3,17 @@ import type { ReactElement, ReactNode } from 'react'
 import { Check, Copy, Maximize2 } from 'lucide-react'
 import mermaid from 'mermaid'
 import { useTheme } from 'next-themes'
-import { Children, cloneElement, isValidElement, useEffect, useId, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
 import remarkGfm from 'remark-gfm'
 
@@ -120,91 +129,99 @@ interface MarkdownMessageProps {
   variant?: MarkdownVariant
 }
 
+// react-markdown mounts overrides by component identity, so these must stay referentially
+// stable across renders or every streamed chunk remounts code blocks and mermaid diagrams.
+const CHAT_REHYPE_PLUGINS = [rehypeHighlight]
+const NO_REHYPE_PLUGINS: never[] = []
+const REMARK_PLUGINS = [remarkGfm]
+
 export function MarkdownMessage({ content, onNavigate, variant = 'chat' }: MarkdownMessageProps) {
   const isActivity = variant === 'activity'
-  const unclosedMermaid = isActivity ? null : findUnclosedMermaidFence(content)
+  const unclosedMermaid = useMemo(
+    () => (isActivity ? null : findUnclosedMermaidFence(content)),
+    [content, isActivity],
+  )
+
+  const components = useMemo<Components>(
+    () => ({
+      a({ children, href, node: _node, ...props }) {
+        if (href && href.startsWith('/wiki') && onNavigate) {
+          return (
+            <a
+              href={href}
+              onClick={(e) => {
+                e.preventDefault()
+                onNavigate(href)
+              }}
+              {...props}
+            >
+              {children}
+            </a>
+          )
+        }
+        return (
+          <a href={href} {...props}>
+            {children}
+          </a>
+        )
+      },
+      blockquote({ children, node: _node, ...props }) {
+        const callout = detectCallout(children)
+        if (!callout) {
+          return <blockquote {...props}>{children}</blockquote>
+        }
+        return (
+          <blockquote {...props} data-callout={callout.type}>
+            <span className="md-callout-label">{callout.label}</span>
+            {callout.content}
+          </blockquote>
+        )
+      },
+      code({ children, className, node, ...props }) {
+        const match = /language-([\w+-]+)/.exec(className || '')
+        if (!isActivity && match?.[1] === 'mermaid') {
+          const chart = codeText(children).replace(/\n$/, '')
+          const incomplete =
+            unclosedMermaid !== null && node?.position?.start.line === unclosedMermaid
+          return <MermaidDiagram chart={chart} incomplete={incomplete} />
+        }
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        )
+      },
+      pre({ children, node: _node, ...props }) {
+        const first = Children.toArray(children)[0]
+        if (
+          !isActivity &&
+          isValidElement<{ className?: string }>(first) &&
+          typeof first.props.className === 'string' &&
+          first.props.className.includes('language-mermaid')
+        ) {
+          return <>{children}</>
+        }
+        return <pre {...props}>{children}</pre>
+      },
+      table({ children, node: _node, ...props }) {
+        return (
+          <div className="md-table-wrapper">
+            <table {...props}>{children}</table>
+          </div>
+        )
+      },
+    }),
+    [isActivity, onNavigate, unclosedMermaid],
+  )
 
   return (
     <div
       className={cn('prose dark:prose-invert max-w-none overflow-x-auto', VARIANT_CLASSES[variant])}
     >
       <ReactMarkdown
-        components={{
-          a({ children, href, node: _node, ...props }) {
-            if (href && href.startsWith('/wiki') && onNavigate) {
-              return (
-                <a
-                  href={href}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    onNavigate(href)
-                  }}
-                  {...props}
-                >
-                  {children}
-                </a>
-              )
-            }
-            return (
-              <a href={href} {...props}>
-                {children}
-              </a>
-            )
-          },
-          blockquote({ children, node: _node, ...props }) {
-            const callout = detectCallout(children)
-            if (!callout) {
-              return <blockquote {...props}>{children}</blockquote>
-            }
-            return (
-              <blockquote {...props} data-callout={callout.type}>
-                <span className="md-callout-label">{callout.label}</span>
-                {callout.content}
-              </blockquote>
-            )
-          },
-          code({ children, className, node, ...props }) {
-            const match = /language-([\w+-]+)/.exec(className || '')
-            if (!isActivity && match?.[1] === 'mermaid') {
-              const chart = codeText(children).replace(/\n$/, '')
-              const incomplete =
-                unclosedMermaid !== null && node?.position?.start.line === unclosedMermaid
-              return (
-                <MermaidDiagram
-                  chart={chart}
-                  incomplete={incomplete}
-                  key={`${incomplete}:${chart}`}
-                />
-              )
-            }
-            return (
-              <code className={className} {...props}>
-                {children}
-              </code>
-            )
-          },
-          pre({ children, node: _node, ...props }) {
-            const first = Children.toArray(children)[0]
-            if (
-              !isActivity &&
-              isValidElement<{ className?: string }>(first) &&
-              typeof first.props.className === 'string' &&
-              first.props.className.includes('language-mermaid')
-            ) {
-              return <>{children}</>
-            }
-            return <pre {...props}>{children}</pre>
-          },
-          table({ children, node: _node, ...props }) {
-            return (
-              <div className="md-table-wrapper">
-                <table {...props}>{children}</table>
-              </div>
-            )
-          },
-        }}
-        rehypePlugins={isActivity ? [] : [rehypeHighlight]}
-        remarkPlugins={[remarkGfm]}
+        components={components}
+        rehypePlugins={isActivity ? NO_REHYPE_PLUGINS : CHAT_REHYPE_PLUGINS}
+        remarkPlugins={REMARK_PLUGINS}
       >
         {content}
       </ReactMarkdown>
@@ -281,7 +298,7 @@ function findUnclosedMermaidFence(content: string): null | number {
 }
 
 function MermaidDiagram({ chart, incomplete }: { chart: string; incomplete: boolean }) {
-  const recognition = recognize(chart)
+  const recognition = useMemo(() => recognize(chart), [chart])
   const recognitionError = incomplete
     ? 'Incomplete Mermaid diagram'
     : recognition.ok
@@ -289,7 +306,8 @@ function MermaidDiagram({ chart, incomplete }: { chart: string; incomplete: bool
       : recognition.error
   const renderText = recognition.ok && !incomplete ? recognition.renderText : null
   const [svg, setSvg] = useState<null | string>(null)
-  const [error, setError] = useState<null | string>(null)
+  const [failure, setFailure] = useState<null | { message: string; source: string }>(null)
+  const error = failure?.source === renderText ? failure.message : null
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [copied, setCopied] = useResetAfterDelay(false, false, 1500)
   const { resolvedTheme } = useTheme()
@@ -321,12 +339,15 @@ function MermaidDiagram({ chart, incomplete }: { chart: string; incomplete: bool
         const { svg: renderedSvg } = await mermaid.render(svgId, renderText)
         if (!isCancelled) {
           setSvg(renderedSvg)
-          setError(null)
+          setFailure(null)
         }
       } catch (err) {
         console.error('Mermaid rendering error:', err)
         if (!isCancelled) {
-          setError(err instanceof Error ? err.message : String(err))
+          setFailure({
+            message: err instanceof Error ? err.message : String(err),
+            source: renderText,
+          })
         }
       }
     }
@@ -342,7 +363,7 @@ function MermaidDiagram({ chart, incomplete }: { chart: string; incomplete: bool
     return (
       <div className="border-destructive bg-destructive/10 text-destructive rounded-md border p-4 text-sm">
         <p className="font-semibold">Failed to render Mermaid diagram</p>
-        <p className="mt-1 break-words opacity-80">{displayError}</p>
+        <p className="mt-1 wrap-break-word opacity-80">{displayError}</p>
         <details className="mt-3">
           <summary className="cursor-pointer text-xs font-medium opacity-80">
             Show diagram source
@@ -390,7 +411,7 @@ function MermaidDiagram({ chart, incomplete }: { chart: string; incomplete: bool
           <div className="flex flex-1 items-center justify-center overflow-hidden">
             {svg && (
               <div
-                className="mermaid-diagram-fullscreen flex h-full w-full items-center justify-center [&_svg]:!h-full [&_svg]:!w-full [&_svg]:!max-w-none"
+                className="mermaid-diagram-fullscreen flex h-full w-full items-center justify-center [&_svg]:h-full! [&_svg]:w-full! [&_svg]:max-w-none!"
                 dangerouslySetInnerHTML={{ __html: svg }}
               />
             )}

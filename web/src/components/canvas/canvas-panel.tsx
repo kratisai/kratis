@@ -1,3 +1,7 @@
+import { memo } from 'react'
+
+import type { CanvasDocument as CanvasDocumentType } from '@/types/canvas-types'
+
 import { CanvasDocument } from '@/components/canvas/canvas-document'
 import { CanvasTabs } from '@/components/canvas/canvas-tabs'
 import { useCanvasStore } from '@/store/canvas-store'
@@ -7,11 +11,12 @@ interface CanvasPanelProps {
   docId: string
 }
 
-export function CanvasPanel({ chatId, docId }: CanvasPanelProps) {
-  const canvases = useCanvasStore((state) => state.canvases)
+const NO_CANVASES: CanvasDocumentType[] = []
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- canvases[chatId] can be undefined at runtime despite the Record type
-  const chatCanvases = canvases[chatId] || []
+export const CanvasPanel = memo(function CanvasPanel({ chatId, docId }: CanvasPanelProps) {
+  const chatCanvases =
+    useCanvasStore((state): CanvasDocumentType[] | undefined => state.canvases[chatId]) ??
+    NO_CANVASES
 
   if (chatCanvases.length === 0) {
     return (
@@ -35,4 +40,4 @@ export function CanvasPanel({ chatId, docId }: CanvasPanelProps) {
       </div>
     </div>
   )
-}
+})
