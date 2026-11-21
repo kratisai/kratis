@@ -26,6 +26,7 @@ import com.kratisai.controlplane.service.ProcessExecutor;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SlowTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.TestIsolationScope;
 import com.kratisai.controlplane.testsupport.TestTimingRegistry;
 import com.kratisai.controlplane.testsupport.llm.UseRealLlmClient;
 import com.kratisai.controlplane.testsupport.llm.WireMockLlmServer;
@@ -126,7 +127,8 @@ public abstract class AbstractAgentExecutionRealTest {
 
     private static final Object IMAGE_BUILD_LOCK = new Object();
     private static final AtomicBoolean INITIALIZED = new AtomicBoolean(false);
-    private static final String TEST_IMAGE_NAME = "kratis-e2e-test:latest";
+    private static final String RUNNER_IMAGE_NAME = TestIsolationScope.runnerImageTag();
+    private static final String TEST_IMAGE_NAME = TestIsolationScope.e2eImageTag();
     private static final String DUMMY_REPO_CONTAINER_PATH = "/kratis/dummy-repo";
     private static final Duration HITL_STALL_TIMEOUT = Duration.ofSeconds(20);
 
@@ -162,13 +164,7 @@ public abstract class AbstractAgentExecutionRealTest {
             // Build the runner-base image
             long runnerImgStart = System.nanoTime();
             ProcessBuilder pbRunner = new ProcessBuilder(
-                    "docker",
-                    "build",
-                    "-t",
-                    "kratis-runner-base:latest",
-                    "-f",
-                    "../build/Dockerfile.runner-base",
-                    "..");
+                    "docker", "build", "-t", RUNNER_IMAGE_NAME, "-f", "../build/Dockerfile.runner-base", "..");
             int exitCode = runQuietBuildProcess(pbRunner);
             TestTimingRegistry.instance().recordSubPhase("runnerImageBuild", System.nanoTime() - runnerImgStart);
             if (exitCode != 0) {
@@ -200,13 +196,13 @@ public abstract class AbstractAgentExecutionRealTest {
 
                 // Build test image with dummy repo at /kratis/dummy-repo.
                 Files.writeString(tempDockerfile, """
-                        FROM kratis-runner-base:latest
+                        FROM %s
                         USER root
                         RUN mkdir -p /kratis/dummy-repo
                         COPY . /kratis/dummy-repo/
                         RUN chown -R 1000:1000 /kratis/
                         USER kratis
-                        """);
+                        """.formatted(RUNNER_IMAGE_NAME));
                 ProcessBuilder pbImage = new ProcessBuilder(
                         "docker",
                         "build",

@@ -22,6 +22,7 @@ import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SlowTest;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.TestIsolationScope;
 import com.kratisai.controlplane.testsupport.TestTimingRegistry;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -44,7 +45,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 @SlowTest(slotGroup = "E2E_DOCKER_CONTAINER", maxConcurrency = 3)
 class SuspendResumeConnectorIntegrationTest {
 
-    private static final String RUNNER_IMAGE = "kratis-runner-base:latest";
+    private static final String RUNNER_IMAGE = TestIsolationScope.runnerImageTag();
     private static final String UPSTREAM_SCRIPT = "set -e; rm -rf /tmp/seed /tmp/up.git; git init -q -b main /tmp/seed;"
             + " cd /tmp/seed; git config user.email a@b.c; git config user.name t;"
             + " echo 1 > a.txt; git add .; git commit -qm c1;"

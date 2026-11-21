@@ -13,6 +13,7 @@ import com.kratisai.controlplane.service.ProcessExecutor;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.TestIsolationScope;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
@@ -80,9 +81,7 @@ abstract @SpringIntegrationTest class BaseCodebaseMemoryParserIntegrationTest {
     protected CodebaseMemoryParserService createParserService(File binaryFile) {
         IngestionProperties ingestionProperties = new IngestionProperties();
         ingestionProperties.getParser().setBinaryPath(binaryFile.getAbsolutePath());
-        ingestionProperties
-                .getParser()
-                .setTempDir(new File(System.getProperty("java.io.tmpdir"), "kratis-cbm-cache").getAbsolutePath());
+        ingestionProperties.getParser().setTempDir(TestIsolationScope.cbmCacheDir());
         return new CodebaseMemoryParserService(
                 ctxNodeRepository, ctxEdgeRepository, new ProcessExecutor(), objectMapper, ingestionProperties);
     }

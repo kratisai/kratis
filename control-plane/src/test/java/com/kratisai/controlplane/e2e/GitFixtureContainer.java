@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.e2e;
 
+import com.kratisai.controlplane.testsupport.TestIsolationScope;
 import com.kratisai.controlplane.testsupport.TestTimingRegistry;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.IOException;
@@ -33,7 +34,7 @@ public class GitFixtureContainer extends GenericContainer<GitFixtureContainer> {
 
     private static final Logger logger = LoggerFactory.getLogger(GitFixtureContainer.class);
 
-    private static final String IMAGE_NAME = "kratis-git-fixture:static";
+    private static final String IMAGE_NAME = TestIsolationScope.gitFixtureImageTag();
     private static final String HTTP_USER = "oauth2";
     private static final String SSH_USER = "gituser";
     private static final String FIXTURE_FILE_CONTENT = "Hello over HTTPS";

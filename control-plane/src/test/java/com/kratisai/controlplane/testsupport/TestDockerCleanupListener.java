@@ -9,13 +9,14 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Removes Docker resources left behind by integration tests that exercise the docker host with
- * {@code kratis.instance.id=kratis-test}. The label scope means developer stacks are never
- * touched. Best-effort: without a docker CLI the e2e tests already fail on their own.
+ * this workspace/container's scoped {@code kratis.instance.id}. The label scope means developer
+ * stacks and parallel branch containers are never touched. Best-effort: without a docker CLI the
+ * e2e tests already fail on their own.
  */
 public class TestDockerCleanupListener implements TestExecutionListener {
 
     private static final Logger log = LoggerFactory.getLogger(TestDockerCleanupListener.class);
-    private static final String TEST_INSTANCE_ID = "kratis-test";
+    private static final String TEST_INSTANCE_ID = TestIsolationScope.instanceId();
 
     @Override
     public void testPlanExecutionStarted(TestPlan testPlan) {

@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kratisai.controlplane.api.restdto.CreateSandboxExecutionRequest;
+import com.kratisai.controlplane.config.InstanceProperties;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.service.CanvasService;
@@ -92,6 +93,9 @@ class ChatExecutionControllerTest {
 
     @Autowired
     private EnvironmentRpcClient environmentRpcClient;
+
+    @Autowired
+    private InstanceProperties instanceProperties;
 
     private String authToken;
     private ChatEntity chat;
@@ -201,7 +205,7 @@ class ChatExecutionControllerTest {
                         return new ProcessExecutor.ProcessResult(0, "mock-container-id-999888".getBytes());
                     }
                     if (cmd.stream().anyMatch(arg -> arg.contains("index .Config.Labels"))) {
-                        return new ProcessExecutor.ProcessResult(0, "kratis-test\n".getBytes());
+                        return new ProcessExecutor.ProcessResult(0, (instanceProperties.getId() + "\n").getBytes());
                     }
                     return new ProcessExecutor.ProcessResult(0, new byte[0]);
                 })
@@ -256,7 +260,7 @@ class ChatExecutionControllerTest {
                         "-e",
                         "DOCKER_TLS_CERTDIR=",
                         "--label",
-                        "kratis.instance.id=kratis-test",
+                        "kratis.instance.id=" + instanceProperties.getId(),
                         "--label",
                         "kratis.role=dind",
                         "docker:dind-rootless",
@@ -276,7 +280,7 @@ class ChatExecutionControllerTest {
                         "--add-host",
                         "host.docker.internal:host-gateway",
                         "--label",
-                        "kratis.instance.id=kratis-test",
+                        "kratis.instance.id=" + instanceProperties.getId(),
                         "--label",
                         "kratis.role=runner",
                         "--cap-drop=ALL",

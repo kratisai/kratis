@@ -58,7 +58,7 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
     private static final Logger logger = LoggerFactory.getLogger(PostgresTestInitializer.class);
 
     /** Peers resolve each other by alias here, so inter-container addressing needs no IP math. */
-    private static final String TEST_NETWORK_NAME = "kratis-test-net";
+    private static final String TEST_NETWORK_NAME = TestIsolationScope.networkName();
 
     private static final String POSTGRES_ALIAS = "postgres";
     private static final String LITELLM_ALIAS = "litellm";
@@ -81,7 +81,7 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                     "full_page_writes=off")
             .withNetworkMode(TEST_NETWORK_NAME)
             .withCreateContainerCmdModifier(cmd -> cmd.withAliases(POSTGRES_ALIAS))
-            .withLabel("workspace.id", System.getProperty("user.dir"))
+            .withLabel("workspace.id", TestIsolationScope.workspaceScope())
             .withReuse(true);
 
     static final GenericContainer<?> LITELLM_CONTAINER;
@@ -149,7 +149,7 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                 .withNetworkMode(TEST_NETWORK_NAME)
                 .withCreateContainerCmdModifier(cmd -> cmd.withAliases(LITELLM_ALIAS))
                 .withExtraHost("host.docker.internal", "host-gateway")
-                .withLabel("workspace.id", System.getProperty("user.dir"))
+                .withLabel("workspace.id", TestIsolationScope.workspaceScope())
                 .withEnv("LITELLM_MASTER_KEY", "sk-test-master")
                 .withEnv("LITELLM_LOG", "INFO")
                 .withEnv("STORE_MODEL_IN_DB", "True")
@@ -286,8 +286,8 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
         }
 
         if (modelCount > LITELLM_MODEL_COUNT_FAIL_THRESHOLD) {
-            throw new IllegalStateException(
-                    String.format("""
+            throw new IllegalStateException(String.format(
+                    """
 
                     ============================================================================
                     TEST ENVIRONMENT ERROR: LiteLLM model table is polluted with %d models
@@ -312,7 +312,7 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                     Or remove the reused containers entirely to start fresh:
                       docker ps -a --filter "label=workspace.id=%s" -q | xargs -r docker rm -f
                     ============================================================================
-                    """, modelCount, LITELLM_MODEL_COUNT_FAIL_THRESHOLD, System.getProperty("user.dir")));
+                    """, modelCount, LITELLM_MODEL_COUNT_FAIL_THRESHOLD, TestIsolationScope.workspaceScope()));
         }
     }
 
@@ -401,14 +401,17 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                 .getPropertySources()
                 .addFirst(new MapPropertySource(
                         "testSchemaConfig",
-                        Map.of(
-                                "test.schema", schema,
-                                "spring.datasource.url", schemaJdbcUrl,
-                                "spring.datasource.hikari.pool-name", "kratis-test-" + schema,
-                                "spring.liquibase.enabled", "true",
-                                "spring.liquibase.default-schema", schema,
-                                "spring.liquibase.liquibase-schema", schema,
-                                "spring.jpa.properties.hibernate.default_schema", schema)));
+                        Map.ofEntries(
+                                Map.entry("test.schema", schema),
+                                Map.entry("spring.datasource.url", schemaJdbcUrl),
+                                Map.entry("spring.datasource.hikari.pool-name", "kratis-test-" + schema),
+                                Map.entry("spring.liquibase.enabled", "true"),
+                                Map.entry("spring.liquibase.default-schema", schema),
+                                Map.entry("spring.liquibase.liquibase-schema", schema),
+                                Map.entry("spring.jpa.properties.hibernate.default_schema", schema),
+                                Map.entry("kratis.instance.id", TestIsolationScope.instanceId()),
+                                Map.entry("kratis.ingestion.parser.temp-dir", TestIsolationScope.cbmCacheDir()),
+                                Map.entry("kratis.storage.local-path", TestIsolationScope.blobDir()))));
 
         TestTimingRegistry.instance().registerContextInit(applicationContext, schema, schemaCreateNanos, initStart);
         applicationContext.addBeanFactoryPostProcessor(

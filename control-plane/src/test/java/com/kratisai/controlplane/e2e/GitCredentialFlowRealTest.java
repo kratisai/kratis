@@ -31,6 +31,7 @@ import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SlowTest;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.TestIsolationScope;
 import com.kratisai.controlplane.testsupport.TestTimingRegistry;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -71,7 +72,7 @@ class GitCredentialFlowRealTest {
     private static final Logger logger = LoggerFactory.getLogger(GitCredentialFlowRealTest.class);
 
     private static final String FIXTURE_TOKEN = "kratis-fixture-pat-token";
-    private static final String TEST_IMAGE = "kratis-runner-base:latest";
+    private static final String TEST_IMAGE = TestIsolationScope.runnerImageTag();
     private static final String FIXTURE_FILE_CONTENT = "Hello over HTTPS";
 
     private static final AtomicBoolean INITIALIZED = new AtomicBoolean(false);
@@ -128,11 +129,11 @@ class GitCredentialFlowRealTest {
     private String originalServerUrl;
 
     @BeforeAll
-    static void beforeAll() {
+    static void beforeAll() throws Exception {
         if (!INITIALIZED.compareAndSet(false, true)) {
             return;
         }
-        // Use pre-built sidecar binary and runner-base image (built by CI / local dev)
+        AbstractAgentExecutionRealTest.ensureE2eImagesBuilt();
         gitFixture = new GitFixtureContainer(FIXTURE_TOKEN);
         gitFixture.start();
     }
