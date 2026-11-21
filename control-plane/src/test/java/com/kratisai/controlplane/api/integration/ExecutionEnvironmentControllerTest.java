@@ -12,6 +12,8 @@ import com.kratisai.controlplane.api.restdto.CreateTeamRequest;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.config.InstanceProperties;
+import com.kratisai.controlplane.model.CanvasEntity;
+import com.kratisai.controlplane.model.CanvasType;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.EnvironmentProvider;
 import com.kratisai.controlplane.model.EnvironmentStatus;
@@ -22,6 +24,7 @@ import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
+import com.kratisai.controlplane.repository.CanvasRepository;
 import com.kratisai.controlplane.repository.EnvironmentProviderRepository;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
@@ -68,6 +71,9 @@ class ExecutionEnvironmentControllerTest {
     private SandboxExecutionRepository sandboxExecutionRepository;
 
     @Autowired
+    private CanvasRepository canvasRepository;
+
+    @Autowired
     private SandboxExecutionActivityRepository sandboxExecutionActivityRepository;
 
     @Autowired
@@ -94,6 +100,13 @@ class ExecutionEnvironmentControllerTest {
     private final List<GenericContainer<?>> runnerContainers = new ArrayList<>();
 
     private UUID teamId;
+
+    private CanvasEntity createSpecCanvas(ChatEntity chat, String documentId) {
+        CanvasEntity canvas = new CanvasEntity(chat.getId(), documentId, "Test Spec", "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setNewRepoName("Test Repository");
+        return canvasRepository.save(canvas);
+    }
 
     @BeforeEach
     void setUp() {
@@ -143,6 +156,7 @@ class ExecutionEnvironmentControllerTest {
 
         SandboxExecution execution = new SandboxExecution();
         execution.setEnvironment(activeEnv);
+        execution.setCanvas(createSpecCanvas(chat, "activity"));
         execution.setChat(chat);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         execution.setStartedAt(Instant.now());
@@ -247,9 +261,11 @@ class ExecutionEnvironmentControllerTest {
         executionEnvironmentRepository.save(running);
 
         SandboxExecution execution = new SandboxExecution();
+        ChatEntity chat =
+                testDataFactory.createChat(teamRepository.findById(teamId).orElseThrow(), user, "Running Chat");
         execution.setEnvironment(running);
-        execution.setChat(
-                testDataFactory.createChat(teamRepository.findById(teamId).orElseThrow(), user, "Running Chat"));
+        execution.setCanvas(createSpecCanvas(chat, "running"));
+        execution.setChat(chat);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         execution.setStartedAt(Instant.now());
         sandboxExecutionRepository.save(execution);

@@ -2,6 +2,8 @@ package com.kratisai.controlplane.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kratisai.controlplane.model.CanvasEntity;
+import com.kratisai.controlplane.model.CanvasType;
 import com.kratisai.controlplane.model.ChangeSet;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
@@ -38,6 +40,9 @@ class ChangeSetRepositoryTest {
     private ChatRepository chatRepository;
 
     @Autowired
+    private CanvasRepository canvasRepository;
+
+    @Autowired
     private ExecutionEnvironmentRepository executionEnvironmentRepository;
 
     @Autowired
@@ -54,6 +59,10 @@ class ChangeSetRepositoryTest {
 
         ChatEntity chat = new ChatEntity(team, ctx.user(), "Repository Test Chat");
         chatRepository.save(chat);
+        CanvasEntity canvas = new CanvasEntity(chat.getId(), "changeset-spec", "Test Spec", "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setNewRepoName("Test Repository");
+        canvasRepository.save(canvas);
 
         ExecutionEnvironment env = new ExecutionEnvironment();
         env.setTeam(team);
@@ -65,6 +74,7 @@ class ChangeSetRepositoryTest {
 
         execution = new SandboxExecution();
         execution.setEnvironment(env);
+        execution.setCanvas(canvas);
         execution.setChat(chat);
         execution.setStatus(com.kratisai.controlplane.model.SandboxExecutionStatus.RUNNING);
         execution.setStartedAt(Instant.now());

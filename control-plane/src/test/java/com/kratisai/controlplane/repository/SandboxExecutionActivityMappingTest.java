@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
+import com.kratisai.controlplane.model.CanvasEntity;
+import com.kratisai.controlplane.model.CanvasType;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
@@ -44,6 +46,9 @@ class SandboxExecutionActivityMappingTest {
     private ChatRepository chatRepository;
 
     @Autowired
+    private CanvasRepository canvasRepository;
+
+    @Autowired
     private SandboxExecutionActivityRepository activityRepository;
 
     private SandboxExecution createExecution() {
@@ -58,11 +63,16 @@ class SandboxExecutionActivityMappingTest {
 
         ChatEntity chat = new ChatEntity(context.team(), context.user(), "Test Chat");
         chatRepository.save(chat);
+        CanvasEntity canvas = new CanvasEntity(chat.getId(), "activity-spec", "Test Spec", "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setNewRepoName("Test Repository");
+        canvasRepository.save(canvas);
 
         entityManager.flush();
 
         SandboxExecution execution = new SandboxExecution();
         execution.setEnvironment(env);
+        execution.setCanvas(canvas);
         execution.setChat(chat);
         execution.setTaskPrompt("Test task");
         execution.setStatus(SandboxExecutionStatus.RUNNING);

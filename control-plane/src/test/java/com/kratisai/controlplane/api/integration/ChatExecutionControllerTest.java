@@ -101,6 +101,11 @@ class ChatExecutionControllerTest {
     private String originalServerUrl;
     private UUID spawnedEnvId;
 
+    private CanvasEntity createSpecCanvas(String documentId) {
+        return canvasService.createCanvas(
+                chat.getId(), documentId, "Test Spec", "content", CanvasType.SPEC, repository, null);
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, String> nullableStringMap() {
         return Mockito.nullable(Map.class);
@@ -389,6 +394,7 @@ class ChatExecutionControllerTest {
         environment = executionEnvironmentRepository.save(environment);
 
         SandboxExecution running = new SandboxExecution();
+        running.setCanvas(createSpecCanvas("list-running"));
         running.setChat(chat);
         running.setEnvironment(environment);
         running.setStatus(SandboxExecutionStatus.RUNNING);
@@ -396,6 +402,7 @@ class ChatExecutionControllerTest {
         running = sandboxExecutionRepository.save(running);
 
         SandboxExecution completed = new SandboxExecution();
+        completed.setCanvas(createSpecCanvas("list-completed"));
         completed.setChat(chat);
         completed.setEnvironment(environment);
         completed.setStatus(SandboxExecutionStatus.COMPLETED);
@@ -462,6 +469,7 @@ class ChatExecutionControllerTest {
         environment = executionEnvironmentRepository.save(environment);
 
         SandboxExecution execution = new SandboxExecution();
+        execution.setCanvas(createSpecCanvas("halt-execution-" + UUID.randomUUID()));
         execution.setChat(chat);
         execution.setEnvironment(environment);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
@@ -489,6 +497,7 @@ class ChatExecutionControllerTest {
         environment = executionEnvironmentRepository.save(environment);
 
         SandboxExecution execution = new SandboxExecution();
+        execution.setCanvas(createSpecCanvas("halt-execution-" + UUID.randomUUID()));
         execution.setChat(chat);
         execution.setEnvironment(environment);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
@@ -542,6 +551,7 @@ class ChatExecutionControllerTest {
         environment = executionEnvironmentRepository.save(environment);
 
         SandboxExecution execution = new SandboxExecution();
+        execution.setCanvas(createSpecCanvas("halt-execution-" + UUID.randomUUID()));
         execution.setChat(chat);
         execution.setEnvironment(environment);
         execution.setStatus(SandboxExecutionStatus.COMPLETED);
@@ -576,6 +586,7 @@ class ChatExecutionControllerTest {
         environment = executionEnvironmentRepository.save(environment);
 
         SandboxExecution execution = new SandboxExecution();
+        execution.setCanvas(createSpecCanvas("halt-execution-" + UUID.randomUUID()));
         execution.setChat(chat);
         execution.setEnvironment(environment);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
@@ -600,6 +611,7 @@ class ChatExecutionControllerTest {
         environment = executionEnvironmentRepository.save(environment);
 
         SandboxExecution execution = new SandboxExecution();
+        execution.setCanvas(createSpecCanvas("halt-execution-" + UUID.randomUUID()));
         execution.setChat(chat);
         execution.setEnvironment(environment);
         execution.setStatus(SandboxExecutionStatus.RUNNING);

@@ -30,6 +30,9 @@ class SandboxExecutionMappingTest {
     @Autowired
     private ChatRepository chatRepository;
 
+    @Autowired
+    private CanvasRepository canvasRepository;
+
     @Test
     void testSandboxExecutionWithModelProviderAndModelName() {
         // Create test context with team, user, repository, and model provider
@@ -46,12 +49,17 @@ class SandboxExecutionMappingTest {
         // Create chat
         ChatEntity chat = new ChatEntity(context.team(), context.user(), "Test Chat");
         chatRepository.save(chat);
+        CanvasEntity canvas = new CanvasEntity(chat.getId(), "mapping-spec", "Test Spec", "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setNewRepoName("Test Repository");
+        canvasRepository.save(canvas);
 
         entityManager.flush();
 
         // Create sandbox execution with model provider and model name
         SandboxExecution execution = new SandboxExecution();
         execution.setEnvironment(env);
+        execution.setCanvas(canvas);
         execution.setChat(chat);
         execution.setHarness(AgentHarness.valueOf("OPENCODE"));
         execution.setTaskPrompt("Test task");

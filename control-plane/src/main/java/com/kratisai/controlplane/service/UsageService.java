@@ -2,6 +2,7 @@ package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.api.restdto.UsageLogEntryDto;
 import com.kratisai.controlplane.api.restdto.UsageSummaryDto;
+import com.kratisai.controlplane.model.CanvasEntity;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ChatUsageSession;
 import com.kratisai.controlplane.model.IngestionBatch;
@@ -126,7 +127,8 @@ public class UsageService {
             String userEmail = exec.getChat() != null && exec.getChat().getUser() != null
                     ? exec.getChat().getUser().getEmail()
                     : "system@kratis.ai";
-            String title = exec.getTaskPrompt() != null ? exec.getTaskPrompt() : "Agent Execution";
+            CanvasEntity canvas = exec.getCanvas();
+            String title = canvas.getTitle();
             if (title.length() > 60) {
                 title = title.substring(0, 60) + "...";
             }

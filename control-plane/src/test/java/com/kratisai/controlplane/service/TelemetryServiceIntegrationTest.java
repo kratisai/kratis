@@ -62,6 +62,9 @@ class TelemetryServiceIntegrationTest {
     private SandboxExecutionRepository sandboxExecutionRepository;
 
     @Autowired
+    private CanvasRepository canvasRepository;
+
+    @Autowired
     private KratisInstallationRepository installationRepository;
 
     @BeforeEach
@@ -130,6 +133,10 @@ class TelemetryServiceIntegrationTest {
         repositoryRepository.save(repository);
 
         ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "Telemetry topic"));
+        CanvasEntity canvas = new CanvasEntity(chat.getId(), "telemetry-spec", "Test Spec", "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setNewRepoName("Test Repository");
+        canvasRepository.save(canvas);
 
         ChatUsageSession chatSession = new ChatUsageSession(chat, "sk-telemetry-virtual-key", "gpt-4o");
         chatSession.getUsage().setTotalSpend(1.5);
@@ -143,6 +150,7 @@ class TelemetryServiceIntegrationTest {
         ingestionBatchRepository.save(batch);
 
         SandboxExecution execution = new SandboxExecution();
+        execution.setCanvas(canvas);
         execution.setEnvironment(context.defaultSandbox());
         execution.setChat(chat);
         execution.setStatus(SandboxExecutionStatus.COMPLETED);

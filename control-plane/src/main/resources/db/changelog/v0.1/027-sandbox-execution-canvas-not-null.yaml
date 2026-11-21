@@ -1,0 +1,23 @@
+databaseChangeLog:
+  - changeSet:
+      id: 027-01-sandbox-execution-canvas-not-null
+      author: kratis
+      preConditions:
+        - onFail: MARK_RAN
+        - onError: MARK_RAN
+        - tableExists:
+            tableName: sandbox_executions
+      changes:
+        - sql:
+            dbms: postgresql
+            splitStatements: true
+            sql: DELETE FROM sandbox_executions WHERE canvas_id IS NULL;
+  - changeSet:
+      id: 027-02-sandbox-execution-canvas-not-null
+      author: kratis
+      changes:
+        - addNotNullConstraint:
+            tableName: sandbox_executions
+            columnName: canvas_id
+            columnDataType: bigint
+            constraintName: nn_sandbox_executions_canvas

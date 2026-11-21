@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.kratisai.controlplane.model.AgentHarness;
+import com.kratisai.controlplane.model.CanvasEntity;
+import com.kratisai.controlplane.model.CanvasType;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
@@ -40,6 +42,9 @@ class ExecutionDiffSnapshotMappingTest {
     private ChatRepository chatRepository;
 
     @Autowired
+    private CanvasRepository canvasRepository;
+
+    @Autowired
     private ExecutionDiffSnapshotRepository diffSnapshotRepository;
 
     private SandboxExecution createExecution() {
@@ -54,9 +59,14 @@ class ExecutionDiffSnapshotMappingTest {
 
         ChatEntity chat = new ChatEntity(context.team(), context.user(), "Test Chat");
         chatRepository.save(chat);
+        CanvasEntity canvas = new CanvasEntity(chat.getId(), "diff-spec", "Test Spec", "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setNewRepoName("Test Repository");
+        canvasRepository.save(canvas);
 
         SandboxExecution execution = new SandboxExecution();
         execution.setEnvironment(env);
+        execution.setCanvas(canvas);
         execution.setChat(chat);
         execution.setHarness(AgentHarness.valueOf("OPENCODE"));
         execution.setTaskPrompt("Test task");

@@ -16,6 +16,8 @@ import com.kratisai.controlplane.api.restdto.DiffSummaryDto;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.GitDiffStatus;
+import com.kratisai.controlplane.model.CanvasEntity;
+import com.kratisai.controlplane.model.CanvasType;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
@@ -90,8 +92,12 @@ class SandboxExecutionDiffServiceTest {
                 new Repository("my-repo", "https://github.com/test/repo.git", "main", RepositoryType.GITHUB);
         repository.setTeam(team);
 
+        CanvasEntity canvas = new CanvasEntity(chatId, "diff-spec", "Test Spec", "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setNewRepoName("Test Repository");
         execution = new SandboxExecution();
         execution.setId(executionId);
+        execution.setCanvas(canvas);
         execution.setChat(chat);
         execution.setEnvironment(environment);
         execution.setRepository(repository);

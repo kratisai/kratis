@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kratisai.controlplane.api.restdto.SteerCommentDto;
 import com.kratisai.controlplane.api.restdto.SteerExecutionRequest;
+import com.kratisai.controlplane.model.CanvasEntity;
+import com.kratisai.controlplane.model.CanvasType;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
@@ -18,6 +20,7 @@ import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionEnvironmentType;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.repository.CanvasRepository;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
@@ -72,6 +75,9 @@ class SandboxExecutionDiffControllerTest {
     private SandboxExecutionRepository sandboxExecutionRepository;
 
     @Autowired
+    private CanvasRepository canvasRepository;
+
+    @Autowired
     private EnvironmentSessionRegistry sessionRegistry;
 
     @Autowired
@@ -104,7 +110,13 @@ class SandboxExecutionDiffControllerTest {
         environment.setStatus(EnvironmentStatus.CONNECTED);
         environment = executionEnvironmentRepository.save(environment);
 
+        CanvasEntity canvas = new CanvasEntity(chat.getId(), "diff-spec", "Test Spec", "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setNewRepoName("Test Repository");
+        canvas = canvasRepository.save(canvas);
+
         execution = new SandboxExecution();
+        execution.setCanvas(canvas);
         execution.setChat(chat);
         execution.setEnvironment(environment);
         execution.setStatus(SandboxExecutionStatus.RUNNING);

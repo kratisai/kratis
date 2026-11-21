@@ -34,6 +34,9 @@ class UsageServiceTest {
     private SandboxExecutionRepository sandboxExecutionRepository;
 
     @Autowired
+    private CanvasRepository canvasRepository;
+
+    @Autowired
     private IngestionBatchRepository ingestionBatchRepository;
 
     @Autowired
@@ -63,6 +66,13 @@ class UsageServiceTest {
         user = context.user();
     }
 
+    private CanvasEntity specCanvas(java.util.UUID chatId, String documentId, String title) {
+        CanvasEntity canvas = new CanvasEntity(chatId, documentId, title, "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setNewRepoName("Test Repository");
+        return canvas;
+    }
+
     @Test
     void getUsageLogs_andSummary_withExecutionsAndIngestions() {
         ExecutionEnvironment env = new ExecutionEnvironment();
@@ -73,8 +83,10 @@ class UsageServiceTest {
         env = executionEnvironmentRepository.save(env);
 
         ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "Test Chat"));
+        CanvasEntity canvas = canvasRepository.save(specCanvas(chat.getId(), "short", "Test Job"));
         SandboxExecution exec = new SandboxExecution();
         exec.setEnvironment(env);
+        exec.setCanvas(canvas);
         exec.setChat(chat);
         exec.setStatus(SandboxExecutionStatus.COMPLETED);
         exec.setStartedAt(Instant.now().minusSeconds(10));
@@ -244,17 +256,21 @@ class UsageServiceTest {
         env = executionEnvironmentRepository.save(env);
 
         ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "Test Chat"));
+        CanvasEntity longCanvas = canvasRepository.save(specCanvas(chat.getId(), "long", "x".repeat(100)));
+        CanvasEntity shortCanvas = canvasRepository.save(specCanvas(chat.getId(), "short", "Test Job"));
         SandboxExecution longTitle = new SandboxExecution();
         longTitle.setEnvironment(env);
+        longTitle.setCanvas(longCanvas);
         longTitle.setChat(chat);
         longTitle.setStatus(SandboxExecutionStatus.RUNNING);
         longTitle.setActiveSince(Instant.now().minusSeconds(100));
         longTitle.setStatus(SandboxExecutionStatus.COMPLETED);
-        longTitle.setTaskPrompt("x".repeat(100));
+        longTitle.setTaskPrompt("Sandbox preamble should not be the activity title");
         sandboxExecutionRepository.save(longTitle);
 
         SandboxExecution noModel = new SandboxExecution();
         noModel.setEnvironment(env);
+        noModel.setCanvas(shortCanvas);
         noModel.setChat(chat);
         noModel.setStatus(SandboxExecutionStatus.COMPLETED);
         noModel.setStartedAt(Instant.now().minusSeconds(10));
@@ -262,6 +278,7 @@ class UsageServiceTest {
 
         SandboxExecution otherHarness = new SandboxExecution();
         otherHarness.setEnvironment(env);
+        otherHarness.setCanvas(shortCanvas);
         otherHarness.setChat(chat);
         otherHarness.setStatus(SandboxExecutionStatus.COMPLETED);
         otherHarness.setStartedAt(Instant.now().minusSeconds(10));
@@ -276,6 +293,7 @@ class UsageServiceTest {
                 .filteredOn(entry -> entry.activityTitle().endsWith("..."))
                 .singleElement()
                 .satisfies(entry -> {
+                    assertThat(entry.activityTitle()).isEqualTo("x".repeat(60) + "...");
                     assertThat(entry.activityTitle()).hasSize(63);
                     assertThat(entry.durationSeconds()).isEqualTo(100L);
                     assertThat(entry.modelIdentifiers()).containsExactly("default");
@@ -284,10 +302,41 @@ class UsageServiceTest {
         assertThat(logs.getContent())
                 .filteredOn(entry -> entry.modelIdentifiers().contains("gpt-4o"))
                 .singleElement()
-                .satisfies(entry -> assertThat(entry.agentName()).isEqualTo("Claude Code"));
+                .satisfies(entry -> {
+                    assertThat(entry.agentName()).isEqualTo("Claude Code");
+                    assertThat(entry.activityTitle()).isEqualTo("Test Job");
+                });
         logs.getContent().forEach(entry -> assertThat(entry.targetUrl())
                 .isEqualTo(
                         "/chats/" + chat.getId() + "/executions/" + entry.id().substring("exec-".length())));
+    }
+
+    @Test
+    void getUsageLogs_executionTitle_prefersCanvasTitleOverTaskPrompt() {
+        ExecutionEnvironment env = new ExecutionEnvironment();
+        env.setName("env-1");
+        env.setType(ExecutionEnvironmentType.SANDBOX);
+        env.setTeam(team);
+        env.setUser(user);
+        env = executionEnvironmentRepository.save(env);
+
+        ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "Fix: Usage Log Execution Names"));
+        CanvasEntity canvas =
+                canvasRepository.save(specCanvas(chat.getId(), "execution-title", "Fix: Usage Log Execution Names"));
+        SandboxExecution execution = new SandboxExecution();
+        execution.setEnvironment(env);
+        execution.setCanvas(canvas);
+        execution.setChat(chat);
+        execution.setTaskPrompt("You are running as a non-root user inside a sandbox...");
+        execution.setStatus(SandboxExecutionStatus.COMPLETED);
+        execution.setStartedAt(Instant.now());
+        sandboxExecutionRepository.save(execution);
+
+        Page<UsageLogEntryDto> logs = usageService.getUsageLogs(
+                user.getId(), team.getId(), "7d", null, null, "EXECUTION", null, null, PageRequest.of(0, 10));
+
+        UsageLogEntryDto execEntry = logs.getContent().getFirst();
+        assertThat(execEntry.activityTitle()).isEqualTo("Fix: Usage Log Execution Names");
     }
 
     @Test

@@ -141,6 +141,8 @@ class ExecutionEnvironmentServiceTest {
         SandboxExecution execution = new SandboxExecution();
         execution.setId(EXECUTION_ID);
         execution.setEnvironment(env);
+        execution.setCanvas(new CanvasEntity(chat.getId(), "doc-1", "Test Spec", "content"));
+        execution.getCanvas().setCanvasType(CanvasType.SPEC);
         execution.setChat(chat);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         execution.setStartedAt(Instant.now());

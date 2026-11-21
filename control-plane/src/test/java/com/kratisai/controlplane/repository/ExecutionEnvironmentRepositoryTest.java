@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
+import com.kratisai.controlplane.model.CanvasEntity;
+import com.kratisai.controlplane.model.CanvasType;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
@@ -41,6 +43,9 @@ class ExecutionEnvironmentRepositoryTest {
     private ChatRepository chatRepository;
 
     @Autowired
+    private CanvasRepository canvasRepository;
+
+    @Autowired
     private TestDataFactory testDataFactory;
 
     @Autowired
@@ -51,6 +56,7 @@ class ExecutionEnvironmentRepositoryTest {
 
     private Team team;
     private ChatEntity chat;
+    private CanvasEntity canvas;
 
     @BeforeEach
     void setUp() {
@@ -61,6 +67,10 @@ class ExecutionEnvironmentRepositoryTest {
 
         chat = new ChatEntity(team, ctx.user(), "Repository Test Chat");
         chatRepository.save(chat);
+        canvas = new CanvasEntity(chat.getId(), "environment-spec", "Test Spec", "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setNewRepoName("Test Repository");
+        canvas = canvasRepository.save(canvas);
     }
 
     private ExecutionEnvironment createEnvironment(Team t, String name) {
@@ -76,6 +86,7 @@ class ExecutionEnvironmentRepositoryTest {
     private SandboxExecution createExecution(ExecutionEnvironment env) {
         SandboxExecution execution = new SandboxExecution();
         execution.setEnvironment(env);
+        execution.setCanvas(canvas);
         execution.setChat(chat);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         execution.setStartedAt(Instant.now());

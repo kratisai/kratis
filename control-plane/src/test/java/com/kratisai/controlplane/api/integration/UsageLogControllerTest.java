@@ -4,8 +4,19 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.kratisai.controlplane.model.CanvasEntity;
+import com.kratisai.controlplane.model.CanvasType;
+import com.kratisai.controlplane.model.ChatEntity;
+import com.kratisai.controlplane.model.ExecutionEnvironment;
+import com.kratisai.controlplane.model.ExecutionEnvironmentType;
+import com.kratisai.controlplane.model.SandboxExecution;
+import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
+import com.kratisai.controlplane.repository.CanvasRepository;
+import com.kratisai.controlplane.repository.ChatRepository;
+import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.service.JwtService;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
@@ -35,7 +46,20 @@ class UsageLogControllerTest {
     @Autowired
     private WebApplicationContext wac;
 
+    @Autowired
+    private ChatRepository chatRepository;
+
+    @Autowired
+    private ExecutionEnvironmentRepository executionEnvironmentRepository;
+
+    @Autowired
+    private CanvasRepository canvasRepository;
+
+    @Autowired
+    private SandboxExecutionRepository sandboxExecutionRepository;
+
     private Team team;
+    private User user;
     private String authToken;
 
     @BeforeEach
@@ -48,8 +72,37 @@ class UsageLogControllerTest {
 
         var context = testDataFactory.createUserAndTeam();
         team = context.team();
-        User user = context.user();
+        user = context.user();
         authToken = jwtService.generateAccessToken(user.getId(), user.getEmail());
+    }
+
+    @Test
+    void getUsageLogs_executionTitleUsesSpecCanvasTitle() throws Exception {
+        ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "Chat title does not name the work"));
+        ExecutionEnvironment environment = new ExecutionEnvironment();
+        environment.setName("Usage Test Environment");
+        environment.setType(ExecutionEnvironmentType.SANDBOX);
+        environment.setTeam(team);
+        environment.setUser(user);
+        environment = executionEnvironmentRepository.save(environment);
+
+        CanvasEntity canvas = new CanvasEntity(chat.getId(), "usage-spec", "Fix: Usage Log Execution Names", "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setNewRepoName("Test Repository");
+        canvas = canvasRepository.save(canvas);
+
+        SandboxExecution execution = new SandboxExecution();
+        execution.setChat(chat);
+        execution.setEnvironment(environment);
+        execution.setCanvas(canvas);
+        execution.setTaskPrompt("You are running as a non-root user inside a sandbox...");
+        execution.setStatus(SandboxExecutionStatus.COMPLETED);
+        sandboxExecutionRepository.save(execution);
+
+        mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-logs?page=0&size=10")
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].activityTitle").value("Fix: Usage Log Execution Names"));
     }
 
     @Test

@@ -12,6 +12,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kratisai.controlplane.api.restdto.PublishPrRequestDto;
 import com.kratisai.controlplane.api.restdto.PushBranchRequestDto;
+import com.kratisai.controlplane.model.CanvasEntity;
+import com.kratisai.controlplane.model.CanvasType;
 import com.kratisai.controlplane.model.ChangeSet;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.CredentialType;
@@ -25,6 +27,7 @@ import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.repository.CanvasRepository;
 import com.kratisai.controlplane.repository.ChangeSetRepository;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
@@ -80,6 +83,9 @@ class SandboxExecutionPublishControllerTest {
 
     @Autowired
     private SandboxExecutionRepository sandboxExecutionRepository;
+
+    @Autowired
+    private CanvasRepository canvasRepository;
 
     @Autowired
     private RepoCredentialRepository repoCredentialRepository;
@@ -138,7 +144,13 @@ class SandboxExecutionPublishControllerTest {
         ModelProvider modelProvider = testDataFactory.createModelProviderWithLiteLLM(
                 ctx.team(), "test-provider", ProviderType.OPENAI, "sk-test", List.of("gpt-4o"));
 
+        CanvasEntity canvas = new CanvasEntity(chat.getId(), "publish-spec", "Test Spec", "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setRepository(repository);
+        canvas = canvasRepository.save(canvas);
+
         execution = new SandboxExecution();
+        execution.setCanvas(canvas);
         execution.setChat(chat);
         execution.setEnvironment(environment);
         execution.setRepository(repository);

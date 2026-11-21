@@ -93,7 +93,7 @@ public class SandboxExecution {
     private String taskPrompt;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "canvas_id", nullable = true, foreignKey = @ForeignKey(name = "fk_sandbox_executions_canvas"))
+    @JoinColumn(name = "canvas_id", nullable = false, foreignKey = @ForeignKey(name = "fk_sandbox_executions_canvas"))
     private CanvasEntity canvas;
 
     @OneToMany(mappedBy = "execution", cascade = CascadeType.ALL, orphanRemoval = true)
