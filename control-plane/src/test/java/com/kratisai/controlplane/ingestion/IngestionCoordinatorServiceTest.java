@@ -3,13 +3,19 @@ package com.kratisai.controlplane.ingestion;
 import static com.kratisai.controlplane.testsupport.llm.FakeChatModelMatchers.ingestionPipelineMatchers;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kratisai.controlplane.config.LiteLLMProperties;
+import com.kratisai.controlplane.ingestion.parse.CodebaseMemoryParserService;
+import com.kratisai.controlplane.ingestion.surfaces.SurfaceExtractionService;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionStatus;
 import com.kratisai.controlplane.model.Repository;
+import com.kratisai.controlplane.repository.CtxEdgeRepository;
+import com.kratisai.controlplane.repository.CtxNodeRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.service.ProcessExecutor;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.IngestionTestStubs;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
@@ -17,6 +23,7 @@ import java.time.Duration;
 import java.util.UUID;
 import org.awaitility.Awaitility;
 import org.awaitility.core.ConditionTimeoutException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -49,18 +56,43 @@ class IngestionCoordinatorServiceTest {
     @Autowired
     private FakeChatModel fakeChatModel;
 
+    @Autowired
+    private CodebaseMemoryParserService codebaseMemoryParserService;
+
+    @Autowired
+    private SurfaceExtractionService surfaceExtractionService;
+
+    @Autowired
+    private CtxNodeRepository ctxNodeRepository;
+
+    @Autowired
+    private CtxEdgeRepository ctxEdgeRepository;
+
+    @Autowired
+    private LiteLLMProperties liteLLMProperties;
+
     private Repository repository;
+    private Duration previousFinalizeDelay;
 
     @BeforeEach
     void setUp() {
+        previousFinalizeDelay = liteLLMProperties.getUsageFinalizeDelay();
+        liteLLMProperties.setUsageFinalizeDelay(Duration.ZERO);
         databaseCleaner.cleanAll();
         fakeChatModel.reset();
         fakeChatModel.addMatchers(ingestionPipelineMatchers());
 
         Mockito.reset(processExecutor);
+        IngestionTestStubs.stubFastParserAndSurfaces(
+                codebaseMemoryParserService, surfaceExtractionService, ctxNodeRepository, ctxEdgeRepository);
 
         TestDataFactory.TestContext ctx = testDataFactory.createDefaultContext("test-team", "kratis-core");
         repository = ctx.repository();
+    }
+
+    @AfterEach
+    void tearDown() {
+        liteLLMProperties.setUsageFinalizeDelay(previousFinalizeDelay);
     }
 
     @Test

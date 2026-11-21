@@ -285,6 +285,10 @@ class CodebaseMemoryParserServiceTest {
                 .extracting(CtxEdge::getRelationType)
                 .containsExactlyInAnyOrder(
                         RelationType.CALLS, RelationType.CALLS, RelationType.IMPORTS, RelationType.IMPORTS);
+
+        assertThat(sqlitePath).exists();
+        parserService.cleanupDatabase(batch.getId());
+        assertThat(sqlitePath).doesNotExist();
     }
 
     private static void insertNode(

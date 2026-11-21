@@ -1,5 +1,7 @@
 package com.kratisai.controlplane.testsupport;
 
+import com.kratisai.controlplane.ingestion.parse.CodebaseMemoryParserService;
+import com.kratisai.controlplane.ingestion.surfaces.SurfaceExtractionService;
 import com.kratisai.controlplane.ingestion.teamwiki.TeamWikiGenerationService;
 import com.kratisai.controlplane.ingestion.teamwiki.TeamWikiWorker;
 import com.kratisai.controlplane.ingestion.write.SemanticIndexingService;
@@ -27,6 +29,8 @@ import org.springframework.core.Ordered;
 public class TestSpiesConfig {
 
     private static final Set<Class<?>> SPIED_BEAN_TYPES = Set.of(
+            CodebaseMemoryParserService.class,
+            SurfaceExtractionService.class,
             TeamWikiWorker.class,
             TeamWikiGenerationService.class,
             SemanticIndexingService.class,

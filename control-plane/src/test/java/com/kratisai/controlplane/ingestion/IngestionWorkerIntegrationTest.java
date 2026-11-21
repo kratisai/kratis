@@ -4,10 +4,14 @@ import static com.kratisai.controlplane.testsupport.llm.FakeChatModelMatchers.in
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import com.kratisai.controlplane.config.LiteLLMProperties;
+import com.kratisai.controlplane.ingestion.parse.CodebaseMemoryParserService;
+import com.kratisai.controlplane.ingestion.surfaces.SurfaceExtractionService;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ProcessExecutor;
+import com.kratisai.controlplane.testsupport.IngestionTestStubs;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
@@ -17,6 +21,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
@@ -66,7 +71,17 @@ public class IngestionWorkerIntegrationTest {
     @Autowired
     private LiteLLMProvisioningService litellmProvisioningService;
 
+    @Autowired
+    private CodebaseMemoryParserService codebaseMemoryParserService;
+
+    @Autowired
+    private SurfaceExtractionService surfaceExtractionService;
+
+    @Autowired
+    private LiteLLMProperties liteLLMProperties;
+
     private Path tempRepoDir;
+    private Duration previousFinalizeDelay;
 
     // The shared single-thread ingestion executor queues behind earlier tests under load, so
     // awaiting a terminal status only against wall time needs a generous window.
@@ -74,6 +89,8 @@ public class IngestionWorkerIntegrationTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        previousFinalizeDelay = liteLLMProperties.getUsageFinalizeDelay();
+        liteLLMProperties.setUsageFinalizeDelay(Duration.ZERO);
         fakeChatModel.reset();
         fakeChatModel.addMatchers(ingestionPipelineMatchers());
 
@@ -93,6 +110,7 @@ public class IngestionWorkerIntegrationTest {
 
     @AfterEach
     void tearDown() throws Exception {
+        liteLLMProperties.setUsageFinalizeDelay(previousFinalizeDelay);
         if (tempRepoDir != null) {
             deleteDirectory(tempRepoDir);
         }
@@ -104,10 +122,12 @@ public class IngestionWorkerIntegrationTest {
             pb.command().add(arg);
         }
         pb.directory(dir.toFile());
-        pb.inheritIO();
+        pb.redirectErrorStream(true);
         Process p = pb.start();
+        byte[] output = p.getInputStream().readAllBytes();
         if (p.waitFor() != 0) {
-            throw new RuntimeException("Git command failed: " + String.join(" ", args));
+            throw new RuntimeException("Git command failed: " + String.join(" ", args) + "\n"
+                    + new String(output, java.nio.charset.StandardCharsets.UTF_8));
         }
     }
 
@@ -157,6 +177,8 @@ public class IngestionWorkerIntegrationTest {
 
     @Test
     void testHappyPathIngestion() {
+        IngestionTestStubs.stubFastParserAndSurfaces(
+                codebaseMemoryParserService, surfaceExtractionService, ctxNodeRepository, ctxEdgeRepository);
         // 1. Setup: Create a team (with ingestion provider), repository, and ingestion batch
         TestDataFactory.TestContext ctx = testDataFactory.createContextWithCustomRepo(
                 "Test Team", "test-repo", tempRepoDir.toUri().toString());
@@ -272,6 +294,8 @@ public class IngestionWorkerIntegrationTest {
 
     @Test
     void testPartialDataRetentionOnDimensionResearchFailure() {
+        IngestionTestStubs.stubFastParserAndSurfaces(
+                codebaseMemoryParserService, surfaceExtractionService, ctxNodeRepository, ctxEdgeRepository);
         // 1. Setup: Create a team, repository, and ingestion batch
         TestDataFactory.TestContext ctx = testDataFactory.createContextWithCustomRepo(
                 "Test Team", "test-repo", tempRepoDir.toUri().toString());
@@ -334,6 +358,8 @@ public class IngestionWorkerIntegrationTest {
 
     @Test
     void testVirtualKeyLifecycleOnSuccess() {
+        IngestionTestStubs.stubFastParserAndSurfaces(
+                codebaseMemoryParserService, surfaceExtractionService, ctxNodeRepository, ctxEdgeRepository);
         // 1. Setup: Create a team with ingestion provider, repository, and ingestion batch
         TestDataFactory.TestContext ctx = testDataFactory.createContextWithCustomRepo(
                 "Test Team", "test-repo", tempRepoDir.toUri().toString());

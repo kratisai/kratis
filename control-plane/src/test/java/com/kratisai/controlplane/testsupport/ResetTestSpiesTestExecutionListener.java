@@ -17,6 +17,8 @@ public class ResetTestSpiesTestExecutionListener implements TestExecutionListene
 
     private static final List<String> RESETTABLE_BEAN_NAMES = List.of(
             "testLiteLLMClient",
+            "codebaseMemoryParserService",
+            "surfaceExtractionService",
             "teamWikiWorker",
             "teamWikiGenerationService",
             "semanticIndexingService",

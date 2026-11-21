@@ -165,6 +165,19 @@ public class CodebaseMemoryParserService {
         return resolveCacheDir(dbTempDir).resolve(projectName(batch) + ".db");
     }
 
+    /** Deletes the temporary per-batch SQLite parser cache after downstream phases finish. */
+    public void cleanupDatabase(UUID batchId) {
+        if (batchId == null) {
+            return;
+        }
+        Path sqlitePath = cacheDirFor(dbTempDir).resolve(PROJECT_NAME_PREFIX + batchId + ".db");
+        try {
+            Files.deleteIfExists(sqlitePath);
+        } catch (IOException e) {
+            logger.warn("Failed to delete parser SQLite database at {}: {}", sqlitePath, e.getMessage());
+        }
+    }
+
     public static String projectName(IngestionBatch batch) {
         return PROJECT_NAME_PREFIX + batch.getId();
     }

@@ -88,7 +88,11 @@ abstract @SpringIntegrationTest class BaseCodebaseMemoryParserIntegrationTest {
 
     /** Run the parser on the given sample directory. */
     protected void runParser(CodebaseMemoryParserService parserService, Path sampleDir) {
-        parserService.prepareAst(batch, sampleDir);
+        try {
+            parserService.prepareAst(batch, sampleDir);
+        } finally {
+            parserService.cleanupDatabase(batch.getId());
+        }
     }
 
     /**

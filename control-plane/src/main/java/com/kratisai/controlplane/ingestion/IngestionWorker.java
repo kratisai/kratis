@@ -136,6 +136,9 @@ public class IngestionWorker {
             logger.error("Ingestion batch {} failed during execution", batchId, e);
             transactionTemplate.execute(txStatus -> markBatchFailed(batchId, e, batchLogger));
         } finally {
+            if (codebaseMemoryParserService != null) {
+                codebaseMemoryParserService.cleanupDatabase(batchId);
+            }
             // Clean up cloned repository directory to prevent disk leakage in Step 1
             if (cloneResult != null && cloneResult.cloneDirectory() != null) {
                 try {

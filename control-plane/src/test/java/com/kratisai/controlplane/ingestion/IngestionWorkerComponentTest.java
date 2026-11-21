@@ -4,12 +4,16 @@ import static com.kratisai.controlplane.testsupport.llm.FakeChatModelMatchers.in
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.kratisai.controlplane.config.LiteLLMProperties;
+import com.kratisai.controlplane.ingestion.parse.CodebaseMemoryParserService;
+import com.kratisai.controlplane.ingestion.surfaces.SurfaceExtractionService;
 import com.kratisai.controlplane.model.CtxNode;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionBatchLog;
 import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.IngestionStatus;
 import com.kratisai.controlplane.model.Repository;
+import com.kratisai.controlplane.repository.CtxEdgeRepository;
 import com.kratisai.controlplane.repository.CtxNodeRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.repository.IngestionModelUsageRepository;
@@ -17,6 +21,7 @@ import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ProcessExecutor;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.IngestionTestStubs;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
@@ -29,6 +34,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import org.awaitility.Awaitility;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -57,6 +63,15 @@ class IngestionWorkerComponentTest {
     private CtxNodeRepository ctxNodeRepository;
 
     @Autowired
+    private CtxEdgeRepository ctxEdgeRepository;
+
+    @Autowired
+    private CodebaseMemoryParserService codebaseMemoryParserService;
+
+    @Autowired
+    private SurfaceExtractionService surfaceExtractionService;
+
+    @Autowired
     private DatabaseCleaner databaseCleaner;
 
     @Autowired
@@ -71,13 +86,19 @@ class IngestionWorkerComponentTest {
     @Autowired
     private LiteLLMProvisioningService litellmProvisioningService;
 
+    @Autowired
+    private LiteLLMProperties liteLLMProperties;
+
     @TempDir
     Path tempDir;
 
     private Repository repository;
+    private Duration previousFinalizeDelay;
 
     @BeforeEach
     void setUp() throws Exception {
+        previousFinalizeDelay = liteLLMProperties.getUsageFinalizeDelay();
+        liteLLMProperties.setUsageFinalizeDelay(Duration.ZERO);
         databaseCleaner.cleanAll();
         fakeChatModel.reset();
         fakeChatModel.addMatchers(ingestionPipelineMatchers());
@@ -142,8 +163,15 @@ class IngestionWorkerComponentTest {
         repositoryRepository.saveAndFlush(repository);
     }
 
+    @AfterEach
+    void tearDown() {
+        liteLLMProperties.setUsageFinalizeDelay(previousFinalizeDelay);
+    }
+
     @Test
     void shouldCompleteIngestionAndSaveNodesOnSuccess() {
+        IngestionTestStubs.stubFastParserAndSurfaces(
+                codebaseMemoryParserService, surfaceExtractionService, ctxNodeRepository, ctxEdgeRepository);
         // Create and save a pending batch
         IngestionBatch batch = new IngestionBatch(repository);
         ingestionBatchRepository.saveAndFlush(batch);
@@ -314,6 +342,8 @@ class IngestionWorkerComponentTest {
 
     @Test
     void shouldCreatePerModelUsageRowsWithVirtualKey() {
+        IngestionTestStubs.stubFastParserAndSurfaces(
+                codebaseMemoryParserService, surfaceExtractionService, ctxNodeRepository, ctxEdgeRepository);
         IngestionBatch batch = new IngestionBatch(repository);
         ingestionBatchRepository.saveAndFlush(batch);
 

@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.kratisai.controlplane.api.restdto.UpdateTeamRequest;
 import com.kratisai.controlplane.config.LiteLLMProperties;
+import com.kratisai.controlplane.ingestion.parse.CodebaseMemoryParserService;
+import com.kratisai.controlplane.ingestion.surfaces.SurfaceExtractionService;
 import com.kratisai.controlplane.model.CtxEmbedding;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionStatus;
@@ -15,7 +17,9 @@ import com.kratisai.controlplane.model.ProviderType;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
 import com.kratisai.controlplane.model.Team;
+import com.kratisai.controlplane.repository.CtxEdgeRepository;
 import com.kratisai.controlplane.repository.CtxEmbeddingRepository;
+import com.kratisai.controlplane.repository.CtxNodeRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.repository.ModelProviderRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
@@ -24,6 +28,7 @@ import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ProcessExecutor;
 import com.kratisai.controlplane.service.TeamService;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.IngestionTestStubs;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
@@ -93,6 +98,18 @@ class IngestionEmbeddingProvisioningE2ETest {
     @Autowired
     private LiteLLMProperties liteLLMProperties;
 
+    @Autowired
+    private CodebaseMemoryParserService codebaseMemoryParserService;
+
+    @Autowired
+    private SurfaceExtractionService surfaceExtractionService;
+
+    @Autowired
+    private CtxNodeRepository ctxNodeRepository;
+
+    @Autowired
+    private CtxEdgeRepository ctxEdgeRepository;
+
     @TempDir
     Path tempDir;
 
@@ -105,6 +122,8 @@ class IngestionEmbeddingProvisioningE2ETest {
         databaseCleaner.cleanAll();
         fakeChatModel.reset();
         Mockito.reset(processExecutor);
+        IngestionTestStubs.stubFastParserAndSurfaces(
+                codebaseMemoryParserService, surfaceExtractionService, ctxNodeRepository, ctxEdgeRepository);
 
         wireMockLlmServer = new WireMockLlmServer();
         testContext = testDataFactory.createUserAndTeam(false);
