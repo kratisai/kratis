@@ -121,6 +121,9 @@ class SandboxExecutionPublishServiceTest {
     private SandboxProvisioningService sandboxProvisioningService;
 
     @Mock
+    private ExecutionEnvironmentService executionEnvironmentService;
+
+    @Mock
     private PlatformTransactionManager transactionManager;
 
     private FakeChatModel fakeChatModel;
@@ -208,6 +211,7 @@ class SandboxExecutionPublishServiceTest {
                 chatModelFactory,
                 objectMapper,
                 sandboxProvisioningService,
+                executionEnvironmentService,
                 transactionManager);
     }
 

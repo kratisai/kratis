@@ -454,7 +454,7 @@ class ExecutionEnvironmentControllerTest {
             ExecutionEnvironment updated =
                     executionEnvironmentRepository.findById(runnerEnvId).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
-            assertThat(updated.getStateChangedAt()).isNotNull();
+            assertThat(updated.getLastActivityAt()).isNotNull();
             assertThat(dockerCli("ps", "-a", "--filter", "name=kratis-sandbox-" + runnerEnvId, "-q"))
                     .isEmpty();
         } finally {
@@ -483,7 +483,7 @@ class ExecutionEnvironmentControllerTest {
             ExecutionEnvironment updated =
                     executionEnvironmentRepository.findById(runnerEnvId).orElseThrow();
             assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
-            assertThat(updated.getStateChangedAt()).isNotNull();
+            assertThat(updated.getLastActivityAt()).isNotNull();
 
             ExecutionEnvironment terminated =
                     executionEnvironmentRepository.findById(runnerEnvId).orElseThrow();

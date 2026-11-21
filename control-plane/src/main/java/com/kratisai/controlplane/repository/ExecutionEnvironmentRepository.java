@@ -26,13 +26,13 @@ public interface ExecutionEnvironmentRepository extends JpaRepository<ExecutionE
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             UPDATE ExecutionEnvironment e
-            SET e.status = :next, e.stateChangedAt = :now
-            WHERE e.id = :id AND e.status = :expected AND e.stateChangedAt = :expectedStateChangedAt
+            SET e.status = :next, e.lastActivityAt = :now
+            WHERE e.id = :id AND e.status = :expected AND e.lastActivityAt = :expectedLastActivityAt
             """)
     int transitionIfUnchanged(
             @Param("id") UUID id,
             @Param("expected") EnvironmentStatus expected,
-            @Param("expectedStateChangedAt") Instant expectedStateChangedAt,
+            @Param("expectedLastActivityAt") Instant expectedLastActivityAt,
             @Param("next") EnvironmentStatus next,
             @Param("now") Instant now);
 
@@ -61,7 +61,44 @@ public interface ExecutionEnvironmentRepository extends JpaRepository<ExecutionE
     @Query("""
             SELECT e FROM ExecutionEnvironment e
             WHERE e.status = com.kratisai.controlplane.model.EnvironmentStatus.SLEEPING
-              AND e.stateChangedAt < :cutoff
+              AND e.lastActivityAt < :cutoff
             """)
     List<ExecutionEnvironment> findExpiredSleeping(@Param("cutoff") Instant cutoff);
+
+    /**
+     * Quiet activity touch: only a CONNECTED row that has been idle past the throttle cutoff
+     * gets its clock moved, so read paths never write more than once per throttle window and
+     * never compete with a lifecycle transition.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            UPDATE ExecutionEnvironment e
+            SET e.lastActivityAt = :now
+            WHERE e.id = :id
+              AND e.status = com.kratisai.controlplane.model.EnvironmentStatus.CONNECTED
+              AND e.lastActivityAt <= :throttleCutoff
+            """)
+    int touchActiveEnvironmentIfElapsed(
+            @Param("id") UUID id, @Param("now") Instant now, @Param("throttleCutoff") Instant throttleCutoff);
+
+    /**
+     * CAS on the SLEEPING edge: takes the transition only if both status and activity clock still
+     * match the snapshot the sweep suspended from. A touch committed between the snapshot and the
+     * suspend makes this write 0 rows, so live user activity is never overwritten by a stale
+     * suspend arriving late.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            UPDATE ExecutionEnvironment e
+            SET e.status = :next, e.lastActivityAt = :now
+            WHERE e.id = :id
+              AND e.status = :expected
+              AND e.lastActivityAt = :expectedLastActivityAt
+            """)
+    int transitionIfStatusAndActivityUnchanged(
+            @Param("id") UUID id,
+            @Param("expected") EnvironmentStatus expected,
+            @Param("expectedLastActivityAt") Instant expectedLastActivityAt,
+            @Param("next") EnvironmentStatus next,
+            @Param("now") Instant now);
 }

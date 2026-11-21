@@ -38,11 +38,12 @@ public class ExecutionEnvironment {
     private EnvironmentStatus status;
 
     /**
-     * When the clock for the current status started: the status last changed, or the execution
-     * last stopped running. Idle-timeout, connect-timeout and retention all measure from here.
+     * Liveness clock for the current status: the status last changed, an execution last stopped
+     * running, or user activity was last observed. Idle-timeout, connect-timeout and retention
+     * all measure from here.
      */
-    @Column(name = "state_changed_at")
-    private Instant stateChangedAt;
+    @Column(name = "last_activity_at", nullable = false)
+    private Instant lastActivityAt;
 
     @Column(name = "auth_token", length = 255)
     private String authToken;
@@ -62,8 +63,8 @@ public class ExecutionEnvironment {
         if (type == null) {
             type = ExecutionEnvironmentType.SANDBOX;
         }
-        if (stateChangedAt == null) {
-            stateChangedAt = Instant.now();
+        if (lastActivityAt == null) {
+            lastActivityAt = Instant.now();
         }
     }
 
@@ -141,11 +142,11 @@ public class ExecutionEnvironment {
         this.lastHeartbeat = lastHeartbeat;
     }
 
-    public Instant getStateChangedAt() {
-        return stateChangedAt;
+    public Instant getLastActivityAt() {
+        return lastActivityAt;
     }
 
-    public void setStateChangedAt(Instant stateChangedAt) {
-        this.stateChangedAt = stateChangedAt;
+    public void setLastActivityAt(Instant lastActivityAt) {
+        this.lastActivityAt = lastActivityAt;
     }
 }

@@ -32,6 +32,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
@@ -72,6 +73,9 @@ public class SandboxExecutionService {
     private final ExecutionActivityPersistenceService activityPersistenceService;
     private final SandboxOrchestratorService sandboxOrchestratorService;
     private final SandboxProperties sandboxProperties;
+    // Provider breaks the constructor cycle with ExecutionEnvironmentService; resolved lazily
+    // because every call site already holds a transaction.
+    private final ObjectProvider<ExecutionEnvironmentService> executionEnvironmentServiceProvider;
 
     final Map<UUID, String> activePromptIds = new ConcurrentHashMap<>();
 
@@ -93,7 +97,8 @@ public class SandboxExecutionService {
             @Qualifier("dispatchExecutor") Executor dispatchExecutor,
             ExecutionActivityPersistenceService activityPersistenceService,
             SandboxOrchestratorService sandboxOrchestratorService,
-            SandboxProperties sandboxProperties) {
+            SandboxProperties sandboxProperties,
+            ObjectProvider<ExecutionEnvironmentService> executionEnvironmentServiceProvider) {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.finalizeUsageTransactionTemplate = new TransactionTemplate(transactionManager);
         this.sandboxExecutionRepository = sandboxExecutionRepository;
@@ -113,6 +118,7 @@ public class SandboxExecutionService {
         this.activityPersistenceService = activityPersistenceService;
         this.sandboxOrchestratorService = sandboxOrchestratorService;
         this.sandboxProperties = sandboxProperties;
+        this.executionEnvironmentServiceProvider = executionEnvironmentServiceProvider;
     }
 
     private void requireTeamMembership(UUID userId, UUID teamId) {
@@ -510,6 +516,12 @@ public class SandboxExecutionService {
 
         boolean recovering = execution.getStatus() == SandboxExecutionStatus.FAILED;
         touchExecutionGraph(execution);
+        try {
+            executionEnvironmentServiceProvider.getObject().touchActiveEnvironment(environment.getId());
+        } catch (Exception e) {
+            // Best-effort: a failed liveness stamp must never fail the steering it accompanies.
+            logger.warn("Failed to record user activity on environment {}: {}", environment.getId(), e.getMessage());
+        }
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         execution.setCompletedAt(null);
         execution.setExitCode(null);
@@ -685,7 +697,7 @@ public class SandboxExecutionService {
                 return;
             }
             managed.setStatus(EnvironmentStatus.TERMINATED);
-            managed.setStateChangedAt(Instant.now());
+            managed.setLastActivityAt(Instant.now());
             executionEnvironmentRepository.save(managed);
             eventPublisher.publishEvent(
                     new TeamEntityChangedEvent(managed.getTeam().getId(), TeamEntityType.ENVIRONMENTS));

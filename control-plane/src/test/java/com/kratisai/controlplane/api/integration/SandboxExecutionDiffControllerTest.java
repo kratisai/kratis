@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.api.integration;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -33,6 +34,8 @@ import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -200,6 +203,49 @@ class SandboxExecutionDiffControllerTest {
                 .andExpect(jsonPath("$.totalDeletions").value(3))
                 .andExpect(jsonPath("$.files[0].path").value("src/Test.java"))
                 .andExpect(jsonPath("$.files[0].status").value("MODIFIED"));
+    }
+
+    @Test
+    void getDiffSummary_whenEnvironmentConnected_touchesLastActivityAt() throws Exception {
+        seedDiffSnapshot(15, 3, "diff --git a/src/Test.java b/src/Test.java\n+new");
+        Instant stale = Instant.now().truncatedTo(ChronoUnit.MICROS).minusSeconds(300);
+        environment.setLastActivityAt(stale);
+        executionEnvironmentRepository.save(environment);
+
+        mockMvc.perform(get(
+                                "/api/v1/chats/{chatId}/executions/{executionId}/diff/summary",
+                                chat.getId(),
+                                execution.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk());
+
+        assertThat(executionEnvironmentRepository
+                        .findById(environment.getId())
+                        .orElseThrow()
+                        .getLastActivityAt())
+                .isAfter(stale);
+    }
+
+    @Test
+    void getDiffSummary_whenEnvironmentSleeping_doesNotTouchLastActivityAt() throws Exception {
+        seedDiffSnapshot(15, 3, "diff --git a/src/Test.java b/src/Test.java\n+new");
+        Instant stale = Instant.now().truncatedTo(ChronoUnit.MICROS).minusSeconds(300);
+        environment.setLastActivityAt(stale);
+        environment.setStatus(EnvironmentStatus.SLEEPING);
+        executionEnvironmentRepository.save(environment);
+
+        mockMvc.perform(get(
+                                "/api/v1/chats/{chatId}/executions/{executionId}/diff/summary",
+                                chat.getId(),
+                                execution.getId())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk());
+
+        assertThat(executionEnvironmentRepository
+                        .findById(environment.getId())
+                        .orElseThrow()
+                        .getLastActivityAt())
+                .isEqualTo(stale);
     }
 
     @Test

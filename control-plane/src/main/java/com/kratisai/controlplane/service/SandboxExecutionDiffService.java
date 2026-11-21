@@ -9,7 +9,9 @@ import com.kratisai.controlplane.api.restdto.ReadFileSliceDto;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.model.ChatEntity;
+import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
+import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
@@ -20,6 +22,8 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +35,8 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class SandboxExecutionDiffService {
 
+    private static final Logger logger = LoggerFactory.getLogger(SandboxExecutionDiffService.class);
+
     private static final long SLICE_TIMEOUT_SECONDS = 30;
 
     private final SandboxExecutionRepository sandboxExecutionRepository;
@@ -39,6 +45,7 @@ public class SandboxExecutionDiffService {
     private final ExecutionDiffSnapshotRepository diffSnapshotRepository;
     private final BlobStorageService blobStorageService;
     private final ObjectMapper objectMapper;
+    private final ExecutionEnvironmentService executionEnvironmentService;
 
     public SandboxExecutionDiffService(
             SandboxExecutionRepository sandboxExecutionRepository,
@@ -46,25 +53,29 @@ public class SandboxExecutionDiffService {
             EnvironmentRpcClient environmentRpcClient,
             ExecutionDiffSnapshotRepository diffSnapshotRepository,
             BlobStorageService blobStorageService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ExecutionEnvironmentService executionEnvironmentService) {
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.chatRepository = chatRepository;
         this.environmentRpcClient = environmentRpcClient;
         this.diffSnapshotRepository = diffSnapshotRepository;
         this.blobStorageService = blobStorageService;
         this.objectMapper = objectMapper;
+        this.executionEnvironmentService = executionEnvironmentService;
     }
 
     @Transactional(readOnly = true)
     public DiffSummaryDto getDiffSummary(UUID userId, UUID chatId, UUID executionId) {
-        validateAndGetExecution(userId, chatId, executionId);
+        SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
+        touchIfConnected(execution);
         return getDiffSummaryFromSnapshot(executionId);
     }
 
     @Transactional(readOnly = true)
     public DiffFileDto getFileDiff(UUID userId, UUID chatId, UUID executionId, String path) {
         Objects.requireNonNull(path, "path is required");
-        validateAndGetExecution(userId, chatId, executionId);
+        SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
+        touchIfConnected(execution);
         return getFileDiffFromSnapshot(executionId, path);
     }
 
@@ -74,6 +85,7 @@ public class SandboxExecutionDiffService {
             UUID userId, UUID chatId, UUID executionId, String path, int startLine, int endLine) {
         Objects.requireNonNull(path, "path is required");
         SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
+        touchIfConnected(execution);
         var env = execution.getEnvironment();
         if (env == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution has no associated environment");
@@ -105,12 +117,26 @@ public class SandboxExecutionDiffService {
 
     @Transactional(readOnly = true)
     public String exportPatch(UUID userId, UUID chatId, UUID executionId) {
-        validateAndGetExecution(userId, chatId, executionId);
+        SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
+        touchIfConnected(execution);
         StringBuilder fullPatch = new StringBuilder();
         for (EnvironmentConnectorResult.GitDiffManifestFile file : manifestFiles(executionId)) {
             fullPatch.append(readSection(executionId, file));
         }
         return fullPatch.toString();
+    }
+
+    private void touchIfConnected(SandboxExecution execution) {
+        ExecutionEnvironment env = execution.getEnvironment();
+        if (env == null || env.getStatus() != EnvironmentStatus.CONNECTED) {
+            return;
+        }
+        try {
+            executionEnvironmentService.touchActiveEnvironment(env.getId());
+        } catch (Exception e) {
+            // Best-effort: a failed liveness stamp must never fail the read it accompanies.
+            logger.warn("Failed to record user activity on environment {}: {}", env.getId(), e.getMessage());
+        }
     }
 
     private DiffSummaryDto getDiffSummaryFromSnapshot(UUID executionId) {

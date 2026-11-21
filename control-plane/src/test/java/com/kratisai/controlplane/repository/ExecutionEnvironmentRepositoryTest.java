@@ -162,7 +162,7 @@ class ExecutionEnvironmentRepositoryTest {
         ExecutionEnvironment env = createEnvironment(team, "stuck");
         env.setStatus(EnvironmentStatus.PENDING_CONNECT);
         Instant observed = Instant.now().truncatedTo(ChronoUnit.MICROS);
-        env.setStateChangedAt(observed);
+        env.setLastActivityAt(observed);
         executionEnvironmentRepository.save(env);
         entityManager.flush();
         entityManager.clear();
@@ -183,5 +183,119 @@ class ExecutionEnvironmentRepositoryTest {
         int stale = executionEnvironmentRepository.transitionIfUnchanged(
                 env.getId(), EnvironmentStatus.PENDING_CONNECT, observed, EnvironmentStatus.SLEEPING, now);
         assertThat(stale).isZero();
+    }
+
+    @Test
+    void touchActiveEnvironmentIfElapsed_updatesConnectedRowIdlePastThrottle() {
+        ExecutionEnvironment env = createEnvironment(team, "touched");
+        Instant quiet = Instant.now().minusSeconds(120);
+        env.setLastActivityAt(quiet);
+        executionEnvironmentRepository.save(env);
+        entityManager.flush();
+        entityManager.clear();
+
+        Instant now = Instant.now();
+        int updated =
+                executionEnvironmentRepository.touchActiveEnvironmentIfElapsed(env.getId(), now, now.minusSeconds(60));
+        assertThat(updated).isEqualTo(1);
+
+        entityManager.flush();
+        entityManager.clear();
+        Instant lastActivityAt = executionEnvironmentRepository
+                .findById(env.getId())
+                .orElseThrow()
+                .getLastActivityAt();
+        assertThat(lastActivityAt).isAfter(quiet);
+    }
+
+    @Test
+    void touchActiveEnvironmentIfElapsed_skipsRowTouchedWithinThrottleWindow() {
+        ExecutionEnvironment env = createEnvironment(team, "fresh");
+        Instant recent = Instant.now().truncatedTo(ChronoUnit.MICROS).minusSeconds(10);
+        env.setLastActivityAt(recent);
+        executionEnvironmentRepository.save(env);
+        entityManager.flush();
+        entityManager.clear();
+
+        Instant now = Instant.now();
+        int updated =
+                executionEnvironmentRepository.touchActiveEnvironmentIfElapsed(env.getId(), now, now.minusSeconds(60));
+        assertThat(updated).isZero();
+
+        entityManager.flush();
+        entityManager.clear();
+        assertThat(executionEnvironmentRepository
+                        .findById(env.getId())
+                        .orElseThrow()
+                        .getLastActivityAt())
+                .isEqualTo(recent);
+    }
+
+    @Test
+    void touchActiveEnvironmentIfElapsed_skipsSleepingRow() {
+        ExecutionEnvironment env = createEnvironment(team, "sleepy");
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        Instant quiet = Instant.now().truncatedTo(ChronoUnit.MICROS).minusSeconds(120);
+        env.setLastActivityAt(quiet);
+        executionEnvironmentRepository.save(env);
+        entityManager.flush();
+        entityManager.clear();
+
+        Instant now = Instant.now();
+        int updated =
+                executionEnvironmentRepository.touchActiveEnvironmentIfElapsed(env.getId(), now, now.minusSeconds(60));
+        assertThat(updated).isZero();
+
+        entityManager.flush();
+        entityManager.clear();
+        assertThat(executionEnvironmentRepository
+                        .findById(env.getId())
+                        .orElseThrow()
+                        .getLastActivityAt())
+                .isEqualTo(quiet);
+    }
+
+    @Test
+    void transitionIfStatusAndActivityUnchanged_takesTheSleepingEdgeWhenRowIsUntouched() {
+        ExecutionEnvironment env = createEnvironment(team, "quiet");
+        Instant quietSince = Instant.now().truncatedTo(ChronoUnit.MICROS).minusSeconds(120);
+        env.setLastActivityAt(quietSince);
+        executionEnvironmentRepository.save(env);
+        entityManager.flush();
+        entityManager.clear();
+
+        Instant now = Instant.now();
+        int taken = executionEnvironmentRepository.transitionIfStatusAndActivityUnchanged(
+                env.getId(), EnvironmentStatus.CONNECTED, quietSince, EnvironmentStatus.SLEEPING, now);
+        assertThat(taken).isEqualTo(1);
+
+        entityManager.flush();
+        entityManager.clear();
+        ExecutionEnvironment slept =
+                executionEnvironmentRepository.findById(env.getId()).orElseThrow();
+        assertThat(slept.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
+        assertThat(slept.getLastActivityAt()).isAfter(quietSince);
+    }
+
+    @Test
+    void transitionIfStatusAndActivityUnchanged_skipsRowTouchedSinceTheSweepsSnapshot() {
+        ExecutionEnvironment env = createEnvironment(team, "touched mid-sweep");
+        Instant quietSince = Instant.now().truncatedTo(ChronoUnit.MICROS).minusSeconds(120);
+        env.setLastActivityAt(quietSince.plusSeconds(30));
+        executionEnvironmentRepository.save(env);
+        entityManager.flush();
+        entityManager.clear();
+
+        Instant now = Instant.now();
+        int taken = executionEnvironmentRepository.transitionIfStatusAndActivityUnchanged(
+                env.getId(), EnvironmentStatus.CONNECTED, quietSince, EnvironmentStatus.SLEEPING, now);
+        assertThat(taken).isZero();
+
+        entityManager.flush();
+        entityManager.clear();
+        ExecutionEnvironment awake =
+                executionEnvironmentRepository.findById(env.getId()).orElseThrow();
+        assertThat(awake.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+        assertThat(awake.getLastActivityAt()).isEqualTo(quietSince.plusSeconds(30));
     }
 }

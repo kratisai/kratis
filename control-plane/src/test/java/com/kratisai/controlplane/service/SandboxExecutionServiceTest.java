@@ -64,6 +64,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -135,6 +136,9 @@ class SandboxExecutionServiceTest {
 
     @Mock
     private SkillProvisioningService skillProvisioningService;
+
+    @Mock
+    private ExecutionEnvironmentService executionEnvironmentService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private SandboxProvisioningService sandboxProvisioningService;
@@ -214,7 +218,32 @@ class SandboxExecutionServiceTest {
                 dispatchExecutor,
                 activityPersistenceService,
                 sandboxOrchestratorService,
-                sandboxProperties);
+                sandboxProperties,
+                providerOf(executionEnvironmentService));
+    }
+
+    private static <T> ObjectProvider<T> providerOf(T instance) {
+        return new ObjectProvider<>() {
+            @Override
+            public T getObject() {
+                return instance;
+            }
+
+            @Override
+            public T getObject(Object... args) {
+                return instance;
+            }
+
+            @Override
+            public T getIfAvailable() {
+                return instance;
+            }
+
+            @Override
+            public T getIfUnique() {
+                return instance;
+            }
+        };
     }
 
     private void stubSuccessfulExec() throws Exception {
@@ -1757,7 +1786,7 @@ class SandboxExecutionServiceTest {
         environment.setType(ExecutionEnvironmentType.SANDBOX);
         environment.setProvider(provider);
         environment.setStatus(EnvironmentStatus.SLEEPING);
-        environment.setStateChangedAt(Instant.now().minusSeconds(60));
+        environment.setLastActivityAt(Instant.now().minusSeconds(60));
         Team haltTeam = new Team();
         haltTeam.setId(TEAM_ID);
         environment.setTeam(haltTeam);
@@ -1775,7 +1804,7 @@ class SandboxExecutionServiceTest {
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
         assertThat(execution.getCompletedAt()).isNotNull();
         assertThat(environment.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
-        assertThat(environment.getStateChangedAt()).isAfter(Instant.now().minusSeconds(30));
+        assertThat(environment.getLastActivityAt()).isAfter(Instant.now().minusSeconds(30));
         verify(eventPublisher).publishEvent(any(SandboxExecutionCompleteEvent.class));
         // Halting a sleeping/disconnected sandbox must not require a live connector session.
         verify(sessionRegistry, never()).getSessionForEnvironment(any());
@@ -2044,6 +2073,7 @@ class SandboxExecutionServiceTest {
 
         assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.RUNNING);
         verify(sandboxExecutionRepository).save(execution);
+        verify(executionEnvironmentService).touchActiveEnvironment(ENVIRONMENT_ID);
 
         ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
         verify(eventPublisher).publishEvent(eventCaptor.capture());

@@ -26,6 +26,7 @@ import com.kratisai.controlplane.repository.TeamRepository;
 import com.kratisai.controlplane.repository.UserRepository;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -47,6 +48,9 @@ public class ExecutionEnvironmentService {
     private static final Logger logger = LoggerFactory.getLogger(ExecutionEnvironmentService.class);
 
     private static final Duration HEARTBEAT_STALE_AFTER = Duration.ofSeconds(60);
+
+    /** Minimum quiet interval between activity-touch writes from user read paths. */
+    private static final Duration ACTIVITY_THROTTLE = Duration.ofSeconds(60);
 
     private static final String UNAVAILABLE_ENVIRONMENT_REASON =
             "execution abandoned because its environment is no longer available";
@@ -307,6 +311,11 @@ public class ExecutionEnvironmentService {
 
         UUID envId = env.getId();
         UUID teamId = env.getTeam().getId();
+        // CAS token for the SLEEPING edge written after the suspend below: with strict equality,
+        // any touch committed between the sweep's snapshot and that edge makes the write 0 rows,
+        // so the row stays awake and the sweep retries. Truncated to micros because that is the
+        // precision the column keeps.
+        Instant quietSince = env.getLastActivityAt().truncatedTo(ChronoUnit.MICROS);
 
         try {
             SandboxProvider sandboxProvider =
@@ -314,17 +323,30 @@ public class ExecutionEnvironmentService {
             if (!sandboxProvider.suspend(envId)) {
                 // The row reported a sandbox that no longer exists; "sleeping" would be a lie.
                 logger.warn("Idle suspend found nothing to preserve for env {}; marking TERMINATED", envId);
+                revertQuietClaim(env, quietSince);
                 reconcilePurgedEnvironment(env);
                 return;
             }
             logger.debug("Suspend committed snapshot for env {}; marking SLEEPING", envId);
         } catch (Exception e) {
             logger.error("Failed to suspend sandbox for environment {}", envId, e);
+            revertQuietClaim(env, quietSince);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to suspend environment");
         }
 
-        markSuspended(env);
-        executionEnvironmentRepository.save(env);
+        // The quiet clock is compared only after the slow suspend, never across provider I/O,
+        // so the row is never locked while the sidecar is still talking to it.
+        if (executionEnvironmentRepository.transitionIfStatusAndActivityUnchanged(
+                        envId, EnvironmentStatus.CONNECTED, quietSince, EnvironmentStatus.SLEEPING, Instant.now())
+                == 0) {
+            logger.info("Env {} saw activity while its suspend committed; retrying next sweep", envId);
+            return;
+        }
+
+        // Mirror the persisted edge into the entity callers still hold; retention measures
+        // from this SLEEPING entry stamp written by the CAS above.
+        env.setStatus(EnvironmentStatus.SLEEPING);
+        env.setLastActivityAt(quietSince);
 
         sandboxExecutionRepository
                 .findFirstByEnvironmentIdOrderByStartedAtDesc(envId)
@@ -443,7 +465,7 @@ public class ExecutionEnvironmentService {
     public void expireEnvironment(ExecutionEnvironment env) {
         UUID envId = env.getId();
         UUID teamId = env.getTeam().getId();
-        logger.debug("Expiring env {} stateChangedAt={}", envId, env.getStateChangedAt());
+        logger.debug("Expiring env {} lastActivityAt={}", envId, env.getLastActivityAt());
         SandboxProvider sandboxProvider =
                 sandboxOrchestratorService.getProvider(env.getProvider().getType());
         sandboxProvider.destroy(envId);
@@ -469,7 +491,7 @@ public class ExecutionEnvironmentService {
      * connector registered first, in which case the row must keep its CONNECTED state.
      */
     @Transactional
-    public boolean rollbackFailedResumeIfStillPending(UUID envId, Instant expectedStateChangedAt) {
+    public boolean rollbackFailedResumeIfStillPending(UUID envId, Instant expectedLastActivityAt) {
         ExecutionEnvironment env =
                 executionEnvironmentRepository.findById(envId).orElse(null);
         if (env == null) {
@@ -479,7 +501,7 @@ public class ExecutionEnvironmentService {
         if (executionEnvironmentRepository.transitionIfUnchanged(
                         envId,
                         EnvironmentStatus.PENDING_CONNECT,
-                        expectedStateChangedAt,
+                        expectedLastActivityAt,
                         EnvironmentStatus.SLEEPING,
                         Instant.now())
                 == 0) {
@@ -495,7 +517,7 @@ public class ExecutionEnvironmentService {
      * registered first, in which case the row must keep its CONNECTED state.
      */
     @Transactional
-    public boolean reconcilePurgedEnvironmentIfStillPending(UUID envId, Instant expectedStateChangedAt) {
+    public boolean reconcilePurgedEnvironmentIfStillPending(UUID envId, Instant expectedLastActivityAt) {
         ExecutionEnvironment env =
                 executionEnvironmentRepository.findById(envId).orElse(null);
         if (env == null) {
@@ -505,7 +527,7 @@ public class ExecutionEnvironmentService {
         if (executionEnvironmentRepository.transitionIfUnchanged(
                         envId,
                         EnvironmentStatus.PENDING_CONNECT,
-                        expectedStateChangedAt,
+                        expectedLastActivityAt,
                         EnvironmentStatus.TERMINATED,
                         Instant.now())
                 == 0) {
@@ -540,11 +562,37 @@ public class ExecutionEnvironmentService {
 
     private static void transition(ExecutionEnvironment env, EnvironmentStatus status) {
         env.setStatus(status);
-        env.setStateChangedAt(Instant.now());
+        env.setLastActivityAt(Instant.now());
+    }
+
+    /**
+     * Quiet liveness stamp from user-facing read paths. Writes only a CONNECTED row that has
+     * been quiet past the throttle window. REQUIRES_NEW because callers are often
+     * {@code readOnly = true}; a joined read-only transaction would reject the UPDATE. Never
+     * publishes {@link TeamEntityChangedEvent}: an activity touch must not wake every client's
+     * websocket refresh.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void touchActiveEnvironment(UUID envId) {
+        if (envId == null) {
+            return;
+        }
+        Instant now = Instant.now();
+        executionEnvironmentRepository.touchActiveEnvironmentIfElapsed(envId, now, now.minus(ACTIVITY_THROTTLE));
     }
 
     private static void markSuspended(ExecutionEnvironment env) {
         transition(env, EnvironmentStatus.SLEEPING);
+    }
+
+    /**
+     * The SLEEPING edge is a conditional UPDATE, so a failed suspend needs no compensating
+     * write: the throwing path rolls its transaction back, and the nothing-to-preserve path
+     * re-stamps the row through {@code reconcilePurgedEnvironment}. Restoring the in-memory
+     * field keeps the entity consistent for callers that still hold it.
+     */
+    private static void revertQuietClaim(ExecutionEnvironment env, Instant quietSince) {
+        env.setLastActivityAt(quietSince);
     }
 
     /**

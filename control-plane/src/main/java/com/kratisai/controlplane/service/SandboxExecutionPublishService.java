@@ -87,6 +87,7 @@ public class SandboxExecutionPublishService {
     private final ChatModelFactory chatModelFactory;
     private final ObjectMapper objectMapper;
     private final SandboxProvisioningService sandboxProvisioningService;
+    private final ExecutionEnvironmentService executionEnvironmentService;
     private final TransactionTemplate requiresNewTransactionTemplate;
 
     public SandboxExecutionPublishService(
@@ -104,6 +105,7 @@ public class SandboxExecutionPublishService {
             ChatModelFactory chatModelFactory,
             ObjectMapper objectMapper,
             SandboxProvisioningService sandboxProvisioningService,
+            ExecutionEnvironmentService executionEnvironmentService,
             PlatformTransactionManager transactionManager) {
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.changeSetRepository = changeSetRepository;
@@ -120,6 +122,7 @@ public class SandboxExecutionPublishService {
         this.chatModelFactory = chatModelFactory;
         this.objectMapper = objectMapper;
         this.sandboxProvisioningService = sandboxProvisioningService;
+        this.executionEnvironmentService = executionEnvironmentService;
         this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -127,7 +130,20 @@ public class SandboxExecutionPublishService {
     @Transactional(readOnly = true)
     public PublishCapabilitiesDto getPublishCapabilities(UUID userId, UUID chatId, UUID executionId) {
         SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
+        touchIfConnected(execution.getEnvironment());
         return buildPublishCapabilities(execution);
+    }
+
+    /** Best-effort liveness stamp: a failed activity touch never fails the read it accompanies. */
+    private void touchIfConnected(ExecutionEnvironment env) {
+        if (env == null || env.getStatus() != EnvironmentStatus.CONNECTED) {
+            return;
+        }
+        try {
+            executionEnvironmentService.touchActiveEnvironment(env.getId());
+        } catch (Exception e) {
+            logger.warn("Failed to record user activity on environment {}: {}", env.getId(), e.getMessage());
+        }
     }
 
     private PublishCapabilitiesDto buildPublishCapabilities(SandboxExecution execution) {
@@ -373,6 +389,7 @@ public class SandboxExecutionPublishService {
             throw new PublishException(
                     PublishException.ErrorCode.ENVIRONMENT_NOT_RUNNING, "Environment is not running");
         }
+        touchIfConnected(env);
         if (execution.getStatus() == SandboxExecutionStatus.RUNNING) {
             throw new PublishException(PublishException.ErrorCode.EXECUTION_RUNNING, "Execution is actively running");
         }

@@ -122,7 +122,7 @@ public class EnvironmentRegisterRpcHandler
         }
 
         if (env.getStatus() != EnvironmentStatus.CONNECTED) {
-            env.setStateChangedAt(Instant.now());
+            env.setLastActivityAt(Instant.now());
         }
         env.setStatus(EnvironmentStatus.CONNECTED);
         if (reconnectState.activeAcpSessionId() != null) {
@@ -207,7 +207,7 @@ public class EnvironmentRegisterRpcHandler
                 sessionId,
                 loggable(connectorVersion));
         if (env.getStatus() != EnvironmentStatus.CONNECTED) {
-            env.setStateChangedAt(Instant.now());
+            env.setLastActivityAt(Instant.now());
         }
         env.setStatus(EnvironmentStatus.CONNECTED);
         env.setLastHeartbeat(Instant.now());

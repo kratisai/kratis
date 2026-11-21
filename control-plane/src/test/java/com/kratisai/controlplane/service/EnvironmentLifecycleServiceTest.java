@@ -109,7 +109,7 @@ class EnvironmentLifecycleServiceTest {
         env.setType(ExecutionEnvironmentType.SANDBOX);
         env.setStatus(status);
         env.setProvider(provider);
-        env.setStateChangedAt(LONG_AGO);
+        env.setLastActivityAt(LONG_AGO);
         return env;
     }
 
@@ -123,7 +123,7 @@ class EnvironmentLifecycleServiceTest {
         sandboxProperties.getLifecycle().setSettleWindow(Duration.ofHours(1));
         lifecycleService = newService();
         ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
-        env.setStateChangedAt(LONG_AGO);
+        env.setLastActivityAt(LONG_AGO);
         givenEnvironments(EnvironmentStatus.CONNECTED, env);
 
         lifecycleService.sweep();
@@ -135,7 +135,7 @@ class EnvironmentLifecycleServiceTest {
     @Test
     void sweep_suspendsEnvironmentIdleLongerThanTimeout() {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
-        env.setStateChangedAt(Instant.now().minus(Duration.ofHours(2)));
+        env.setLastActivityAt(Instant.now().minus(Duration.ofHours(2)));
         givenEnvironments(EnvironmentStatus.CONNECTED, env);
 
         lifecycleService.sweep();
@@ -146,7 +146,7 @@ class EnvironmentLifecycleServiceTest {
     @Test
     void sweep_suspendsEvenWhenHeartbeatIsStale() {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
-        env.setStateChangedAt(Instant.now().minus(Duration.ofHours(2)));
+        env.setLastActivityAt(Instant.now().minus(Duration.ofHours(2)));
         env.setLastHeartbeat(LONG_AGO);
         givenEnvironments(EnvironmentStatus.CONNECTED, env);
 
@@ -158,7 +158,7 @@ class EnvironmentLifecycleServiceTest {
     @Test
     void sweep_neverSuspendsEnvironmentWithRunningExecution() {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
-        env.setStateChangedAt(Instant.now().minus(Duration.ofHours(2)));
+        env.setLastActivityAt(Instant.now().minus(Duration.ofHours(2)));
         givenEnvironments(EnvironmentStatus.CONNECTED, env);
         when(executionLifecycleService.hasRunningExecutions(ENV_ID)).thenReturn(true);
 
@@ -170,7 +170,7 @@ class EnvironmentLifecycleServiceTest {
     @Test
     void sweep_neverSuspendsEnvironmentWithPendingHitl() {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
-        env.setStateChangedAt(Instant.now().minus(Duration.ofHours(2)));
+        env.setLastActivityAt(Instant.now().minus(Duration.ofHours(2)));
         givenEnvironments(EnvironmentStatus.CONNECTED, env);
         when(executionLifecycleService.hasPendingHitl(ENV_ID)).thenReturn(true);
 
@@ -182,7 +182,7 @@ class EnvironmentLifecycleServiceTest {
     @Test
     void sweep_sleepsIdleEnvironmentOncePendingHitlClears() {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
-        env.setStateChangedAt(Instant.now().minus(Duration.ofHours(2)));
+        env.setLastActivityAt(Instant.now().minus(Duration.ofHours(2)));
         givenEnvironments(EnvironmentStatus.CONNECTED, env);
         when(executionLifecycleService.hasPendingHitl(ENV_ID)).thenReturn(false);
 
@@ -195,7 +195,7 @@ class EnvironmentLifecycleServiceTest {
     @Test
     void sweep_pendingHitlDoesNotBlockLostRuntimeHandling() {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
-        env.setStateChangedAt(Instant.now().minus(Duration.ofHours(2)));
+        env.setLastActivityAt(Instant.now().minus(Duration.ofHours(2)));
         givenEnvironments(EnvironmentStatus.CONNECTED, env);
         when(environmentRepository.findByTypeAndStatusIn(any(), any())).thenReturn(List.of(env));
         when(executionLifecycleService.hasPendingHitl(ENV_ID)).thenReturn(true);
@@ -214,12 +214,36 @@ class EnvironmentLifecycleServiceTest {
     @Test
     void sweep_skipsEnvironmentIdleForLessThanTimeout() {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
-        env.setStateChangedAt(Instant.now().minus(Duration.ofMinutes(1)));
+        env.setLastActivityAt(Instant.now().minus(Duration.ofMinutes(1)));
         givenEnvironments(EnvironmentStatus.CONNECTED, env);
 
         lifecycleService.sweep();
 
         verify(executionEnvironmentService, never()).sleepEnvironmentInternal(any());
+    }
+
+    @Test
+    void sweep_recentUserActivityDelaysSuspensionPastIdleTimeout() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
+        // Connected long ago, but the user viewed a diff moments ago: the activity clock,
+        // not the connect time, decides idle suspension.
+        env.setLastActivityAt(Instant.now().minus(Duration.ofMinutes(2)));
+        givenEnvironments(EnvironmentStatus.CONNECTED, env);
+
+        lifecycleService.sweep();
+
+        verify(executionEnvironmentService, never()).sleepEnvironmentInternal(any());
+    }
+
+    @Test
+    void sweep_suspendsWhenNoActivitySinceIdleTimeout() {
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
+        env.setLastActivityAt(Instant.now().minus(Duration.ofMinutes(21)));
+        givenEnvironments(EnvironmentStatus.CONNECTED, env);
+
+        lifecycleService.sweep();
+
+        verify(executionEnvironmentService).sleepEnvironmentInternal(env);
     }
 
     @Test
@@ -336,7 +360,7 @@ class EnvironmentLifecycleServiceTest {
         sandboxProperties.getLifecycle().setStartupGrace(Duration.ofHours(1));
         lifecycleService = newService();
         ExecutionEnvironment env = sandbox(EnvironmentStatus.PENDING_CONNECT);
-        env.setStateChangedAt(Instant.now());
+        env.setLastActivityAt(Instant.now());
         when(environmentRepository.findByTypeAndStatusIn(any(), any())).thenReturn(List.of(env));
 
         lifecycleService.sweep();
@@ -376,7 +400,7 @@ class EnvironmentLifecycleServiceTest {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
         // Container is still up, but no heartbeat for one full reconnect window: the connector
         // is wedged. Quiet for 10 minutes is not yet idle (20m), so this is the lost-runtime rule.
-        env.setStateChangedAt(Instant.now().minus(Duration.ofMinutes(10)));
+        env.setLastActivityAt(Instant.now().minus(Duration.ofMinutes(10)));
         env.setLastHeartbeat(Instant.now().minus(Duration.ofMinutes(6)));
         sandboxProperties.getLifecycle().setConnectTimeout(Duration.ofMinutes(5));
         lifecycleService = newService();
@@ -396,7 +420,7 @@ class EnvironmentLifecycleServiceTest {
     @Test
     void sweep_lostRuntime_connectedAliveInsideReconnectWindowIsLeftAlone() {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.CONNECTED);
-        env.setStateChangedAt(Instant.now().minus(Duration.ofMinutes(10)));
+        env.setLastActivityAt(Instant.now().minus(Duration.ofMinutes(10)));
         env.setLastHeartbeat(Instant.now().minus(Duration.ofMinutes(1)));
         sandboxProperties.getLifecycle().setConnectTimeout(Duration.ofMinutes(5));
         lifecycleService = newService();
@@ -443,10 +467,10 @@ class EnvironmentLifecycleServiceTest {
     @Test
     void sweep_oneFailingRowDoesNotStopTheOthers() {
         ExecutionEnvironment failing = sandbox(EnvironmentStatus.CONNECTED);
-        failing.setStateChangedAt(Instant.now().minus(Duration.ofHours(2)));
+        failing.setLastActivityAt(Instant.now().minus(Duration.ofHours(2)));
         ExecutionEnvironment healthy = sandbox(EnvironmentStatus.CONNECTED);
         healthy.setId(UUID.fromString("99999999-9999-9999-9999-999999999999"));
-        healthy.setStateChangedAt(Instant.now().minus(Duration.ofHours(2)));
+        healthy.setLastActivityAt(Instant.now().minus(Duration.ofHours(2)));
         givenEnvironments(EnvironmentStatus.CONNECTED, failing, healthy);
         doThrow(new IllegalStateException("boom"))
                 .when(executionEnvironmentService)

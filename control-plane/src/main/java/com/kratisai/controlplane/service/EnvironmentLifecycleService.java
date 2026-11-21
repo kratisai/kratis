@@ -102,7 +102,7 @@ public class EnvironmentLifecycleService {
     private void resolveStuckResumes(Instant now) {
         for (ExecutionEnvironment env : environmentRepository.findByTypeAndStatus(
                 ExecutionEnvironmentType.SANDBOX, EnvironmentStatus.PENDING_CONNECT)) {
-            if (!elapsed(env.getStateChangedAt(), now, connectTimeout)) {
+            if (!elapsed(env.getLastActivityAt(), now, connectTimeout)) {
                 continue;
             }
             SandboxProvider provider = providerFor(env);
@@ -123,9 +123,9 @@ public class EnvironmentLifecycleService {
             // transition fails in that case, so a CONNECTED row is never overwritten; the
             // lost-runtime rule reconciles the now-missing runtime on a later sweep.
             boolean claimed = retained
-                    ? executionEnvironmentService.rollbackFailedResumeIfStillPending(envId, env.getStateChangedAt())
+                    ? executionEnvironmentService.rollbackFailedResumeIfStillPending(envId, env.getLastActivityAt())
                     : executionEnvironmentService.reconcilePurgedEnvironmentIfStillPending(
-                            envId, env.getStateChangedAt());
+                            envId, env.getLastActivityAt());
             if (!claimed) {
                 logger.debug(
                         "Environment {} registered while its stuck runtime was removed;"
@@ -158,14 +158,14 @@ public class EnvironmentLifecycleService {
                 logger.trace("Idle check: env {} awaits a human answer; skipping", env.getId());
                 continue;
             }
-            if (!elapsed(env.getStateChangedAt(), now, idleTimeout)) {
-                logger.trace("Idle check: env {} quiet since {}; not yet idle", env.getId(), env.getStateChangedAt());
+            if (!elapsed(env.getLastActivityAt(), now, idleTimeout)) {
+                logger.trace("Idle check: env {} quiet since {}; not yet idle", env.getId(), env.getLastActivityAt());
                 continue;
             }
             logger.debug(
                     "Idle timeout reached for env {} (quiet since {}); suspending",
                     env.getId(),
-                    env.getStateChangedAt());
+                    env.getLastActivityAt());
             failRow(
                     "suspending idle sandbox",
                     () -> executionEnvironmentService.sleepEnvironmentInternal(env),
@@ -178,7 +178,7 @@ public class EnvironmentLifecycleService {
             if (env.getType() != ExecutionEnvironmentType.SANDBOX || env.getProvider() == null) {
                 continue;
             }
-            logger.debug("Expiring env {} (state_changed_at={})", env.getId(), env.getStateChangedAt());
+            logger.debug("Expiring env {} (last_activity_at={})", env.getId(), env.getLastActivityAt());
             failRow("expiring sandbox", () -> executionEnvironmentService.expireEnvironment(env), env.getId());
         }
     }
@@ -191,7 +191,7 @@ public class EnvironmentLifecycleService {
      * nothing-left CONNECTED row becomes TERMINATED, after that window. RUNNING executions move
      * to UNKNOWN on suspend; IDLE ones are unchanged for SLEEPING and move to UNKNOWN for
      * TERMINATED. PENDING_CONNECT and SLEEPING rows do not need the heartbeat: their
-     * state_changed_at is stamped on entry to that status, so the startup-grace gate above guards
+     * last_activity_at is stamped on entry to that status, so the startup-grace gate above guards
      * both against docker listing lag right after the status change.
      */
     private void applyLostRuntimeRule(Instant now) {
@@ -205,10 +205,12 @@ public class EnvironmentLifecycleService {
             if (provider == null) {
                 continue;
             }
-            // CONNECTED rows gate on their heartbeat, not on row age: state_changed_at holds the
-            // connect time, which is by construction older than any grace.
+            // CONNECTED rows bypass this gate entirely: their clock advances on throttled user
+            // touches, so its age says nothing about docker listing lag. The grace guards only
+            // the status-stamped rows (entry to PENDING_CONNECT or SLEEPING), where the clock
+            // really is a transition timestamp.
             if (env.getStatus() != EnvironmentStatus.CONNECTED
-                    && !elapsed(env.getStateChangedAt(), now, startupGrace)) {
+                    && !elapsed(env.getLastActivityAt(), now, startupGrace)) {
                 continue;
             }
             failRow(
@@ -323,7 +325,7 @@ public class EnvironmentLifecycleService {
         }
         if (env.getStatus() == EnvironmentStatus.TERMINATED
                 && env.getProvider() != null
-                && elapsed(env.getStateChangedAt(), now, startupGrace)) {
+                && elapsed(env.getLastActivityAt(), now, startupGrace)) {
             logger.info("Purging compute of terminated sandbox {}", envId);
             provider.terminateSandbox(envId);
         }
@@ -334,7 +336,7 @@ public class EnvironmentLifecycleService {
         if (env != null && env.getStatus() != EnvironmentStatus.TERMINATED) {
             return;
         }
-        if (env != null && (env.getProvider() == null || !elapsed(env.getStateChangedAt(), now, startupGrace))) {
+        if (env != null && (env.getProvider() == null || !elapsed(env.getLastActivityAt(), now, startupGrace))) {
             return;
         }
         Instant firstSeen = orphanSnapshotFirstSeen.putIfAbsent(envId, now);

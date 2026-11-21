@@ -42,6 +42,7 @@ import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.FakeGitHubApiClientConfig;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -111,6 +112,7 @@ class SandboxExecutionPublishControllerTest {
     private String authToken;
     private ChatEntity chat;
     private SandboxExecution execution;
+    private ExecutionEnvironment environment;
     private boolean rebaseConflict;
 
     @BeforeEach
@@ -134,7 +136,7 @@ class SandboxExecutionPublishControllerTest {
         repository.setCredential(credential);
         repository = repositoryRepository.save(repository);
 
-        ExecutionEnvironment environment = new ExecutionEnvironment();
+        environment = new ExecutionEnvironment();
         environment.setTeam(chat.getTeam());
         environment.setName("Publish Test Env");
         environment.setType(ExecutionEnvironmentType.SANDBOX);
@@ -305,6 +307,43 @@ class SandboxExecutionPublishControllerTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + authToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UP_TO_DATE"));
+    }
+
+    @Test
+    void getPublishCapabilities_touchesLastActivityAtWhenConnected() throws Exception {
+        Instant stale = Instant.now().minusSeconds(300);
+        environment.setLastActivityAt(stale);
+        executionEnvironmentRepository.save(environment);
+
+        mockMvc.perform(get(
+                                "/api/v1/chats/{chatId}/executions/{execId}/publish-capabilities",
+                                chat.getId(),
+                                execution.getId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + authToken))
+                .andExpect(status().isOk());
+
+        assertThat(executionEnvironmentRepository
+                        .findById(environment.getId())
+                        .orElseThrow()
+                        .getLastActivityAt())
+                .isAfter(stale);
+    }
+
+    @Test
+    void rebase_touchesLastActivityAt() throws Exception {
+        Instant stale = Instant.now().minusSeconds(300);
+        environment.setLastActivityAt(stale);
+        executionEnvironmentRepository.save(environment);
+
+        mockMvc.perform(post("/api/v1/chats/{chatId}/executions/{execId}/rebase", chat.getId(), execution.getId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + authToken))
+                .andExpect(status().isOk());
+
+        assertThat(executionEnvironmentRepository
+                        .findById(environment.getId())
+                        .orElseThrow()
+                        .getLastActivityAt())
+                .isAfter(stale);
     }
 
     @Test

@@ -228,20 +228,25 @@ stateDiagram-v2
 
 ### Clocks
 
-Each transition sets `state_changed_at`. The sweep uses this column as its main clock:
+Each transition sets `last_activity_at`. The sweep uses this column as its main clock, and
+throttled user read-path touches (publish capability checks, rebase, diff reads, steering;
+60-second throttle, no event published) move it too:
 
-- `CONNECTED`: idle time, against `idle-timeout` (20 minutes). The clock starts when the
-  last `RUNNING` execution stops.
+- `CONNECTED`: the most recent of the last `RUNNING` execution stopping and the last
+  throttled user touch, against `idle-timeout` (20 minutes).
 - `PENDING_CONNECT`: spawn or resume age, against `connect-timeout` (5 minutes).
 - `SLEEPING`: time since suspend, against `retention-period` (30 days). Each resume
   restarts it.
 
 A `CONNECTED` row additionally answers to its heartbeat (`last_heartbeat`, refreshed by
 `env.heartbeat`): a runner that is up while the heartbeat has been absent for
-`connect-timeout` is a wedged connector and is suspended. Two in-memory clocks cover rows
-whose `state_changed_at` cannot move (orphans, and a `CONNECTED` row with no resources at
-all): they wait out one grace window before the destructive step, so a docker listing
-glitch or a connector mid-reconnect can never masquerade as absence.
+`connect-timeout` is a wedged connector and is suspended. The idle suspend takes its
+`SLEEPING` edge through a compare-and-set on the activity clock *after* `suspend` returns —
+never holding the row across provider I/O — so a touch that committed since the sweep's
+snapshot leaves the row awake and the sweep retries it later. Two in-memory clocks cover
+rows whose `last_activity_at` cannot move (orphans, and a `CONNECTED` row with no
+resources at all): they wait out one grace window before the destructive step, so a docker
+listing glitch or a connector mid-reconnect can never masquerade as absence.
 
 Teardown always goes through `suspend`, which commits any runner still on disk — including
 a stopped corpse whose workspace layer is otherwise unreachable — before removing compute.

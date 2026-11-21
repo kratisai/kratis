@@ -24,6 +24,7 @@ import com.kratisai.controlplane.repository.TeamRepository;
 import com.kratisai.controlplane.repository.UserRepository;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -127,7 +128,17 @@ class ExecutionEnvironmentServiceTest {
         env.setType(ExecutionEnvironmentType.SANDBOX);
         env.setStatus(EnvironmentStatus.CONNECTED);
         env.setProvider(provider);
+        env.setLastActivityAt(Instant.now());
         return env;
+    }
+
+    /**
+     * The sleep-path CAS on (status, quiet clock) succeeds unless a test says a touch raced it.
+     */
+    private void sleepEdgeClaimSucceeds() {
+        when(executionEnvironmentRepository.transitionIfStatusAndActivityUnchanged(
+                        eq(ENV_ID), eq(EnvironmentStatus.CONNECTED), any(), eq(EnvironmentStatus.SLEEPING), any()))
+                .thenReturn(1);
     }
 
     private SandboxExecution createRunningExecution(ExecutionEnvironment env) {
@@ -152,6 +163,7 @@ class ExecutionEnvironmentServiceTest {
     @Test
     void sleepEnvironment_suspendsProviderAndMarksSleeping() {
         ExecutionEnvironment env = createSandboxEnvironment();
+        sleepEdgeClaimSucceeds();
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
         when(sandboxProvider.suspend(ENV_ID)).thenReturn(true);
@@ -160,14 +172,14 @@ class ExecutionEnvironmentServiceTest {
 
         verify(sandboxProvider).suspend(ENV_ID);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
-        assertThat(env.getStateChangedAt()).isNotNull();
-        verify(executionEnvironmentRepository).save(env);
+        assertThat(env.getLastActivityAt()).isNotNull();
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
     }
 
     @Test
     void sleepEnvironment_leavesIdleExecutionUnchanged() {
         ExecutionEnvironment env = createSandboxEnvironment();
+        sleepEdgeClaimSucceeds();
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
         when(sandboxProvider.suspend(ENV_ID)).thenReturn(true);
@@ -181,6 +193,7 @@ class ExecutionEnvironmentServiceTest {
     @Test
     void sleepEnvironment_marksTerminatedWhenNothingToPreserve() {
         ExecutionEnvironment env = createSandboxEnvironment();
+        // The nothing-to-preserve path returns before the SLEEPING edge, so no claim stub applies
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
         when(sandboxProvider.suspend(ENV_ID)).thenReturn(false);
@@ -190,13 +203,13 @@ class ExecutionEnvironmentServiceTest {
         assertThat(env.getStatus())
                 .as("a 'sleep' of an empty sandbox is a purge, not a sleeping state")
                 .isEqualTo(EnvironmentStatus.TERMINATED);
-        verify(executionEnvironmentRepository).save(env);
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
     }
 
     @Test
     void sleepEnvironment_recordsSleepActivityAndPublishesStatusChange() {
         ExecutionEnvironment env = createSandboxEnvironment();
+        sleepEdgeClaimSucceeds();
         SandboxExecution execution = createRunningExecution(env);
         when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
                 .thenReturn(Optional.of(execution));
@@ -221,6 +234,7 @@ class ExecutionEnvironmentServiceTest {
     @Test
     void sleepEnvironment_publishesSuspendedEventWithoutCompleteEvent() {
         ExecutionEnvironment env = createSandboxEnvironment();
+        sleepEdgeClaimSucceeds();
         SandboxExecution execution = createRunningExecution(env);
         when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
                 .thenReturn(Optional.of(execution));
@@ -243,6 +257,43 @@ class ExecutionEnvironmentServiceTest {
         assertThat(execution.getStatus())
                 .as("sleep must not change the execution status")
                 .isEqualTo(SandboxExecutionStatus.RUNNING);
+    }
+
+    @Test
+    void sleepEnvironment_skipsTheSuspendWhenActivityRacedTheSweep() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        // A touch committed between the sweep's snapshot and the SLEEPING edge: the CAS write
+        // updates 0 rows, the suspend-snapshot commit stays safe, and the sweep retries.
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        when(sandboxProvider.suspend(ENV_ID)).thenReturn(true);
+        when(executionEnvironmentRepository.transitionIfStatusAndActivityUnchanged(
+                        eq(ENV_ID), eq(EnvironmentStatus.CONNECTED), any(), eq(EnvironmentStatus.SLEEPING), any()))
+                .thenReturn(0);
+
+        executionEnvironmentService.sleepEnvironmentInternal(env);
+
+        verify(sandboxProvider).suspend(ENV_ID);
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+        assertThat(env.getLastActivityAt()).isNotNull();
+        verify(eventPublisher, never()).publishEvent(any(TeamEntityChangedEvent.class));
+    }
+
+    @Test
+    void sleepEnvironment_providerFailureNeverMarksTheRowSleeping() {
+        ExecutionEnvironment env = createSandboxEnvironment();
+        Instant quietSince = Instant.now();
+        env.setLastActivityAt(quietSince);
+        when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
+                .thenReturn(sandboxProvider);
+        when(sandboxProvider.suspend(ENV_ID)).thenThrow(new IllegalStateException("docker gone"));
+
+        assertThatThrownBy(() -> executionEnvironmentService.sleepEnvironmentInternal(env))
+                .isInstanceOf(ResponseStatusException.class);
+
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+        verify(executionEnvironmentRepository, never()).save(any());
+        verify(eventPublisher, never()).publishEvent(any(TeamEntityChangedEvent.class));
     }
 
     @Test
@@ -304,6 +355,9 @@ class ExecutionEnvironmentServiceTest {
     @Test
     void sleepEnvironment_withSuspendedProviderFailure_returns500AndKeepsEnvironment() {
         ExecutionEnvironment env = createSandboxEnvironment();
+        Instant quietSince = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        env.setLastActivityAt(quietSince);
+        // The provider failure raises before the SLEEPING edge, so no claim stub applies
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
         doThrow(new IllegalStateException("No runner container found"))
@@ -315,6 +369,7 @@ class ExecutionEnvironmentServiceTest {
                         org.springframework.web.server.ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode().value()).isEqualTo(500));
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+        assertThat(env.getLastActivityAt()).isEqualTo(quietSince);
     }
 
     @Test
@@ -385,7 +440,7 @@ class ExecutionEnvironmentServiceTest {
         ExecutionEnvironmentDto dto = executionEnvironmentService.resumeEnvironment(USER_ID, TEAM_ID, ENV_ID);
 
         assertThat(dto.status()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
-        assertThat(env.getStateChangedAt()).isNotNull();
+        assertThat(env.getLastActivityAt()).isNotNull();
         verify(sandboxProvisioningService).reprovisionEnvironment(env);
         // Two-phase resume: the intent commits (save + event) before the spawn; the resume
         // path only publishes once more on success.
@@ -538,6 +593,7 @@ class ExecutionEnvironmentServiceTest {
     @Test
     void sleepEnvironmentInternal_stampsStateChangeAndSuspendTime() {
         ExecutionEnvironment env = createSandboxEnvironment();
+        sleepEdgeClaimSucceeds();
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
         when(sandboxProvider.suspend(ENV_ID)).thenReturn(true);
@@ -545,7 +601,7 @@ class ExecutionEnvironmentServiceTest {
         executionEnvironmentService.sleepEnvironmentInternal(env);
 
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
-        assertThat(env.getStateChangedAt()).isNotNull();
+        assertThat(env.getLastActivityAt()).isNotNull();
     }
 
     @Test
@@ -556,7 +612,7 @@ class ExecutionEnvironmentServiceTest {
         executionEnvironmentService.rollbackFailedResume(env);
 
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
-        assertThat(env.getStateChangedAt()).isNotNull();
+        assertThat(env.getLastActivityAt()).isNotNull();
         verify(executionEnvironmentRepository).save(env);
     }
 
@@ -624,7 +680,7 @@ class ExecutionEnvironmentServiceTest {
     void expireEnvironment_destroysSnapshotAndMarksTerminated() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);
-        env.setStateChangedAt(Instant.now().minus(Duration.ofDays(60)));
+        env.setLastActivityAt(Instant.now().minus(Duration.ofDays(60)));
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
 
@@ -640,7 +696,7 @@ class ExecutionEnvironmentServiceTest {
     void expireEnvironment_terminatesActiveExecution() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);
-        env.setStateChangedAt(Instant.now().minus(Duration.ofDays(60)));
+        env.setLastActivityAt(Instant.now().minus(Duration.ofDays(60)));
         when(sandboxOrchestratorService.getProvider(ExecutionProviderType.DOCKER))
                 .thenReturn(sandboxProvider);
         SandboxExecution active = createRunningExecution(env);
@@ -664,7 +720,7 @@ class ExecutionEnvironmentServiceTest {
     void reconcilePurgedEnvironment_withActiveExecution_terminatesWithoutRecordingSandboxPurged() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);
-        env.setStateChangedAt(Instant.now());
+        env.setLastActivityAt(Instant.now());
         SandboxExecution active = createRunningExecution(env);
         active.setStatus(SandboxExecutionStatus.RUNNING);
         when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
@@ -687,7 +743,7 @@ class ExecutionEnvironmentServiceTest {
     void reconcilePurgedEnvironment_marksTerminatedAndRecordsPurgedActivity() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);
-        env.setStateChangedAt(Instant.now());
+        env.setLastActivityAt(Instant.now());
         SandboxExecution execution = createRunningExecution(env);
         execution.setStatus(SandboxExecutionStatus.COMPLETED);
         when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
@@ -717,7 +773,7 @@ class ExecutionEnvironmentServiceTest {
     void reconcilePurgedEnvironment_withFailedExecution_publishesSuspendedEvent() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.CONNECTED);
-        env.setStateChangedAt(Instant.now());
+        env.setLastActivityAt(Instant.now());
         SandboxExecution failed = createRunningExecution(env);
         failed.setStatus(SandboxExecutionStatus.FAILED);
         when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
@@ -737,7 +793,7 @@ class ExecutionEnvironmentServiceTest {
     void reconcilePurgedEnvironment_withoutExecution_marksTerminatedOnly() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);
-        env.setStateChangedAt(Instant.now());
+        env.setLastActivityAt(Instant.now());
         when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
                 .thenReturn(Optional.empty());
 
@@ -755,7 +811,7 @@ class ExecutionEnvironmentServiceTest {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.PENDING_CONNECT);
         Instant observed = Instant.now();
-        env.setStateChangedAt(observed);
+        env.setLastActivityAt(observed);
         when(executionEnvironmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
         when(executionEnvironmentRepository.transitionIfUnchanged(any(), any(), any(), any(), any()))
                 .thenReturn(1);
@@ -772,7 +828,7 @@ class ExecutionEnvironmentServiceTest {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.PENDING_CONNECT);
         Instant observed = Instant.now();
-        env.setStateChangedAt(observed);
+        env.setLastActivityAt(observed);
         when(executionEnvironmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
         when(executionEnvironmentRepository.transitionIfUnchanged(any(), any(), any(), any(), any()))
                 .thenReturn(0);
@@ -788,7 +844,7 @@ class ExecutionEnvironmentServiceTest {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.PENDING_CONNECT);
         Instant observed = Instant.now();
-        env.setStateChangedAt(observed);
+        env.setLastActivityAt(observed);
         when(executionEnvironmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
         when(executionEnvironmentRepository.transitionIfUnchanged(any(), any(), any(), any(), any()))
                 .thenReturn(1);
@@ -808,7 +864,7 @@ class ExecutionEnvironmentServiceTest {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.PENDING_CONNECT);
         Instant observed = Instant.now();
-        env.setStateChangedAt(observed);
+        env.setLastActivityAt(observed);
         when(executionEnvironmentRepository.findById(ENV_ID)).thenReturn(Optional.of(env));
         when(executionEnvironmentRepository.transitionIfUnchanged(any(), any(), any(), any(), any()))
                 .thenReturn(0);
@@ -817,5 +873,20 @@ class ExecutionEnvironmentServiceTest {
                 .isFalse();
 
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void touchActiveEnvironment_writesThroughRepositoryThrottleQuery() {
+        executionEnvironmentService.touchActiveEnvironment(ENV_ID);
+
+        verify(executionEnvironmentRepository).touchActiveEnvironmentIfElapsed(eq(ENV_ID), any(), any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void touchActiveEnvironment_nullId_skipsRepositoryCall() {
+        executionEnvironmentService.touchActiveEnvironment(null);
+
+        verify(executionEnvironmentRepository, never()).touchActiveEnvironmentIfElapsed(any(), any(), any());
     }
 }

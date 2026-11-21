@@ -177,7 +177,7 @@ public class SandboxExecution {
         } else if (!willRun && wasRunning) {
             endActive(now);
             if (environment != null) {
-                environment.setStateChangedAt(now);
+                environment.setLastActivityAt(now);
             }
         }
         this.status = status;

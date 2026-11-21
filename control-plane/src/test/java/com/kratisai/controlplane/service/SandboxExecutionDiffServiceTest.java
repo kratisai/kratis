@@ -60,6 +60,9 @@ class SandboxExecutionDiffServiceTest {
     @Mock
     private BlobStorageService blobStorageService;
 
+    @Mock
+    private ExecutionEnvironmentService executionEnvironmentService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private SandboxExecutionDiffService service;
 
@@ -108,7 +111,8 @@ class SandboxExecutionDiffServiceTest {
                 environmentRpcClient,
                 diffSnapshotRepository,
                 blobStorageService,
-                objectMapper);
+                objectMapper,
+                executionEnvironmentService);
 
         when(chatRepository.findById(chatId)).thenReturn(Optional.of(chat));
         when(sandboxExecutionRepository.findById(executionId)).thenReturn(Optional.of(execution));
@@ -267,5 +271,65 @@ class SandboxExecutionDiffServiceTest {
         assertThatThrownBy(() -> service.getReadFileSlice(userId, chatId, executionId, "src/App.tsx", 1, 10))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("associated environment");
+    }
+
+    @Test
+    void getDiffSummary_connectedEnvironment_touchesActivity() {
+        givenSnapshot("[" + manifestEntry("src/App.tsx", 8, 2, "b-sha") + "]");
+
+        service.getDiffSummary(userId, chatId, executionId);
+
+        verify(executionEnvironmentService).touchActiveEnvironment(envId);
+    }
+
+    @Test
+    void getDiffSummary_sleepingEnvironment_doesNotTouchActivity() {
+        execution.getEnvironment().setStatus(EnvironmentStatus.SLEEPING);
+        givenSnapshot("[" + manifestEntry("src/App.tsx", 8, 2, "b-sha") + "]");
+
+        service.getDiffSummary(userId, chatId, executionId);
+
+        verify(executionEnvironmentService, never()).touchActiveEnvironment(any());
+    }
+
+    @Test
+    void getFileDiff_touchesActivityWhenConnected() {
+        givenSnapshot("[" + manifestEntry("src/App.tsx", 8, 2, "b-sha") + "]");
+        storedSection("b-sha", "patch");
+
+        service.getFileDiff(userId, chatId, executionId, "src/App.tsx");
+
+        verify(executionEnvironmentService).touchActiveEnvironment(envId);
+    }
+
+    @Test
+    void exportPatch_touchesActivityWhenConnected() {
+        givenSnapshot("[" + manifestEntry("src/App.tsx", 8, 2, "b-sha") + "]");
+        storedSection("b-sha", "patch");
+
+        service.exportPatch(userId, chatId, executionId);
+
+        verify(executionEnvironmentService).touchActiveEnvironment(envId);
+    }
+
+    @Test
+    void getReadFileSlice_touchesActivityWhenConnected() throws Exception {
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.ReadFileSlice.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(new EnvironmentConnectorResult.ReadFileSlice("src/App.tsx", 1, List.of("line 1")));
+
+        service.getReadFileSlice(userId, chatId, executionId, "src/App.tsx", 1, 10);
+
+        verify(executionEnvironmentService).touchActiveEnvironment(envId);
+    }
+
+    @Test
+    void getReadFileSlice_withoutEnvironment_neverTouchesActivity() {
+        execution.setEnvironment(null);
+
+        assertThatThrownBy(() -> service.getReadFileSlice(userId, chatId, executionId, "src/App.tsx", 1, 10))
+                .isInstanceOf(ResponseStatusException.class);
+
+        verifyNoInteractions(executionEnvironmentService);
     }
 }

@@ -195,7 +195,7 @@ class EnvironmentRegisterRpcHandlerTest {
         verify(executionEnvironmentRepository).save(env);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
         assertThat(env.getLastHeartbeat()).isNotNull();
-        assertThat(env.getStateChangedAt()).isNotNull();
+        assertThat(env.getLastActivityAt()).isNotNull();
 
         verify(sessionRegistry).registerEnvironmentSession(any(String.class), eq(envId));
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
@@ -296,7 +296,7 @@ class EnvironmentRegisterRpcHandlerTest {
         verify(executionEnvironmentRepository).save(env);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
         assertThat(env.getLastHeartbeat()).isNotNull();
-        assertThat(env.getStateChangedAt()).isNotNull();
+        assertThat(env.getLastActivityAt()).isNotNull();
 
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
         verify(eventPublisher, never()).publishEvent(any(EnvironmentRegisteredEvent.class));
@@ -307,11 +307,11 @@ class EnvironmentRegisterRpcHandlerTest {
         ExecutionEnvironment env = createEnvironment();
         env.setStatus(EnvironmentStatus.SLEEPING);
         Instant staleChange = Instant.now().minus(Duration.ofHours(2));
-        env.setStateChangedAt(staleChange);
+        env.setLastActivityAt(staleChange);
 
         reconnect(env);
 
-        assertThat(env.getStateChangedAt()).isAfter(staleChange);
+        assertThat(env.getLastActivityAt()).isAfter(staleChange);
     }
 
     @Test
@@ -319,11 +319,11 @@ class EnvironmentRegisterRpcHandlerTest {
         ExecutionEnvironment env = createEnvironment();
         env.setStatus(EnvironmentStatus.CONNECTED);
         Instant staleChange = Instant.now().minus(Duration.ofHours(2));
-        env.setStateChangedAt(staleChange);
+        env.setLastActivityAt(staleChange);
 
         reconnect(env);
 
-        assertThat(env.getStateChangedAt()).isEqualTo(staleChange);
+        assertThat(env.getLastActivityAt()).isEqualTo(staleChange);
     }
 
     private void reconnect(ExecutionEnvironment env) {

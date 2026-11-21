@@ -1,0 +1,29 @@
+databaseChangeLog:
+- changeSet:
+    id: 027-rename-state-changed-at-to-last-activity-at-001
+    author: kratis
+    preConditions:
+      - onFail: MARK_RAN
+      - columnExists:
+          tableName: execution_environments
+          columnName: state_changed_at
+    changes:
+      - renameColumn:
+          tableName: execution_environments
+          oldColumnName: state_changed_at
+          newColumnName: last_activity_at
+          columnDataType: TIMESTAMP WITH TIME ZONE
+- changeSet:
+    id: 027-rename-state-changed-at-to-last-activity-at-002
+    author: kratis
+    preConditions:
+      - onFail: MARK_RAN
+      - columnExists:
+          tableName: execution_environments
+          columnName: last_activity_at
+    changes:
+      - addNotNullConstraint:
+          tableName: execution_environments
+          columnName: last_activity_at
+          columnDataType: TIMESTAMP WITH TIME ZONE
+          constraintName: nn_execution_environments_last_activity_at

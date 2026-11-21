@@ -20,7 +20,7 @@ class SandboxExecutionEnvironmentQuietTest {
 
     private static ExecutionEnvironment environment() {
         ExecutionEnvironment environment = new ExecutionEnvironment();
-        environment.setStateChangedAt(LONG_AGO);
+        environment.setLastActivityAt(LONG_AGO);
         return environment;
     }
 
@@ -36,7 +36,7 @@ class SandboxExecutionEnvironmentQuietTest {
 
             execution.setStatus(next);
 
-            assertThat(environment.getStateChangedAt()).as(next.name()).isAfter(LONG_AGO);
+            assertThat(environment.getLastActivityAt()).as(next.name()).isAfter(LONG_AGO);
         }
     }
 
@@ -45,13 +45,13 @@ class SandboxExecutionEnvironmentQuietTest {
         ExecutionEnvironment environment = environment();
         SandboxExecution execution = runningExecutionOn(environment);
         execution.setStatus(SandboxExecutionStatus.RUNNING);
-        assertThat(environment.getStateChangedAt()).isEqualTo(LONG_AGO);
+        assertThat(environment.getLastActivityAt()).isEqualTo(LONG_AGO);
 
         execution.setStatus(SandboxExecutionStatus.IDLE);
-        Instant afterQuiet = environment.getStateChangedAt();
+        Instant afterQuiet = environment.getLastActivityAt();
         execution.setStatus(SandboxExecutionStatus.COMPLETED);
 
-        assertThat(environment.getStateChangedAt()).isEqualTo(afterQuiet);
+        assertThat(environment.getLastActivityAt()).isEqualTo(afterQuiet);
     }
 
     @Test

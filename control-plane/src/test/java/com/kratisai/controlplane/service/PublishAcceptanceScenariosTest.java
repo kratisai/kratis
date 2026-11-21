@@ -103,6 +103,9 @@ class PublishAcceptanceScenariosTest {
     private SandboxProvisioningService sandboxProvisioningService;
 
     @Mock
+    private ExecutionEnvironmentService executionEnvironmentService;
+
+    @Mock
     private PlatformTransactionManager transactionManager;
 
     @Mock
@@ -148,6 +151,7 @@ class PublishAcceptanceScenariosTest {
                 chatModelFactory,
                 new ObjectMapper(),
                 sandboxProvisioningService,
+                executionEnvironmentService,
                 transactionManager);
 
         Team team = new Team("Acceptance Team", "Desc");
