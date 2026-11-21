@@ -52,8 +52,8 @@ public class LiteLLMProvisioningService {
     private final LiteLLMClient liteLLMClient;
     private final ModelProviderRepository modelProviderRepository;
     private final TeamRepository teamRepository;
+    private final LiteLLMProperties liteLLMProperties;
     private final ProviderPricing providerPricing;
-    private final boolean reconciliationEnabled;
 
     private final AtomicBoolean reconciliationSettled = new AtomicBoolean(false);
     private final AtomicInteger reconcileFailures = new AtomicInteger(0);
@@ -68,13 +68,13 @@ public class LiteLLMProvisioningService {
         this.liteLLMClient = liteLLMClient;
         this.modelProviderRepository = modelProviderRepository;
         this.teamRepository = teamRepository;
+        this.liteLLMProperties = liteLLMProperties;
         this.providerPricing = providerPricing;
-        this.reconciliationEnabled = liteLLMProperties.getReconciliation().isEnabled();
     }
 
     @PostConstruct
     void reconcileOnStartup() {
-        if (!reconciliationEnabled) {
+        if (!liteLLMProperties.getReconciliation().isEnabled()) {
             reconciliationSettled.set(true);
             logger.info("LiteLLM startup reconciliation skipped (disabled by configuration)");
             return;
@@ -127,7 +127,7 @@ public class LiteLLMProvisioningService {
 
     @Scheduled(fixedDelayString = "${kratis.litellm.reconciliation.retry-interval:10s}")
     void retryReconciliation() {
-        if (!reconciliationEnabled || reconciliationSettled.get()) {
+        if (!liteLLMProperties.getReconciliation().isEnabled() || reconciliationSettled.get()) {
             return;
         }
         if (reconcileFailures.get() >= MAX_STARTUP_RECONCILE_RETRIES) {

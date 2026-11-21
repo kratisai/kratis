@@ -32,6 +32,7 @@ import org.springframework.test.context.TestExecutionListeners;
             InheritedTransactionContextCleanupListener.class,
             DrainExecutorsTestExecutionListener.class,
             ResetChatModelTestExecutionListener.class,
+            ResetTestSpiesTestExecutionListener.class,
             SlowTestTimingListener.class
         },
         mergeMode = TestExecutionListeners.MergeMode.MERGE_WITH_DEFAULTS)
@@ -39,15 +40,18 @@ import org.springframework.test.context.TestExecutionListeners;
     TestDataFactory.class,
     SandboxExecutionScenarioFactory.class,
     FakeChatModelConfig.class,
+    FakePostHogClientConfig.class,
     ModelDiscoveryTestConfig.class,
     LiteLLMTestConfig.class,
     ProcessExecutorTestConfig.class,
+    TestSpiesConfig.class,
     FakeGitHubApiClientConfig.class,
     FakeGitLabApiClientConfig.class,
     FakeBitbucketApiClientConfig.class,
     FakeAzureDevOpsApiClientConfig.class,
     DatabaseCleaner.class,
     TestAsyncExecutorConfig.class,
+    TestIngestionExecutorConfig.class,
     TestAgentConfig.class,
     TestSecurityConfig.class
 })

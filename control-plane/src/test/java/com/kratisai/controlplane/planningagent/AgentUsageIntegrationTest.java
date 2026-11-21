@@ -24,7 +24,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @SpringIntegrationTest
 class AgentUsageIntegrationTest extends AgentTestHarness {
@@ -44,7 +43,7 @@ class AgentUsageIntegrationTest extends AgentTestHarness {
     @Autowired
     private TestDataFactory testDataFactory;
 
-    @MockitoBean
+    @Autowired
     private LiteLLMClient liteLLMClient;
 
     private UUID teamId;
@@ -66,13 +65,15 @@ class AgentUsageIntegrationTest extends AgentTestHarness {
         chat = testDataFactory.createChat(team, user, "Usage Test Chat");
 
         reset(liteLLMClient);
-        when(liteLLMClient.generateKey(any()))
-                .thenReturn(new GenerateKeyResponse("sk-test-virtual-key", "kratis-chat-" + chat.getId()));
-        when(liteLLMClient.keyInfo(any()))
-                .thenReturn(new KeyInfoResponse(
-                        "sk-test-virtual-key", new KeyInfoData("kratis-chat-" + chat.getId(), 1.5)));
-        when(liteLLMClient.spendLogs(any()))
-                .thenReturn(List.of(new SpendLogEntry(100L, 80L, 20L, 1.5, "raw", "gpt-4o")));
+        doReturn(new GenerateKeyResponse("sk-test-virtual-key", "kratis-chat-" + chat.getId()))
+                .when(liteLLMClient)
+                .generateKey(any());
+        doReturn(new KeyInfoResponse("sk-test-virtual-key", new KeyInfoData("kratis-chat-" + chat.getId(), 1.5)))
+                .when(liteLLMClient)
+                .keyInfo(any());
+        doReturn(List.of(new SpendLogEntry(100L, 80L, 20L, 1.5, "raw", "gpt-4o")))
+                .when(liteLLMClient)
+                .spendLogs(any());
 
         mockModel.addMatcher(
                 PromptMatcher.builder().response("Hello from planning agent").build());
@@ -123,16 +124,17 @@ class AgentUsageIntegrationTest extends AgentTestHarness {
         existing.getUsage().setUsageLastUpdatedAt(Instant.now().minus(5, ChronoUnit.HOURS));
         chatUsageSessionRepository.save(existing);
 
-        when(liteLLMClient.generateKey(any()))
-                .thenReturn(new GenerateKeyResponse("sk-new-virtual-key", "kratis-chat-" + chat.getId()));
-        when(liteLLMClient.keyInfo("sk-old-virtual-key"))
-                .thenReturn(
-                        new KeyInfoResponse("sk-old-virtual-key", new KeyInfoData("kratis-chat-" + chat.getId(), 0.5)));
-        when(liteLLMClient.spendLogs("sk-old-virtual-key")).thenReturn(List.of(new SpendLogEntry(50L, 30L, 20L)));
-        when(liteLLMClient.keyInfo("sk-new-virtual-key"))
-                .thenReturn(
-                        new KeyInfoResponse("sk-new-virtual-key", new KeyInfoData("kratis-chat-" + chat.getId(), 0.0)));
-        when(liteLLMClient.spendLogs("sk-new-virtual-key")).thenReturn(List.of(new SpendLogEntry(10L, 6L, 4L)));
+        doReturn(new GenerateKeyResponse("sk-new-virtual-key", "kratis-chat-" + chat.getId()))
+                .when(liteLLMClient)
+                .generateKey(any());
+        doReturn(new KeyInfoResponse("sk-old-virtual-key", new KeyInfoData("kratis-chat-" + chat.getId(), 0.5)))
+                .when(liteLLMClient)
+                .keyInfo("sk-old-virtual-key");
+        doReturn(List.of(new SpendLogEntry(50L, 30L, 20L))).when(liteLLMClient).spendLogs("sk-old-virtual-key");
+        doReturn(new KeyInfoResponse("sk-new-virtual-key", new KeyInfoData("kratis-chat-" + chat.getId(), 0.0)))
+                .when(liteLLMClient)
+                .keyInfo("sk-new-virtual-key");
+        doReturn(List.of(new SpendLogEntry(10L, 6L, 4L))).when(liteLLMClient).spendLogs("sk-new-virtual-key");
 
         List<ClientPayload.ChatStreamPayload> results = planningAgentService
                 .streamMessage(teamId, providerId, "gpt-4o", chat.getId(), "After inactivity")
@@ -158,14 +160,17 @@ class AgentUsageIntegrationTest extends AgentTestHarness {
         existing.getUsage().setUsageLastUpdatedAt(Instant.now());
         chatUsageSessionRepository.save(existing);
 
-        when(liteLLMClient.keyInfo("sk-expired-key")).thenThrow(new RuntimeException("404 Not Found - key not found"));
-        when(liteLLMClient.spendLogs("sk-expired-key")).thenThrow(new RuntimeException("404 Not Found"));
-        when(liteLLMClient.generateKey(any()))
-                .thenReturn(new GenerateKeyResponse("sk-regenerated-key", "kratis-chat-" + chat.getId()));
-        when(liteLLMClient.keyInfo("sk-regenerated-key"))
-                .thenReturn(new KeyInfoResponse(
-                        "sk-regenerated-key", new KeyInfoData("kratis-chat-" + chat.getId(), 0.75)));
-        when(liteLLMClient.spendLogs("sk-regenerated-key")).thenReturn(List.of(new SpendLogEntry(42L, 22L, 20L)));
+        doThrow(new RuntimeException("404 Not Found - key not found"))
+                .when(liteLLMClient)
+                .keyInfo("sk-expired-key");
+        doThrow(new RuntimeException("404 Not Found")).when(liteLLMClient).spendLogs("sk-expired-key");
+        doReturn(new GenerateKeyResponse("sk-regenerated-key", "kratis-chat-" + chat.getId()))
+                .when(liteLLMClient)
+                .generateKey(any());
+        doReturn(new KeyInfoResponse("sk-regenerated-key", new KeyInfoData("kratis-chat-" + chat.getId(), 0.75)))
+                .when(liteLLMClient)
+                .keyInfo("sk-regenerated-key");
+        doReturn(List.of(new SpendLogEntry(42L, 22L, 20L))).when(liteLLMClient).spendLogs("sk-regenerated-key");
 
         List<ClientPayload.ChatStreamPayload> results = planningAgentService
                 .streamMessage(teamId, providerId, "gpt-4o", chat.getId(), "Test key expiry")

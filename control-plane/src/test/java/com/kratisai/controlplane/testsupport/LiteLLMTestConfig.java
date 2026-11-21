@@ -3,6 +3,7 @@ package com.kratisai.controlplane.testsupport;
 import com.kratisai.controlplane.client.litellm.LiteLLMClient;
 import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.testsupport.llm.TestLiteLLMClient;
+import org.mockito.Mockito;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
@@ -10,6 +11,10 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.support.RestClientAdapter;
 import org.springframework.web.service.invoker.HttpServiceProxyFactory;
 
+/**
+ * Provides a Mockito spy around {@link TestLiteLLMClient} so integration tests can stub/verify
+ * {@link LiteLLMClient} without forking a separate {@code @MockitoBean} Spring context.
+ */
 @TestConfiguration
 public class LiteLLMTestConfig {
 
@@ -24,6 +29,6 @@ public class LiteLLMTestConfig {
         HttpServiceProxyFactory factory =
                 HttpServiceProxyFactory.builderFor(adapter).build();
         LiteLLMClient realClient = factory.createClient(LiteLLMClient.class);
-        return new TestLiteLLMClient(realClient);
+        return Mockito.spy(new TestLiteLLMClient(realClient));
     }
 }

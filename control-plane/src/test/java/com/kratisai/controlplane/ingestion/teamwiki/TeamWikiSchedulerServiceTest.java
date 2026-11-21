@@ -2,6 +2,8 @@ package com.kratisai.controlplane.ingestion.teamwiki;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 
 import com.kratisai.controlplane.ingestion.teamwiki.TeamWikiSchedulerService.DeferralReason;
@@ -25,7 +27,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.server.ResponseStatusException;
 
 @SpringIntegrationTest
@@ -49,7 +50,7 @@ class TeamWikiSchedulerServiceTest {
     @Autowired
     private TeamWikiBatchRepository teamWikiBatchRepository;
 
-    @MockitoBean
+    @Autowired
     private TeamWikiWorker teamWikiWorker;
 
     private Team team;
@@ -58,6 +59,7 @@ class TeamWikiSchedulerServiceTest {
 
     @BeforeEach
     void setUp() {
+        doNothing().when(teamWikiWorker).runBuild(any());
         databaseCleaner.cleanAll();
         TestDataFactory.TestContext ctx = testDataFactory.createDefaultContext("Sched Team", "repo-one");
         team = ctx.team();

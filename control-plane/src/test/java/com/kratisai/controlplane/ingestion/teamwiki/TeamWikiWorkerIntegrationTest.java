@@ -4,8 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import com.kratisai.controlplane.ingestion.write.SemanticIndexingService;
 import com.kratisai.controlplane.model.IngestionStatus;
@@ -28,7 +29,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -53,13 +53,13 @@ class TeamWikiWorkerIntegrationTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
-    @MockitoBean
+    @Autowired
     private TeamWikiGenerationService generationService;
 
-    @MockitoBean
+    @Autowired
     private SemanticIndexingService semanticIndexingService;
 
-    @MockitoBean
+    @Autowired
     private VirtualKeyService virtualKeyService;
 
     private Team team;
@@ -88,13 +88,17 @@ class TeamWikiWorkerIntegrationTest {
         String embAlias =
                 litellmProvisioningService.buildLiteLLMModelName(team.getEmbeddingProvider(), team.getEmbeddingModel());
 
-        when(virtualKeyService.generateKey(any(), any())).thenReturn("sk-tw-real-test");
-        when(generationService.generate(eq(batch.getId()), any()))
-                .thenReturn(new TeamWikiGenerationService.GenerationResult(3, 7L));
-        when(virtualKeyService.fetchUsageByModel("sk-tw-real-test"))
-                .thenReturn(Map.of(
+        doReturn("sk-tw-real-test").when(virtualKeyService).generateKey(any(), any());
+        doReturn(new TeamWikiGenerationService.GenerationResult(3, 7L))
+                .when(generationService)
+                .generate(eq(batch.getId()), any());
+        doNothing().when(semanticIndexingService).indexTeamWikiBatch(any(), any());
+        doReturn(Map.of(
                         chatAlias, new LlmUsageSnapshot(0.42, 3500L, 2500L, 1000L),
-                        embAlias, new LlmUsageSnapshot(0.03, 500L, 500L, 0L)));
+                        embAlias, new LlmUsageSnapshot(0.03, 500L, 500L, 0L)))
+                .when(virtualKeyService)
+                .fetchUsageByModel("sk-tw-real-test");
+        doNothing().when(virtualKeyService).revokeKey("sk-tw-real-test");
 
         teamWikiWorker.runBuild(batch.getId());
 

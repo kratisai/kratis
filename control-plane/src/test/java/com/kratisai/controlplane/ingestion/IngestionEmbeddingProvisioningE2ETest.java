@@ -26,7 +26,6 @@ import com.kratisai.controlplane.service.TeamService;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
-import com.kratisai.controlplane.testsupport.TestIngestionExecutorConfig;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import com.kratisai.controlplane.testsupport.llm.HttpRequestMatcher;
 import com.kratisai.controlplane.testsupport.llm.LlmResponseBuilders;
@@ -44,8 +43,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Import;
-import org.springframework.test.context.TestPropertySource;
 
 /**
  * Full, real ingestion-pipeline interactions routing embeddings calls through LiteLLM.
@@ -55,8 +52,6 @@ import org.springframework.test.context.TestPropertySource;
  */
 @UseRealEmbeddingClient
 @SpringIntegrationTest
-@TestPropertySource(properties = "spring.main.allow-bean-definition-overriding=true")
-@Import(TestIngestionExecutorConfig.class)
 class IngestionEmbeddingProvisioningE2ETest {
 
     @Autowired

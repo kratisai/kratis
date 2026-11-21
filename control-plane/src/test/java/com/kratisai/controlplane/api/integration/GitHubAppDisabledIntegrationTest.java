@@ -8,18 +8,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.SaveRepoCredentialRequest;
+import com.kratisai.controlplane.config.GitHubAppConfig;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.service.JwtService;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -29,8 +30,6 @@ import org.springframework.web.context.WebApplicationContext;
  * KRATIS_GITHUB_APP_* configuration (the distributable default).
  */
 @SpringIntegrationTest
-@TestPropertySource(
-        properties = {"kratis.github.app-id=", "kratis.github.app-name=", "kratis.github.private-key-path="})
 class GitHubAppDisabledIntegrationTest {
 
     private MockMvc mockMvc;
@@ -48,11 +47,24 @@ class GitHubAppDisabledIntegrationTest {
     @Autowired
     private WebApplicationContext wac;
 
+    @Autowired
+    private GitHubAppConfig gitHubAppConfig;
+
     private String authToken;
     private UUID teamId;
+    private String previousAppId;
+    private String previousAppName;
+    private String previousPrivateKeyPath;
 
     @BeforeEach
     void setUp() {
+        previousAppId = gitHubAppConfig.getAppId();
+        previousAppName = gitHubAppConfig.getAppName();
+        previousPrivateKeyPath = gitHubAppConfig.getPrivateKeyPath();
+        gitHubAppConfig.setAppId("");
+        gitHubAppConfig.setAppName("");
+        gitHubAppConfig.setPrivateKeyPath("");
+
         mockMvc = MockMvcBuilders.webAppContextSetup(wac)
                 .apply(SecurityMockMvcConfigurers.springSecurity())
                 .build();
@@ -64,6 +76,13 @@ class GitHubAppDisabledIntegrationTest {
         teamId = team.getId();
         authToken =
                 jwtService.generateAccessToken(ctx.user().getId(), ctx.user().getEmail());
+    }
+
+    @AfterEach
+    void tearDown() {
+        gitHubAppConfig.setAppId(previousAppId);
+        gitHubAppConfig.setAppName(previousAppName);
+        gitHubAppConfig.setPrivateKeyPath(previousPrivateKeyPath);
     }
 
     @Test

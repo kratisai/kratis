@@ -1,5 +1,7 @@
 package com.kratisai.controlplane.api.integration;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -36,7 +38,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -76,7 +77,7 @@ class TeamWikiControllerTest {
     @Autowired
     private TeamWikiBatchLogService batchLogService;
 
-    @MockitoBean
+    @Autowired
     private TeamWikiWorker teamWikiWorker;
 
     private String authToken;
@@ -85,6 +86,7 @@ class TeamWikiControllerTest {
 
     @BeforeEach
     void setUp() {
+        doNothing().when(teamWikiWorker).runBuild(any(UUID.class));
         mockMvc = MockMvcBuilders.webAppContextSetup(wac)
                 .apply(SecurityMockMvcConfigurers.springSecurity())
                 .build();
@@ -174,7 +176,7 @@ class TeamWikiControllerTest {
                 .andExpect(jsonPath("$.buildMode").value("FULL"))
                 .andExpect(jsonPath("$.triggerKind").value("MANUAL"));
 
-        verify(teamWikiWorker).runBuild(org.mockito.ArgumentMatchers.any(UUID.class));
+        verify(teamWikiWorker).runBuild(any(UUID.class));
 
         // Second rebuild while one is QUEUED returns 409 Conflict
         mockMvc.perform(post("/api/v1/teams/{teamId}/wiki/rebuild", teamId)

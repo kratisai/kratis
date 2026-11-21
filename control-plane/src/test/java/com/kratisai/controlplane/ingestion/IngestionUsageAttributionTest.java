@@ -2,6 +2,7 @@ package com.kratisai.controlplane.ingestion;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionModelUsage;
 import com.kratisai.controlplane.model.ModelKind;
@@ -12,7 +13,6 @@ import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
-import com.kratisai.controlplane.testsupport.TestIngestionExecutorConfig;
 import com.kratisai.controlplane.testsupport.WikiPageContentFixtures;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModelConfig;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModelMatchers;
@@ -33,18 +33,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Import;
-import org.springframework.test.context.TestPropertySource;
 
 @SpringIntegrationTest
-@Import(TestIngestionExecutorConfig.class)
-@TestPropertySource(
-        properties = {
-            "spring.main.allow-bean-definition-overriding=true",
-            // Embedding spend rows land seconds after the call via LiteLLM's async flush;
-            // allow extra settle time before the single finalize fetch.
-            "kratis.litellm.usage-finalize-delay=15s"
-        })
 class IngestionUsageAttributionTest {
 
     @Autowired
@@ -66,7 +56,7 @@ class IngestionUsageAttributionTest {
     private TestDataFactory testDataFactory;
 
     @Autowired
-    private com.kratisai.controlplane.config.LiteLLMProperties liteLLMProperties;
+    private LiteLLMProperties liteLLMProperties;
 
     @Autowired
     private LiteLLMProvisioningService liteLLMProvisioningService;
@@ -77,9 +67,12 @@ class IngestionUsageAttributionTest {
     private WireMockLlmServer wireMock;
 
     private com.kratisai.controlplane.model.Repository repository;
+    private Duration previousFinalizeDelay;
 
     @BeforeEach
     void setUp() throws Exception {
+        previousFinalizeDelay = liteLLMProperties.getUsageFinalizeDelay();
+        liteLLMProperties.setUsageFinalizeDelay(Duration.ofSeconds(15));
         databaseCleaner.cleanAll();
 
         wireMock = new WireMockLlmServer();
@@ -184,7 +177,10 @@ class IngestionUsageAttributionTest {
     @AfterEach
     void tearDown() {
         FakeChatModelConfig.clear();
-        wireMock.stop();
+        liteLLMProperties.setUsageFinalizeDelay(previousFinalizeDelay);
+        if (wireMock != null) {
+            wireMock.stop();
+        }
     }
 
     @Test

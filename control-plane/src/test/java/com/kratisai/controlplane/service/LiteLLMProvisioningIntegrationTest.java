@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.kratisai.controlplane.client.litellm.LiteLLMClient;
 import com.kratisai.controlplane.client.litellm.LiteLLMDto.*;
+import com.kratisai.controlplane.config.LiteLLMProperties;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
@@ -15,14 +16,9 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.test.context.TestPropertySource;
 
 @UseRealLlmClient
 @SpringIntegrationTest
-// The test profile normally sets kratis.litellm.reconciliation.enabled=false so @PostConstruct
-// doesn't hit LiteLLM on every context boot. Override it back to true here so the reconciliation
-// test below exercises the real behavior, against a Spring context reserved for this override.
-@TestPropertySource(properties = "kratis.litellm.reconciliation.enabled=true")
 class LiteLLMProvisioningIntegrationTest {
 
     @Autowired
@@ -30,6 +26,9 @@ class LiteLLMProvisioningIntegrationTest {
 
     @Autowired
     private LiteLLMProvisioningService provisioningService;
+
+    @Autowired
+    private LiteLLMProperties liteLLMProperties;
 
     @Autowired
     private TestDataFactory testDataFactory;
@@ -222,7 +221,13 @@ class LiteLLMProvisioningIntegrationTest {
         assertThat(provisioningService.verifyModelRegistered(provider, "text-embedding-3-small"))
                 .isFalse();
 
-        provisioningService.reconcileOnStartup();
+        boolean previousReconciliation = liteLLMProperties.getReconciliation().isEnabled();
+        liteLLMProperties.getReconciliation().setEnabled(true);
+        try {
+            provisioningService.reconcileOnStartup();
+        } finally {
+            liteLLMProperties.getReconciliation().setEnabled(previousReconciliation);
+        }
 
         assertThat(provisioningService.verifyModelRegistered(provider, "gpt-4o"))
                 .isTrue();

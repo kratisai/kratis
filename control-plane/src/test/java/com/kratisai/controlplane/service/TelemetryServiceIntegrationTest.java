@@ -4,34 +4,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.kratisai.controlplane.client.PostHogCaptureRequest;
-import com.kratisai.controlplane.client.PostHogClient;
+import com.kratisai.controlplane.config.TelemetryProperties;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
+import com.kratisai.controlplane.testsupport.FakePostHogClient;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
-import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.test.context.TestPropertySource;
 
 @SpringIntegrationTest
-@Import(TelemetryServiceIntegrationTest.FakePostHogClientConfig.class)
-@TestPropertySource(
-        properties = {
-            "kratis.telemetry.disabled=false",
-            "kratis.telemetry.version=1.2.3-test",
-            "kratis.telemetry.build-tag=sha-abc123"
-        })
 class TelemetryServiceIntegrationTest {
 
     @Autowired
@@ -67,14 +54,31 @@ class TelemetryServiceIntegrationTest {
     @Autowired
     private KratisInstallationRepository installationRepository;
 
+    @Autowired
+    private TelemetryProperties telemetryProperties;
+
+    private String previousDisabled;
+    private String previousVersion;
+    private String previousBuildTag;
+
     @BeforeEach
     void setUp() {
+        previousDisabled = telemetryProperties.getDisabled();
+        previousVersion = telemetryProperties.getVersion();
+        previousBuildTag = telemetryProperties.getBuildTag();
+        telemetryProperties.setDisabled("false");
+        telemetryProperties.setVersion("1.2.3-test");
+        telemetryProperties.setBuildTag("sha-abc123");
         databaseCleaner.cleanAll();
         fakePostHogClient.reset();
     }
 
     @AfterEach
     void tearDown() {
+        fakePostHogClient.reset();
+        telemetryProperties.setDisabled(previousDisabled);
+        telemetryProperties.setVersion(previousVersion);
+        telemetryProperties.setBuildTag(previousBuildTag);
         databaseCleaner.cleanAll();
     }
 
@@ -158,42 +162,5 @@ class TelemetryServiceIntegrationTest {
         execution.setHarness(AgentHarness.valueOf("OPENCODE"));
         execution.startUsage("sk-telemetry-key", "gpt-4o").setTotalSpend(0.125);
         sandboxExecutionRepository.save(execution);
-    }
-
-    public static class FakePostHogClient implements PostHogClient {
-
-        private final List<PostHogCaptureRequest> requests = new CopyOnWriteArrayList<>();
-        private volatile boolean shouldThrow;
-
-        void setShouldThrow(boolean shouldThrow) {
-            this.shouldThrow = shouldThrow;
-        }
-
-        void reset() {
-            requests.clear();
-            shouldThrow = false;
-        }
-
-        List<PostHogCaptureRequest> requests() {
-            return requests;
-        }
-
-        @Override
-        public void capture(PostHogCaptureRequest request) {
-            if (shouldThrow) {
-                throw new IllegalStateException("Simulated PostHog failure");
-            }
-            requests.add(request);
-        }
-    }
-
-    @TestConfiguration
-    static class FakePostHogClientConfig {
-
-        @Bean
-        @Primary
-        FakePostHogClient fakePostHogClient() {
-            return new FakePostHogClient();
-        }
     }
 }
