@@ -673,6 +673,7 @@ describe('Repository Drilldown - Ingestion Statistics', () => {
           architecturePatterns: [],
           dimensions: [],
           edgeTypeCounts: {},
+          models: [],
           nodeTypeCounts: {},
           relations: [],
           surfaces: [],
@@ -863,6 +864,180 @@ describe('Repository Drilldown - Ingestion Statistics', () => {
     expect(screen.getByText('42')).toBeInTheDocument()
   })
 
+  it('renders the model caption with kind, identifier, and spend under the key-stats strip', async () => {
+    const mockStats = {
+      batchId: 'batch-1',
+      edgeTypeCounts: {},
+      models: [
+        {
+          litellmAlias: 'anthropic/claude-sonnet-4-5',
+          modelIdentifier: 'claude-sonnet-4-5',
+          modelKind: 'CHAT',
+          totalSpend: 1.01,
+          totalTokens: 900,
+        },
+        {
+          litellmAlias: 'openai/text-embedding-3-small',
+          modelIdentifier: 'text-embedding-3-small',
+          modelKind: 'EMBEDDING',
+          totalSpend: 0.23,
+          totalTokens: 600,
+        },
+      ],
+      nodeTypeCounts: {},
+      totalDurationSeconds: 60,
+      totalEdges: 0,
+      totalNodes: 0,
+      usageLastUpdatedAt: '2024-01-15T10:05:00Z',
+    }
+
+    setupMocksWithStats([], mockStats)
+    setAuthenticated({ teamId: 'team-1' })
+
+    renderWithRouter(['/repos/repo-1'])
+
+    await waitFor(() => {
+      expect(screen.getByText('Chat:')).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('Embeddings:')).toBeInTheDocument()
+    expect(screen.getByText('claude-sonnet-4-5')).toBeInTheDocument()
+    expect(screen.getByText('text-embedding-3-small')).toBeInTheDocument()
+    expect(screen.getByText('$1.01')).toBeInTheDocument()
+    expect(screen.getByText('$0.23')).toBeInTheDocument()
+  })
+
+  it('hides the model caption when the batch has no model usage', async () => {
+    const mockStats = {
+      batchId: 'batch-1',
+      edgeTypeCounts: {},
+      models: [],
+      nodeTypeCounts: {},
+      totalDurationSeconds: 60,
+      totalEdges: 0,
+      totalNodes: 0,
+    }
+
+    setupMocksWithStats([], mockStats)
+    setAuthenticated({ teamId: 'team-1' })
+
+    renderWithRouter(['/repos/repo-1'])
+
+    await waitFor(() => {
+      expect(screen.getByText('Duration')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByText('Chat:')).not.toBeInTheDocument()
+    expect(screen.queryByText('Embeddings:')).not.toBeInTheDocument()
+    expect(screen.queryByText('Model:')).not.toBeInTheDocument()
+  })
+
+  it('shows an em dash instead of per-model spend when usageLastUpdatedAt is null', async () => {
+    const mockStats = {
+      batchId: 'batch-1',
+      edgeTypeCounts: {},
+      models: [
+        {
+          litellmAlias: null,
+          modelIdentifier: 'gpt-4o',
+          modelKind: 'CHAT',
+          totalSpend: 0.5,
+          totalTokens: 100,
+        },
+      ],
+      nodeTypeCounts: {},
+      totalDurationSeconds: 60,
+      totalEdges: 0,
+      totalNodes: 0,
+      usageLastUpdatedAt: null,
+    }
+
+    setupMocksWithStats([], mockStats)
+    setAuthenticated({ teamId: 'team-1' })
+
+    renderWithRouter(['/repos/repo-1'])
+
+    await waitFor(() => {
+      expect(screen.getByText('Chat:')).toBeInTheDocument()
+    })
+
+    // Spend placeholder replaces the formatted amount while usage has never been updated.
+    expect(screen.queryByText('$0.50')).not.toBeInTheDocument()
+    const modelSegment = screen.getByText('Chat:').parentElement
+    expect(modelSegment).toHaveTextContent('—')
+    expect(modelSegment).toHaveTextContent('gpt-4o')
+  })
+
+  it('renders a Dimensions total caption above the category grid', async () => {
+    const mockStats = {
+      batchId: 'batch-1',
+      dimensions: [
+        { category: 'domain', name: 'Authentication' },
+        { category: 'archetype', name: 'Controller' },
+        { category: 'cross_cutting', name: 'Logging' },
+      ],
+      edgeTypeCounts: {},
+      models: [],
+      nodeTypeCounts: {},
+      totalDurationSeconds: 60,
+      totalEdges: 0,
+      totalNodes: 0,
+    }
+
+    setupMocksWithStats([], mockStats)
+    setAuthenticated({ teamId: 'team-1' })
+
+    renderWithRouter(['/repos/repo-1'])
+
+    await waitFor(() => {
+      expect(screen.getByText('Dimensions: 3')).toBeInTheDocument()
+    })
+
+    // The caption sits above the per-category grid (only one such caption exists).
+    expect(screen.getAllByText(/^Dimensions:/)).toHaveLength(1)
+  })
+
+  it('renders chat and embedding model entries that share one identifier without duplicate keys', async () => {
+    const mockStats = {
+      batchId: 'batch-1',
+      edgeTypeCounts: {},
+      models: [
+        {
+          litellmAlias: null,
+          modelIdentifier: 'shared-model',
+          modelKind: 'CHAT',
+          totalSpend: 0.01,
+          totalTokens: 100,
+        },
+        {
+          litellmAlias: null,
+          modelIdentifier: 'shared-model',
+          modelKind: 'EMBEDDING',
+          totalSpend: 0.01,
+          totalTokens: 100,
+        },
+      ],
+      nodeTypeCounts: {},
+      totalDurationSeconds: 60,
+      totalEdges: 0,
+      totalNodes: 0,
+      usageLastUpdatedAt: '2024-01-15T10:05:00Z',
+    }
+
+    setupMocksWithStats([], mockStats)
+    setAuthenticated({ teamId: 'team-1' })
+
+    renderWithRouter(['/repos/repo-1'])
+
+    await waitFor(() => {
+      expect(screen.getByText('Chat:')).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('Embeddings:')).toBeInTheDocument()
+    // Both (kind, identifier) pairs render; the composite fragment key keeps them distinct.
+    expect(screen.getAllByText('shared-model')).toHaveLength(2)
+  })
+
   it('shows placeholders when no usage data is recorded', async () => {
     const mockStats = {
       batchId: 'batch-1',
@@ -1028,6 +1203,7 @@ describe('Repository Drilldown - Batch Selection', () => {
           architecturePatterns: [],
           dimensions: [],
           edgeTypeCounts: {},
+          models: [],
           nodeTypeCounts: {},
           relations: [],
           surfaces: [],
@@ -1290,6 +1466,7 @@ describe('Repository Drilldown - Dimension Categories & Wiki Pages', () => {
           architecturePatterns: [],
           dimensions: [],
           edgeTypeCounts: {},
+          models: [],
           nodeTypeCounts: {},
           relations: [],
           surfaces: [],
@@ -1813,6 +1990,7 @@ describe('Repository Drilldown - Wiki Page Key Structure', () => {
           architecturePatterns: [],
           dimensions: [],
           edgeTypeCounts: {},
+          models: [],
           nodeTypeCounts: {},
           relations: [],
           surfaces: [],

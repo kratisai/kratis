@@ -3,6 +3,7 @@ package com.kratisai.controlplane.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.kratisai.controlplane.api.restdto.ModelUsageDto;
 import com.kratisai.controlplane.api.restdto.UsageLogEntryDto;
 import com.kratisai.controlplane.api.restdto.UsageSummaryDto;
 import com.kratisai.controlplane.model.*;
@@ -142,7 +143,9 @@ class UsageServiceTest {
         assertThat(chatEntry.usageType()).isEqualTo(UsageType.CHAT);
         assertThat(chatEntry.status()).isEqualTo(SandboxExecutionStatus.RUNNING);
         assertThat(chatEntry.durationSeconds()).isNull();
-        assertThat(chatEntry.modelIdentifiers()).containsExactly("gpt-4o");
+        assertThat(chatEntry.models())
+                .extracting(ModelUsageDto::modelIdentifier)
+                .containsExactly("gpt-4o");
         assertThat(chatEntry.totalTokens()).isEqualTo(250L);
         assertThat(chatEntry.totalSpend()).isEqualTo(0.003);
         assertThat(chatEntry.targetUrl()).isEqualTo("/chats/" + chat.getId());
@@ -170,7 +173,9 @@ class UsageServiceTest {
         Page<UsageLogEntryDto> byModel = usageService.getUsageLogs(
                 user.getId(), team.getId(), "24h", null, null, null, "unknown", null, PageRequest.of(0, 10));
         assertThat(byModel.getContent()).hasSize(1);
-        assertThat(byModel.getContent().getFirst().modelIdentifiers()).containsExactly("unknown");
+        assertThat(byModel.getContent().getFirst().models())
+                .extracting(ModelUsageDto::modelIdentifier)
+                .containsExactly("unknown");
 
         // Filter by agent "SomeAgent" should exclude the chat session (since agentName is null)
         Page<UsageLogEntryDto> byAgent = usageService.getUsageLogs(
@@ -301,11 +306,14 @@ class UsageServiceTest {
                     assertThat(entry.activityTitle()).isEqualTo("x".repeat(60) + "...");
                     assertThat(entry.activityTitle()).hasSize(63);
                     assertThat(entry.durationSeconds()).isEqualTo(100L);
-                    assertThat(entry.modelIdentifiers()).containsExactly("default");
+                    assertThat(entry.models())
+                            .extracting(ModelUsageDto::modelIdentifier)
+                            .containsExactly("default");
                     assertThat(entry.agentName()).isEqualTo("OpenCode");
                 });
         assertThat(logs.getContent())
-                .filteredOn(entry -> entry.modelIdentifiers().contains("gpt-4o"))
+                .filteredOn(entry -> entry.models().stream()
+                        .anyMatch(m -> m.modelIdentifier().equals("gpt-4o")))
                 .singleElement()
                 .satisfies(entry -> {
                     assertThat(entry.agentName()).isEqualTo("Claude Code");
@@ -364,7 +372,9 @@ class UsageServiceTest {
                 user.getId(), team.getId(), "7d", null, null, UsageType.INGESTION, null, null, PageRequest.of(0, 10));
         assertThat(ingestionLogs.getContent()).hasSize(1);
         UsageLogEntryDto ingestionEntry = ingestionLogs.getContent().getFirst();
-        assertThat(ingestionEntry.modelIdentifiers()).containsExactly("gpt-4o", "text-embedding-3-small");
+        assertThat(ingestionEntry.models())
+                .extracting(ModelUsageDto::modelIdentifier)
+                .containsExactly("gpt-4o", "text-embedding-3-small");
         assertThat(ingestionEntry.totalTokens()).isEqualTo(500L);
         assertThat(ingestionEntry.totalSpend()).isCloseTo(0.01, org.assertj.core.data.Offset.offset(0.000001));
 

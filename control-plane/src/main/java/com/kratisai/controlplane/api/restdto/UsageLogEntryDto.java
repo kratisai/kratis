@@ -16,15 +16,13 @@ public record UsageLogEntryDto(
         String agentName,
         SandboxExecutionStatus status,
         String userEmail,
-        Set<String> modelIdentifiers,
+        Set<ModelUsageDto> models,
         UsageType usageType,
         Long totalTokens,
         Double totalSpend,
         String targetUrl) {
     public UsageLogEntryDto {
-        Objects.requireNonNull(modelIdentifiers, "modelIdentifiers is required");
-        TreeSet<String> sorted = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-        sorted.addAll(modelIdentifiers);
-        modelIdentifiers = Collections.unmodifiableSet(sorted);
+        Objects.requireNonNull(models, "models is required");
+        models = Collections.unmodifiableSet(new TreeSet<>(models));
     }
 }

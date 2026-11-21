@@ -433,12 +433,12 @@ export function UsageView() {
                         {/* 4. Model */}
                         <td>
                           <div className="flex flex-wrap gap-1">
-                            {entry.modelIdentifiers.map((model) => (
+                            {entry.models.map((model) => (
                               <div
-                                className="text-muted-foreground bg-muted/50 w-fit rounded px-2 py-0.5 font-mono text-sm text-xs"
-                                key={model}
+                                className="text-muted-foreground bg-muted/50 w-fit rounded px-2 py-0.5 font-mono text-xs"
+                                key={`${model.modelKind ?? 'UNKNOWN'}-${model.modelIdentifier}`}
                               >
-                                {model}
+                                {model.modelIdentifier}
                               </div>
                             ))}
                           </div>

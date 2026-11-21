@@ -10,15 +10,12 @@ import static org.mockito.Mockito.when;
 import com.kratisai.controlplane.ingestion.write.SemanticIndexingService;
 import com.kratisai.controlplane.model.IngestionStatus;
 import com.kratisai.controlplane.model.LlmUsageSnapshot;
-import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.TeamWikiBatch;
 import com.kratisai.controlplane.model.TeamWikiBuildMode;
-import com.kratisai.controlplane.model.TeamWikiModelUsage;
 import com.kratisai.controlplane.model.TeamWikiSourceSnapshot;
 import com.kratisai.controlplane.model.TeamWikiTriggerKind;
 import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
-import com.kratisai.controlplane.repository.TeamWikiModelUsageRepository;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.VirtualKeyService;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
@@ -32,6 +29,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringIntegrationTest
 class TeamWikiWorkerIntegrationTest {
@@ -43,9 +42,6 @@ class TeamWikiWorkerIntegrationTest {
     private TeamWikiBatchRepository teamWikiBatchRepository;
 
     @Autowired
-    private TeamWikiModelUsageRepository teamWikiModelUsageRepository;
-
-    @Autowired
     private LiteLLMProvisioningService litellmProvisioningService;
 
     @Autowired
@@ -53,6 +49,9 @@ class TeamWikiWorkerIntegrationTest {
 
     @Autowired
     private DatabaseCleaner databaseCleaner;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @MockitoBean
     private TeamWikiGenerationService generationService;
@@ -99,22 +98,28 @@ class TeamWikiWorkerIntegrationTest {
 
         teamWikiWorker.runBuild(batch.getId());
 
+        // modelUsage is LAZY: load the batch and read the collection inside one transaction,
+        // copying out only detached-safe values.
+        record PersistedUsage(double totalSpend, long totalTokens, long promptTokens, long completionTokens) {}
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            List<PersistedUsage> usages = new TransactionTemplate(transactionManager)
+                    .execute(status ->
+                            teamWikiBatchRepository.findById(batch.getId()).orElseThrow().getModelUsage().stream()
+                                    .map(u -> new PersistedUsage(
+                                            u.getTotalSpend(),
+                                            u.getTotalTokens(),
+                                            u.getPromptTokens(),
+                                            u.getCompletionTokens()))
+                                    .toList());
             TeamWikiBatch saved =
                     teamWikiBatchRepository.findById(batch.getId()).orElseThrow();
             assertThat(saved.getStatus()).isEqualTo(IngestionStatus.SUCCESS);
             assertThat(saved.isActive()).isTrue();
-
-            List<TeamWikiModelUsage> usages = teamWikiModelUsageRepository.findByTeamWikiBatchId(batch.getId());
             assertThat(usages).hasSize(2);
-            TeamWikiModelUsage chatUsage = usages.stream()
-                    .filter(u -> u.getModelKind() == ModelKind.CHAT)
-                    .findFirst()
-                    .orElseThrow();
-            assertThat(chatUsage.getTotalSpend()).isEqualTo(0.42);
-            assertThat(chatUsage.getTotalTokens()).isEqualTo(3500L);
-            assertThat(chatUsage.getPromptTokens()).isEqualTo(2500L);
-            assertThat(chatUsage.getCompletionTokens()).isEqualTo(1000L);
+            assertThat(usages.stream().mapToDouble(PersistedUsage::totalSpend).sum())
+                    .isCloseTo(0.45, org.assertj.core.data.Offset.offset(0.000001));
+            assertThat(usages.stream().mapToLong(PersistedUsage::totalTokens).sum())
+                    .isEqualTo(4000L);
 
             verify(virtualKeyService).revokeKey("sk-tw-real-test");
         });

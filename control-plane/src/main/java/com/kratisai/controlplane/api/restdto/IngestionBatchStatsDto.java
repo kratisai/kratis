@@ -3,9 +3,11 @@ package com.kratisai.controlplane.api.restdto;
 import com.kratisai.controlplane.model.NodeType;
 import com.kratisai.controlplane.model.RelationType;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 public class IngestionBatchStatsDto {
 
@@ -20,6 +22,7 @@ public class IngestionBatchStatsDto {
     private List<SurfaceStatDto> surfaces;
     private List<RelationStatDto> relations;
     private List<WikiPageDto> wikiPages;
+    private Set<ModelUsageDto> models;
     private Double totalSpend;
     private Long totalTokens;
     private Long promptTokens;
@@ -39,6 +42,7 @@ public class IngestionBatchStatsDto {
             List<SurfaceStatDto> surfaces,
             List<RelationStatDto> relations,
             List<WikiPageDto> wikiPages,
+            Set<ModelUsageDto> models,
             Double totalSpend,
             Long totalTokens,
             Long promptTokens,
@@ -56,6 +60,7 @@ public class IngestionBatchStatsDto {
         this.surfaces = Objects.requireNonNull(surfaces, "surfaces is required");
         this.relations = Objects.requireNonNull(relations, "relations is required");
         this.wikiPages = Objects.requireNonNull(wikiPages, "wikiPages is required");
+        this.models = Objects.requireNonNull(models, "models is required");
         this.totalSpend = totalSpend;
         this.totalTokens = totalTokens;
         this.promptTokens = promptTokens;
@@ -73,7 +78,8 @@ public class IngestionBatchStatsDto {
                 + totalEdges + ", nodeTypeCounts="
                 + nodeTypeCounts + ", edgeTypeCounts="
                 + edgeTypeCounts + ", dimensionCount="
-                + size(dimensions) + ", architecturePatternCount="
+                + size(dimensions) + ", modelCount="
+                + size(models) + ", architecturePatternCount="
                 + size(architecturePatterns) + ", surfaceCount="
                 + size(surfaces) + ", relationCount="
                 + size(relations) + ", wikiPageCount="
@@ -86,7 +92,7 @@ public class IngestionBatchStatsDto {
                 + usageLastUpdatedAt + '}';
     }
 
-    private static int size(List<?> values) {
+    private static int size(Collection<?> values) {
         return values == null ? 0 : values.size();
     }
 
@@ -152,6 +158,14 @@ public class IngestionBatchStatsDto {
 
     public void setWikiPages(List<WikiPageDto> wikiPages) {
         this.wikiPages = wikiPages;
+    }
+
+    public Set<ModelUsageDto> getModels() {
+        return models;
+    }
+
+    public void setModels(Set<ModelUsageDto> models) {
+        this.models = models;
     }
 
     public List<ArchitecturePatternDto> getArchitecturePatterns() {

@@ -27,6 +27,7 @@ const stats: IngestionBatchStatsDto = {
   completionTokens: null,
   dimensions: [],
   edgeTypeCounts: {},
+  models: [],
   nodeTypeCounts: {},
   promptTokens: null,
   relations: [

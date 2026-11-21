@@ -23,7 +23,15 @@ const entryTemplate: UsageLogEntry = {
   agentName: 'OpenCode',
   durationSeconds: 5,
   id: 'exec-1',
-  modelIdentifiers: ['gpt-4o'],
+  models: [
+    {
+      litellmAlias: null,
+      modelIdentifier: 'gpt-4o',
+      modelKind: 'CHAT',
+      totalSpend: 0.03,
+      totalTokens: 1200,
+    },
+  ],
   status: 'COMPLETED',
   targetUrl: '/chats/chat-1/executions/exec-1',
   timestamp: new Date().toISOString(),
@@ -123,6 +131,36 @@ describe('UsageView', () => {
     render(<UsageView />)
 
     expect(screen.getAllByText('gpt-4o').length).toBeGreaterThan(0)
+  })
+
+  it('renders chat and embedding rows that share one identifier without duplicate keys', () => {
+    logEntries = [
+      {
+        ...entryTemplate,
+        id: 'ingest-2',
+        models: [
+          {
+            litellmAlias: null,
+            modelIdentifier: 'shared-model',
+            modelKind: 'CHAT',
+            totalSpend: 0.01,
+            totalTokens: 100,
+          },
+          {
+            litellmAlias: null,
+            modelIdentifier: 'shared-model',
+            modelKind: 'EMBEDDING',
+            totalSpend: 0.01,
+            totalTokens: 100,
+          },
+        ],
+        usageType: 'INGESTION',
+      },
+    ]
+    render(<UsageView />)
+
+    // Both (kind, identifier) pairs render; the composite key keeps them distinct.
+    expect(screen.getAllByText('shared-model')).toHaveLength(2)
   })
 
   it('formats the log table duration as human-readable time, not raw seconds', () => {

@@ -1,3 +1,5 @@
+import type { ModelUsageDto } from '@/types/auth-types'
+
 export interface PageResponse<T> {
   content: T[]
   number: number
@@ -11,7 +13,7 @@ export interface UsageLogEntry {
   agentName: null | string
   durationSeconds: null | number
   id: string
-  modelIdentifiers: string[]
+  models: ModelUsageDto[]
   status: 'COMPLETED' | 'FAILED' | 'IDLE' | 'RUNNING' | null
   targetUrl?: null | string
   timestamp: string

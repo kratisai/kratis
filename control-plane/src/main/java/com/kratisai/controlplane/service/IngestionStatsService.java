@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.ArchitecturePatternDto;
 import com.kratisai.controlplane.api.restdto.DimensionStatDto;
 import com.kratisai.controlplane.api.restdto.IngestionBatchStatsDto;
+import com.kratisai.controlplane.api.restdto.ModelUsageDto;
 import com.kratisai.controlplane.api.restdto.RelationSide;
 import com.kratisai.controlplane.api.restdto.RelationStatDto;
 import com.kratisai.controlplane.api.restdto.SurfaceStatDto;
@@ -148,6 +149,15 @@ public class IngestionStatsService {
             totalToolCalls = batch.getTotalToolCalls();
         }
 
+        Set<ModelUsageDto> models = modelUsage.stream()
+                .map(u -> new ModelUsageDto(
+                        u.getModelKind(),
+                        u.getModelIdentifier(),
+                        u.getLitellmAlias(),
+                        u.getTotalSpend(),
+                        u.getTotalTokens()))
+                .collect(Collectors.toCollection(TreeSet::new));
+
         // Get dimension stats via optimized GROUP BY query
         List<Object[]> dimensionCounts = ctxNodeDimensionRepository.countNodesByDimension(batchId);
         Map<String, List<String>> topFilesByDimension = computeTopFilesByDimension(batchId);
@@ -178,6 +188,7 @@ public class IngestionStatsService {
                 surfaces,
                 relations,
                 wikiPages,
+                models,
                 totalSpend,
                 totalTokens,
                 promptTokens,

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.model.Ceiling;
+import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.Nature;
 import com.kratisai.controlplane.model.NodeType;
 import com.kratisai.controlplane.model.RelationType;
@@ -12,6 +13,7 @@ import com.kratisai.controlplane.model.SurfaceRole;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -39,6 +41,8 @@ class IngestionBatchStatsDtoTest {
         assertThat(dto.getRelations().getFirst().otherRepositoryName()).isEqualTo("billing-service");
         assertThat(dto.getWikiPages()).hasSize(2);
         assertThat(dto.getWikiPages()).extracting(WikiPageDto::pageSlug).containsExactly("home", "architecture");
+        assertThat(dto.getModels()).hasSize(1);
+        assertThat(dto.getModels().iterator().next().modelIdentifier()).isEqualTo("gpt-4o");
         assertThat(dto.getTotalSpend()).isEqualTo(0.42);
         assertThat(dto.getTotalTokens()).isEqualTo(1234L);
         assertThat(dto.getPromptTokens()).isEqualTo(900L);
@@ -50,8 +54,8 @@ class IngestionBatchStatsDtoTest {
     @Test
     void setters_shouldUpdateAllFields() {
         IngestionBatchStatsDto dto = new IngestionBatchStatsDto(
-                null, null, 0, 0, null, null, List.of(), List.of(), List.of(), List.of(), List.of(), null, null, null,
-                null, null, null);
+                null, null, 0, 0, null, null, List.of(), List.of(), List.of(), List.of(), List.of(), Set.of(), null,
+                null, null, null, null, null);
 
         dto.setBatchId("updated-batch");
         dto.setTotalDurationSeconds(999L);
@@ -64,6 +68,7 @@ class IngestionBatchStatsDtoTest {
         dto.setSurfaces(List.of());
         dto.setRelations(List.of());
         dto.setWikiPages(List.of());
+        dto.setModels(Set.of());
         dto.setTotalSpend(0.01);
         dto.setTotalTokens(10L);
         dto.setPromptTokens(5L);
@@ -82,6 +87,7 @@ class IngestionBatchStatsDtoTest {
         assertThat(dto.getSurfaces()).isEmpty();
         assertThat(dto.getRelations()).isEmpty();
         assertThat(dto.getWikiPages()).isEmpty();
+        assertThat(dto.getModels()).isEmpty();
         assertThat(dto.getTotalSpend()).isEqualTo(0.01);
         assertThat(dto.getTotalTokens()).isEqualTo(10L);
         assertThat(dto.getPromptTokens()).isEqualTo(5L);
@@ -110,6 +116,7 @@ class IngestionBatchStatsDtoTest {
                         "billing-service",
                         List.of("Client calls the billing API"))),
                 List.of(),
+                Set.of(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", "openai/gpt-4o", 0.42, 1234L)),
                 0.42,
                 1234L,
                 900L,
@@ -123,6 +130,7 @@ class IngestionBatchStatsDtoTest {
         assertThat(json).contains("42");
         assertThat(json).contains("0.42");
         assertThat(json).contains("billing-service");
+        assertThat(json).contains("modelIdentifier");
     }
 
     @Test
@@ -134,6 +142,7 @@ class IngestionBatchStatsDtoTest {
                 .contains("totalNodes=42")
                 .contains("totalEdges=84")
                 .contains("dimensionCount=1")
+                .contains("modelCount=1")
                 .contains("architecturePatternCount=1")
                 .contains("surfaceCount=1")
                 .contains("relationCount=1")
@@ -164,6 +173,7 @@ class IngestionBatchStatsDtoTest {
                         "billing-service",
                         List.of("Client calls the billing API"))),
                 List.of(wikiPage("home", "Home"), wikiPage("architecture", "Architecture")),
+                Set.of(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", "openai/gpt-4o", 0.42, 1234L)),
                 0.42,
                 1234L,
                 900L,

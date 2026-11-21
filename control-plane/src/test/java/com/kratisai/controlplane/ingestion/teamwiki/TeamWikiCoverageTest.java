@@ -33,11 +33,9 @@ import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
 import com.kratisai.controlplane.repository.CtxEmbeddingRepository;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
-import com.kratisai.controlplane.repository.IngestionModelUsageRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
-import com.kratisai.controlplane.repository.TeamWikiModelUsageRepository;
 import com.kratisai.controlplane.service.EmbeddingModelFactory;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.UsageService;
@@ -199,9 +197,7 @@ class TeamWikiCoverageTest {
         IngestionBatchRepository ingestRepo = mock(IngestionBatchRepository.class);
         ChatRepository chatRepo = mock(ChatRepository.class);
         ChatUsageSessionRepository chatUsageRepo = mock(ChatUsageSessionRepository.class);
-        IngestionModelUsageRepository ingestModelRepo = mock(IngestionModelUsageRepository.class);
         TeamWikiBatchRepository twBatchRepo = mock(TeamWikiBatchRepository.class);
-        TeamWikiModelUsageRepository twModelRepo = mock(TeamWikiModelUsageRepository.class);
 
         TeamWikiBatch twBatch = new TeamWikiBatch();
         twBatch.setId(UUID.randomUUID());
@@ -217,10 +213,9 @@ class TeamWikiCoverageTest {
 
         when(memberRepo.existsByTeamIdAndUserId(teamId, userId)).thenReturn(true);
         when(twBatchRepo.findByTeamIdAndStartedAtBetween(any(), any(), any())).thenReturn(List.of(twBatch));
-        when(twModelRepo.findByTeamWikiBatchId(twBatch.getId())).thenReturn(List.of(mu));
 
-        UsageService usageService = new UsageService(
-                memberRepo, execRepo, ingestRepo, chatRepo, chatUsageRepo, ingestModelRepo, twBatchRepo, twModelRepo);
+        UsageService usageService =
+                new UsageService(memberRepo, execRepo, ingestRepo, chatRepo, chatUsageRepo, twBatchRepo);
 
         var logs = usageService.getUsageLogs(userId, teamId, "7d", null, null, null, null, null, PageRequest.of(0, 10));
         assertThat(logs.getContent()).hasSize(1);

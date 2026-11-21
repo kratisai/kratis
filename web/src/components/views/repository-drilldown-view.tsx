@@ -549,7 +549,38 @@ export function RepositoryDrilldownView() {
                   </div>
                 </div>
 
+                {/* Per-model usage, spanning chat and embedding models used by this batch */}
+                {batchStats.models.length > 0 && (
+                  <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                    {batchStats.models.map((model, index) => (
+                      <React.Fragment
+                        key={`${model.modelKind ?? 'UNKNOWN'}-${model.modelIdentifier}`}
+                      >
+                        {index > 0 && <span aria-hidden="true">·</span>}
+                        <span>
+                          <span className="font-medium">
+                            {model.modelKind === 'CHAT'
+                              ? 'Chat:'
+                              : model.modelKind === 'EMBEDDING'
+                                ? 'Embeddings:'
+                                : 'Model:'}
+                          </span>{' '}
+                          <span className="font-mono">{model.modelIdentifier}</span> <span>·</span>{' '}
+                          <span>
+                            {batchStats.usageLastUpdatedAt == null
+                              ? '—'
+                              : formatSpend(model.totalSpend)}
+                          </span>
+                        </span>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                )}
+
                 {/* Dimension Categories Stats */}
+                <p className="text-muted-foreground text-sm">
+                  Dimensions: {batchStats.dimensions.length}
+                </p>
                 <div className="grid gap-4 sm:grid-cols-3">
                   {['domain', 'archetype', 'cross_cutting'].map((category, index) => {
                     const categoryStats = batchStats.dimensions.filter(

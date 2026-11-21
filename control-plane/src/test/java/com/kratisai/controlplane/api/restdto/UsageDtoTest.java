@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.UsageType;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
@@ -13,7 +14,7 @@ import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
-// The null-rejection test deliberately passes null to a record whose
+// The null-rejection tests deliberately pass null to records whose
 // parameters are non-null, which SpotBugs flags as NP_NULL_PARAM_DEREF_NONVIRTUAL.
 @SuppressFBWarnings("NP_NULL_PARAM_DEREF_NONVIRTUAL")
 class UsageDtoTest {
@@ -29,7 +30,7 @@ class UsageDtoTest {
                 "Agent",
                 SandboxExecutionStatus.COMPLETED,
                 "user@example.com",
-                Set.of("gpt-4o"),
+                Set.of(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.05, 100L)),
                 UsageType.EXECUTION,
                 100L,
                 0.05,
@@ -41,7 +42,7 @@ class UsageDtoTest {
         assertThat(dto.agentName()).isEqualTo("Agent");
         assertThat(dto.status()).isEqualTo(SandboxExecutionStatus.COMPLETED);
         assertThat(dto.userEmail()).isEqualTo("user@example.com");
-        assertThat(dto.modelIdentifiers()).containsExactly("gpt-4o");
+        assertThat(dto.models()).extracting(ModelUsageDto::modelIdentifier).containsExactly("gpt-4o");
         assertThat(dto.usageType()).isEqualTo(UsageType.EXECUTION);
         assertThat(dto.totalTokens()).isEqualTo(100L);
         assertThat(dto.totalSpend()).isEqualTo(0.05);
@@ -49,7 +50,7 @@ class UsageDtoTest {
     }
 
     @Test
-    void usageLogEntryDto_sortsModelIdentifiersCaseInsensitively() {
+    void usageLogEntryDto_sortsModelsCaseInsensitively() {
         UsageLogEntryDto dto = new UsageLogEntryDto(
                 "id-2",
                 Instant.now(),
@@ -58,12 +59,16 @@ class UsageDtoTest {
                 "Ingestion Worker",
                 SandboxExecutionStatus.COMPLETED,
                 "system@kratis.ai",
-                Set.of("text-embedding-3-small", "gpt-4o"),
+                Set.of(
+                        new ModelUsageDto(ModelKind.EMBEDDING, "text-embedding-3-small", null, 0.002, 100L),
+                        new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.01, 500L)),
                 UsageType.INGESTION,
                 500L,
                 0.01,
                 "/repos/repo-1");
-        assertThat(dto.modelIdentifiers()).containsExactly("gpt-4o", "text-embedding-3-small");
+        assertThat(dto.models())
+                .extracting(ModelUsageDto::modelIdentifier)
+                .containsExactly("gpt-4o", "text-embedding-3-small");
         assertThat(dto.targetUrl()).isEqualTo("/repos/repo-1");
     }
 
@@ -77,7 +82,7 @@ class UsageDtoTest {
                 "Agent",
                 SandboxExecutionStatus.COMPLETED,
                 "user@example.com",
-                Set.of("gpt-4o"),
+                Set.of(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.0, 10L)),
                 UsageType.EXECUTION,
                 10L,
                 0.0,
@@ -86,7 +91,7 @@ class UsageDtoTest {
     }
 
     @Test
-    void usageLogEntryDto_rejectsNullModelIdentifiers() {
+    void usageLogEntryDto_rejectsNullModels() {
         assertThatThrownBy(() -> new UsageLogEntryDto(
                         "id-3",
                         Instant.now(),
@@ -144,7 +149,7 @@ class UsageDtoTest {
                 "Agent",
                 SandboxExecutionStatus.COMPLETED,
                 "user@example.com",
-                Set.of("gpt-4o"),
+                Set.of(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.05, 100L)),
                 UsageType.EXECUTION,
                 100L,
                 0.05,
@@ -152,5 +157,26 @@ class UsageDtoTest {
 
         String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(dto);
         assertThat(json).contains("\"usageType\":\"EXECUTION\"");
+        assertThat(json).contains("\"modelIdentifier\":\"gpt-4o\"");
+    }
+
+    @Test
+    void modelUsageDto_rejectsNullModelIdentifier() {
+        assertThatThrownBy(() -> new ModelUsageDto(ModelKind.CHAT, null, null, 0.0, 0L))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("modelIdentifier is required");
+    }
+
+    @Test
+    void modelUsageDto_ordersByKindThenIdentifierCaseInsensitively() {
+        ModelUsageDto chat = new ModelUsageDto(ModelKind.CHAT, "GPT-4o", null, 0.01, 100L);
+        ModelUsageDto embedding = new ModelUsageDto(ModelKind.EMBEDDING, "text-embedding-3-small", null, 0.01, 100L);
+
+        // The comparator is case-insensitive; record equals still distinguishes case.
+        assertThat(chat.compareTo(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.01, 100L)))
+                .isZero();
+        assertThat(chat).isNotEqualTo(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.01, 100L));
+        assertThat(embedding).isGreaterThan(chat);
+        assertThat(chat.compareTo(null)).isEqualTo(1);
     }
 }

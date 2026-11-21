@@ -110,12 +110,15 @@ class UsageLogControllerTest {
         execution.setCanvas(canvas);
         execution.setTaskPrompt("You are running as a non-root user inside a sandbox...");
         execution.setStatus(SandboxExecutionStatus.COMPLETED);
+        execution.setModelName("gpt-4o");
         sandboxExecutionRepository.save(execution);
 
         mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-logs?page=0&size=10")
                         .header("Authorization", "Bearer " + authToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].activityTitle").value("Fix: Usage Log Execution Names"));
+                .andExpect(jsonPath("$.content[0].activityTitle").value("Fix: Usage Log Execution Names"))
+                .andExpect(jsonPath("$.content[0].models[0].modelIdentifier").value("gpt-4o"))
+                .andExpect(jsonPath("$.content[0].models[0].modelKind").value("CHAT"));
     }
 
     @Test

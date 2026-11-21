@@ -58,6 +58,7 @@ export interface IngestionBatchStatsDto {
   completionTokens: null | number
   dimensions: DimensionStatDto[]
   edgeTypeCounts: Record<string, number>
+  models: ModelUsageDto[]
   nodeTypeCounts: Record<string, number>
   promptTokens: null | number
   relations: RelationStatDto[]
@@ -102,6 +103,14 @@ export interface ModelProviderDto {
   providerType: ProviderType
   teamId: string
   updatedAt: string
+}
+
+export interface ModelUsageDto {
+  litellmAlias: null | string
+  modelIdentifier: string
+  modelKind: ModelKind | null
+  totalSpend: null | number
+  totalTokens: null | number
 }
 
 export type ProviderType =
