@@ -34,6 +34,7 @@ public class DatabaseCleaner {
     private TestLiteLLMClient testLiteLLMClient;
 
     private volatile List<String> cachedTablesToTruncate;
+    private volatile String cachedNonEmptyCheckSql;
 
     private static final Set<String> EXCLUDED_TABLES = Set.of("databasechangelog", "databasechangeloglock");
 
@@ -66,11 +67,13 @@ public class DatabaseCleaner {
                                 String.class,
                                 schema.toLowerCase());
 
-                        cachedTablesToTruncate = tables.stream()
+                        List<String> resolved = tables.stream()
                                 .map(String::toLowerCase)
                                 .filter(tableName -> !EXCLUDED_TABLES.contains(tableName))
                                 .map(tableName -> schema + "." + tableName)
                                 .collect(Collectors.toList());
+                        cachedNonEmptyCheckSql = buildNonEmptyCheckSql(resolved);
+                        cachedTablesToTruncate = resolved;
                         discoveryNanos = System.nanoTime() - discStart;
                     }
                 }
@@ -80,9 +83,15 @@ public class DatabaseCleaner {
                 return;
             }
 
-            String truncateSql = "TRUNCATE TABLE " + String.join(", ", cachedTablesToTruncate) + " CASCADE";
-
             long truncStart = System.nanoTime();
+            List<String> nonEmptyTables = jdbcTemplate.queryForList(cachedNonEmptyCheckSql, String.class);
+            if (nonEmptyTables.isEmpty()) {
+                truncateNanos = System.nanoTime() - truncStart;
+                return;
+            }
+
+            String truncateSql = "TRUNCATE TABLE " + String.join(", ", nonEmptyTables) + " CASCADE";
+
             try {
                 jdbcTemplate.execute("SET lock_timeout = '1s'");
                 jdbcTemplate.execute(truncateSql);
@@ -116,6 +125,19 @@ public class DatabaseCleaner {
                             truncateNanos,
                             lockTimeoutHealed);
         }
+    }
+
+    /**
+     * Builds a single MVCC-exact probe query returning only tables that currently contain at least
+     * one row, avoiding unnecessary {@code ACCESS EXCLUSIVE} locks on empty tables.
+     */
+    static String buildNonEmptyCheckSql(List<String> qualifiedTables) {
+        if (qualifiedTables == null || qualifiedTables.isEmpty()) {
+            return "";
+        }
+        return qualifiedTables.stream()
+                .map(table -> "SELECT '" + table + "' AS table_name WHERE EXISTS (SELECT 1 FROM " + table + ")")
+                .collect(Collectors.joining(" UNION ALL "));
     }
 
     private void terminateConnections() {

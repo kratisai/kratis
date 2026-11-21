@@ -113,7 +113,16 @@ class EnvironmentRegisterRpcHandlerTest {
                 .toList();
     }
 
+    private void ensureLogAppenderAttached() {
+        // Spring Boot's LoggingApplicationListener resets Logback when parallel integration contexts boot.
+        if (!handlerLogger.isAttached(logAppender)) {
+            logAppender.start();
+            handlerLogger.addAppender(logAppender);
+        }
+    }
+
     private void register(boolean reconnect, String connectorVersion) {
+        ensureLogAppenderAttached();
         when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(createEnvironment()));
         EnvironmentRpcPayload.Register params =
                 new EnvironmentRpcPayload.Register(authToken, reconnect, null, false, 0L, null, 1, connectorVersion);

@@ -21,6 +21,7 @@ import com.kratisai.controlplane.websocket.environment.EnvironmentRpcHandler;
 import com.kratisai.controlplane.websocket.environment.EnvironmentWebSocketHandler;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
 import com.tngtech.archunit.core.domain.JavaConstructor;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
@@ -30,9 +31,9 @@ import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.domain.JavaParameter;
 import com.tngtech.archunit.core.domain.JavaParameterizedType;
 import com.tngtech.archunit.core.domain.JavaType;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
-import com.tngtech.archunit.junit.AnalyzeClasses;
-import com.tngtech.archunit.junit.ArchTest;
+import com.tngtech.archunit.core.importer.Location;
 import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.ConditionEvents;
@@ -45,6 +46,8 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
@@ -55,31 +58,32 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.socket.WebSocketMessage;
 import org.springframework.web.socket.WebSocketSession;
 
-@AnalyzeClasses(
-        packages = "com.kratisai.controlplane",
-        importOptions = {
-            ImportOption.DoNotIncludeTests.class,
-            ImportOption.DoNotIncludeJars.class,
-            ArchitectureSanityTest.DoNotIncludeAotGeneratedClasses.class
-        })
 public class ArchitectureSanityTest {
+
+    private static JavaClasses importedClasses;
+
+    @BeforeAll
+    static void importClasses() {
+        importedClasses = new ClassFileImporter()
+                .withImportOption(new ImportOption.DoNotIncludeTests())
+                .withImportOption(new ImportOption.DoNotIncludeJars())
+                .withImportOption(new DoNotIncludeAotGeneratedClasses())
+                .importPackages("com.kratisai.controlplane");
+    }
 
     static final class DoNotIncludeAotGeneratedClasses implements ImportOption {
         @Override
-        public boolean includes(com.tngtech.archunit.core.importer.Location location) {
+        public boolean includes(Location location) {
             return !location.contains("__BeanDefinitions")
                     && !location.contains("__BeanFactoryRegistrations")
                     && !location.contains("__AotProcessor");
         }
     }
 
-    @ArchTest
     public static final ArchRule NO_FIELD_INJECTION = GeneralCodingRules.NO_CLASSES_SHOULD_USE_FIELD_INJECTION;
 
-    @ArchTest
     public static final ArchRule NO_STANDARD_STREAMS = GeneralCodingRules.NO_CLASSES_SHOULD_ACCESS_STANDARD_STREAMS;
 
-    @ArchTest
     public static final ArchRule NO_GENERIC_EXCEPTIONS = noClasses()
             .should(new ArchCondition<JavaClass>("throw generic exceptions") {
                 @Override
@@ -104,7 +108,6 @@ public class ArchitectureSanityTest {
      * so the native image aborts during context refresh with a {@code ClassCastException}. Break the
      * cycle with an {@code ObjectProvider} or restructure the dependency instead.
      */
-    @ArchTest
     public static final ArchRule NO_LAZY_CONSTRUCTOR_INJECTION = noClasses()
             .should(new ArchCondition<JavaClass>("not use @Lazy on constructor parameters") {
                 @Override
@@ -125,14 +128,12 @@ public class ArchitectureSanityTest {
             .because("GraalVM native images cannot build the CGLIB lazy-resolution proxy that @Lazy triggers;"
                     + " break dependency cycles with ObjectProvider or restructure instead");
 
-    @ArchTest
     public static final ArchRule NO_RAW_VIRTUAL_THREAD_START = noClasses()
             .should()
             .callMethod(Thread.class, "startVirtualThread", Runnable.class)
             .because("Raw Thread.startVirtualThread is untracked; route work through a named executor"
                     + " bean so tests can drain background work before truncating the schema");
 
-    @ArchTest
     public static final ArchRule EXECUTOR_CREATION_ONLY_IN_ASYNC_CONFIG = classes()
             .that()
             .doNotHaveFullyQualifiedName(AsyncConfig.class.getName())
@@ -197,7 +198,6 @@ public class ArchitectureSanityTest {
      * Hoisting it into a field would let research tasks outlive the call and race the test-schema
      * truncation, invisibly to the creation-site rule.
      */
-    @ArchTest
     public static final ArchRule RESEARCH_EXECUTOR_MUST_STAY_SCOPED = fields().that()
             .areDeclaredIn(DimensionResearchService.class)
             .or()
@@ -224,7 +224,6 @@ public class ArchitectureSanityTest {
      * belongs in services behind events, dispatched onto a tracked executor — see {@code
      * EnvironmentWebSocketHandler#runSessionCleanup}.
      */
-    @ArchTest
     public static final ArchRule SESSION_REGISTRIES_NEVER_TOUCH_REPOSITORIES = noClasses()
             .that()
             .haveFullyQualifiedName(ClientSessionRegistry.class.getName())
@@ -242,7 +241,6 @@ public class ArchitectureSanityTest {
      * awaits. {@code EnvironmentSessionRegistry} may publish only because its handler hands cleanup
      * to the tracked {@code envMessageExecutor} first.
      */
-    @ArchTest
     public static final ArchRule CLIENT_SESSION_REGISTRY_PUBLISHES_NO_EVENTS = noClasses()
             .that()
             .haveFullyQualifiedName(ClientSessionRegistry.class.getName())
@@ -258,7 +256,6 @@ public class ArchitectureSanityTest {
                     + " listener would put DB work there — hand off to a tracked executor like"
                     + " EnvironmentWebSocketHandler does");
 
-    @ArchTest
     public static final ArchRule NO_CIRCULAR_DEPENDENCIES = SlicesRuleDefinition.slices()
             .matching("com.kratisai.controlplane.(*)..")
             .should()
@@ -287,7 +284,6 @@ public class ArchitectureSanityTest {
      * Client fan-out must use AFTER_COMMIT without fallbackExecution. Events published outside a
      * transaction are dropped by design — fix the publisher to be {@code @Transactional}.
      */
-    @ArchTest
     public static final ArchRule NO_FALLBACK_EXECUTION_ON_TRANSACTIONAL_LISTENERS = methods()
             .that()
             .areAnnotatedWith(TransactionalEventListener.class)
@@ -308,7 +304,6 @@ public class ArchitectureSanityTest {
             .because("fallbackExecution papers over missing transactions and reintroduces stale-read races;"
                     + " always publish client fan-out events inside @Transactional methods");
 
-    @ArchTest
     public static final ArchRule ONLY_DISPATCH_CALLS_WEBSOCKET_SEND = noClasses()
             .that()
             .doNotHaveFullyQualifiedName(WebSocketDispatch.class.getName())
@@ -317,7 +312,6 @@ public class ArchitectureSanityTest {
             .because("All WebSocket writes must flow through WebSocketDispatch so serialization"
                     + " and the send-or-fail-loudly error policy live in exactly one place");
 
-    @ArchTest
     public static final ArchRule HANDLERS_NEVER_TOUCH_WEBSOCKET_SESSION = noClasses()
             .that()
             .areAssignableTo(ClientRpcHandler.class)
@@ -329,7 +323,6 @@ public class ArchitectureSanityTest {
             .because("RPC handlers receive a session id and return a Flux; only transport"
                     + " infrastructure may use the raw session");
 
-    @ArchTest
     public static final ArchRule HANDLERS_NEVER_TOUCH_WEBSOCKET_DISPATCH = noClasses()
             .that()
             .areAssignableTo(ClientRpcHandler.class)
@@ -345,7 +338,6 @@ public class ArchitectureSanityTest {
      * Business code must not fan-out to client WebSockets directly. Publish domain events; only
      * {@link ClientRealtimeEventListeners} may call {@code WebSocketDispatch.broadcastNotification*}.
      */
-    @ArchTest
     public static final ArchRule ONLY_REALTIME_LISTENERS_BROADCAST_TO_CLIENTS = noClasses()
             .that()
             .doNotHaveFullyQualifiedName(ClientRealtimeEventListeners.class.getName())
@@ -362,7 +354,6 @@ public class ArchitectureSanityTest {
             .because("Client WebSocket fan-out must go through domain events + ClientRealtimeEventListeners;"
                     + " session-directed streaming (chat/canvas) is exempt and does not use broadcast");
 
-    @ArchTest
     public static final ArchRule ONLY_TRANSPORT_DEPENDS_ON_WEBSOCKET_DISPATCH = noClasses()
             .that()
             .doNotHaveFullyQualifiedName(WebSocketDispatch.class.getName())
@@ -391,7 +382,6 @@ public class ArchitectureSanityTest {
      * TransactionTemplate} block, which ArchUnit cannot statically verify. Do not grow this list
      * without moving the publish call to a declaratively transactional method instead.
      */
-    @ArchTest
     public static final ArchRule PUBLISH_EVENT_REQUIRES_TRANSACTION_BOUNDARY = methods()
             .that(callsPublishEvent())
             .and()
@@ -446,7 +436,6 @@ public class ArchitectureSanityTest {
                     + " transaction boundary — this is the single pattern that makes fallbackExecution"
                     + " unnecessary and eliminates stale-read races by construction.");
 
-    @ArchTest
     public static final ArchRule NO_SLEEP_INSIDE_TRANSACTIONS = methods()
             .that()
             .areAnnotatedWith(Transactional.class)
@@ -469,7 +458,6 @@ public class ArchitectureSanityTest {
             .because("Database transactions must never hold connection locks across Thread.sleep();"
                     + " perform delays outside the transaction boundary.");
 
-    @ArchTest
     public static final ArchRule TOOLS_USE_KRATIS_TOOL_ANNOTATION = noMethods()
             .should()
             .beAnnotatedWith(Tool.class)
@@ -477,7 +465,6 @@ public class ArchitectureSanityTest {
                     + " result through verbatim; schema $ref/$defs keys then reach Gemini as"
                     + " function_response references and fail the request. Use @KratisTool instead.");
 
-    @ArchTest
     public static final ArchRule KRATIS_TOOLS_RETURN_SAFE_TYPES = methods()
             .that()
             .areAnnotatedWith(KratisTool.class)
@@ -520,5 +507,105 @@ public class ArchitectureSanityTest {
                                 && call.getTarget().getName().equals("publishEvent"));
             }
         };
+    }
+
+    @Test
+    void noFieldInjection() {
+        NO_FIELD_INJECTION.check(importedClasses);
+    }
+
+    @Test
+    void noStandardStreams() {
+        NO_STANDARD_STREAMS.check(importedClasses);
+    }
+
+    @Test
+    void noGenericExceptions() {
+        NO_GENERIC_EXCEPTIONS.check(importedClasses);
+    }
+
+    @Test
+    void noLazyConstructorInjection() {
+        NO_LAZY_CONSTRUCTOR_INJECTION.check(importedClasses);
+    }
+
+    @Test
+    void noRawVirtualThreadStart() {
+        NO_RAW_VIRTUAL_THREAD_START.check(importedClasses);
+    }
+
+    @Test
+    void executorCreationOnlyInAsyncConfig() {
+        EXECUTOR_CREATION_ONLY_IN_ASYNC_CONFIG.check(importedClasses);
+    }
+
+    @Test
+    void researchExecutorMustStayScoped() {
+        RESEARCH_EXECUTOR_MUST_STAY_SCOPED.check(importedClasses);
+    }
+
+    @Test
+    void sessionRegistriesNeverTouchRepositories() {
+        SESSION_REGISTRIES_NEVER_TOUCH_REPOSITORIES.check(importedClasses);
+    }
+
+    @Test
+    void clientSessionRegistryPublishesNoEvents() {
+        CLIENT_SESSION_REGISTRY_PUBLISHES_NO_EVENTS.check(importedClasses);
+    }
+
+    @Test
+    void noCircularDependencies() {
+        NO_CIRCULAR_DEPENDENCIES.check(importedClasses);
+    }
+
+    @Test
+    void noFallbackExecutionOnTransactionalListeners() {
+        NO_FALLBACK_EXECUTION_ON_TRANSACTIONAL_LISTENERS.check(importedClasses);
+    }
+
+    @Test
+    void onlyDispatchCallsWebSocketSend() {
+        ONLY_DISPATCH_CALLS_WEBSOCKET_SEND.check(importedClasses);
+    }
+
+    @Test
+    void handlersNeverTouchWebSocketSession() {
+        HANDLERS_NEVER_TOUCH_WEBSOCKET_SESSION.check(importedClasses);
+    }
+
+    @Test
+    void handlersNeverTouchWebSocketDispatch() {
+        HANDLERS_NEVER_TOUCH_WEBSOCKET_DISPATCH.check(importedClasses);
+    }
+
+    @Test
+    void onlyRealtimeListenersBroadcastToClients() {
+        ONLY_REALTIME_LISTENERS_BROADCAST_TO_CLIENTS.check(importedClasses);
+    }
+
+    @Test
+    void onlyTransportDependsOnWebSocketDispatch() {
+        ONLY_TRANSPORT_DEPENDS_ON_WEBSOCKET_DISPATCH.check(importedClasses);
+    }
+
+    @Test
+    void publishEventRequiresTransactionBoundary() {
+        PUBLISH_EVENT_REQUIRES_TRANSACTION_BOUNDARY.check(importedClasses);
+    }
+
+    @Test
+    void noSleepInsideTransactions() {
+        NO_SLEEP_INSIDE_TRANSACTIONS.check(importedClasses);
+    }
+
+    @Test
+    void toolsUseKratisToolAnnotation() {
+        TOOLS_USE_KRATIS_TOOL_ANNOTATION.check(importedClasses);
+    }
+
+    @Test
+    void kratisToolsReturnSafeTypes() {
+        KRATIS_TOOLS_RETURN_SAFE_TYPES.check(importedClasses);
     }
 }

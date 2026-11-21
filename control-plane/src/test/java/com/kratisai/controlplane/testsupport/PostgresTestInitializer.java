@@ -7,16 +7,19 @@ import com.github.dockerjava.api.exception.ConflictException;
 import com.github.dockerjava.api.model.ContainerNetwork;
 import com.kratisai.controlplane.service.LocalDockerSandboxProvider;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.io.InputStream;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -226,6 +229,13 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
 
     private static void verifyLiteLLMLoggingPatch() {
         try {
+            String stampPath =
+                    "/tmp/.kratis_patch_ok_" + computeClasspathSha256Prefix("litellm/patch_response_logging.py");
+            Container.ExecResult fastCheck = LITELLM_CONTAINER.execInContainer("test", "-f", stampPath);
+            if (fastCheck.getExitCode() == 0) {
+                logger.info("LiteLLM logging patch stamp verified ({})", stampPath);
+                return;
+            }
             LITELLM_CONTAINER.copyFileToContainer(
                     MountableFile.forClasspathResource("litellm/patch_response_logging.py"),
                     "/tmp/patch_response_logging_check.py");
@@ -235,12 +245,23 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                 throw new IllegalStateException("LiteLLM logging patch drift detected: " + result.getStdout()
                         + System.lineSeparator() + result.getStderr());
             }
+            LITELLM_CONTAINER.execInContainer("touch", stampPath);
             logger.info("LiteLLM logging patch matches the running image");
         } catch (Exception e) {
             if (e instanceof IllegalStateException illegalStateException) {
                 throw illegalStateException;
             }
             throw new IllegalStateException("Unable to verify the LiteLLM logging patch", e);
+        }
+    }
+
+    private static String computeClasspathSha256Prefix(String resourcePath) throws Exception {
+        try (InputStream is = PostgresTestInitializer.class.getClassLoader().getResourceAsStream(resourcePath)) {
+            if (is == null) {
+                throw new IllegalStateException("Missing classpath resource: " + resourcePath);
+            }
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(is.readAllBytes());
+            return HexFormat.of().formatHex(digest, 0, 8);
         }
     }
 

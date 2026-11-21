@@ -24,6 +24,7 @@ import com.kratisai.controlplane.validation.ValidPasswordValidator;
 import com.openai.models.FunctionParameters;
 import com.openai.models.completions.CompletionUsage;
 import com.openai.models.embeddings.CreateEmbeddingResponse;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.aot.hint.MemberCategory;
@@ -34,11 +35,17 @@ import org.springframework.aot.hint.predicate.RuntimeHintsPredicates;
 @DisplayName("AotHints")
 class AotHintsTest {
 
+    private static RuntimeHints hints;
+
+    @BeforeAll
+    static void registerHintsOnce() {
+        hints = new RuntimeHints();
+        new AotHints().registerHints(hints, AotHintsTest.class.getClassLoader());
+    }
+
     @Test
     @DisplayName("registers the Mermaid grammar resource")
     void registersMermaidGrammarResource() {
-        RuntimeHints hints = new RuntimeHints();
-        new AotHints().registerHints(hints, getClass().getClassLoader());
         assertThat(RuntimeHintsPredicates.resource().forResource("mermaid-grammar/grammar.json"))
                 .accepts(hints);
     }
@@ -46,11 +53,6 @@ class AotHintsTest {
     @Test
     @DisplayName("registers JDK proxy for ModelDiscoveryClient")
     void registersJdkProxy() {
-        RuntimeHints hints = new RuntimeHints();
-        AotHints aotHints = new AotHints();
-
-        aotHints.registerHints(hints, getClass().getClassLoader());
-
         assertThat(RuntimeHintsPredicates.proxies().forInterfaces(ModelDiscoveryClient.class))
                 .accepts(hints);
     }
@@ -58,11 +60,6 @@ class AotHintsTest {
     @Test
     @DisplayName("registers reflection hints for planning agent models and DTOs")
     void registersReflectionHints() {
-        RuntimeHints hints = new RuntimeHints();
-        AotHints aotHints = new AotHints();
-
-        aotHints.registerHints(hints, getClass().getClassLoader());
-
         assertThat(RuntimeHintsPredicates.reflection().onType(DependenciesResponse.class))
                 .accepts(hints);
         assertThat(RuntimeHintsPredicates.reflection().onType(RepositorySummary.class))
@@ -90,11 +87,6 @@ class AotHintsTest {
     @Test
     @DisplayName("registers constructor access for the password constraint validator")
     void registersPasswordConstraintValidator() {
-        RuntimeHints hints = new RuntimeHints();
-        AotHints aotHints = new AotHints();
-
-        aotHints.registerHints(hints, getClass().getClassLoader());
-
         assertThat(RuntimeHintsPredicates.reflection()
                         .onType(ValidPasswordValidator.class)
                         .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
@@ -104,11 +96,6 @@ class AotHintsTest {
     @Test
     @DisplayName("registers WebSocket wire DTOs for Jackson binding")
     void registersWebSocketPayloadHints() {
-        RuntimeHints hints = new RuntimeHints();
-        AotHints aotHints = new AotHints();
-
-        aotHints.registerHints(hints, getClass().getClassLoader());
-
         assertThat(RuntimeHintsPredicates.reflection()
                         .onType(ClientPayload.AuthResult.class)
                         .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
@@ -129,11 +116,6 @@ class AotHintsTest {
     @Test
     @DisplayName("registers binding hints for LLM structured-output records")
     void registersRecordBindingHints() {
-        RuntimeHints hints = new RuntimeHints();
-        AotHints aotHints = new AotHints();
-
-        aotHints.registerHints(hints, getClass().getClassLoader());
-
         assertThat(RuntimeHintsPredicates.reflection()
                         .onType(DimensionDiscoveryResult.class)
                         .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
@@ -155,11 +137,6 @@ class AotHintsTest {
     @Test
     @DisplayName("registers binding hints for OpenAI SDK model classes")
     void registersOpenAiModelHints() {
-        RuntimeHints hints = new RuntimeHints();
-        AotHints aotHints = new AotHints();
-
-        aotHints.registerHints(hints, getClass().getClassLoader());
-
         assertThat(RuntimeHintsPredicates.reflection()
                         .onType(CreateEmbeddingResponse.Usage.class)
                         .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
@@ -179,11 +156,6 @@ class AotHintsTest {
     @Test
     @DisplayName("registers binding hints for Anthropic SDK model classes")
     void registersAnthropicModelHints() {
-        RuntimeHints hints = new RuntimeHints();
-        AotHints aotHints = new AotHints();
-
-        aotHints.registerHints(hints, getClass().getClassLoader());
-
         assertThat(RuntimeHintsPredicates.reflection()
                         .onType(Message.class)
                         .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
@@ -198,11 +170,6 @@ class AotHintsTest {
     @Test
     @DisplayName("registers field and method access on the springdoc SpringWebProvider lazy proxy")
     void registersSpringWebProviderLazyProxyHints() {
-        RuntimeHints hints = new RuntimeHints();
-        AotHints aotHints = new AotHints();
-
-        aotHints.registerHints(hints, getClass().getClassLoader());
-
         assertThat(RuntimeHintsPredicates.reflection()
                         .onType(TypeReference.of("org.springdoc.core.providers.SpringWebProvider"))
                         .withMemberCategory(MemberCategory.ACCESS_DECLARED_FIELDS))
@@ -220,11 +187,6 @@ class AotHintsTest {
     @Test
     @DisplayName("registers the tool result converter constructor")
     void registersToolResultConverterConstructor() {
-        RuntimeHints hints = new RuntimeHints();
-        AotHints aotHints = new AotHints();
-
-        aotHints.registerHints(hints, getClass().getClassLoader());
-
         // ToolUtils builds @Tool(resultConverter = ...) with getDeclaredConstructor at startup.
         assertThat(RuntimeHintsPredicates.reflection()
                         .onType(TypeReference.of("com.kratisai.controlplane.agentloop.KratisToolResultConverter"))
@@ -235,11 +197,6 @@ class AotHintsTest {
     @Test
     @DisplayName("registers binding hints for the harness definition record")
     void registersHarnessDefinitionBindingHints() {
-        RuntimeHints hints = new RuntimeHints();
-        AotHints aotHints = new AotHints();
-
-        aotHints.registerHints(hints, getClass().getClassLoader());
-
         // The catalogue is read from disk at runtime, so Jackson must bind AgentHarness.Definition
         // inside the native image, not only at build time.
         assertThat(RuntimeHintsPredicates.reflection()
@@ -251,11 +208,6 @@ class AotHintsTest {
     @Test
     @DisplayName("registers binding hints for assisted discovery records")
     void registersAssistedResponseBindingHints() {
-        RuntimeHints hints = new RuntimeHints();
-        AotHints aotHints = new AotHints();
-
-        aotHints.registerHints(hints, getClass().getClassLoader());
-
         for (String name : new String[] {"Discovery", "Observation", "Fact"}) {
             assertThat(RuntimeHintsPredicates.reflection()
                             .onType(TypeReference.of(
@@ -268,11 +220,6 @@ class AotHintsTest {
     @Test
     @DisplayName("registers resource hints for OkHttp PublicSuffixDatabase")
     void registersResourceHints() {
-        RuntimeHints hints = new RuntimeHints();
-        AotHints aotHints = new AotHints();
-
-        aotHints.registerHints(hints, getClass().getClassLoader());
-
         assertThat(RuntimeHintsPredicates.resource()
                         .forResource("okhttp3/internal/publicsuffix/PublicSuffixDatabase.gz"))
                 .accepts(hints);
