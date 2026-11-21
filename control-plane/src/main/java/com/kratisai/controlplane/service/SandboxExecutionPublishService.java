@@ -605,15 +605,15 @@ public class SandboxExecutionPublishService {
         UUID executionId = execution.getId();
         SandboxExecutionActivity activity;
         try {
-            activity = activityPersistenceService.recordActivity(
-                    executionId, ActivityType.PUBLISH, description, actionId, ActivityStatus.COMPLETED, detail);
+            activity = requiresNewTransactionTemplate.execute(status -> activityPersistenceService.recordActivity(
+                    executionId, ActivityType.PUBLISH, description, actionId, ActivityStatus.COMPLETED, detail));
         } catch (DataIntegrityViolationException ex) {
             logger.warn(
                     "Unique index collision on publish activity (execution={}, actionId={}), falling back to merge",
                     executionId,
                     actionId,
                     ex);
-            activity = activityRepository
+            activity = requiresNewTransactionTemplate.execute(status -> activityRepository
                     .findByExecutionIdAndActionId(executionId, actionId)
                     .map(existing -> {
                         existing.setActivityType(ActivityType.PUBLISH);
@@ -628,7 +628,7 @@ public class SandboxExecutionPublishService {
                         }
                         return activityRepository.save(existing);
                     })
-                    .orElse(null);
+                    .orElse(null));
         }
         if (activity != null) {
             eventPublisher.publishEvent(new SandboxExecutionActivityEvent(

@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -2415,6 +2416,112 @@ class SandboxExecutionPublishServiceTest {
         PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
 
         assertThat(result.prNumber()).isEqualTo(101L);
+        verify(changeSetRepository).save(any(ChangeSet.class));
+        verify(activityRepository).save(existingActivity);
+        assertThat(existingActivity.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+        verify(eventPublisher).publishEvent(any(SandboxExecutionActivityEvent.class));
+    }
+
+    @Test
+    void publishPullRequest_commitTimeUniqueViolation_fallsBackToMerge() throws Exception {
+        stubExecutionLookup();
+        stubWorkspaceObserve();
+
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        EnvironmentConnectorResult.GitPush pushResult =
+                new EnvironmentConnectorResult.GitPush("sha999", "pr-branch", "refs/heads/pr-branch", "SUCCESS");
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(pushResult);
+
+        GitAuthMaterial auth = GitAuthMaterial.ofToken("pat-token");
+        when(credentialResolver.resolve(repository)).thenReturn(auth);
+
+        PullRequestResultDto expectedPr =
+                new PullRequestResultDto(101, "https://github.com/test/repo/pull/101", "pr-branch", "main");
+        when(repoProvider.createPullRequest(eq(repository), eq(auth), any(CreatePullRequestCommand.class)))
+                .thenReturn(expectedPr);
+
+        String expectedActionId = "pub:pr:" + repository.getId() + ":101";
+        when(activityPersistenceService.recordActivity(
+                        eq(executionId), eq(ActivityType.PUBLISH), any(), eq(expectedActionId), any(), any()))
+                .thenReturn(new SandboxExecutionActivity(
+                        executionId,
+                        1L,
+                        expectedActionId,
+                        ActivityType.PUBLISH,
+                        ActivityStatus.COMPLETED,
+                        "New",
+                        null));
+
+        // Simulate commit-time flush unique collision on the initial REQUIRES_NEW transaction;
+        // the fallback merge REQUIRES_NEW transaction commit succeeds.
+        doThrow(new DataIntegrityViolationException("Unique constraint violation"))
+                .doNothing()
+                .when(transactionManager)
+                .commit(any());
+
+        SandboxExecutionActivity existingActivity = new SandboxExecutionActivity(
+                executionId, 1L, expectedActionId, ActivityType.PUBLISH, ActivityStatus.PENDING, "Old", null);
+        when(activityRepository.findByExecutionIdAndActionId(executionId, expectedActionId))
+                .thenReturn(Optional.of(existingActivity));
+        when(activityRepository.save(any(SandboxExecutionActivity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        PublishPrRequestDto request = new PublishPrRequestDto("pr-branch", "main", "PR Title", "PR Body", false, true);
+        PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
+
+        assertThat(result.prNumber()).isEqualTo(101L);
+        verify(changeSetRepository).save(any(ChangeSet.class));
+        verify(activityRepository).save(existingActivity);
+        assertThat(existingActivity.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+        verify(eventPublisher).publishEvent(any(SandboxExecutionActivityEvent.class));
+    }
+
+    @Test
+    void pushBranch_commitTimeUniqueViolation_fallsBackToMerge() throws Exception {
+        stubExecutionLookup();
+        stubWorkspaceObserve();
+
+        EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
+                "sha1234567890", "feature-branch", "refs/heads/feature-branch", "SUCCESS");
+
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(pushResult);
+
+        String expectedActionId = "pub:push:" + executionId + ":sha1234567890";
+
+        when(activityPersistenceService.recordActivity(
+                        eq(executionId), eq(ActivityType.PUBLISH), any(), eq(expectedActionId), any(), any()))
+                .thenReturn(new SandboxExecutionActivity(
+                        executionId,
+                        1L,
+                        expectedActionId,
+                        ActivityType.PUBLISH,
+                        ActivityStatus.COMPLETED,
+                        "New",
+                        null));
+
+        // Simulate commit-time flush unique collision on the initial REQUIRES_NEW transaction
+        doThrow(new DataIntegrityViolationException("Unique constraint violation"))
+                .doNothing()
+                .when(transactionManager)
+                .commit(any());
+
+        SandboxExecutionActivity existingActivity = new SandboxExecutionActivity(
+                executionId, 1L, expectedActionId, ActivityType.PUBLISH, ActivityStatus.PENDING, "Old", null);
+        when(activityRepository.findByExecutionIdAndActionId(executionId, expectedActionId))
+                .thenReturn(Optional.of(existingActivity));
+        when(activityRepository.save(any(SandboxExecutionActivity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        PushBranchRequestDto request = new PushBranchRequestDto("feature-branch", "commit msg", true);
+        PushBranchResponseDto response = service.pushBranch(userId, chatId, executionId, request);
+
+        assertThat(response.branchName()).isEqualTo("feature-branch");
+        verify(changeSetRepository).save(any(ChangeSet.class));
         verify(activityRepository).save(existingActivity);
         assertThat(existingActivity.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
         verify(eventPublisher).publishEvent(any(SandboxExecutionActivityEvent.class));
