@@ -37,6 +37,19 @@ const (
 	DefaultInitializeTimeout = 30 * time.Second
 )
 
+// A re-attach may replay the stored transcript as session/update notifications,
+// and some agents (Gemini CLI) stream that replay asynchronously, outliving the
+// session/load response. Suppression is held from attach until the wire goes
+// quiet.
+var (
+	// A replay drains as one tight burst, so a quiet wire marks its end.
+	// Overridable for tests.
+	attachReplayQuietWindow = 1 * time.Second
+	// Bounds pathological drains so a pending prompt's live turn is never
+	// starved of suppression relief.
+	attachReplaySettleCap = 60 * time.Second
+)
+
 type SupervisorTimeouts struct {
 	CancelDelay       time.Duration
 	ExitWait          time.Duration
@@ -652,6 +665,12 @@ func (s *AgentSupervisor) Launch(cmd *exec.Cmd) (*LaunchResult, error) {
 // the agent supports it, otherwise creates a new session. session/resume is
 // preferred over session/load because it does not replay history (Kratis already
 // owns the transcript). A failed re-attach falls back to session/new.
+//
+// Only a re-attach can replay history: suppression is armed for the whole
+// re-attach (fallback included) and held until the replay wire goes quiet
+// (awaitAttachSettled), so the first live session/prompt cannot race it. A
+// fresh session stays unsuppressed so agent metadata sent during attach is
+// still captured.
 func (s *AgentSupervisor) establishSession(
 	transport *acp.AcpTransport,
 	initResp acp.AcpInitializeResponse,
@@ -659,13 +678,40 @@ func (s *AgentSupervisor) establishSession(
 	if s.resumeSessionID == "" {
 		return s.newSession(transport)
 	}
+	if s.handler != nil {
+		s.handler.SetSuppressSessionUpdates(true)
+	}
 	sessionID, err := s.resumeSession(transport, initResp)
 	if err != nil {
 		s.eventSink.SendOutput(
 			fmt.Sprintf("[ACP] Session re-attach failed (%v); creating a new session", err), "stderr")
-		return s.newSession(transport)
+		freshID, freshResumed, freshErr := s.newSession(transport)
+		if freshErr == nil {
+			s.awaitAttachSettled()
+		}
+		return freshID, freshResumed, freshErr
 	}
+	s.awaitAttachSettled()
 	return sessionID, true, nil
+}
+
+// awaitAttachSettled holds attach suppression until the update wire goes quiet,
+// then opens it. Running inside Launch keeps the boundary synchronous: the
+// control plane's first session/prompt cannot race an asynchronous replay.
+func (s *AgentSupervisor) awaitAttachSettled() {
+	if s.handler == nil {
+		return
+	}
+	settled := time.Now()
+	for !s.handler.AttachReplayDrained(settled, attachReplayQuietWindow) {
+		if time.Since(settled) >= attachReplaySettleCap {
+			s.eventSink.SendOutput(
+				"[ACP] Attach replay suppression hit its settle cap; clearing for live traffic", "stderr")
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	s.handler.SetSuppressSessionUpdates(false)
 }
 
 func (s *AgentSupervisor) resumeSession(transport *acp.AcpTransport, initResp acp.AcpInitializeResponse) (string, error) {
@@ -687,17 +733,11 @@ func (s *AgentSupervisor) resumeSession(transport *acp.AcpTransport, initResp ac
 	case initResp.AgentCapabilities.LoadSession:
 		s.eventSink.SendOutput(
 			fmt.Sprintf("[ACP] Loading stored session %s (session/load)", s.resumeSessionID), "stdout")
-		if s.handler != nil {
-			s.handler.SetSuppressSessionUpdates(true)
-		}
 		resp, err := transport.SendRequest("session/load", acp.AcpSessionLoadRequest{
 			SessionID:  s.resumeSessionID,
 			Cwd:        s.workspace,
 			McpServers: []interface{}{},
 		}, s.Timeouts.InitializeTimeout)
-		if s.handler != nil {
-			s.handler.SetSuppressSessionUpdates(false)
-		}
 		if err != nil {
 			return "", err
 		}

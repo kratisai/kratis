@@ -582,7 +582,11 @@ agent process lifecycle:
   stored session id persisted at `<credentials-dir>/acp_session_id` (owned by `supervisor.Launch()`)
 - `session/prompt` to send prompts (owned by `supervisor.Prompt()`)
 - `session/cancel` as a notification (no `id` field) during terminate
-- Session updates replayed by `session/load` are suppressed so the control plane's transcript is not duplicated
+- Session updates replayed while attaching (`session/load` or `session/resume`,
+  including Gemini CLI's asynchronous history stream that outlives the load
+  response) are suppressed until the replay wire goes quiet, so the control
+  plane's transcript is not duplicated; `Launch` returns only after that
+  window opens
 - Termination sequence (cancel permissions → session/cancel → stdin close → SIGTERM → SIGKILL); the
   session is deliberately left open so a later process can re-attach
 - Notification handling for `session/update`, `session/request_permission`

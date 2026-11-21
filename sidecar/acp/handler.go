@@ -176,10 +176,15 @@ type Handler struct {
 	workspace string
 	debug     bool
 
-	// suppressUpdates drops session/update notifications while session/load
-	// replays a stored transcript: Kratis already owns that history, so
-	// relaying it would duplicate every message in the UI.
+	// suppressUpdates drops session/update notifications during attach: agents
+	// replay their stored transcript on session/load (some asynchronously,
+	// outliving the response), and Kratis already owns that history. Cleared
+	// by AgentSupervisor.awaitAttachSettled.
 	suppressUpdates atomic.Bool
+
+	// Last session/update arrival (UnixNano), fed by NoteSessionUpdate: a replay
+	// keeps the wire busy, so quiet marks its end.
+	lastSessionUpdateAt atomic.Int64
 
 	mu                      sync.Mutex
 	toolCalls               map[string]*ToolCallInfo
@@ -255,10 +260,25 @@ func (h *Handler) CloseChunkRun(reason string) {
 	h.closeChunkRunLocked(reason)
 }
 
-// SetSuppressSessionUpdates toggles dropping of session/update notifications,
-// used around session/load so the replayed transcript is not re-emitted.
+// SetSuppressSessionUpdates toggles dropping of session/update notifications.
 func (h *Handler) SetSuppressSessionUpdates(suppress bool) {
 	h.suppressUpdates.Store(suppress)
+}
+
+// NoteSessionUpdate records a session/update arrival (suppressed or relayed):
+// dropped replay traffic still proves the wire is busy.
+func (h *Handler) NoteSessionUpdate() {
+	h.lastSessionUpdateAt.Store(time.Now().UnixNano())
+}
+
+// AttachReplayDrained reports whether the wire has been quiet for the whole
+// window since the later of settleStart and the last session/update.
+func (h *Handler) AttachReplayDrained(settleStart time.Time, quietWindow time.Duration) bool {
+	last := time.Unix(0, h.lastSessionUpdateAt.Load())
+	if last.Before(settleStart) {
+		last = settleStart
+	}
+	return time.Since(last) >= quietWindow
 }
 
 func (h *Handler) NotificationHandler(transport *AcpTransport) func(string, map[string]interface{}, interface{}, bool) {
@@ -270,8 +290,9 @@ func (h *Handler) NotificationHandler(transport *AcpTransport) func(string, map[
 		}
 
 		if method == "session/update" {
+			h.NoteSessionUpdate()
 			if h.suppressUpdates.Load() {
-				h.debugf("[NOTIF] Dropping replayed session/update during session/load")
+				h.debugf("[NOTIF] Dropping replayed session/update during attach suppression")
 				return
 			}
 			h.handleSessionUpdate(params)
