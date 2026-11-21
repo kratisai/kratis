@@ -37,10 +37,18 @@ public class TrackingTaskScheduler extends ThreadPoolTaskScheduler {
     }
 
     public void awaitIdle(Duration timeout) {
-        Awaitility.await().atMost(timeout).pollInterval(Duration.ofMillis(20)).until(() -> {
-            prune();
-            return outstanding.isEmpty();
-        });
+        prune();
+        if (outstanding.isEmpty()) {
+            return;
+        }
+        Awaitility.await()
+                .atMost(timeout)
+                .pollDelay(Duration.ZERO)
+                .pollInterval(Duration.ofMillis(20))
+                .until(() -> {
+                    prune();
+                    return outstanding.isEmpty();
+                });
     }
 
     private void prune() {

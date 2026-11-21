@@ -36,7 +36,14 @@ public class TrackingVirtualThreadExecutor implements Executor, AutoCloseable {
     }
 
     public void awaitIdle(Duration timeout) {
-        Awaitility.await().atMost(timeout).pollInterval(Duration.ofMillis(20)).until(() -> inFlight.get() == 0);
+        if (inFlight.get() == 0) {
+            return;
+        }
+        Awaitility.await()
+                .atMost(timeout)
+                .pollDelay(Duration.ZERO)
+                .pollInterval(Duration.ofMillis(20))
+                .until(() -> inFlight.get() == 0);
     }
 
     @Override

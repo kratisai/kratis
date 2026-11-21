@@ -55,6 +55,21 @@ class TrackingVirtualThreadExecutorTest {
         }
     }
 
+    @Test
+    void awaitIdle_returnsImmediatelyWhenAlreadyIdle() {
+        TrackingVirtualThreadExecutor executor = new TrackingVirtualThreadExecutor();
+        try {
+            long startNanos = System.nanoTime();
+            for (int i = 0; i < 50; i++) {
+                executor.awaitIdle(Duration.ofSeconds(5));
+            }
+            long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;
+            assertThat(elapsedMs).isLessThan(100L);
+        } finally {
+            executor.close();
+        }
+    }
+
     private static void awaitQuietly(CountDownLatch latch) {
         try {
             latch.await();

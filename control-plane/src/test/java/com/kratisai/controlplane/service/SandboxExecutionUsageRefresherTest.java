@@ -294,4 +294,17 @@ class SandboxExecutionUsageRefresherTest {
         verify(virtualKeyService, never()).fetchUsage(any());
         verify(eventPublisher, never()).publishEvent(any());
     }
+
+    @Test
+    void cancelAllPendingRefreshes_cancelsOpenWindowAndSkipsTrailingRefresh() {
+        stubRunningExecution();
+        refresher.onSandboxExecutionActivityEvent(activityEvent());
+        refresher.onSandboxExecutionActivityEvent(activityEvent());
+
+        refresher.cancelAllPendingRefreshes();
+
+        verify(windowFutures.getFirst()).cancel(false);
+        runWindowTask(0);
+        assertThat(immediateTasks).hasSize(1);
+    }
 }

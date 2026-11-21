@@ -52,4 +52,14 @@ class TrackingTaskSchedulerTest {
         scheduler.awaitIdle(Duration.ofSeconds(2));
         assertThat(scheduler.outstanding()).isZero();
     }
+
+    @Test
+    void awaitIdle_returnsImmediatelyWhenAlreadyIdle() {
+        long startNanos = System.nanoTime();
+        for (int i = 0; i < 50; i++) {
+            scheduler.awaitIdle(Duration.ofSeconds(5));
+        }
+        long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;
+        assertThat(elapsedMs).isLessThan(100L);
+    }
 }

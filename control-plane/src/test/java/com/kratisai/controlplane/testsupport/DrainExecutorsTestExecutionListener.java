@@ -1,7 +1,6 @@
 package com.kratisai.controlplane.testsupport;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
+import com.kratisai.controlplane.service.SandboxExecutionUsageRefresher;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -59,6 +58,9 @@ public class DrainExecutorsTestExecutionListener implements TestExecutionListene
                 return;
             }
             ApplicationContext context = testContext.getApplicationContext();
+            if (context.containsBean("sandboxExecutionUsageRefresher")) {
+                context.getBean(SandboxExecutionUsageRefresher.class).cancelAllPendingRefreshes();
+            }
             for (String beanName : EXECUTOR_BEAN_NAMES) {
                 Object bean = beanOrNull(context, beanName);
                 if (bean instanceof TrackingVirtualThreadExecutor tracked) {
@@ -67,8 +69,7 @@ public class DrainExecutorsTestExecutionListener implements TestExecutionListene
                     }
                     tracked.awaitIdle(DRAIN_TIMEOUT);
                 } else if (bean instanceof ThreadPoolTaskExecutor executor) {
-                    var tpe = executor.getThreadPoolExecutor();
-                    if (tpe.getActiveCount() > 0 || !tpe.getQueue().isEmpty()) {
+                    if (!isExecutorIdle(executor)) {
                         waitedBeans.add(beanName);
                     }
                     awaitIdle(executor);
@@ -91,14 +92,19 @@ public class DrainExecutorsTestExecutionListener implements TestExecutionListene
         return context.containsBean(beanName) ? context.getBean(beanName) : null;
     }
 
+    private static boolean isExecutorIdle(ThreadPoolTaskExecutor executor) {
+        var tpe = executor.getThreadPoolExecutor();
+        return tpe.getActiveCount() == 0 && tpe.getQueue().isEmpty();
+    }
+
     private static void awaitIdle(ThreadPoolTaskExecutor executor) {
+        if (isExecutorIdle(executor)) {
+            return;
+        }
         Awaitility.await()
                 .atMost(DRAIN_TIMEOUT)
-                .pollInterval(Duration.ofMillis(50))
-                .untilAsserted(() -> {
-                    var threadPoolExecutor = executor.getThreadPoolExecutor();
-                    assertThat(threadPoolExecutor.getActiveCount()).isZero();
-                    assertThat(threadPoolExecutor.getQueue()).isEmpty();
-                });
+                .pollDelay(Duration.ZERO)
+                .pollInterval(Duration.ofMillis(20))
+                .until(() -> isExecutorIdle(executor));
     }
 }

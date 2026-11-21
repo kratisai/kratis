@@ -14,6 +14,7 @@ import com.kratisai.controlplane.model.event.SandboxExecutionSuspendedEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -94,6 +95,13 @@ public class SandboxExecutionUsageRefresher {
     @EventListener
     public void onSandboxExecutionSuspendedEvent(SandboxExecutionSuspendedEvent event) {
         cancelPendingRefresh(event.executionId());
+    }
+
+    /** Cancels all pending trailing refresh windows across executions (used between test runs). */
+    public void cancelAllPendingRefreshes() {
+        for (UUID executionId : List.copyOf(pendingRefreshWindows.keySet())) {
+            cancelPendingRefresh(executionId);
+        }
     }
 
     private void cancelPendingRefresh(UUID executionId) {
