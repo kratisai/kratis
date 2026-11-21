@@ -54,10 +54,10 @@ public class DrainExecutorsTestExecutionListener implements TestExecutionListene
         long start = System.nanoTime();
         List<String> waitedBeans = new ArrayList<>();
         try {
-            if (!testContext.hasApplicationContext()) {
+            ApplicationContext context = ContextCacheTracker.resolvedContext(testContext);
+            if (context == null) {
                 return;
             }
-            ApplicationContext context = testContext.getApplicationContext();
             if (context.containsBean("sandboxExecutionUsageRefresher")) {
                 context.getBean(SandboxExecutionUsageRefresher.class).cancelAllPendingRefreshes();
             }

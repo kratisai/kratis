@@ -231,7 +231,7 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
         try {
             String stampPath =
                     "/tmp/.kratis_patch_ok_" + computeClasspathSha256Prefix("litellm/patch_response_logging.py");
-            Container.ExecResult fastCheck = LITELLM_CONTAINER.execInContainer("test", "-f", stampPath);
+            Container.ExecResult fastCheck = LITELLM_CONTAINER.execInContainer("/usr/bin/test", "-f", stampPath);
             if (fastCheck.getExitCode() == 0) {
                 logger.info("LiteLLM logging patch stamp verified ({})", stampPath);
                 return;

@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.testsupport.llm;
 
+import com.kratisai.controlplane.testsupport.ContextCacheTracker;
 import com.kratisai.controlplane.testsupport.TestTimingRegistry;
 import com.kratisai.controlplane.testsupport.WikiPageContentFixtures;
 import java.util.List;
@@ -13,6 +14,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.DefaultToolCallingChatOptions;
+import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.TestContext;
 import org.springframework.test.context.TestExecutionListener;
 
@@ -39,7 +41,11 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
     private void resetChatModel(TestContext testContext) {
         long start = System.nanoTime();
         try {
-            ChatModel chatModel = testContext.getApplicationContext().getBean(ChatModel.class);
+            ApplicationContext context = ContextCacheTracker.resolvedContext(testContext);
+            if (context == null) {
+                return;
+            }
+            ChatModel chatModel = context.getBean(ChatModel.class);
             if (chatModel instanceof FakeChatModel fakeChatModel) {
                 fakeChatModel.reset();
                 reapplyDefaultMatchers(fakeChatModel);

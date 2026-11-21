@@ -40,10 +40,7 @@ public class ResetTestSpiesTestExecutionListener implements TestExecutionListene
     }
 
     private static void resetInstantiatedSpies(TestContext testContext) {
-        if (!testContext.hasApplicationContext()) {
-            return;
-        }
-        ApplicationContext context = testContext.getApplicationContext();
+        ApplicationContext context = ContextCacheTracker.resolvedContext(testContext);
         if (!(context instanceof ConfigurableApplicationContext configurable)) {
             return;
         }
