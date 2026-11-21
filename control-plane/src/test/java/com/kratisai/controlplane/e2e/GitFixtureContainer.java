@@ -11,6 +11,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
@@ -43,6 +44,9 @@ public class GitFixtureContainer extends GenericContainer<GitFixtureContainer> {
     /** Files committed upstream; none may appear in a diff of sandbox-local changes. */
     public static final List<String> UPSTREAM_FILES = List.of("hello.txt", "second.txt", "third.txt", "develop.txt");
 
+    private static final Object IMAGE_BUILD_LOCK = new Object();
+    private static final AtomicBoolean IMAGE_BUILT = new AtomicBoolean(false);
+
     private final String token;
     private Path sourceRepoDir;
     private Path fixtureDir;
@@ -69,7 +73,7 @@ public class GitFixtureContainer extends GenericContainer<GitFixtureContainer> {
             TestTimingRegistry.instance().recordSubPhase("gitFixturePrepare", System.nanoTime() - prepStart);
 
             long startTime = System.nanoTime();
-            super.start();
+            startWithInitialImageLock(super::start);
             TestTimingRegistry.instance().recordSubPhase("gitFixtureContainerStart", System.nanoTime() - startTime);
 
             long injectStart = System.nanoTime();
@@ -85,6 +89,17 @@ public class GitFixtureContainer extends GenericContainer<GitFixtureContainer> {
             logger.info("[git-fixture] serving {} and {}", gitHttpUrl, gitSshUrl);
         } catch (IOException | InterruptedException | NoSuchAlgorithmException e) {
             throw new IllegalStateException("Failed to start git fixture container", e);
+        }
+    }
+
+    private static void startWithInitialImageLock(Runnable startAction) {
+        if (IMAGE_BUILT.get()) {
+            startAction.run();
+            return;
+        }
+        synchronized (IMAGE_BUILD_LOCK) {
+            startAction.run();
+            IMAGE_BUILT.set(true);
         }
     }
 

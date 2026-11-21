@@ -34,6 +34,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.awaitility.Awaitility;
 import org.awaitility.core.ConditionEvaluationListener;
 import org.awaitility.core.EvaluatedCondition;
@@ -41,6 +42,7 @@ import org.awaitility.core.TimeoutEvent;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -62,7 +64,7 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
     private static final String RESUMED_FILE = "resume_added.txt";
     private static final String AGENT_FILE = "kratis_task.sh";
 
-    protected static GitFixtureContainer gitFixture;
+    private static final Map<Class<?>, GitFixtureContainer> GIT_FIXTURES = new ConcurrentHashMap<>();
 
     @Autowired
     private ProcessExecutor suspendProcessExecutor;
@@ -91,23 +93,38 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
     private TransactionTemplate transactionTemplate;
 
     @BeforeAll
-    static void startGitFixture() {
-        gitFixture = new GitFixtureContainer(FIXTURE_TOKEN);
-        gitFixture.start();
+    static void startGitFixture(TestInfo testInfo) {
+        Class<?> testClass = testInfo.getTestClass().orElseThrow();
+        GitFixtureContainer fixture = new GitFixtureContainer(FIXTURE_TOKEN);
+        fixture.start();
+        GIT_FIXTURES.put(testClass, fixture);
     }
 
     @AfterAll
-    static void stopGitFixture() {
-        if (gitFixture != null) {
-            gitFixture.stop();
+    static void stopGitFixture(TestInfo testInfo) {
+        Class<?> testClass = testInfo.getTestClass().orElse(null);
+        if (testClass != null) {
+            GitFixtureContainer fixture = GIT_FIXTURES.remove(testClass);
+            if (fixture != null) {
+                fixture.stop();
+            }
         }
+    }
+
+    protected GitFixtureContainer gitFixture() {
+        return GIT_FIXTURES.get(getClass());
+    }
+
+    @Override
+    protected boolean verifySleepAfterExecution() {
+        return true;
     }
 
     protected abstract String targetBranch();
 
     @Override
     protected String getRepositoryUrl() {
-        return gitFixture.getGitHttpUrl();
+        return gitFixture().getGitHttpUrl();
     }
 
     @Override

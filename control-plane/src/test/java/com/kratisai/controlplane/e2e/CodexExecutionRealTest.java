@@ -33,6 +33,11 @@ class CodexExecutionRealTest extends AbstractAgentExecutionRealTest {
     }
 
     @Override
+    protected boolean verifySleepAfterExecution() {
+        return true;
+    }
+
+    @Override
     protected String getExpectedAgentName() {
         return "@agentclientprotocol/codex-acp";
     }

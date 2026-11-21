@@ -8,7 +8,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 @SpringIntegrationTest
-@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER")
+@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER", maxConcurrency = 3)
 class SuspendResumeMainBranchRealTest extends AbstractSuspendResumeRealTest {
 
     @Override

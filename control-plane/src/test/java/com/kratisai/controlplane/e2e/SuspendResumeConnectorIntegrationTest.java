@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,7 +41,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
  * provider suspend/resume contract and the state a woken connector inherits from its snapshot.
  */
 @SpringIntegrationTest
-@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER")
+@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER", maxConcurrency = 3)
 class SuspendResumeConnectorIntegrationTest {
 
     private static final String RUNNER_IMAGE = "kratis-runner-base:latest";
@@ -85,6 +86,11 @@ class SuspendResumeConnectorIntegrationTest {
     private SandboxProperties sandboxProperties;
 
     private ExecutionEnvironment environment;
+
+    @BeforeAll
+    static void ensureImagesBuilt() throws Exception {
+        AbstractAgentExecutionRealTest.ensureE2eImagesBuilt();
+    }
 
     @BeforeEach
     void setUp() {

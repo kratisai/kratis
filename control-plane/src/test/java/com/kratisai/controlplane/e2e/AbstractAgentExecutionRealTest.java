@@ -32,7 +32,10 @@ import com.kratisai.controlplane.testsupport.llm.WireMockLlmServer;
 import com.kratisai.controlplane.websocket.ClientWebSocketFixture;
 import com.kratisai.controlplane.websocket.LineLogger;
 import jakarta.websocket.ContainerProvider;
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -88,7 +91,7 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
  * to capture all {@code execution_output} messages in real-time via WebSocket,
  * logging them with SLF4J.
  */
-@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER")
+@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER", maxConcurrency = 3)
 @UseRealLlmClient
 public abstract class AbstractAgentExecutionRealTest {
 
@@ -121,6 +124,7 @@ public abstract class AbstractAgentExecutionRealTest {
         return "/usr/local/go/bin:" + existingPath;
     }
 
+    private static final Object IMAGE_BUILD_LOCK = new Object();
     private static final AtomicBoolean INITIALIZED = new AtomicBoolean(false);
     private static final String TEST_IMAGE_NAME = "kratis-e2e-test:latest";
     private static final String DUMMY_REPO_CONTAINER_PATH = "/kratis/dummy-repo";
@@ -128,93 +132,134 @@ public abstract class AbstractAgentExecutionRealTest {
 
     @BeforeAll
     static void beforeAll() throws Exception {
-        if (!INITIALIZED.compareAndSet(false, true)) {
+        ensureE2eImagesBuilt();
+    }
+
+    /** Compiles the Go sidecar and builds the E2E Docker images once per JVM across parallel lanes. */
+    public static void ensureE2eImagesBuilt() throws Exception {
+        if (INITIALIZED.get()) {
             return;
         }
-        String goBinary = resolveGoBinary();
+        synchronized (IMAGE_BUILD_LOCK) {
+            if (INITIALIZED.get()) {
+                return;
+            }
+            String goBinary = resolveGoBinary();
 
-        // Compile the Go sidecar locally first (statically linked for Alpine
-        // compatibility)
-        long goStart = System.nanoTime();
-        ProcessBuilder pbGo = new ProcessBuilder(goBinary, "build", "-o", "kratis-connector", "main.go")
-                .directory(new File("../sidecar"))
-                .inheritIO();
-        pbGo.environment().put("CGO_ENABLED", "0");
-        pbGo.environment().put("PATH", goEnhancedPath());
-        Process pGo = pbGo.start();
-        int exitCodeGo = pGo.waitFor();
-        TestTimingRegistry.instance().recordSubPhase("goSidecarBuild", System.nanoTime() - goStart);
-        if (exitCodeGo != 0) {
-            throw new RuntimeException("Failed to compile Go sidecar");
-        }
+            // Compile the Go sidecar locally first (statically linked for Alpine
+            // compatibility)
+            long goStart = System.nanoTime();
+            ProcessBuilder pbGo = new ProcessBuilder(goBinary, "build", "-o", "kratis-connector", "main.go")
+                    .directory(new File("../sidecar"));
+            pbGo.environment().put("CGO_ENABLED", "0");
+            pbGo.environment().put("PATH", goEnhancedPath());
+            int exitCodeGo = runQuietBuildProcess(pbGo);
+            TestTimingRegistry.instance().recordSubPhase("goSidecarBuild", System.nanoTime() - goStart);
+            if (exitCodeGo != 0) {
+                throw new RuntimeException("Failed to compile Go sidecar");
+            }
 
-        // Build the runner-base image
-        long runnerImgStart = System.nanoTime();
-        Process p = new ProcessBuilder(
-                        "docker",
-                        "build",
-                        "-t",
-                        "kratis-runner-base:latest",
-                        "-f",
-                        "../build/Dockerfile.runner-base",
-                        "..")
-                .inheritIO()
-                .start();
-        int exitCode = p.waitFor();
-        TestTimingRegistry.instance().recordSubPhase("runnerImageBuild", System.nanoTime() - runnerImgStart);
-        if (exitCode != 0) {
-            throw new RuntimeException("Failed to build docker image for real test");
-        }
+            // Build the runner-base image
+            long runnerImgStart = System.nanoTime();
+            ProcessBuilder pbRunner = new ProcessBuilder(
+                    "docker",
+                    "build",
+                    "-t",
+                    "kratis-runner-base:latest",
+                    "-f",
+                    "../build/Dockerfile.runner-base",
+                    "..");
+            int exitCode = runQuietBuildProcess(pbRunner);
+            TestTimingRegistry.instance().recordSubPhase("runnerImageBuild", System.nanoTime() - runnerImgStart);
+            if (exitCode != 0) {
+                throw new RuntimeException("Failed to build docker image for real test");
+            }
 
-        // Create a dummy git repo and bake it into a test image at /kratis/dummy-repo
-        // This eliminates the need for /tmp bind mounts — the repo is inside the
-        // container
-        long e2eImgStart = System.nanoTime();
-        Path dummyRepoDir = Files.createTempDirectory("kratis-dummy-repo-");
-        Files.writeString(dummyRepoDir.resolve("README.md"), "# Dummy E2E Test Repo\n\nHello Kratis!");
-        new ProcessBuilder("git", "init")
-                .directory(dummyRepoDir.toFile())
-                .start()
-                .waitFor();
-        new ProcessBuilder("git", "add", ".")
-                .directory(dummyRepoDir.toFile())
-                .start()
-                .waitFor();
-        new ProcessBuilder(
-                        "git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "Initial")
-                .directory(dummyRepoDir.toFile())
-                .start()
-                .waitFor();
-        new ProcessBuilder("git", "branch", "-M", "main")
-                .directory(dummyRepoDir.toFile())
-                .start()
-                .waitFor();
+            // Create a dummy git repo and bake it into a test image at /kratis/dummy-repo
+            // This eliminates the need for /tmp bind mounts — the repo is inside the
+            // container
+            long e2eImgStart = System.nanoTime();
+            Path dummyRepoDir = Files.createTempDirectory("kratis-dummy-repo-");
+            Path tempDockerfile = Files.createTempFile("Dockerfile.e2e-", "");
+            try {
+                Files.writeString(dummyRepoDir.resolve("README.md"), "# Dummy E2E Test Repo\n\nHello Kratis!");
+                runQuietBuildProcess(new ProcessBuilder("git", "init").directory(dummyRepoDir.toFile()));
+                runQuietBuildProcess(new ProcessBuilder("git", "add", ".").directory(dummyRepoDir.toFile()));
+                runQuietBuildProcess(new ProcessBuilder(
+                                "git",
+                                "-c",
+                                "user.name=Test",
+                                "-c",
+                                "user.email=test@example.com",
+                                "commit",
+                                "-m",
+                                "Initial")
+                        .directory(dummyRepoDir.toFile()));
+                runQuietBuildProcess(
+                        new ProcessBuilder("git", "branch", "-M", "main").directory(dummyRepoDir.toFile()));
 
-        // Build test image with dummy repo at /kratis/dummy-repo.
-        Path tempDockerfile = Files.createTempFile("Dockerfile.e2e-", "");
-        Files.writeString(tempDockerfile, """
-                FROM kratis-runner-base:latest
-                USER root
-                RUN mkdir -p /kratis/dummy-repo
-                COPY . /kratis/dummy-repo/
-                RUN chown -R 1000:1000 /kratis/
-                USER kratis
-                """);
-        Process pImage = new ProcessBuilder(
+                // Build test image with dummy repo at /kratis/dummy-repo.
+                Files.writeString(tempDockerfile, """
+                        FROM kratis-runner-base:latest
+                        USER root
+                        RUN mkdir -p /kratis/dummy-repo
+                        COPY . /kratis/dummy-repo/
+                        RUN chown -R 1000:1000 /kratis/
+                        USER kratis
+                        """);
+                ProcessBuilder pbImage = new ProcessBuilder(
                         "docker",
                         "build",
                         "-t",
                         TEST_IMAGE_NAME,
                         "-f",
                         tempDockerfile.toString(),
-                        dummyRepoDir.toString())
-                .inheritIO()
-                .start();
-        int exitCodeImage = pImage.waitFor();
-        Files.deleteIfExists(tempDockerfile);
-        TestTimingRegistry.instance().recordSubPhase("e2eImageBuild", System.nanoTime() - e2eImgStart);
-        if (exitCodeImage != 0) {
-            throw new RuntimeException("Failed to build E2E test image with dummy repo");
+                        dummyRepoDir.toString());
+                int exitCodeImage = runQuietBuildProcess(pbImage);
+                TestTimingRegistry.instance().recordSubPhase("e2eImageBuild", System.nanoTime() - e2eImgStart);
+                if (exitCodeImage != 0) {
+                    throw new RuntimeException("Failed to build E2E test image with dummy repo");
+                }
+                INITIALIZED.set(true);
+            } finally {
+                Files.deleteIfExists(tempDockerfile);
+                deleteRecursivelyQuiet(dummyRepoDir);
+            }
+        }
+    }
+
+    private static int runQuietBuildProcess(ProcessBuilder pb) throws Exception {
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader reader =
+                new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line).append('\n');
+            }
+        }
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            logger.error("Build process {} failed (exit={}):\n{}", pb.command(), exitCode, output);
+        }
+        return exitCode;
+    }
+
+    private static void deleteRecursivelyQuiet(Path dir) {
+        if (dir == null || !Files.exists(dir)) {
+            return;
+        }
+        try (var walk = Files.walk(dir)) {
+            walk.sorted((a, b) -> b.compareTo(a)).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (Exception ignored) {
+                    // Best effort temp dir cleanup
+                }
+            });
+        } catch (Exception ignored) {
+            // Best effort temp dir cleanup
         }
     }
 
@@ -315,6 +360,16 @@ public abstract class AbstractAgentExecutionRealTest {
     private final AtomicBoolean conformanceSawPlanActivity = new AtomicBoolean(false);
     private final AtomicBoolean conformanceSawTodoToolCall = new AtomicBoolean(false);
     private final StringBuffer commandActivityOutputs = new StringBuffer();
+
+    /**
+     * Whether {@link #executeAgentInstallationAndExecutionFlow} should suspend (commit) the
+     * sandbox to {@code SLEEPING} at the end of the turn. Enabled for tests covering sleep/resume
+     * contracts; disabled by default so harness execution tests avoid multi-GB {@code docker commit}
+     * churn on ephemeral containers.
+     */
+    protected boolean verifySleepAfterExecution() {
+        return false;
+    }
 
     /**
      * Returns the {@link AgentHarness} to test.
@@ -1463,6 +1518,10 @@ public abstract class AbstractAgentExecutionRealTest {
                     });
         }
         TestTimingRegistry.instance().recordSubPhase("postCompletionVerify", System.nanoTime() - verifyStart);
+
+        if (!verifySleepAfterExecution()) {
+            return;
+        }
 
         // Sleep the environment to simulate a graceful pause (reproducing the issue where
         // ExecutionEnvironmentService.sleepEnvironmentInternal calls terminateExecution, which for

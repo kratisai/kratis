@@ -19,8 +19,14 @@ import org.junit.jupiter.api.Tag;
 public @interface SlowTest {
     /**
      * Optional label to group slow tests into the same execution slot.
-     * Tests with the same slotGroup will share the same Spring Context and run sequentially
-     * within their allocated thread pool, preventing them from running concurrently.
+     * Tests with the same slotGroup share the allocated slot(s) and Spring Context(s).
      */
     String slotGroup() default "";
+
+    /**
+     * Maximum number of concurrent execution slots allocated to {@link #slotGroup()}.
+     * Defaults to {@code 1} (strictly serialized on a single thread). Values {@code > 1}
+     * partition the group across dedicated lanes in round-robin order.
+     */
+    int maxConcurrency() default 1;
 }

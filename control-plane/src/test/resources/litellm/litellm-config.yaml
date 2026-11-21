@@ -3,6 +3,7 @@
 # without requiring real provider API keys.
 general_settings:
   master_key: sk-test-master
+  proxy_batch_write_at: 1
 
 litellm_settings:
   # Drop unsupported parameters instead of failing. Some agents (e.g., Mistral Vibe)

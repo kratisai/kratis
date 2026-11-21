@@ -20,7 +20,8 @@ import org.springframework.test.context.MergedContextConfiguration;
  * <p>
  * Spring caches ApplicationContext instances based on this customizer's
  * equality. By computing a stable slot number from the test class name's
- * hash, Spring generates exactly #POOL_SIZE distinct contexts.
+ * hash, Spring generates exactly #POOL_SIZE distinct contexts for fast tests,
+ * plus dedicated slots for {@code @SlowTest(slotGroup = ...)}.
  * <p>
  * This guarantees isolated databases for parallel execution.
  */
@@ -30,10 +31,7 @@ public final class ThreadBoundContextCustomizer implements ContextCustomizer {
 
     // must match parallelism from junit-platform.properties
     public static final int POOL_SIZE = 4;
-    private static final Map<Class<?>, Integer> slowTestSlots = new ConcurrentHashMap<>();
-    private static final Map<String, Integer> groupSlots = new ConcurrentHashMap<>();
-    private static final AtomicInteger roundRobinCounter = new AtomicInteger(0);
-    private static final AtomicInteger groupSlotCounter = new AtomicInteger(POOL_SIZE);
+    private static final SlotAllocator DEFAULT_ALLOCATOR = new SlotAllocator(POOL_SIZE);
     private static final Set<Class<?>> BASE_IMPORT_CLASSES = resolveBaseImportClasses();
 
     private static Set<Class<?>> resolveBaseImportClasses() {
@@ -46,33 +44,16 @@ public final class ThreadBoundContextCustomizer implements ContextCustomizer {
     }
 
     public static int getSlotForClass(Class<?> testClass) {
-        SlowTest slowTest = testClass.getAnnotation(SlowTest.class);
-        if (slowTest == null) {
-            // & Integer.MAX_VALUE keeps the index non-negative for all hashCode() values
-            // (Math.abs(Integer.MIN_VALUE) is negative).
-            return (testClass.getName().hashCode() & Integer.MAX_VALUE) % POOL_SIZE;
-        }
-
-        String slotGroup = slowTest.slotGroup();
-        if (slotGroup != null && !slotGroup.isEmpty()) {
-            // Allocate a dedicated slot outside [0, POOL_SIZE-1] so normal tests never block on this group
-            return groupSlots.computeIfAbsent(slotGroup, k -> groupSlotCounter.getAndIncrement());
-        }
-
-        return slowTestSlots.computeIfAbsent(testClass, k -> roundRobinCounter.getAndIncrement() % POOL_SIZE);
+        return DEFAULT_ALLOCATOR.getSlotForClass(testClass);
     }
 
     /** Returns the slot assignment strategy for reporting purposes. */
     public static String getSlotModeForClass(Class<?> testClass) {
-        SlowTest slowTest = testClass.getAnnotation(SlowTest.class);
-        if (slowTest == null) {
-            return "HASH";
-        }
-        String slotGroup = slowTest.slotGroup();
-        if (slotGroup != null && !slotGroup.isEmpty()) {
-            return "GROUP:" + slotGroup;
-        }
-        return "SLOW_RR";
+        return DEFAULT_ALLOCATOR.getSlotModeForClass(testClass);
+    }
+
+    static SlotAllocator createAllocatorForTest(int poolSize) {
+        return new SlotAllocator(poolSize);
     }
 
     private final int slot;
@@ -132,5 +113,64 @@ public final class ThreadBoundContextCustomizer implements ContextCustomizer {
     @Override
     public String toString() {
         return "ThreadBoundContextCustomizer[slot=" + slot + "/" + POOL_SIZE + ", class='" + testClassName + "']";
+    }
+
+    static final class SlotAllocator {
+        private final int poolSize;
+        private final Map<Class<?>, Integer> slowTestSlots = new ConcurrentHashMap<>();
+        private final Map<String, int[]> groupLanePools = new ConcurrentHashMap<>();
+        private final Map<Class<?>, Integer> groupClassSlots = new ConcurrentHashMap<>();
+        private final Map<String, AtomicInteger> groupLaneCounters = new ConcurrentHashMap<>();
+        private final AtomicInteger roundRobinCounter = new AtomicInteger(0);
+        private final AtomicInteger groupSlotCounter;
+
+        SlotAllocator(int poolSize) {
+            this.poolSize = poolSize;
+            this.groupSlotCounter = new AtomicInteger(poolSize);
+        }
+
+        int getSlotForClass(Class<?> testClass) {
+            SlowTest slowTest = testClass.getAnnotation(SlowTest.class);
+            if (slowTest == null) {
+                // & Integer.MAX_VALUE keeps the index non-negative for all hashCode() values
+                // (Math.abs(Integer.MIN_VALUE) is negative).
+                return (testClass.getName().hashCode() & Integer.MAX_VALUE) % poolSize;
+            }
+
+            String slotGroup = slowTest.slotGroup();
+            if (slotGroup != null && !slotGroup.isEmpty()) {
+                int lanes = Math.max(1, slowTest.maxConcurrency());
+                int[] pool = groupLanePools.computeIfAbsent(slotGroup, k -> {
+                    int[] allocated = new int[lanes];
+                    for (int i = 0; i < lanes; i++) {
+                        allocated[i] = groupSlotCounter.getAndIncrement();
+                    }
+                    return allocated;
+                });
+                return groupClassSlots.computeIfAbsent(testClass, k -> {
+                    if (pool.length == 1) {
+                        return pool[0];
+                    }
+                    int idx = groupLaneCounters
+                            .computeIfAbsent(slotGroup, g -> new AtomicInteger(0))
+                            .getAndIncrement();
+                    return pool[Math.floorMod(idx, pool.length)];
+                });
+            }
+
+            return slowTestSlots.computeIfAbsent(testClass, k -> roundRobinCounter.getAndIncrement() % poolSize);
+        }
+
+        String getSlotModeForClass(Class<?> testClass) {
+            SlowTest slowTest = testClass.getAnnotation(SlowTest.class);
+            if (slowTest == null) {
+                return "HASH";
+            }
+            String slotGroup = slowTest.slotGroup();
+            if (slotGroup != null && !slotGroup.isEmpty()) {
+                return "GROUP:" + slotGroup;
+            }
+            return "SLOW_RR";
+        }
     }
 }
