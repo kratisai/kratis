@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { PlanActivity } from '@/types/execution-activity-types'
+import type { PlanActivity, PublishActivity } from '@/types/execution-activity-types'
 import type {
   ActivityHitl,
   ExecutionActivityResult,
@@ -2262,6 +2262,77 @@ describe('activity-store', () => {
 
       const [activity] = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activity.startedAt).toBe('2026-10-20T09:00:00.000Z')
+    })
+  })
+
+  describe('PUBLISH activities', () => {
+    it('creates a completed PublishActivity and does not fall through to elicitation', () => {
+      useActivityStore.getState().handleActivityEvent(
+        activityResult({
+          actionId: 'pub:pr:repo-1:42',
+          activityType: 'PUBLISH',
+          createdAt: '2026-10-20T10:00:00.000Z',
+          description: 'Published changes: Pull Request #42 created to merge feature into main',
+          detail: {
+            baseBranch: 'main',
+            commitSha: 'abc1234',
+            headBranch: 'feature',
+            isUpdate: false,
+            prNumber: 42,
+            providerType: 'GITHUB',
+            prUrl: 'https://github.com/test/repo/pull/42',
+          },
+          status: 'completed',
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
+      const activity = activities[0] as PublishActivity
+      expect(activity.type).toBe('publish')
+      expect(activity.state).toBe('completed')
+      expect(activity.actionId).toBe('pub:pr:repo-1:42')
+      expect(activity.description).toBe(
+        'Published changes: Pull Request #42 created to merge feature into main',
+      )
+      expect(activity.prNumber).toBe(42)
+      expect(activity.prUrl).toBe('https://github.com/test/repo/pull/42')
+      expect(activity.headBranch).toBe('feature')
+      expect(activity.baseBranch).toBe('main')
+      expect(activity.commitSha).toBe('abc1234')
+      expect(activity.isUpdate).toBe(false)
+      expect(activityTitle(activity)).toBe('Published changes')
+    })
+
+    it('deduplicates on actionId without appending duplicates', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'pub:pr:repo-1:42',
+          activityType: 'PUBLISH',
+          createdAt: '2026-10-20T10:00:00.000Z',
+          description: 'Published changes: Pull Request #42 created',
+          status: 'completed',
+        }),
+      )
+
+      expect(useActivityStore.getState().activitiesByExecution['exec-1']).toHaveLength(1)
+
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'pub:pr:repo-1:42',
+          activityType: 'PUBLISH',
+          createdAt: '2026-10-20T10:01:00.000Z',
+          description: 'Published changes: Updated Pull Request #42',
+          status: 'completed',
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
+      const activity = activities[0] as PublishActivity
+      expect(activity.description).toBe('Published changes: Updated Pull Request #42')
+      expect(activity.startedAt).toBe('2026-10-20T10:00:00.000Z')
     })
   })
 })

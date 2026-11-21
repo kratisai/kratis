@@ -19,6 +19,9 @@ import com.kratisai.controlplane.api.restdto.PullRequestResultDto;
 import com.kratisai.controlplane.api.restdto.PushBranchRequestDto;
 import com.kratisai.controlplane.api.restdto.PushBranchResponseDto;
 import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
+import com.kratisai.controlplane.api.wsdto.ActivityDetail;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
+import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.git.credential.GitAuthMaterial;
@@ -42,6 +45,7 @@ import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
+import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.repository.*;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
@@ -61,6 +65,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.server.ResponseStatusException;
@@ -85,6 +91,12 @@ class SandboxExecutionPublishServiceTest {
 
     @Mock
     private SandboxExecutionActivityRepository activityRepository;
+
+    @Mock
+    private ExecutionActivityPersistenceService activityPersistenceService;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @Mock
     private RepositoryRepository repositoryRepository;
@@ -170,11 +182,23 @@ class SandboxExecutionPublishServiceTest {
 
         when(chatModelFactory.createChatModel(modelProvider, "gpt-4o")).thenReturn(fakeChatModel);
 
+        when(activityPersistenceService.recordActivity(any(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> new SandboxExecutionActivity(
+                        inv.getArgument(0),
+                        1L,
+                        inv.getArgument(3),
+                        inv.getArgument(1),
+                        inv.getArgument(4),
+                        inv.getArgument(2),
+                        null));
+
         service = new SandboxExecutionPublishService(
                 sandboxExecutionRepository,
                 changeSetRepository,
                 chatRepository,
                 activityRepository,
+                activityPersistenceService,
+                eventPublisher,
                 repositoryRepository,
                 credentialRepository,
                 environmentRpcClient,
@@ -2169,5 +2193,230 @@ class SandboxExecutionPublishServiceTest {
 
         assertThat(result.prNumber()).isEqualTo(383L);
         verify(repoProvider, never()).createPullRequest(any(), any(), any());
+    }
+
+    @Test
+    void publishPullRequest_recordsSinglePublishActivityAndPublishesEvent() throws Exception {
+        stubExecutionLookup();
+        stubWorkspaceObserve();
+
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        EnvironmentConnectorResult.GitPush pushResult =
+                new EnvironmentConnectorResult.GitPush("sha999", "pr-branch", "refs/heads/pr-branch", "SUCCESS");
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(pushResult);
+
+        GitAuthMaterial auth = GitAuthMaterial.ofToken("pat-token");
+        when(credentialResolver.resolve(repository)).thenReturn(auth);
+
+        PullRequestResultDto expectedPr =
+                new PullRequestResultDto(101, "https://github.com/test/repo/pull/101", "pr-branch", "main");
+        when(repoProvider.createPullRequest(eq(repository), eq(auth), any(CreatePullRequestCommand.class)))
+                .thenReturn(expectedPr);
+
+        PublishPrRequestDto request = new PublishPrRequestDto("pr-branch", "main", "PR Title", "PR Body", false, true);
+        PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
+
+        assertThat(result.prNumber()).isEqualTo(101);
+
+        String expectedActionId = "pub:pr:" + repository.getId() + ":101";
+        ArgumentCaptor<ActivityDetail> detailCaptor = ArgumentCaptor.forClass(ActivityDetail.class);
+        verify(activityPersistenceService)
+                .recordActivity(
+                        eq(executionId),
+                        eq(ActivityType.PUBLISH),
+                        eq("Published changes: Pull Request #101 created to merge pr-branch into main"),
+                        eq(expectedActionId),
+                        eq(ActivityStatus.COMPLETED),
+                        detailCaptor.capture());
+
+        ActivityDetail detail = detailCaptor.getValue();
+        assertThat(detail.prNumber()).isEqualTo(101L);
+        assertThat(detail.prUrl()).isEqualTo("https://github.com/test/repo/pull/101");
+        assertThat(detail.headBranch()).isEqualTo("pr-branch");
+        assertThat(detail.baseBranch()).isEqualTo("main");
+        assertThat(detail.commitSha()).isEqualTo("sha999");
+        assertThat(detail.isUpdate()).isFalse();
+
+        ArgumentCaptor<SandboxExecutionActivityEvent> eventCaptor =
+                ArgumentCaptor.forClass(SandboxExecutionActivityEvent.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        SandboxExecutionActivityEvent event = eventCaptor.getValue();
+        assertThat(event.teamId()).isEqualTo(team.getId());
+        assertThat(event.executionId()).isEqualTo(executionId);
+        assertThat(event.activityType()).isEqualTo(ActivityType.PUBLISH);
+        assertThat(event.actionId()).isEqualTo(expectedActionId);
+        assertThat(event.status()).isEqualTo(ActivityStatus.COMPLETED);
+    }
+
+    @Test
+    void publishPullRequest_updatePr_recordsSinglePublishActivityWithUpdateDetail() throws Exception {
+        stubExecutionLookup();
+        stubWorkspaceObserve();
+
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        ChangeSet existingChangeSet = new ChangeSet(
+                execution,
+                1,
+                "digest",
+                "sha111",
+                "pr-branch",
+                202L,
+                "https://github.com/test/repo/pull/202",
+                "main",
+                Instant.now());
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId)).thenReturn(List.of(existingChangeSet));
+
+        when(repoProvider.getPullRequest(eq(repository), any(), eq(202L)))
+                .thenReturn(new PullRequestSnapshot(
+                        202L,
+                        PullRequestSnapshot.PullRequestState.OPEN,
+                        "https://github.com/test/repo/pull/202",
+                        "pr-branch",
+                        "main",
+                        "sha111"));
+
+        EnvironmentConnectorResult.GitPush pushResult =
+                new EnvironmentConnectorResult.GitPush("sha222", "pr-branch", "refs/heads/pr-branch", "SUCCESS");
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(pushResult);
+
+        PublishPrRequestDto request = new PublishPrRequestDto(
+                "pr-branch", "main", "Updated PR Title", "Updated Body", false, false, null, null, null, false, null);
+        PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
+
+        assertThat(result.prNumber()).isEqualTo(202);
+
+        String expectedActionId = "pub:pr:" + repository.getId() + ":202";
+        ArgumentCaptor<ActivityDetail> detailCaptor = ArgumentCaptor.forClass(ActivityDetail.class);
+        verify(activityPersistenceService)
+                .recordActivity(
+                        eq(executionId),
+                        eq(ActivityType.PUBLISH),
+                        eq("Published changes: Updated Pull Request #202 on branch pr-branch"),
+                        eq(expectedActionId),
+                        eq(ActivityStatus.COMPLETED),
+                        detailCaptor.capture());
+
+        ActivityDetail detail = detailCaptor.getValue();
+        assertThat(detail.prNumber()).isEqualTo(202L);
+        assertThat(detail.isUpdate()).isTrue();
+        assertThat(detail.commitSha()).isEqualTo("sha222");
+
+        verify(eventPublisher).publishEvent(any(SandboxExecutionActivityEvent.class));
+    }
+
+    @Test
+    void pushBranch_recordsSinglePublishActivityAndPublishesEvent() throws Exception {
+        stubExecutionLookup();
+        stubWorkspaceObserve();
+
+        EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
+                "sha1234567890", "feature-branch", "refs/heads/feature-branch", "SUCCESS");
+
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(pushResult);
+
+        PushBranchRequestDto request = new PushBranchRequestDto("feature-branch", "commit msg", true);
+        PushBranchResponseDto response = service.pushBranch(userId, chatId, executionId, request);
+
+        assertThat(response.branchName()).isEqualTo("feature-branch");
+
+        String expectedActionId = "pub:push:" + executionId + ":sha1234567890";
+        ArgumentCaptor<ActivityDetail> detailCaptor = ArgumentCaptor.forClass(ActivityDetail.class);
+        verify(activityPersistenceService)
+                .recordActivity(
+                        eq(executionId),
+                        eq(ActivityType.PUBLISH),
+                        eq("Published changes to branch feature-branch (sha1234)"),
+                        eq(expectedActionId),
+                        eq(ActivityStatus.COMPLETED),
+                        detailCaptor.capture());
+
+        ActivityDetail detail = detailCaptor.getValue();
+        assertThat(detail.headBranch()).isEqualTo("feature-branch");
+        assertThat(detail.commitSha()).isEqualTo("sha1234567890");
+
+        ArgumentCaptor<SandboxExecutionActivityEvent> eventCaptor =
+                ArgumentCaptor.forClass(SandboxExecutionActivityEvent.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        SandboxExecutionActivityEvent event = eventCaptor.getValue();
+        assertThat(event.actionId()).isEqualTo(expectedActionId);
+        assertThat(event.activityType()).isEqualTo(ActivityType.PUBLISH);
+    }
+
+    @Test
+    void publishPullRequest_gitPushFails_doesNotRecordPublishActivity() throws Exception {
+        stubExecutionLookup();
+        stubWorkspaceObserve();
+
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenThrow(new RuntimeException("Git push network failure"));
+
+        PublishPrRequestDto request = new PublishPrRequestDto("pr-branch", "main", "PR Title", "PR Body", false, true);
+
+        assertThatThrownBy(() -> service.publishPullRequest(userId, chatId, executionId, request))
+                .isInstanceOf(RuntimeException.class);
+
+        verify(activityPersistenceService, never())
+                .recordActivity(any(), eq(ActivityType.PUBLISH), any(), any(), any(), any());
+        verify(eventPublisher, never()).publishEvent(any(SandboxExecutionActivityEvent.class));
+    }
+
+    @Test
+    void publishPullRequest_concurrentDuplicatePublishUniqueViolation_fallsBackToMerge() throws Exception {
+        stubExecutionLookup();
+        stubWorkspaceObserve();
+
+        RepoProvider repoProvider = mock(RepoProvider.class);
+        when(repoProvider.supportsPullRequests()).thenReturn(true);
+        when(providerRegistry.getProvider(repository)).thenReturn(repoProvider);
+
+        EnvironmentConnectorResult.GitPush pushResult =
+                new EnvironmentConnectorResult.GitPush("sha999", "pr-branch", "refs/heads/pr-branch", "SUCCESS");
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(pushResult);
+
+        GitAuthMaterial auth = GitAuthMaterial.ofToken("pat-token");
+        when(credentialResolver.resolve(repository)).thenReturn(auth);
+
+        PullRequestResultDto expectedPr =
+                new PullRequestResultDto(101, "https://github.com/test/repo/pull/101", "pr-branch", "main");
+        when(repoProvider.createPullRequest(eq(repository), eq(auth), any(CreatePullRequestCommand.class)))
+                .thenReturn(expectedPr);
+
+        String expectedActionId = "pub:pr:" + repository.getId() + ":101";
+        when(activityPersistenceService.recordActivity(
+                        eq(executionId), eq(ActivityType.PUBLISH), any(), eq(expectedActionId), any(), any()))
+                .thenThrow(new DataIntegrityViolationException("Unique constraint violation"));
+
+        SandboxExecutionActivity existingActivity = new SandboxExecutionActivity(
+                executionId, 1L, expectedActionId, ActivityType.PUBLISH, ActivityStatus.PENDING, "Old", null);
+        when(activityRepository.findByExecutionIdAndActionId(executionId, expectedActionId))
+                .thenReturn(Optional.of(existingActivity));
+        when(activityRepository.save(any(SandboxExecutionActivity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        PublishPrRequestDto request = new PublishPrRequestDto("pr-branch", "main", "PR Title", "PR Body", false, true);
+        PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
+
+        assertThat(result.prNumber()).isEqualTo(101L);
+        verify(activityRepository).save(existingActivity);
+        assertThat(existingActivity.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+        verify(eventPublisher).publishEvent(any(SandboxExecutionActivityEvent.class));
     }
 }

@@ -36,6 +36,7 @@ export type Activity =
   | ErrorActivity
   | MessageActivity
   | PlanActivity
+  | PublishActivity
   | ThinkingActivity
   | ToolExecutionActivity
   | WarningActivity
@@ -48,6 +49,7 @@ export type ActivityType =
   | 'error'
   | 'message'
   | 'plan'
+  | 'publish'
   | 'thinking'
   | 'tool_execution'
   | 'warning'
@@ -109,6 +111,19 @@ export interface PlanActivity extends BaseActivity {
   detail?: ActivityDetail
   plan: PlanEntry[]
   type: 'plan'
+}
+
+export interface PublishActivity extends BaseActivity {
+  baseBranch?: string
+  commitSha?: string
+  description: string
+  detail?: ActivityDetail
+  headBranch?: string
+  isUpdate?: boolean
+  prNumber?: number
+  providerType?: string
+  prUrl?: string
+  type: 'publish'
 }
 
 export interface ThinkingActivity extends BaseActivity {

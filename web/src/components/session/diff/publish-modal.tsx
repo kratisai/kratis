@@ -51,6 +51,7 @@ import {
   pushBranch,
   rebaseExecution,
 } from '@/lib/publish-api'
+import { isSafeHttpUrl } from '@/lib/utils'
 
 export interface PublishModalProps {
   chatId: string
@@ -504,17 +505,19 @@ export function PublishModal({
                     </>
                   )}
                 </p>
-                <div className="pt-1">
-                  <a
-                    className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700"
-                    href={prResult.prUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Open PR #{prResult.prNumber}
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
-                </div>
+                {isSafeHttpUrl(prResult.prUrl) && (
+                  <div className="pt-1">
+                    <a
+                      className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700"
+                      href={prResult.prUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Open PR #{prResult.prNumber}
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  </div>
+                )}
               </div>
             )}
 

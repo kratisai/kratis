@@ -385,8 +385,7 @@ class EnvironmentRegisterRpcHandlerTest {
                 null,
                 null,
                 HitlResolver.system());
-        ActivityDetail detail =
-                new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null).withHitl(hitl);
+        ActivityDetail detail = ActivityDetail.empty().withHitl(hitl);
         when(activityPersistenceService.detailOf(resolved)).thenReturn(detail);
 
         EnvironmentRpcPayload.Register params =

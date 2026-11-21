@@ -1888,8 +1888,7 @@ class SandboxExecutionServiceTest {
     private SandboxExecutionActivity pendingActivity(String actionId, HitlKind kind, String message) throws Exception {
         HitlRequestSnapshot snapshot = new HitlRequestSnapshot(
                 EXECUTION_ID, actionId, kind, message, null, null, null, null, null, null, null, null, null);
-        ActivityDetail detail = new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null)
-                .withHitl(ActivityHitl.from(snapshot, HitlState.AWAITING_HUMAN));
+        ActivityDetail detail = ActivityDetail.empty().withHitl(ActivityHitl.from(snapshot, HitlState.AWAITING_HUMAN));
         return new SandboxExecutionActivity(
                 EXECUTION_ID,
                 1,

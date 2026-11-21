@@ -29,6 +29,7 @@ import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
 import com.kratisai.controlplane.model.SandboxExecution;
+import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
@@ -55,6 +56,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
 
 @ExtendWith(MockitoExtension.class)
@@ -72,6 +74,12 @@ class PublishAcceptanceScenariosTest {
 
     @Mock
     private SandboxExecutionActivityRepository activityRepository;
+
+    @Mock
+    private ExecutionActivityPersistenceService activityPersistenceService;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @Mock
     private RepositoryRepository repositoryRepository;
@@ -115,11 +123,23 @@ class PublishAcceptanceScenariosTest {
 
     @BeforeEach
     void setUp() {
+        when(activityPersistenceService.recordActivity(any(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> new SandboxExecutionActivity(
+                        inv.getArgument(0),
+                        1L,
+                        inv.getArgument(3),
+                        inv.getArgument(1),
+                        inv.getArgument(4),
+                        inv.getArgument(2),
+                        null));
+
         service = new SandboxExecutionPublishService(
                 sandboxExecutionRepository,
                 changeSetRepository,
                 chatRepository,
                 activityRepository,
+                activityPersistenceService,
+                eventPublisher,
                 repositoryRepository,
                 credentialRepository,
                 environmentRpcClient,

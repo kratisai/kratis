@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.agentloop.ChatResponseAssembler;
@@ -9,6 +10,8 @@ import com.kratisai.controlplane.api.restdto.PullRequestResultDto;
 import com.kratisai.controlplane.api.restdto.PushBranchRequestDto;
 import com.kratisai.controlplane.api.restdto.PushBranchResponseDto;
 import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
+import com.kratisai.controlplane.api.wsdto.ActivityDetail;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.EnvironmentConnectorResult;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
@@ -32,6 +35,7 @@ import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
+import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.repository.ChangeSetRepository;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.RepoCredentialRepository;
@@ -50,6 +54,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -71,6 +77,8 @@ public class SandboxExecutionPublishService {
     private final ChangeSetRepository changeSetRepository;
     private final ChatRepository chatRepository;
     private final SandboxExecutionActivityRepository activityRepository;
+    private final ExecutionActivityPersistenceService activityPersistenceService;
+    private final ApplicationEventPublisher eventPublisher;
     private final RepositoryRepository repositoryRepository;
     private final RepoCredentialRepository credentialRepository;
     private final EnvironmentRpcClient environmentRpcClient;
@@ -86,6 +94,8 @@ public class SandboxExecutionPublishService {
             ChangeSetRepository changeSetRepository,
             ChatRepository chatRepository,
             SandboxExecutionActivityRepository activityRepository,
+            ExecutionActivityPersistenceService activityPersistenceService,
+            ApplicationEventPublisher eventPublisher,
             RepositoryRepository repositoryRepository,
             RepoCredentialRepository credentialRepository,
             EnvironmentRpcClient environmentRpcClient,
@@ -99,6 +109,9 @@ public class SandboxExecutionPublishService {
         this.changeSetRepository = changeSetRepository;
         this.chatRepository = chatRepository;
         this.activityRepository = activityRepository;
+        this.activityPersistenceService =
+                Objects.requireNonNull(activityPersistenceService, "activityPersistenceService is required");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher is required");
         this.repositoryRepository = repositoryRepository;
         this.credentialRepository = credentialRepository;
         this.environmentRpcClient = environmentRpcClient;
@@ -426,6 +439,14 @@ public class SandboxExecutionPublishService {
                 Instant.now());
         changeSetRepository.save(changeSet);
 
+        String commitSha = pushResult.commitSha();
+        String actionId = "pub:push:" + executionId + ":" + (commitSha != null ? commitSha : "unknown");
+        String description =
+                "Published changes to branch " + pushResult.branchName() + " (" + shortSha(commitSha) + ")";
+        ActivityDetail detail =
+                ActivityDetail.forPublish(null, null, pushResult.branchName(), baseBranch, commitSha, null, null);
+        recordPublishActivity(execution, actionId, description, detail);
+
         return new PushBranchResponseDto(
                 pushResult.branchName(), pushResult.commitSha(), pushResult.remoteRef(), pushResult.status());
     }
@@ -524,6 +545,20 @@ public class SandboxExecutionPublishService {
                     baseBranch,
                     Instant.now());
             changeSetRepository.save(changeSet);
+
+            String actionId = "pub:pr:" + repo.getId() + ":" + target.prNumber();
+            String description =
+                    "Published changes: Updated Pull Request #" + target.prNumber() + " on branch " + headBranch;
+            ActivityDetail detail = ActivityDetail.forPublish(
+                    target.prNumber(),
+                    prUrl,
+                    headBranch,
+                    baseBranch,
+                    pushedCommitSha,
+                    true,
+                    repo.getRepositoryType() != null ? repo.getRepositoryType().name() : null);
+            recordPublishActivity(execution, actionId, description, detail);
+
             return new PullRequestResultDto(target.prNumber(), prUrl, headBranch, baseBranch);
         }
 
@@ -548,7 +583,71 @@ public class SandboxExecutionPublishService {
                 Instant.now());
         changeSetRepository.save(changeSet);
 
+        String actionId = "pub:pr:" + repo.getId() + ":" + result.prNumber();
+        String description = "Published changes: Pull Request #" + result.prNumber() + " created to merge "
+                + result.headBranch() + " into " + result.baseBranch();
+        ActivityDetail detail = ActivityDetail.forPublish(
+                result.prNumber(),
+                result.prUrl(),
+                result.headBranch(),
+                result.baseBranch(),
+                pushedCommitSha,
+                false,
+                repo.getRepositoryType() != null ? repo.getRepositoryType().name() : null);
+        recordPublishActivity(execution, actionId, description, detail);
+
         return result;
+    }
+
+    private void recordPublishActivity(
+            SandboxExecution execution, String actionId, String description, ActivityDetail detail) {
+        UUID teamId = execution.getChat().getTeam().getId();
+        UUID executionId = execution.getId();
+        SandboxExecutionActivity activity;
+        try {
+            activity = activityPersistenceService.recordActivity(
+                    executionId, ActivityType.PUBLISH, description, actionId, ActivityStatus.COMPLETED, detail);
+        } catch (DataIntegrityViolationException ex) {
+            logger.warn(
+                    "Unique index collision on publish activity (execution={}, actionId={}), falling back to merge",
+                    executionId,
+                    actionId,
+                    ex);
+            activity = activityRepository
+                    .findByExecutionIdAndActionId(executionId, actionId)
+                    .map(existing -> {
+                        existing.setActivityType(ActivityType.PUBLISH);
+                        existing.setDescription(description);
+                        existing.setStatus(ActivityStatus.COMPLETED);
+                        if (detail != null) {
+                            try {
+                                existing.setDetail(objectMapper.writeValueAsString(detail));
+                            } catch (JsonProcessingException e) {
+                                logger.warn("Failed to serialize publish detail on fallback merge", e);
+                            }
+                        }
+                        return activityRepository.save(existing);
+                    })
+                    .orElse(null);
+        }
+        if (activity != null) {
+            eventPublisher.publishEvent(new SandboxExecutionActivityEvent(
+                    teamId,
+                    executionId,
+                    ActivityType.PUBLISH,
+                    description,
+                    actionId,
+                    ActivityStatus.COMPLETED,
+                    detail,
+                    activity.getCreatedAt()));
+        }
+    }
+
+    private static String shortSha(String sha) {
+        if (sha == null || sha.isBlank()) {
+            return "unknown";
+        }
+        return sha.length() > 7 ? sha.substring(0, 7) : sha;
     }
 
     private String formatStatsSummary(

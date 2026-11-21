@@ -783,7 +783,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 }
             }
             case PLAN -> conformanceSawPlanActivity.set(true);
-            case ELICITATION -> {}
+            case ELICITATION, PUBLISH, ERROR, WARNING -> {}
         }
     }
 

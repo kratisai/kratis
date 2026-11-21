@@ -10,6 +10,7 @@ import type {
   ErrorActivity,
   MessageActivity,
   PlanActivity,
+  PublishActivity,
   ThinkingActivity,
   ToolExecutionActivity,
   WarningActivity,
@@ -76,6 +77,8 @@ export function activityTitle(activity: Activity): string {
       return activity.role === 'user' ? 'User' : 'Agent'
     case 'plan':
       return 'Plan'
+    case 'publish':
+      return activity.detail?.title ?? 'Published changes'
     case 'thinking':
       return activity.thought.split('\n')[0].trim() || 'Thinking'
     case 'tool_execution': {
@@ -615,6 +618,44 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
           startedAt: idx >= 0 ? existing[idx].startedAt : result.createdAt,
           state: 'completed',
           type: 'warning',
+        }
+        const updated =
+          idx >= 0
+            ? existing.map((a, i) => (i === idx ? activity : a))
+            : appendActivity(existing, activity)
+        return {
+          activitiesByExecution: {
+            ...state.activitiesByExecution,
+            [executionId]: updated,
+          },
+        }
+      })
+    } else if (activityType === 'PUBLISH') {
+      set((state) => {
+        const existing = state.activitiesByExecution[executionId] ?? []
+        const publishActionId = actionId ?? `pub-${nextActivityId()}`
+        const idx = existing.findIndex(
+          (a) => a.type === 'publish' && a.actionId === publishActionId,
+        )
+        const now = new Date().toISOString()
+        const activity: PublishActivity = {
+          actionId: publishActionId,
+          baseBranch: detail?.baseBranch,
+          collapsed: false,
+          commitSha: detail?.commitSha,
+          description,
+          detail,
+          endedAt: now,
+          executionId,
+          headBranch: detail?.headBranch,
+          id: idx >= 0 ? existing[idx].id : nextActivityId(),
+          isUpdate: detail?.isUpdate,
+          prNumber: detail?.prNumber,
+          providerType: detail?.providerType,
+          prUrl: detail?.prUrl,
+          startedAt: idx >= 0 ? existing[idx].startedAt : result.createdAt,
+          state: 'completed',
+          type: 'publish',
         }
         const updated =
           idx >= 0

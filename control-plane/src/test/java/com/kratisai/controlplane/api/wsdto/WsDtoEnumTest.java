@@ -48,6 +48,8 @@ class WsDtoEnumTest {
         assertThat(ActivityType.fromString("command")).isEqualTo(ActivityType.COMMAND);
         assertThat(ActivityType.MESSAGE.getValue()).isEqualTo("MESSAGE");
         assertThat(ActivityType.fromString("message")).isEqualTo(ActivityType.MESSAGE);
+        assertThat(ActivityType.PUBLISH.getValue()).isEqualTo("PUBLISH");
+        assertThat(ActivityType.fromString("publish")).isEqualTo(ActivityType.PUBLISH);
         assertThatThrownBy(() -> ActivityType.fromString("unknown"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unknown activity type");

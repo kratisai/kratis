@@ -294,7 +294,7 @@ public class ExecutionActivityPersistenceService {
     }
 
     private static ActivityDetail emptyDetail() {
-        return new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null);
+        return ActivityDetail.empty();
     }
 
     private static ActivityDetail placeholderDetail(HitlRequestSnapshot request) {
@@ -303,8 +303,12 @@ public class ExecutionActivityPersistenceService {
         if (locations == null && request.diff() != null && request.diff().path() != null) {
             locations = List.of(new ActivityLocation(request.diff().path(), null));
         }
-        return new ActivityDetail(
-                kind, request.title(), locations, null, request.diff(), null, null, null, null, null, null);
+        return ActivityDetail.builder()
+                .kind(kind)
+                .title(request.title())
+                .locations(locations)
+                .diff(request.diff())
+                .build();
     }
 
     private static ActivityType placeholderType(String toolKind) {
@@ -371,8 +375,7 @@ public class ExecutionActivityPersistenceService {
         String description = reason != null && !reason.isBlank()
                 ? truncate(reason)
                 : "Execution failed (exit code " + exitCode + ")";
-        ActivityDetail detail =
-                new ActivityDetail(null, null, null, null, null, exitCode, null, null, null, null, null);
+        ActivityDetail detail = ActivityDetail.builder().exitCode(exitCode).build();
 
         SandboxExecutionActivity row = recordActivity(
                 executionId, ActivityType.ERROR, description, ERROR_ACTION_ID, ActivityStatus.FAILED, detail);

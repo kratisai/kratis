@@ -215,8 +215,7 @@ class SandboxHitlControllerTest {
                 .findByExecutionIdAndActionId(executionId, snapshot.actionId())
                 .orElseGet(() -> new SandboxExecutionActivity(
                         executionId, 1, snapshot.actionId(), type, ActivityStatus.PENDING, description, null));
-        ActivityDetail detail = new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null)
-                .withHitl(ActivityHitl.from(snapshot, HitlState.AWAITING_HUMAN));
+        ActivityDetail detail = ActivityDetail.empty().withHitl(ActivityHitl.from(snapshot, HitlState.AWAITING_HUMAN));
         row.setActivityType(type);
         row.setStatus(ActivityStatus.PENDING);
         row.setDescription(description);

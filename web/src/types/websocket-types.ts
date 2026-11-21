@@ -16,14 +16,21 @@ export const INVALID_TOKEN_CODE = JsonRpcErrorCodes.INVALID_TOKEN
 export const NOT_AUTHENTICATED_CODE = JsonRpcErrorCodes.NOT_AUTHENTICATED
 
 export interface ActivityDetail {
+  baseBranch?: string
+  commitSha?: string
   diff?: ActivityDiff
   exitCode?: number
+  headBranch?: string
   hitl?: ActivityHitl
+  isUpdate?: boolean
   kind?: ActivityKind
   locations?: ActivityLocation[]
   messageId?: string
   output?: string
   plan?: PlanEntry[]
+  prNumber?: number
+  providerType?: string
+  prUrl?: string
   role?: string
   title?: string
   truncated?: boolean
@@ -407,6 +414,7 @@ export type WireActivityType =
   | 'ERROR'
   | 'MESSAGE'
   | 'PLAN'
+  | 'PUBLISH'
   | 'RESEARCH'
   | 'THINKING'
   | 'WARNING'

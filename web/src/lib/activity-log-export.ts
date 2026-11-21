@@ -5,6 +5,7 @@ import type {
   ErrorActivity,
   MessageActivity,
   PlanActivity,
+  PublishActivity,
   ThinkingActivity,
   ToolExecutionActivity,
   WarningActivity,
@@ -49,6 +50,8 @@ function formatActivity(activity: Activity): string[] {
       return formatMessage(activity)
     case 'plan':
       return formatPlan(activity)
+    case 'publish':
+      return formatPublish(activity)
     case 'thinking':
       return formatThinking(activity)
     case 'tool_execution':
@@ -115,7 +118,25 @@ function formatPlan(activity: PlanActivity): string[] {
   const lines = ['[Plan]']
   formatCommon(lines, activity)
   for (const entry of activity.plan) {
-    lines.push(`  [${entry.status}] (${entry.priority}) ${entry.content}`)
+    lines.push(`  - [${entry.status}] (${entry.priority}) ${entry.content}`)
+  }
+  return lines
+}
+
+function formatPublish(activity: PublishActivity): string[] {
+  const lines = [`[Publish] ${activity.description}`]
+  formatCommon(lines, activity)
+  if (activity.headBranch) {
+    lines.push(`Head branch: ${activity.headBranch}`)
+  }
+  if (activity.baseBranch) {
+    lines.push(`Base branch: ${activity.baseBranch}`)
+  }
+  if (activity.commitSha) {
+    lines.push(`Commit: ${activity.commitSha}`)
+  }
+  if (activity.prUrl) {
+    lines.push(`PR URL: ${activity.prUrl}`)
   }
   return lines
 }

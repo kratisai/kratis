@@ -74,6 +74,8 @@ const hitlSchema = z
 
 const activityDetailSchema = z
   .object({
+    baseBranch: z.string().optional(),
+    commitSha: z.string().optional(),
     diff: z
       .object({
         newText: z.string().optional(),
@@ -83,7 +85,9 @@ const activityDetailSchema = z
       .passthrough()
       .optional(),
     exitCode: z.number().int().optional(),
+    headBranch: z.string().optional(),
     hitl: hitlSchema,
+    isUpdate: z.boolean().optional(),
     kind: activityKind.optional(),
     locations: z
       .array(
@@ -93,6 +97,9 @@ const activityDetailSchema = z
     messageId: z.string().optional(),
     output: z.string().optional(),
     plan: z.array(planEntrySchema).optional(),
+    prNumber: z.number().int().optional(),
+    providerType: z.string().optional(),
+    prUrl: z.string().optional(),
     role: z.string().optional(),
     title: z.string().optional(),
     truncated: z.boolean().optional(),
@@ -183,6 +190,7 @@ export const CLIENT_RESULTS = {
         'PLAN',
         'ERROR',
         'WARNING',
+        'PUBLISH',
       ]),
       createdAt: z.string(),
       description: z.string(),

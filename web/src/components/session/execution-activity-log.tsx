@@ -5,6 +5,8 @@ import {
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  ExternalLink,
+  GitPullRequest,
   HelpCircle,
   ListTodo,
   Loader2,
@@ -22,6 +24,7 @@ import type {
   HitlResolverKind,
   MessageActivity,
   PlanActivity,
+  PublishActivity,
   ThinkingActivity,
   ToolExecutionActivity,
   WarningActivity,
@@ -34,7 +37,7 @@ import { PlanEntriesList, planSummaryLabel } from '@/components/session/plan-ent
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { markdownToText } from '@/lib/markdown-to-text'
-import { cn } from '@/lib/utils'
+import { cn, isSafeHttpUrl } from '@/lib/utils'
 import { activityCommand, activityTitle, useActivityStore } from '@/store/activity-store'
 
 const EMPTY_ACTIVITIES: Activity[] = []
@@ -187,6 +190,8 @@ const ActivityItem = memo(function ActivityItem({ activity, executionId }: Activ
       return <MessageActivityItem activity={activity} executionId={executionId} />
     case 'plan':
       return <PlanActivityItem activity={activity} executionId={executionId} />
+    case 'publish':
+      return <PublishActivityItem activity={activity} executionId={executionId} />
     case 'thinking':
       return <ThinkingActivityItem activity={activity} executionId={executionId} />
     case 'tool_execution':
@@ -594,6 +599,62 @@ function PlanActivityItem({
           </span>
         )
       }
+    />
+  )
+}
+
+function PublishActivityItem({
+  activity,
+  executionId,
+}: {
+  activity: PublishActivity
+  executionId: string
+}) {
+  return (
+    <ActivityItemShell
+      activity={activity}
+      content={
+        <div className="mt-1 space-y-1.5 pl-5 text-xs">
+          <p className="text-muted-foreground">{activity.description}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {activity.headBranch && (
+              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono">
+                {activity.headBranch}
+              </span>
+            )}
+            {activity.baseBranch && (
+              <span className="text-muted-foreground">
+                into <span className="font-mono">{activity.baseBranch}</span>
+              </span>
+            )}
+            {activity.commitSha && (
+              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono">
+                {activity.commitSha.substring(0, 7)}
+              </span>
+            )}
+          </div>
+          {isSafeHttpUrl(activity.prUrl) && (
+            <div>
+              <a
+                className="text-primary inline-flex items-center gap-1 font-medium hover:underline"
+                href={activity.prUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <span>
+                  {activity.prNumber
+                    ? `View Pull Request #${activity.prNumber}`
+                    : 'View Pull Request'}
+                </span>
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+          )}
+        </div>
+      }
+      executionId={executionId}
+      icon={<GitPullRequest className="h-3 w-3 shrink-0 text-green-500" />}
+      title={activityTitle(activity)}
     />
   )
 }

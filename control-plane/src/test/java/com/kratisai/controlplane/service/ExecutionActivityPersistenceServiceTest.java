@@ -262,8 +262,7 @@ class ExecutionActivityPersistenceServiceTest {
         UUID executionId = UUID.randomUUID();
         when(repository.findByExecutionIdAndActionId(executionId, "tc-1")).thenReturn(Optional.empty());
         when(repository.nextSequence(executionId)).thenReturn(1L);
-        ActivityDetail detail =
-                new ActivityDetail(null, "echo hello", null, null, null, null, null, null, null, null, null);
+        ActivityDetail detail = ActivityDetail.forCommand("echo hello");
 
         service.recordActivity(executionId, ActivityType.COMMAND, "echo hello", "tc-1", ActivityStatus.PENDING, detail);
 
@@ -292,14 +291,19 @@ class ExecutionActivityPersistenceServiceTest {
                 "allow",
                 null,
                 new HitlResolver(HitlResolverKind.USER, UUID.randomUUID(), "Alice"));
-        ActivityDetail existingDetail =
-                new ActivityDetail(null, "chmod +x file", null, null, null, null, null, null, null, null, existingHitl);
+        ActivityDetail existingDetail = ActivityDetail.builder()
+                .title("chmod +x file")
+                .hitl(existingHitl)
+                .build();
         existing.setDetail(objectMapper.writeValueAsString(existingDetail));
 
         when(repository.findByExecutionIdAndActionId(executionId, "tc-1")).thenReturn(Optional.of(existing));
 
-        ActivityDetail incomingDetail =
-                new ActivityDetail(null, null, null, "done", null, 0, false, null, null, null, null);
+        ActivityDetail incomingDetail = ActivityDetail.builder()
+                .output("done")
+                .exitCode(0)
+                .truncated(false)
+                .build();
         service.recordActivity(
                 executionId, ActivityType.COMMAND, "chmod +x file", "tc-1", ActivityStatus.COMPLETED, incomingDetail);
 
@@ -342,18 +346,8 @@ class ExecutionActivityPersistenceServiceTest {
         SandboxExecutionActivity existing =
                 row(executionId, 1, "plan", ActivityType.PLAN, ActivityStatus.IN_PROGRESS, "Agent plan updated");
         when(repository.findByExecutionIdAndActionId(executionId, "plan")).thenReturn(Optional.of(existing));
-        ActivityDetail detail = new ActivityDetail(
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                List.of(new PlanEntry("Latest task", PlanEntryPriority.MEDIUM, PlanEntryStatus.PENDING)),
-                null);
+        ActivityDetail detail = ActivityDetail.forPlan(
+                List.of(new PlanEntry("Latest task", PlanEntryPriority.MEDIUM, PlanEntryStatus.PENDING)));
 
         service.recordActivity(
                 executionId, ActivityType.PLAN, "Agent plan updated", "plan", ActivityStatus.IN_PROGRESS, detail);
@@ -370,18 +364,8 @@ class ExecutionActivityPersistenceServiceTest {
         UUID executionId = UUID.randomUUID();
         when(repository.findByExecutionIdAndActionId(executionId, "plan")).thenReturn(Optional.empty());
         when(repository.nextSequence(executionId)).thenReturn(1L);
-        ActivityDetail detail = new ActivityDetail(
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                List.of(new PlanEntry("Setup repo", PlanEntryPriority.HIGH, PlanEntryStatus.IN_PROGRESS)),
-                null);
+        ActivityDetail detail = ActivityDetail.forPlan(
+                List.of(new PlanEntry("Setup repo", PlanEntryPriority.HIGH, PlanEntryStatus.IN_PROGRESS)));
 
         service.recordActivity(
                 executionId, ActivityType.PLAN, "Agent plan updated", "plan", ActivityStatus.IN_PROGRESS, detail);
@@ -568,7 +552,10 @@ class ExecutionActivityPersistenceServiceTest {
         // Pending approval already resolved
         SandboxExecutionActivity resolved =
                 row(executionId, 2, "tool-2", ActivityType.COMMAND, ActivityStatus.PENDING, "rm -rf /");
-        ActivityDetail resolvedDetail = new ActivityDetail(
+        ActivityDetail resolvedDetail = ActivityDetail.forHitl(new ActivityHitl(
+                HitlKind.APPROVAL,
+                HitlState.RESOLVED,
+                "Approve",
                 null,
                 null,
                 null,
@@ -576,24 +563,10 @@ class ExecutionActivityPersistenceServiceTest {
                 null,
                 null,
                 null,
+                HitlResponse.APPROVED,
+                "allow",
                 null,
-                null,
-                null,
-                new ActivityHitl(
-                        HitlKind.APPROVAL,
-                        HitlState.RESOLVED,
-                        "Approve",
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        HitlResponse.APPROVED,
-                        "allow",
-                        null,
-                        null));
+                null));
         resolved.setDetail(objectMapper.writeValueAsString(resolvedDetail));
 
         when(repository.findByExecutionIdAndStatus(executionId, ActivityStatus.PENDING))
@@ -1187,7 +1160,7 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     private static ActivityDetail emptyActivityDetail() {
-        return new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null);
+        return ActivityDetail.empty();
     }
 
     @Test
@@ -1363,7 +1336,7 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     private static ActivityDetail commandDetail(String output) {
-        return new ActivityDetail(null, "chmod", null, output, null, null, null, null, null, null, null);
+        return ActivityDetail.forCommand("chmod", output, null);
     }
 
     @Test

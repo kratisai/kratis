@@ -98,7 +98,7 @@ class PendingHitlTimeoutServiceTest {
                 null,
                 null,
                 null);
-        return new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null).withHitl(hitl);
+        return ActivityDetail.empty().withHitl(hitl);
     }
 
     @Test
@@ -198,8 +198,7 @@ class PendingHitlTimeoutServiceTest {
                 null,
                 null,
                 null);
-        ActivityDetail resolvedDetail =
-                new ActivityDetail(null, null, null, null, null, null, null, null, null, null, null).withHitl(resolved);
+        ActivityDetail resolvedDetail = ActivityDetail.empty().withHitl(resolved);
 
         when(activityRepository.findByStatusAndCreatedAtBefore(eq(ActivityStatus.PENDING), any(Instant.class)))
                 .thenReturn(List.of(nonHitl, resolvedHitl));

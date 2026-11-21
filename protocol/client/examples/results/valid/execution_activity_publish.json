@@ -1,0 +1,18 @@
+{
+  "type": "execution_activity",
+  "executionId": "00000000-0000-0000-0000-000000000006",
+  "activityType": "PUBLISH",
+  "description": "Published changes: Pull Request #42 created to merge feature into main",
+  "actionId": "pub:pr:00000000-0000-0000-0000-000000000001:42",
+  "status": "completed",
+  "createdAt": "2026-10-20T17:32:12.672Z",
+  "detail": {
+    "prNumber": 42,
+    "prUrl": "https://github.com/test/repo/pull/42",
+    "headBranch": "feature",
+    "baseBranch": "main",
+    "commitSha": "abc1234",
+    "isUpdate": false,
+    "providerType": "GITHUB"
+  }
+}

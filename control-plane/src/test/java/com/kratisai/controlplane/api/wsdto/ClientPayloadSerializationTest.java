@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionActivityResult;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -34,8 +35,7 @@ class ClientPayloadSerializationTest {
 
     @Test
     void executionActivityResult_serializesPresentActionIdAndDetail() {
-        ActivityDetail detail = new ActivityDetail(
-                ActivityKind.EXECUTE, "Running tests", null, null, null, 0, false, null, null, null, null);
+        ActivityDetail detail = ActivityDetail.forTool(ActivityKind.EXECUTE, "Running tests", 0, false);
         JsonNode json = objectMapper.valueToTree(new ExecutionActivityResult(
                 UUID.randomUUID(),
                 ActivityType.RESEARCH,
@@ -53,18 +53,8 @@ class ClientPayloadSerializationTest {
 
     @Test
     void executionActivityResult_serializesStructuredPlanAndOmitsEmptyPlan() {
-        ActivityDetail withPlan = new ActivityDetail(
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                java.util.List.of(new PlanEntry("Setup", PlanEntryPriority.HIGH, PlanEntryStatus.IN_PROGRESS)),
-                null);
+        ActivityDetail withPlan = ActivityDetail.forPlan(
+                List.of(new PlanEntry("Setup", PlanEntryPriority.HIGH, PlanEntryStatus.IN_PROGRESS)));
         JsonNode json = objectMapper.valueToTree(new ExecutionActivityResult(
                 UUID.randomUUID(),
                 ActivityType.PLAN,
@@ -81,8 +71,7 @@ class ClientPayloadSerializationTest {
         assertThat(plan.get(0).get("priority").asText()).isEqualTo("high");
         assertThat(plan.get(0).get("status").asText()).isEqualTo("in_progress");
 
-        ActivityDetail emptyPlan =
-                new ActivityDetail(null, null, null, null, null, null, null, null, null, java.util.List.of(), null);
+        ActivityDetail emptyPlan = ActivityDetail.forPlan(List.of());
         JsonNode empty = objectMapper.valueToTree(new ExecutionActivityResult(
                 UUID.randomUUID(),
                 ActivityType.PLAN,
@@ -92,6 +81,30 @@ class ClientPayloadSerializationTest {
                 emptyPlan,
                 CREATED_AT.toString()));
         assertThat(empty.path("detail").has("plan")).isFalse();
+    }
+
+    @Test
+    void executionActivityResult_serializesPublishDetail() {
+        ActivityDetail publishDetail = ActivityDetail.forPublish(
+                42L, "https://github.com/test/repo/pull/42", "feature", "main", "abc1234", false, "GITHUB");
+        JsonNode json = objectMapper.valueToTree(new ExecutionActivityResult(
+                UUID.randomUUID(),
+                ActivityType.PUBLISH,
+                "Published changes: Pull Request #42 created to merge feature into main",
+                "pub:pr:repo-1:42",
+                ActivityStatus.COMPLETED,
+                publishDetail,
+                CREATED_AT.toString()));
+
+        assertThat(json.get("activityType").asText()).isEqualTo("PUBLISH");
+        assertThat(json.get("status").asText()).isEqualTo("completed");
+        assertThat(json.path("detail").path("prNumber").asInt()).isEqualTo(42);
+        assertThat(json.path("detail").path("prUrl").asText()).isEqualTo("https://github.com/test/repo/pull/42");
+        assertThat(json.path("detail").path("headBranch").asText()).isEqualTo("feature");
+        assertThat(json.path("detail").path("baseBranch").asText()).isEqualTo("main");
+        assertThat(json.path("detail").path("commitSha").asText()).isEqualTo("abc1234");
+        assertThat(json.path("detail").path("isUpdate").asBoolean()).isFalse();
+        assertThat(json.path("detail").path("providerType").asText()).isEqualTo("GITHUB");
     }
 
     @Test
