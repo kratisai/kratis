@@ -19,11 +19,16 @@ import java.sql.Statement;
 import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationContextInitializer;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.core.env.MapPropertySource;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.Container;
@@ -86,10 +91,15 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
             "ghcr.io/berriai/litellm@sha256:32cfd7a427f6470033b4dcc9e75dfbea2aa32dbc298b0b511a40e962ce818362";
 
     static {
+        long bootstrapStart = System.nanoTime();
+        long netStart = System.nanoTime();
         ensureTestNetwork();
+        long networkNanos = System.nanoTime() - netStart;
 
         // 1. Start PostgreSQL (reused across test runs when reuse is enabled)
+        long pgStart = System.nanoTime();
         POSTGRES_CONTAINER.start();
+        long postgresStartNanos = System.nanoTime() - pgStart;
 
         // Datasource coordinates are global — all Spring contexts talk to the same Postgres
         // instance. Schema isolation (below) is what separates their data.
@@ -100,6 +110,7 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
         System.setProperty("spring.datasource.driver-class-name", "org.postgresql.Driver");
 
         // Ensure pgvector is installed in public schema and litellm database exists
+        long pgInitStart = System.nanoTime();
         try (Connection conn = DriverManager.getConnection(
                         POSTGRES_CONTAINER.getJdbcUrl(),
                         POSTGRES_CONTAINER.getUsername(),
@@ -116,6 +127,7 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize test postgres database", e);
         }
+        long postgresInitNanos = System.nanoTime() - pgInitStart;
 
         // Peer alias, not the bridge gateway's published port: that listener lives only in the DinD
         // sibling's parent namespace, so LiteLLM cannot reach it from inside.
@@ -157,7 +169,9 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                 .waitingFor(Wait.forHttp("/health/readiness").forPort(4000).withStartupTimeout(Duration.ofMinutes(3)));
 
         logger.info("Starting LiteLLM proxy...");
+        long litellmStart = System.nanoTime();
         LITELLM_CONTAINER.start();
+        long litellmStartNanos = System.nanoTime() - litellmStart;
 
         String litellmMappedPort = String.valueOf(LITELLM_CONTAINER.getMappedPort(4000));
         String litellmBaseUrl = "http://" + LITELLM_CONTAINER.getHost() + ":" + litellmMappedPort;
@@ -181,8 +195,26 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                 System.getProperty("kratis.litellm.sandbox-base-url"),
                 containerHost);
 
+        long patchStart = System.nanoTime();
         verifyLiteLLMLoggingPatch();
+        long patchVerifyNanos = System.nanoTime() - patchStart;
+
+        long countStart = System.nanoTime();
         checkLiteLLMModelCountOrFail(litellmBaseUrl);
+        long modelCountCheckNanos = System.nanoTime() - countStart;
+
+        long totalBootstrapNanos = System.nanoTime() - bootstrapStart;
+        TestTimingRegistry.instance()
+                .recordContainerBootstrap(new TestTimingRegistry.ContainerBootstrapStats(
+                        Thread.currentThread().getName(),
+                        TestTimingRegistry.instance().currentThreadClass(),
+                        totalBootstrapNanos,
+                        networkNanos,
+                        postgresStartNanos,
+                        postgresInitNanos,
+                        litellmStartNanos,
+                        patchVerifyNanos,
+                        modelCountCheckNanos));
 
         // Register shutdown hook to check model count and conditionally remove container
         // This prevents unbounded growth across test runs
@@ -355,9 +387,12 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
      */
     @Override
     public void initialize(@NonNull ConfigurableApplicationContext applicationContext) {
+        long initStart = System.nanoTime();
         String schema = "test_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
 
+        long createStart = System.nanoTime();
         createSchema(schema);
+        long schemaCreateNanos = System.nanoTime() - createStart;
         registerSchemaDropHook(schema);
 
         String schemaJdbcUrl = buildSchemaBoundJdbcUrl(POSTGRES_CONTAINER.getJdbcUrl(), schema);
@@ -375,7 +410,48 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                                 "spring.liquibase.liquibase-schema", schema,
                                 "spring.jpa.properties.hibernate.default_schema", schema)));
 
+        TestTimingRegistry.instance().registerContextInit(applicationContext, schema, schemaCreateNanos, initStart);
+        applicationContext.addBeanFactoryPostProcessor(
+                beanFactory -> beanFactory.addBeanPostProcessor(new InfraBeanTimingPostProcessor(applicationContext)));
+        applicationContext.addApplicationListener(event -> {
+            if (event instanceof ContextRefreshedEvent cre && cre.getApplicationContext() == applicationContext) {
+                TestTimingRegistry.instance().recordContextRefreshed(applicationContext, System.nanoTime());
+            } else if (event instanceof ApplicationReadyEvent are
+                    && are.getApplicationContext() == applicationContext) {
+                TestTimingRegistry.instance().recordContextReady(applicationContext, System.nanoTime());
+            } else if (event instanceof ContextClosedEvent cce && cce.getApplicationContext() == applicationContext) {
+                TestTimingRegistry.instance().recordContextClosed(applicationContext, System.nanoTime());
+            }
+        });
+
         logger.info("🗄  Test schema '{}' allocated for Spring context '{}'", schema, applicationContext.getId());
+    }
+
+    private static final class InfraBeanTimingPostProcessor implements BeanPostProcessor {
+
+        private final ConfigurableApplicationContext context;
+        private final Map<String, Long> startNanos = new ConcurrentHashMap<>();
+
+        private InfraBeanTimingPostProcessor(ConfigurableApplicationContext context) {
+            this.context = context;
+        }
+
+        @Override
+        public Object postProcessBeforeInitialization(@NonNull Object bean, @NonNull String beanName) {
+            if ("liquibase".equals(beanName) || "entityManagerFactory".equals(beanName)) {
+                startNanos.put(beanName, System.nanoTime());
+            }
+            return bean;
+        }
+
+        @Override
+        public Object postProcessAfterInitialization(@NonNull Object bean, @NonNull String beanName) {
+            Long started = startNanos.remove(beanName);
+            if (started != null) {
+                TestTimingRegistry.instance().recordBeanInitDuration(context, beanName, System.nanoTime() - started);
+            }
+            return bean;
+        }
     }
 
     /**

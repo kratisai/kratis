@@ -38,61 +38,83 @@ public class DatabaseCleaner {
     private static final Set<String> EXCLUDED_TABLES = Set.of("databasechangelog", "databasechangeloglock");
 
     public void cleanAll() {
-        // Clear in-memory session registries that would otherwise leak across tests sharing the same context
-        if (environmentSessionRegistry != null) {
-            environmentSessionRegistry.clearAll();
-        }
-        if (clientSessionRegistry != null) {
-            clientSessionRegistry.clearAll();
-        }
+        long totalStart = System.nanoTime();
+        long litellmNanos = 0L;
+        long discoveryNanos = 0L;
+        long truncateNanos = 0L;
+        boolean lockTimeoutHealed = false;
+        try {
+            // Clear in-memory session registries that would otherwise leak across tests sharing the same context
+            if (environmentSessionRegistry != null) {
+                environmentSessionRegistry.clearAll();
+            }
+            if (clientSessionRegistry != null) {
+                clientSessionRegistry.clearAll();
+            }
 
-        // Clean up LiteLLM models created during the test (best-effort, quick)
-        cleanupLiteLLMModels();
+            // Clean up LiteLLM models created during the test (best-effort, quick)
+            long litellmStart = System.nanoTime();
+            cleanupLiteLLMModels();
+            litellmNanos = System.nanoTime() - litellmStart;
 
-        if (cachedTablesToTruncate == null) {
-            synchronized (this) {
-                if (cachedTablesToTruncate == null) {
-                    List<String> tables = jdbcTemplate.queryForList(
-                            "SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE'",
-                            String.class,
-                            schema.toLowerCase());
+            if (cachedTablesToTruncate == null) {
+                synchronized (this) {
+                    if (cachedTablesToTruncate == null) {
+                        long discStart = System.nanoTime();
+                        List<String> tables = jdbcTemplate.queryForList(
+                                "SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE'",
+                                String.class,
+                                schema.toLowerCase());
 
-                    cachedTablesToTruncate = tables.stream()
-                            .map(String::toLowerCase)
-                            .filter(tableName -> !EXCLUDED_TABLES.contains(tableName))
-                            .map(tableName -> schema + "." + tableName)
-                            .collect(Collectors.toList());
+                        cachedTablesToTruncate = tables.stream()
+                                .map(String::toLowerCase)
+                                .filter(tableName -> !EXCLUDED_TABLES.contains(tableName))
+                                .map(tableName -> schema + "." + tableName)
+                                .collect(Collectors.toList());
+                        discoveryNanos = System.nanoTime() - discStart;
+                    }
                 }
             }
-        }
 
-        if (cachedTablesToTruncate.isEmpty()) {
-            return;
-        }
+            if (cachedTablesToTruncate.isEmpty()) {
+                return;
+            }
 
-        String truncateSql = "TRUNCATE TABLE " + String.join(", ", cachedTablesToTruncate) + " CASCADE";
+            String truncateSql = "TRUNCATE TABLE " + String.join(", ", cachedTablesToTruncate) + " CASCADE";
 
-        try {
-            jdbcTemplate.execute("SET lock_timeout = '1s'");
-            jdbcTemplate.execute(truncateSql);
-        } catch (Exception e) {
-            logger.warn(
-                    "TRUNCATE blocked by lock. Self-healing by terminating conflicting sessions for schema {} and retrying...",
-                    schema);
-            terminateConnections();
+            long truncStart = System.nanoTime();
             try {
-                jdbcTemplate.execute("SET lock_timeout = 0");
+                jdbcTemplate.execute("SET lock_timeout = '1s'");
                 jdbcTemplate.execute(truncateSql);
-            } catch (Exception ex) {
-                logger.error("TRUNCATE failed even after connection termination", ex);
-                throw ex;
+            } catch (Exception e) {
+                lockTimeoutHealed = true;
+                logger.warn(
+                        "TRUNCATE blocked by lock. Self-healing by terminating conflicting sessions for schema {} and retrying...",
+                        schema);
+                terminateConnections();
+                try {
+                    jdbcTemplate.execute("SET lock_timeout = 0");
+                    jdbcTemplate.execute(truncateSql);
+                } catch (Exception ex) {
+                    logger.error("TRUNCATE failed even after connection termination", ex);
+                    throw ex;
+                }
+            } finally {
+                try {
+                    jdbcTemplate.execute("SET lock_timeout = 0");
+                } catch (Exception e) {
+                    // Ignore
+                }
+                truncateNanos = System.nanoTime() - truncStart;
             }
         } finally {
-            try {
-                jdbcTemplate.execute("SET lock_timeout = 0");
-            } catch (Exception e) {
-                // Ignore
-            }
+            TestTimingRegistry.instance()
+                    .recordDbClean(
+                            System.nanoTime() - totalStart,
+                            litellmNanos,
+                            discoveryNanos,
+                            truncateNanos,
+                            lockTimeoutHealed);
         }
     }
 

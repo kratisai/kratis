@@ -19,12 +19,16 @@ public class TestDockerCleanupListener implements TestExecutionListener {
 
     @Override
     public void testPlanExecutionStarted(TestPlan testPlan) {
+        long start = System.nanoTime();
         clean();
+        TestTimingRegistry.instance().recordDockerCleanup(true, System.nanoTime() - start);
     }
 
     @Override
     public void testPlanExecutionFinished(TestPlan testPlan) {
+        long start = System.nanoTime();
         clean();
+        TestTimingRegistry.instance().recordDockerCleanup(false, System.nanoTime() - start);
     }
 
     private static void clean() {

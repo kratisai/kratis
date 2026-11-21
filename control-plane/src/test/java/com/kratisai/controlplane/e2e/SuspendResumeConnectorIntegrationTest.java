@@ -22,6 +22,7 @@ import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SlowTest;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.TestTimingRegistry;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -124,10 +125,14 @@ class SuspendResumeConnectorIntegrationTest {
         String runner = "kratis-sandbox-" + envId;
         String snapshot = "kratis-snapshot-" + envId;
 
+        long spawnStart = System.nanoTime();
         provider.spawnSandbox(environment);
+        TestTimingRegistry.instance().recordSubPhase("spawnSandbox", System.nanoTime() - spawnStart);
         dockerExec(runner, "sh", "-c", "echo before-suspend > /kratis/workspace/marker.txt");
 
+        long susp1Start = System.nanoTime();
         provider.suspend(envId);
+        TestTimingRegistry.instance().recordSubPhase("suspendSnapshot", System.nanoTime() - susp1Start);
         assertThat(containerExists(runner))
                 .as("suspend must tear the runtime down")
                 .isFalse();
@@ -135,20 +140,28 @@ class SuspendResumeConnectorIntegrationTest {
         assertThat(imageIds(snapshot)).hasSize(1);
         String firstImage = imageIds(snapshot).getFirst();
 
+        long res1Start = System.nanoTime();
         provider.resume(environment);
+        TestTimingRegistry.instance().recordSubPhase("resumeSnapshot", System.nanoTime() - res1Start);
         assertThat(dockerExec(runner, "cat", "/kratis/workspace/marker.txt")).isEqualTo("before-suspend");
         dockerExec(runner, "sh", "-c", "echo second > /kratis/workspace/second.txt");
 
+        long susp2Start = System.nanoTime();
         provider.suspend(envId);
+        TestTimingRegistry.instance().recordSubPhase("suspendSnapshot", System.nanoTime() - susp2Start);
         assertThat(imageIds(snapshot))
                 .as("the superseded snapshot image is removed")
                 .hasSize(1);
         assertThat(imageIds(snapshot).getFirst()).isNotEqualTo(firstImage);
 
+        long res2Start = System.nanoTime();
         provider.resume(environment);
+        TestTimingRegistry.instance().recordSubPhase("resumeSnapshot", System.nanoTime() - res2Start);
         assertThat(dockerExec(runner, "cat", "/kratis/workspace/second.txt")).isEqualTo("second");
 
+        long destroyStart = System.nanoTime();
         provider.destroy(envId);
+        TestTimingRegistry.instance().recordSubPhase("destroySandbox", System.nanoTime() - destroyStart);
         assertThat(imageIds(snapshot)).as("destroy removes the snapshot").isEmpty();
         assertThatThrownBy(() -> provider.resume(environment))
                 .isInstanceOf(IllegalStateException.class)
@@ -160,8 +173,10 @@ class SuspendResumeConnectorIntegrationTest {
         UUID envId = environment.getId();
         String runner = "kratis-sandbox-" + envId;
 
+        long provStart = System.nanoTime();
         provisioningService.provisionEnvironment(environment, environment.getAuthToken());
         awaitStatus(envId, EnvironmentStatus.CONNECTED);
+        TestTimingRegistry.instance().recordSubPhase("provisionAndConnect", System.nanoTime() - provStart);
 
         runOnConnector(UPSTREAM_SCRIPT);
         environmentRpcClient.send(
@@ -183,14 +198,18 @@ class SuspendResumeConnectorIntegrationTest {
         runOnConnector("echo local > /kratis/workspace/local.txt");
         String headBefore = dockerExec(runner, "git", "-C", "/kratis/workspace", "rev-parse", "HEAD");
 
+        long sleepStart = System.nanoTime();
         environmentService.sleepEnvironmentInternal(
                 environmentRepository.findById(envId).orElseThrow());
         assertThat(environmentRepository.findById(envId).orElseThrow().getStatus())
                 .isEqualTo(EnvironmentStatus.SLEEPING);
+        TestTimingRegistry.instance().recordSubPhase("sleepSnapshot", System.nanoTime() - sleepStart);
 
+        long reprovStart = System.nanoTime();
         provisioningService.reprovisionEnvironment(
                 environmentRepository.findById(envId).orElseThrow());
         awaitStatus(envId, EnvironmentStatus.CONNECTED);
+        TestTimingRegistry.instance().recordSubPhase("reprovisionAndConnect", System.nanoTime() - reprovStart);
 
         assertThat(dockerExec(runner, "git", "-C", "/kratis/workspace", "rev-parse", "HEAD"))
                 .isEqualTo(headBefore);

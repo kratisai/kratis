@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.e2e;
 
+import com.kratisai.controlplane.testsupport.TestTimingRegistry;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -63,9 +64,17 @@ public class GitFixtureContainer extends GenericContainer<GitFixtureContainer> {
     @Override
     public void start() {
         try {
+            long prepStart = System.nanoTime();
             prepareFixtureFiles();
+            TestTimingRegistry.instance().recordSubPhase("gitFixturePrepare", System.nanoTime() - prepStart);
+
+            long startTime = System.nanoTime();
             super.start();
+            TestTimingRegistry.instance().recordSubPhase("gitFixtureContainerStart", System.nanoTime() - startTime);
+
+            long injectStart = System.nanoTime();
             injectFixtureFiles();
+            TestTimingRegistry.instance().recordSubPhase("gitFixtureInject", System.nanoTime() - injectStart);
             // Consumed by sandbox containers. They reach this fixture through the docker host its
             // published ports live on: TESTCONTAINERS_HOST_OVERRIDE when this JVM runs inside a
             // sandbox (the sibling sharing their network), otherwise host.docker.internal.

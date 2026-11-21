@@ -3,6 +3,7 @@ package com.kratisai.controlplane.testsupport;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -42,28 +43,47 @@ public class DrainExecutorsTestExecutionListener implements TestExecutionListene
 
     @Override
     public void beforeTestMethod(@NonNull TestContext testContext) {
-        drain(testContext);
+        drain(testContext, false);
     }
 
     @Override
     public void afterTestExecution(@NonNull TestContext testContext) {
-        drain(testContext);
+        drain(testContext, true);
     }
 
-    private static void drain(TestContext testContext) {
-        ApplicationContext context = testContext.getApplicationContext();
-        for (String beanName : EXECUTOR_BEAN_NAMES) {
-            Object bean = beanOrNull(context, beanName);
-            if (bean instanceof TrackingVirtualThreadExecutor tracked) {
-                tracked.awaitIdle(DRAIN_TIMEOUT);
-            } else if (bean instanceof ThreadPoolTaskExecutor executor) {
-                awaitIdle(executor);
+    private static void drain(TestContext testContext, boolean afterTestExec) {
+        long start = System.nanoTime();
+        List<String> waitedBeans = new ArrayList<>();
+        try {
+            if (!testContext.hasApplicationContext()) {
+                return;
             }
-        }
-        for (String beanName : SCHEDULER_BEAN_NAMES) {
-            if (beanOrNull(context, beanName) instanceof TrackingTaskScheduler scheduler) {
-                scheduler.awaitIdle(DRAIN_TIMEOUT);
+            ApplicationContext context = testContext.getApplicationContext();
+            for (String beanName : EXECUTOR_BEAN_NAMES) {
+                Object bean = beanOrNull(context, beanName);
+                if (bean instanceof TrackingVirtualThreadExecutor tracked) {
+                    if (tracked.inFlight() > 0) {
+                        waitedBeans.add(beanName);
+                    }
+                    tracked.awaitIdle(DRAIN_TIMEOUT);
+                } else if (bean instanceof ThreadPoolTaskExecutor executor) {
+                    var tpe = executor.getThreadPoolExecutor();
+                    if (tpe.getActiveCount() > 0 || !tpe.getQueue().isEmpty()) {
+                        waitedBeans.add(beanName);
+                    }
+                    awaitIdle(executor);
+                }
             }
+            for (String beanName : SCHEDULER_BEAN_NAMES) {
+                if (beanOrNull(context, beanName) instanceof TrackingTaskScheduler scheduler) {
+                    if (scheduler.outstanding() > 0) {
+                        waitedBeans.add(beanName);
+                    }
+                    scheduler.awaitIdle(DRAIN_TIMEOUT);
+                }
+            }
+        } finally {
+            TestTimingRegistry.instance().recordDrainExecutors(System.nanoTime() - start, afterTestExec, waitedBeans);
         }
     }
 

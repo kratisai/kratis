@@ -25,6 +25,7 @@ import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.service.EnvironmentRpcClient;
 import com.kratisai.controlplane.service.ExecutionEnvironmentService;
 import com.kratisai.controlplane.service.ProcessExecutor;
+import com.kratisai.controlplane.testsupport.TestTimingRegistry;
 import com.kratisai.controlplane.testsupport.llm.HttpRequestMatcher;
 import com.kratisai.controlplane.testsupport.llm.LlmMockScenarios;
 import com.kratisai.controlplane.testsupport.llm.LlmResponseBuilders;
@@ -241,6 +242,7 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
     }
 
     protected void resumeViaRest(UUID envId) throws Exception {
+        long start = System.nanoTime();
         // The sleeping environment has no container, so the pre-resume boot baseline comes from
         // the snapshot image (whose log the resumed container inherits); the resumed-container
         // read in awaitResumed then diffs exactly this resume's boots.
@@ -253,9 +255,11 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
                         .header("Authorization", "Bearer " + authToken())
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk());
+        TestTimingRegistry.instance().recordSubPhase("resumeViaRest", System.nanoTime() - start);
     }
 
     protected void awaitResumed(UUID envId, int acpInitializedBefore) throws Exception {
+        long start = System.nanoTime();
         ResumeBaseline baseline = resumeBaselines.getOrDefault(envId, new ResumeBaseline(registrationCount(envId), 0));
         Awaitility.await("resumed environment connected")
                 .atMost(Duration.ofSeconds(120))
@@ -292,6 +296,7 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
                 .pollInterval(Duration.ofSeconds(1))
                 .until(() -> acpInitializedCount() > acpInitializedBefore);
         assertSingleResumeRegistration(envId, baseline);
+        TestTimingRegistry.instance().recordSubPhase("awaitResumed", System.nanoTime() - start);
     }
 
     /**

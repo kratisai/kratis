@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.testsupport.llm;
 
+import com.kratisai.controlplane.testsupport.TestTimingRegistry;
 import com.kratisai.controlplane.testsupport.WikiPageContentFixtures;
 import java.util.List;
 import java.util.Locale;
@@ -36,6 +37,7 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
     }
 
     private void resetChatModel(TestContext testContext) {
+        long start = System.nanoTime();
         try {
             ChatModel chatModel = testContext.getApplicationContext().getBean(ChatModel.class);
             if (chatModel instanceof FakeChatModel fakeChatModel) {
@@ -48,6 +50,8 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
             }
         } catch (Exception e) {
             // Ignore if ChatModel bean is not present
+        } finally {
+            TestTimingRegistry.instance().recordChatModelReset(System.nanoTime() - start);
         }
     }
 

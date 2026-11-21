@@ -26,6 +26,7 @@ import com.kratisai.controlplane.service.ProcessExecutor;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SlowTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.TestTimingRegistry;
 import com.kratisai.controlplane.testsupport.llm.UseRealLlmClient;
 import com.kratisai.controlplane.testsupport.llm.WireMockLlmServer;
 import com.kratisai.controlplane.websocket.ClientWebSocketFixture;
@@ -134,6 +135,7 @@ public abstract class AbstractAgentExecutionRealTest {
 
         // Compile the Go sidecar locally first (statically linked for Alpine
         // compatibility)
+        long goStart = System.nanoTime();
         ProcessBuilder pbGo = new ProcessBuilder(goBinary, "build", "-o", "kratis-connector", "main.go")
                 .directory(new File("../sidecar"))
                 .inheritIO();
@@ -141,11 +143,13 @@ public abstract class AbstractAgentExecutionRealTest {
         pbGo.environment().put("PATH", goEnhancedPath());
         Process pGo = pbGo.start();
         int exitCodeGo = pGo.waitFor();
+        TestTimingRegistry.instance().recordSubPhase("goSidecarBuild", System.nanoTime() - goStart);
         if (exitCodeGo != 0) {
             throw new RuntimeException("Failed to compile Go sidecar");
         }
 
         // Build the runner-base image
+        long runnerImgStart = System.nanoTime();
         Process p = new ProcessBuilder(
                         "docker",
                         "build",
@@ -157,6 +161,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 .inheritIO()
                 .start();
         int exitCode = p.waitFor();
+        TestTimingRegistry.instance().recordSubPhase("runnerImageBuild", System.nanoTime() - runnerImgStart);
         if (exitCode != 0) {
             throw new RuntimeException("Failed to build docker image for real test");
         }
@@ -164,6 +169,7 @@ public abstract class AbstractAgentExecutionRealTest {
         // Create a dummy git repo and bake it into a test image at /kratis/dummy-repo
         // This eliminates the need for /tmp bind mounts — the repo is inside the
         // container
+        long e2eImgStart = System.nanoTime();
         Path dummyRepoDir = Files.createTempDirectory("kratis-dummy-repo-");
         Files.writeString(dummyRepoDir.resolve("README.md"), "# Dummy E2E Test Repo\n\nHello Kratis!");
         new ProcessBuilder("git", "init")
@@ -206,6 +212,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 .start();
         int exitCodeImage = pImage.waitFor();
         Files.deleteIfExists(tempDockerfile);
+        TestTimingRegistry.instance().recordSubPhase("e2eImageBuild", System.nanoTime() - e2eImgStart);
         if (exitCodeImage != 0) {
             throw new RuntimeException("Failed to build E2E test image with dummy repo");
         }
@@ -899,13 +906,17 @@ public abstract class AbstractAgentExecutionRealTest {
 
         if (spawnedEnvId != null) {
             // Extract container logs before terminating the sandbox
+            long logsStart = System.nanoTime();
             extractAndLogContainerLogs("kratis-sandbox-" + spawnedEnvId);
+            TestTimingRegistry.instance().recordSubPhase("extractLogs", System.nanoTime() - logsStart);
 
+            long destroyStart = System.nanoTime();
             try {
                 localDockerSandboxProvider.destroy(spawnedEnvId);
             } catch (Exception e) {
                 // Ignore
             }
+            TestTimingRegistry.instance().recordSubPhase("destroySandbox", System.nanoTime() - destroyStart);
             spawnedEnvId = null;
         }
     }
@@ -1157,11 +1168,13 @@ public abstract class AbstractAgentExecutionRealTest {
                 modelProvider.getId(),
                 modelProvider.getModelNames().getFirst());
 
+        long postStart = System.nanoTime();
         mockMvc.perform(post("/api/v1/chats/{chatId}/executions", chat.getId())
                         .header("Authorization", "Bearer " + authToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated());
+        TestTimingRegistry.instance().recordSubPhase("postExecutions", System.nanoTime() - postStart);
 
         // Find spawned environment
         List<ExecutionEnvironment> envs =
@@ -1173,6 +1186,7 @@ public abstract class AbstractAgentExecutionRealTest {
         spawnedEnvId = env.getId();
 
         // Wait for the sidecar container to connect
+        long connectStart = System.nanoTime();
         Awaitility.await()
                 .atMost(60, TimeUnit.SECONDS)
                 .pollInterval(Duration.ofMillis(500))
@@ -1181,9 +1195,11 @@ public abstract class AbstractAgentExecutionRealTest {
                             executionEnvironmentRepository.findById(env.getId()).orElseThrow();
                     assertThat(updatedEnv.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
                 });
+        TestTimingRegistry.instance().recordSubPhase("awaitConnected", System.nanoTime() - connectStart);
 
         // Wait for the ACP agent to initialize. Also accept a persisted IDLE/terminal status:
         // a normal ACP turn transitions the status to IDLE, and the fan-out may not have drained yet.
+        long acpInitStart = System.nanoTime();
         Awaitility.await("ACP agent initialization for harness " + getHarness().getName())
                 .atMost(180, TimeUnit.SECONDS)
                 .pollInterval(Duration.ofSeconds(1))
@@ -1193,6 +1209,7 @@ public abstract class AbstractAgentExecutionRealTest {
                         || isExecutionTerminalOrFailed(env.getId())
                         || getExecutionStatus(env.getId()) == SandboxExecutionStatus.IDLE
                         || acpInitializedPayloadReceived());
+        TestTimingRegistry.instance().recordSubPhase("awaitAcpInit", System.nanoTime() - acpInitStart);
         assertNoHarnessStall();
 
         // Fail fast on FAILED (the complete fan-out is async, so give the broadcast a moment).
@@ -1211,6 +1228,7 @@ public abstract class AbstractAgentExecutionRealTest {
 
         // Wait for prompt execution to complete: either all expected files exist, or the execution
         // reaches IDLE/terminal state (indicating the ACP agent finished its turn).
+        long promptStart = System.nanoTime();
         Awaitility.await("ACP prompt completion for harness " + getHarness().getName())
                 .atMost(300, TimeUnit.SECONDS)
                 .pollInterval(Duration.ofSeconds(2))
@@ -1219,6 +1237,7 @@ public abstract class AbstractAgentExecutionRealTest {
                         || allExpectedFilesExist()
                         || isExecutionTerminalOrFailed(env.getId())
                         || getExecutionStatus(env.getId()) == SandboxExecutionStatus.IDLE);
+        TestTimingRegistry.instance().recordSubPhase("awaitPromptComplete", System.nanoTime() - promptStart);
         assertNoHarnessStall();
 
         // Fail fast if the execution was reported as FAILED via WebSocket
@@ -1239,6 +1258,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 .isFalse();
 
         // Verify ACP prompt completed (status transitioned to IDLE or COMPLETED)
+        long verifyStart = System.nanoTime();
         Awaitility.await("ACP prompt completion status for harness "
                         + getHarness().getName())
                 .atMost(30, TimeUnit.SECONDS)
@@ -1442,10 +1462,12 @@ public abstract class AbstractAgentExecutionRealTest {
                                 .isGreaterThan(0L);
                     });
         }
+        TestTimingRegistry.instance().recordSubPhase("postCompletionVerify", System.nanoTime() - verifyStart);
 
         // Sleep the environment to simulate a graceful pause (reproducing the issue where
         // ExecutionEnvironmentService.sleepEnvironmentInternal calls terminateExecution, which for
         // agents like Codex that exit via signal produced an ugly "Execution failed" activity).
+        long sleepStart = System.nanoTime();
         SandboxExecution execution = sandboxExecutionRepository.findAll().stream()
                 .filter(e -> e.getEnvironment().getId().equals(env.getId()))
                 .findFirst()
@@ -1476,6 +1498,7 @@ public abstract class AbstractAgentExecutionRealTest {
         ExecutionEnvironment sleptEnv =
                 executionEnvironmentRepository.findById(env.getId()).orElseThrow();
         assertThat(sleptEnv.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
+        TestTimingRegistry.instance().recordSubPhase("sleepSnapshot", System.nanoTime() - sleepStart);
 
         // Regression assertion: sleeping an environment (which terminates the execution including
         // Codex via real sidecar) is a gentle pause operation, not a failure, and must not record

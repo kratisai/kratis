@@ -31,6 +31,7 @@ import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SlowTest;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.TestTimingRegistry;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -177,11 +178,13 @@ class GitCredentialFlowRealTest {
         localDockerSandboxProvider.setConnectUrl(originalServerUrl);
         Mockito.reset(processExecutor);
         if (spawnedEnvId != null) {
+            long start = System.nanoTime();
             try {
                 localDockerSandboxProvider.terminateSandbox(spawnedEnvId);
             } catch (Exception e) {
                 logger.warn("Failed to terminate sandbox {}", spawnedEnvId, e);
             }
+            TestTimingRegistry.instance().recordSubPhase("terminateSandbox", System.nanoTime() - start);
             spawnedEnvId = null;
         }
         databaseCleaner.cleanAll();
@@ -328,11 +331,13 @@ class GitCredentialFlowRealTest {
     }
 
     private void launchAndAwaitConnected(CreateSandboxExecutionRequest request) throws Exception {
+        long postStart = System.nanoTime();
         mockMvc.perform(post("/api/v1/chats/{chatId}/executions", chat.getId())
                         .header("Authorization", "Bearer " + authToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated());
+        TestTimingRegistry.instance().recordSubPhase("postExecutions", System.nanoTime() - postStart);
 
         var env = executionEnvironmentRepository.findByTeamId(chat.getTeam().getId()).stream()
                 .filter(e -> e.getName().startsWith("Sandbox -"))
@@ -340,6 +345,7 @@ class GitCredentialFlowRealTest {
                 .orElseThrow();
         spawnedEnvId = env.getId();
 
+        long connectStart = System.nanoTime();
         Awaitility.await()
                 .atMost(90, TimeUnit.SECONDS)
                 .pollInterval(Duration.ofMillis(500))
@@ -348,6 +354,7 @@ class GitCredentialFlowRealTest {
                             executionEnvironmentRepository.findById(env.getId()).orElseThrow();
                     assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
                 });
+        TestTimingRegistry.instance().recordSubPhase("awaitConnected", System.nanoTime() - connectStart);
     }
 
     private String extractSidecarLog() {

@@ -1,2 +1,3 @@
-com.kratisai.controlplane.testsupport.SlowTestSuiteValidator
 com.kratisai.controlplane.testsupport.TestDockerCleanupListener
+com.kratisai.controlplane.testsupport.SlowTestSuiteValidator
+com.kratisai.controlplane.testsupport.TestTimingReportListener
