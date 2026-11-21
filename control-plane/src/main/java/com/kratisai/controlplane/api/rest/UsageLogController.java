@@ -4,6 +4,7 @@ import com.kratisai.controlplane.api.restdto.PageResponseDto;
 import com.kratisai.controlplane.api.restdto.UsageLogEntryDto;
 import com.kratisai.controlplane.api.restdto.UsageSummaryDto;
 import com.kratisai.controlplane.config.SecurityUtil;
+import com.kratisai.controlplane.model.UsageType;
 import com.kratisai.controlplane.service.UsageService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -13,15 +14,18 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/v1/teams/{teamId}")
@@ -38,14 +42,16 @@ public class UsageLogController {
     @GetMapping("/usage-logs")
     @Operation(
             summary = "Get paginated usage logs",
-            description =
-                    "Returns human-friendly usage log entries spanning Executions, Ingestion Batches, and Chat Sessions")
+            description = "Returns human-friendly usage log entries spanning Executions, Repository Ingestion "
+                    + "Batches, Team Wiki builds, and Chat Sessions. The optional usageType filter "
+                    + "accepts EXECUTION, INGESTION, TEAM_WIKI, or CHAT; unknown values yield 400.")
     @ApiResponses(
             value = {
                 @ApiResponse(
                         responseCode = "200",
                         description = "Usage logs retrieved successfully",
                         content = @Content(schema = @Schema(implementation = UsageLogEntryDto.class))),
+                @ApiResponse(responseCode = "400", description = "Unknown usage type", content = @Content),
                 @ApiResponse(responseCode = "403", description = "Not a member of this team", content = @Content)
             })
     public ResponseEntity<PageResponseDto<UsageLogEntryDto>> getUsageLogs(
@@ -60,8 +66,27 @@ public class UsageLogController {
             @RequestParam(defaultValue = "20") int size) {
         UUID userId = SecurityUtil.getCurrentUserId();
         Page<UsageLogEntryDto> logs = usageService.getUsageLogs(
-                userId, teamId, timeframe, startDate, endDate, usageType, model, agent, PageRequest.of(page, size));
+                userId,
+                teamId,
+                timeframe,
+                startDate,
+                endDate,
+                parseUsageType(usageType),
+                model,
+                agent,
+                PageRequest.of(page, size));
         return ResponseEntity.ok(PageResponseDto.from(logs));
+    }
+
+    private static UsageType parseUsageType(String usageType) {
+        if (usageType == null || usageType.isBlank() || "all".equalsIgnoreCase(usageType.trim())) {
+            return null;
+        }
+        try {
+            return UsageType.valueOf(usageType.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown usage type: " + usageType);
+        }
     }
 
     @GetMapping("/usage-summary")

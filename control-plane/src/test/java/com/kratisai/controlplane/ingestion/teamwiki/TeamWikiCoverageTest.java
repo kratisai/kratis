@@ -222,8 +222,7 @@ class TeamWikiCoverageTest {
         UsageService usageService = new UsageService(
                 memberRepo, execRepo, ingestRepo, chatRepo, chatUsageRepo, ingestModelRepo, twBatchRepo, twModelRepo);
 
-        var logs =
-                usageService.getUsageLogs(userId, teamId, "7d", null, null, "all", null, null, PageRequest.of(0, 10));
+        var logs = usageService.getUsageLogs(userId, teamId, "7d", null, null, null, null, null, PageRequest.of(0, 10));
         assertThat(logs.getContent()).hasSize(1);
         assertThat(logs.getContent().getFirst().activityTitle()).contains("Team Wiki Build");
         assertThat(logs.getContent().getFirst().targetUrl()).isEqualTo("/wiki");

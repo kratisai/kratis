@@ -17,7 +17,7 @@ export interface UsageLogEntry {
   timestamp: string
   totalSpend: number
   totalTokens: number
-  usageType: 'CHAT' | 'EXECUTION' | 'INGESTION'
+  usageType: UsageType
   userEmail: string
 }
 
@@ -30,6 +30,8 @@ export interface UsageSummary {
   totalOperations: number
   totalTokens: number
 }
+
+export type UsageType = 'CHAT' | 'EXECUTION' | 'INGESTION' | 'TEAM_WIKI'
 
 interface ShareBreakdown {
   cost: number

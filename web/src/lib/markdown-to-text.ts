@@ -7,7 +7,9 @@ const QUOTE_RE = /^\s*>\s?/gm
 const BULLET_RE = /^\s*[-*+]\s+/gm
 const ORDERED_RE = /^\s*\d+[.)]\s+/gm
 const HR_RE = /^\s*([-*_])(?:\s*\1){2,}\s*$/gm
-const UNDERSCORE_EMPHASIS_RE = /(?<!\w)_{1,3}([^_\n]+)_{1,3}(?!\w)/g
+// Left boundary is captured instead of a lookbehind: lookbehind is a parse-time
+// SyntaxError on Safari < 16.4 and Vite/esbuild does not transpile regex literals.
+const UNDERSCORE_EMPHASIS_RE = /(^|[^\w])_{1,3}([^_\n]+)_{1,3}(?!\w)/g
 const ASTERISK_EMPHASIS_RE = /\*{1,3}([^*\n]+)\*{1,3}/g
 const STRIKE_RE = /~{1,2}([^~\n]+)~{1,2}/g
 
@@ -23,7 +25,7 @@ export function markdownToText(markdown: string): string {
     .replace(BULLET_RE, '')
     .replace(ORDERED_RE, '')
     .replace(HR_RE, ' ')
-    .replace(UNDERSCORE_EMPHASIS_RE, '$1')
+    .replace(UNDERSCORE_EMPHASIS_RE, '$1$2')
     .replace(ASTERISK_EMPHASIS_RE, '$1')
     .replace(STRIKE_RE, '$1')
     .replace(/\s+/g, ' ')

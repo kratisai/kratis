@@ -3,9 +3,12 @@ package com.kratisai.controlplane.api.restdto;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.model.UsageType;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -27,7 +30,7 @@ class UsageDtoTest {
                 SandboxExecutionStatus.COMPLETED,
                 "user@example.com",
                 Set.of("gpt-4o"),
-                "EXECUTION",
+                UsageType.EXECUTION,
                 100L,
                 0.05,
                 "/chats/chat-1/executions/exec-1");
@@ -39,7 +42,7 @@ class UsageDtoTest {
         assertThat(dto.status()).isEqualTo(SandboxExecutionStatus.COMPLETED);
         assertThat(dto.userEmail()).isEqualTo("user@example.com");
         assertThat(dto.modelIdentifiers()).containsExactly("gpt-4o");
-        assertThat(dto.usageType()).isEqualTo("EXECUTION");
+        assertThat(dto.usageType()).isEqualTo(UsageType.EXECUTION);
         assertThat(dto.totalTokens()).isEqualTo(100L);
         assertThat(dto.totalSpend()).isEqualTo(0.05);
         assertThat(dto.targetUrl()).isEqualTo("/chats/chat-1/executions/exec-1");
@@ -56,7 +59,7 @@ class UsageDtoTest {
                 SandboxExecutionStatus.COMPLETED,
                 "system@kratis.ai",
                 Set.of("text-embedding-3-small", "gpt-4o"),
-                "INGESTION",
+                UsageType.INGESTION,
                 500L,
                 0.01,
                 "/repos/repo-1");
@@ -75,7 +78,7 @@ class UsageDtoTest {
                 SandboxExecutionStatus.COMPLETED,
                 "user@example.com",
                 Set.of("gpt-4o"),
-                "EXECUTION",
+                UsageType.EXECUTION,
                 10L,
                 0.0,
                 null);
@@ -93,7 +96,7 @@ class UsageDtoTest {
                         SandboxExecutionStatus.COMPLETED,
                         "system@kratis.ai",
                         null,
-                        "INGESTION",
+                        UsageType.INGESTION,
                         0L,
                         0.0,
                         null))
@@ -116,5 +119,38 @@ class UsageDtoTest {
         assertThat(summary.modelShare()).hasSize(1);
         assertThat(summary.agentShareByTime()).hasSize(1);
         assertThat(summary.agentShareByCost()).hasSize(1);
+    }
+
+    @Test
+    void usageType_wireNamesAreStable() throws Exception {
+        assertThat(Arrays.stream(UsageType.values()).map(Enum::name))
+                .containsExactlyInAnyOrder("CHAT", "EXECUTION", "INGESTION", "TEAM_WIKI");
+
+        ObjectMapper mapper = new ObjectMapper();
+        for (UsageType type : UsageType.values()) {
+            String json = mapper.writeValueAsString(type);
+            assertThat(json).isEqualTo("\"" + type.name() + "\"");
+            assertThat(mapper.readValue(json, UsageType.class)).isEqualTo(type);
+        }
+    }
+
+    @Test
+    void usageLogEntryDto_serializesUsageTypeAsPlainName() throws Exception {
+        UsageLogEntryDto dto = new UsageLogEntryDto(
+                "id-1",
+                Instant.now(),
+                10L,
+                "Title",
+                "Agent",
+                SandboxExecutionStatus.COMPLETED,
+                "user@example.com",
+                Set.of("gpt-4o"),
+                UsageType.EXECUTION,
+                100L,
+                0.05,
+                "/chats/chat-1/executions/exec-1");
+
+        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(dto);
+        assertThat(json).contains("\"usageType\":\"EXECUTION\"");
     }
 }

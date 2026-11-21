@@ -833,6 +833,9 @@ describe('Execution Activity Log - Expanded/Collapsed States', () => {
       const collapseButton = screen.getByRole('button', { name: 'Collapse' })
       await user.click(collapseButton)
 
+      // Detached nodes keep stale classNames/parents, so the assertions below would
+      // pass vacuously if the click unmounted the branch instead of collapsing it.
+      expect(thoughtEl.isConnected).toBe(true)
       expect(thoughtEl.className).not.toContain('truncate')
       expect(thoughtEl.closest('.prose-activity')).not.toBeNull()
     } finally {

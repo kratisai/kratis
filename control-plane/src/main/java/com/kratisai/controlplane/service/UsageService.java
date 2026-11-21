@@ -12,6 +12,7 @@ import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.TeamWikiBatch;
 import com.kratisai.controlplane.model.TeamWikiModelUsage;
+import com.kratisai.controlplane.model.UsageType;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
@@ -98,7 +99,7 @@ public class UsageService {
             String timeframe,
             Instant startDate,
             Instant endDate,
-            String usageType,
+            UsageType usageType,
             String model,
             String agent,
             Pageable pageable) {
@@ -147,7 +148,7 @@ public class UsageService {
                     exec.getStatus(),
                     userEmail,
                     models,
-                    "EXECUTION",
+                    UsageType.EXECUTION,
                     exec.getTotalTokens(),
                     exec.getTotalSpend(),
                     targetUrl));
@@ -196,7 +197,7 @@ public class UsageService {
                     status,
                     "system@kratis.ai",
                     models,
-                    "INGESTION",
+                    UsageType.INGESTION,
                     batch.getModelUsage().stream()
                             .mapToLong(usage -> usage.getTotalTokens() != null ? usage.getTotalTokens() : 0L)
                             .sum(),
@@ -236,7 +237,7 @@ public class UsageService {
                     status,
                     "system@kratis.ai",
                     models,
-                    "INGESTION",
+                    UsageType.TEAM_WIKI,
                     twBatch.getModelUsage().stream()
                             .mapToLong(usage -> usage.getTotalTokens() != null ? usage.getTotalTokens() : 0L)
                             .sum(),
@@ -276,10 +277,10 @@ public class UsageService {
                             null,
                             title,
                             null,
-                            null,
+                            session.isEnded() ? SandboxExecutionStatus.COMPLETED : SandboxExecutionStatus.RUNNING,
                             userEmail,
                             models,
-                            "CHAT",
+                            UsageType.CHAT,
                             tokens,
                             spend,
                             targetUrl));
@@ -290,9 +291,7 @@ public class UsageService {
         // Apply filters
         List<UsageLogEntryDto> filtered = allEntries.stream()
                 .filter(e -> {
-                    if (usageType != null
-                            && !usageType.equalsIgnoreCase("all")
-                            && !e.usageType().equalsIgnoreCase(usageType)) {
+                    if (usageType != null && e.usageType() != usageType) {
                         return false;
                     }
                     if (model != null && !model.isBlank() && !containsModel(e.modelIdentifiers(), model)) {
@@ -321,8 +320,8 @@ public class UsageService {
     public UsageSummaryDto getUsageSummary(
             UUID userId, UUID teamId, String timeframe, Instant startDate, Instant endDate) {
         validateMembership(userId, teamId);
-        Page<UsageLogEntryDto> allEntries = getUsageLogs(
-                userId, teamId, timeframe, startDate, endDate, "all", null, null, PageRequest.of(0, 10000));
+        Page<UsageLogEntryDto> allEntries =
+                getUsageLogs(userId, teamId, timeframe, startDate, endDate, null, null, null, PageRequest.of(0, 10000));
         Map<UUID, List<IngestionModelUsage>> breakdownByBatch = ingestionModelUsageByBatch(
                 teamId, computeStartTime(timeframe, startDate), endDate != null ? endDate : Instant.now());
 
@@ -348,41 +347,16 @@ public class UsageService {
             totalCost += entry.totalSpend();
             totalTokens += entry.totalTokens();
 
-            // Per-model statistics for ingestion come from the persisted per-model rows,
-            // so each model is attributed exactly its own spend and tokens.
-            if ("INGESTION".equalsIgnoreCase(entry.usageType()) && entry.id().startsWith("ingest-")) {
-                UUID batchId = UUID.fromString(entry.id().substring("ingest-".length()));
-                for (IngestionModelUsage modelUsage : breakdownByBatch.getOrDefault(batchId, List.of())) {
-                    accumulateModel(
-                            costByModel,
-                            tokensByModel,
-                            countByModel,
-                            modelUsage.getModelIdentifier(),
-                            modelUsage.getTotalSpend() != null ? modelUsage.getTotalSpend() : 0.0,
-                            modelUsage.getTotalTokens() != null ? modelUsage.getTotalTokens() : 0L);
-                }
-            } else if ("INGESTION".equalsIgnoreCase(entry.usageType())
-                    && entry.id().startsWith("team-wiki-")) {
-                UUID twBatchId = UUID.fromString(entry.id().substring("team-wiki-".length()));
-                for (TeamWikiModelUsage modelUsage : teamWikiModelUsageRepository.findByTeamWikiBatchId(twBatchId)) {
-                    accumulateModel(
-                            costByModel,
-                            tokensByModel,
-                            countByModel,
-                            modelUsage.getModelIdentifier(),
-                            modelUsage.getTotalSpend() != null ? modelUsage.getTotalSpend() : 0.0,
-                            modelUsage.getTotalTokens() != null ? modelUsage.getTotalTokens() : 0L);
-                }
-            } else {
-                for (String modelName : entry.modelIdentifiers()) {
-                    accumulateModel(
-                            costByModel,
-                            tokensByModel,
-                            countByModel,
-                            modelName,
-                            entry.totalSpend(),
-                            entry.totalTokens());
-                }
+            // Per-model statistics for ingestion and team-wiki batches come from the persisted
+            // per-model rows, so each model is attributed exactly its own spend and tokens.
+            for (ModelContribution contribution : perModelContributions(entry, breakdownByBatch)) {
+                accumulateModel(
+                        costByModel,
+                        tokensByModel,
+                        countByModel,
+                        contribution.modelIdentifier(),
+                        contribution.spend(),
+                        contribution.tokens());
             }
 
             // Agent share by time (using duration or count) - only when agentName is present
@@ -461,6 +435,38 @@ public class UsageService {
     private Map<UUID, List<IngestionModelUsage>> ingestionModelUsageByBatch(UUID teamId, Instant start, Instant end) {
         return ingestionModelUsageRepository.findByTeamIdAndStartedAtBetween(teamId, start, end).stream()
                 .collect(Collectors.groupingBy(usage -> usage.getBatch().getId()));
+    }
+
+    private record ModelContribution(String modelIdentifier, double spend, long tokens) {}
+
+    private List<ModelContribution> perModelContributions(
+            UsageLogEntryDto entry, Map<UUID, List<IngestionModelUsage>> breakdownByBatch) {
+        // Exhaustive switch expression: adding a UsageType constant breaks compilation here
+        // instead of silently dropping the new source from the per-model breakdown.
+        return switch (entry.usageType()) {
+            case INGESTION ->
+                breakdownByBatch
+                        .getOrDefault(UUID.fromString(entry.id().substring("ingest-".length())), List.of())
+                        .stream()
+                        .map(modelUsage -> new ModelContribution(
+                                modelUsage.getModelIdentifier(),
+                                modelUsage.getTotalSpend() != null ? modelUsage.getTotalSpend() : 0.0,
+                                modelUsage.getTotalTokens() != null ? modelUsage.getTotalTokens() : 0L))
+                        .toList();
+            case TEAM_WIKI ->
+                teamWikiModelUsageRepository
+                        .findByTeamWikiBatchId(UUID.fromString(entry.id().substring("team-wiki-".length())))
+                        .stream()
+                        .map(modelUsage -> new ModelContribution(
+                                modelUsage.getModelIdentifier(),
+                                modelUsage.getTotalSpend() != null ? modelUsage.getTotalSpend() : 0.0,
+                                modelUsage.getTotalTokens() != null ? modelUsage.getTotalTokens() : 0L))
+                        .toList();
+            case EXECUTION, CHAT ->
+                entry.modelIdentifiers().stream()
+                        .map(modelName -> new ModelContribution(modelName, entry.totalSpend(), entry.totalTokens()))
+                        .toList();
+        };
     }
 
     private static boolean containsModel(Set<String> models, String model) {

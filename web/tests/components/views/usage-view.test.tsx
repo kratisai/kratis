@@ -35,18 +35,27 @@ const entryTemplate: UsageLogEntry = {
 
 let logEntries: UsageLogEntry[]
 
+const fetchUsageLogsMock = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/usage-api', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/usage-api')>('@/lib/usage-api')
+  return { ...actual, fetchUsageLogs: fetchUsageLogsMock }
+})
+
 vi.mock('@/hooks/use-usage', () => ({
-  useUsageLogs: () => ({
-    data: {
-      content: logEntries,
-      number: 0,
-      size: 15,
-      totalElements: logEntries.length,
-      totalPages: 1,
-    },
-    isLoading: false,
-    refetch: vi.fn(),
-  }),
+  useUsageLogs: (teamId: null | string, params?: { usageType?: string }) => {
+    fetchUsageLogsMock(teamId, params)
+    return {
+      data: {
+        content: logEntries,
+        number: 0,
+        size: 15,
+        totalElements: logEntries.length,
+        totalPages: 1,
+      },
+      isLoading: false,
+      refetch: vi.fn(),
+    }
+  },
   useUsageSummary: () => ({
     data: {
       agentShareByCost: [
@@ -67,13 +76,20 @@ vi.mock('@/hooks/use-usage', () => ({
 }))
 
 vi.mock('@/store/auth-store', () => ({
-  useAuthStore: (selector: (state: { currentTeamId: string }) => unknown) =>
-    selector({ currentTeamId: 'team-1' }),
+  useAuthStore: Object.assign(
+    vi.fn((selector: (state: { currentTeamId: string }) => unknown) =>
+      selector({ currentTeamId: 'team-1' }),
+    ),
+    {
+      getState: vi.fn(() => ({ accessToken: 'mock-token' })),
+    },
+  ),
 }))
 
 describe('UsageView', () => {
   beforeEach(() => {
     logEntries = [entryTemplate]
+    fetchUsageLogsMock.mockClear()
   })
 
   it('renders usage dashboard summary cards and table entries', () => {
@@ -122,5 +138,112 @@ describe('UsageView', () => {
     await user.click(screen.getByRole('tab', { name: 'Time' }))
 
     expect(screen.getByText('10s')).toBeDefined()
+  })
+
+  it('renders a usage-type badge for each entry', () => {
+    logEntries = [
+      entryTemplate,
+      { ...entryTemplate, activityTitle: 'Wiki Build', id: 'tw-1', usageType: 'TEAM_WIKI' },
+      {
+        ...entryTemplate,
+        id: 'unknown-type-1',
+        // Double assertion marks the seed as deliberately out-of-union wire data.
+        usageType: 'FUTURE_TYPE' as unknown as UsageLogEntry['usageType'],
+      },
+    ]
+    render(<UsageView />)
+
+    expect(screen.getByText('Execution')).toBeDefined()
+    expect(screen.getByText('Team Wiki')).toBeDefined()
+    // A usage type the web layer does not know yet falls back to the raw value
+    // instead of crashing the table render.
+    expect(screen.getByText('FUTURE_TYPE')).toBeDefined()
+  })
+
+  it('renders a status badge for a chat row derived from the session', () => {
+    logEntries = [
+      {
+        ...entryTemplate,
+        activityTitle: 'Ask Kratis about onboarding',
+        agentName: null,
+        id: 'chat-session-1',
+        status: 'RUNNING',
+        targetUrl: null,
+        usageType: 'CHAT',
+      },
+    ]
+    render(<UsageView />)
+
+    expect(screen.getByText('Chat Session')).toBeDefined()
+    expect(screen.getByText('RUNNING')).toBeDefined()
+    expect(document.querySelector('.animate-spin')).not.toBeNull()
+  })
+
+  it('renders a COMPLETED status badge for an ended chat session', () => {
+    logEntries = [
+      {
+        ...entryTemplate,
+        id: 'chat-session-2',
+        status: 'COMPLETED',
+        usageType: 'CHAT',
+      },
+    ]
+    render(<UsageView />)
+
+    expect(screen.getByText('COMPLETED')).toBeDefined()
+  })
+
+  it('sends the selected usage type as a query param and the raw all value at the hook boundary', async () => {
+    const user = userEvent.setup()
+    render(<UsageView />)
+
+    // The usage-type select is the second combobox (after the timeframe select).
+    const usageTypeSelect = screen.getAllByRole('combobox')[1]
+    expect(fetchUsageLogsMock).toHaveBeenCalledWith(
+      'team-1',
+      expect.objectContaining({ usageType: 'all' }),
+    )
+
+    await user.click(usageTypeSelect)
+    await user.click(screen.getByRole('option', { name: 'Team Wiki' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ usageType: 'TEAM_WIKI' }),
+    )
+
+    await user.click(screen.getAllByRole('combobox')[1])
+    await user.click(screen.getByRole('option', { name: 'All Types' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ usageType: 'all' }),
+    )
+  })
+
+  it('omits the usageType query param for the all value when fetching', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      json: async () => ({ content: [], number: 0, size: 15, totalElements: 0, totalPages: 0 }),
+      ok: true,
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = mockFetch
+    try {
+      const { fetchUsageLogs } = await vi.importActual<typeof import('@/lib/usage-api')>(
+        '@/lib/usage-api',
+      )
+
+      await fetchUsageLogs('team-1', { usageType: 'all' })
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/teams/team-1/usage-logs?'),
+        expect.anything(),
+      )
+      const urlWithoutType = mockFetch.mock.calls[0][0] as string
+      expect(urlWithoutType).not.toContain('usageType')
+
+      await fetchUsageLogs('team-1', { usageType: 'TEAM_WIKI' })
+      const urlWithType = mockFetch.mock.calls[1][0] as string
+      expect(urlWithType).toContain('usageType=TEAM_WIKI')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

@@ -113,7 +113,12 @@ class AotHintsTest {
                         .onType(ClientPayload.AuthResult.class)
                         .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
                 .accepts(hints);
-        assertThat(RuntimeHintsPredicates.reflection().onMethod(ActivityKind.class, "fromString"))
+        // BindingReflectionHintsRegistrar registers record-component accessors via
+        // ExecutableMode.INVOKE; onMethod(Class, String) is deprecated for removal, so
+        // assert the resolved accessor method directly.
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onMethod(declaredMethod(ActivityKind.class, "fromString"))
+                        .invoke())
                 .accepts(hints);
         assertThat(RuntimeHintsPredicates.reflection()
                         .onType(TelemetryEvent.Thought.class)
@@ -133,7 +138,9 @@ class AotHintsTest {
                         .onType(DimensionDiscoveryResult.class)
                         .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
                 .accepts(hints);
-        assertThat(RuntimeHintsPredicates.reflection().onMethod(DimensionDiscoveryResult.class, "domains"))
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onMethod(declaredMethod(DimensionDiscoveryResult.class, "domains"))
+                        .invoke())
                 .accepts(hints);
         assertThat(RuntimeHintsPredicates.reflection()
                         .onType(DimensionDiscoveryResult.DimensionResult.class)
@@ -158,7 +165,8 @@ class AotHintsTest {
                         .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
                 .accepts(hints);
         assertThat(RuntimeHintsPredicates.reflection()
-                        .onMethod(CreateEmbeddingResponse.Usage.class, "putAdditionalProperty"))
+                        .onMethod(declaredMethod(CreateEmbeddingResponse.Usage.class, "putAdditionalProperty"))
+                        .invoke())
                 .accepts(hints);
         assertThat(RuntimeHintsPredicates.reflection().onType(CreateEmbeddingResponse.class))
                 .accepts(hints);
@@ -180,7 +188,9 @@ class AotHintsTest {
                         .onType(Message.class)
                         .withMemberCategory(MemberCategory.INVOKE_DECLARED_CONSTRUCTORS))
                 .accepts(hints);
-        assertThat(RuntimeHintsPredicates.reflection().onMethod(Message.class, "putAdditionalProperty"))
+        assertThat(RuntimeHintsPredicates.reflection()
+                        .onMethod(declaredMethod(Message.class, "putAdditionalProperty"))
+                        .invoke())
                 .accepts(hints);
         assertThat(RuntimeHintsPredicates.reflection().onType(JsonValue.class)).accepts(hints);
     }
@@ -266,5 +276,19 @@ class AotHintsTest {
         assertThat(RuntimeHintsPredicates.resource()
                         .forResource("okhttp3/internal/publicsuffix/PublicSuffixDatabase.gz"))
                 .accepts(hints);
+    }
+
+    /**
+     * Resolves a declared method by name (any parameter list) for use with
+     * {@code onMethod(Method)}. Methods like {@code putAdditionalProperty(String, JsonValue)}
+     * and enum {@code fromString(String)} take arguments, so an arity-fixed lookup misses them.
+     */
+    private static java.lang.reflect.Method declaredMethod(Class<?> type, String name) {
+        for (java.lang.reflect.Method method : type.getDeclaredMethods()) {
+            if (method.getName().equals(name)) {
+                return method;
+            }
+        }
+        throw new IllegalStateException("No declared method " + name + " on " + type);
     }
 }

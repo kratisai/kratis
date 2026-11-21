@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.api.restdto;
 
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.model.UsageType;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.Objects;
@@ -16,7 +17,7 @@ public record UsageLogEntryDto(
         SandboxExecutionStatus status,
         String userEmail,
         Set<String> modelIdentifiers,
-        String usageType, // "CHAT", "EXECUTION", "INGESTION"
+        UsageType usageType,
         Long totalTokens,
         Double totalSpend,
         String targetUrl) {

@@ -1,14 +1,19 @@
+import type { LucideIcon } from 'lucide-react'
+
 import { Link } from '@tanstack/react-router'
 import { formatDistanceToNow } from 'date-fns'
 import {
   Activity,
   BarChart3,
+  BookOpen,
   Calendar,
   CheckCircle2,
   Clock,
   Coins,
   Cpu,
   Filter,
+  HelpCircle,
+  MessageSquare,
   PieChart,
   RefreshCw,
   Sparkles,
@@ -17,6 +22,8 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useState } from 'react'
+
+import type { UsageType } from '@/types/usage-types'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -31,6 +38,13 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useUsageLogs, useUsageSummary } from '@/hooks/use-usage'
 import { formatDurationSeconds } from '@/lib/format'
 import { useAuthStore } from '@/store/auth-store'
+
+const USAGE_TYPE_META: Partial<Record<UsageType, { icon: LucideIcon; label: string }>> = {
+  CHAT: { icon: MessageSquare, label: 'Chat Session' },
+  EXECUTION: { icon: Sparkles, label: 'Execution' },
+  INGESTION: { icon: BarChart3, label: 'Repository Ingestion' },
+  TEAM_WIKI: { icon: BookOpen, label: 'Team Wiki' },
+}
 
 export function UsageView() {
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
@@ -272,7 +286,8 @@ export function UsageView() {
             <SelectContent>
               <SelectItem value="all">All Types</SelectItem>
               <SelectItem value="EXECUTION">Executions</SelectItem>
-              <SelectItem value="INGESTION">Ingestions</SelectItem>
+              <SelectItem value="INGESTION">Repository Ingestion</SelectItem>
+              <SelectItem value="TEAM_WIKI">Team Wiki</SelectItem>
               <SelectItem value="CHAT">Chat Sessions</SelectItem>
             </SelectContent>
           </Select>
@@ -431,17 +446,17 @@ export function UsageView() {
 
                         {/* 5. Usage Type & Cost */}
                         <td>
-                          <div className="text-foreground text-xs font-semibold">
-                            {entry.usageType}
-                          </div>
-                          <div className="text-muted-foreground mt-0.5 text-xs">
-                            <span className="font-medium">
-                              {entry.totalTokens.toLocaleString()} tk
-                            </span>
-                            <span className="mx-1.5">•</span>
-                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                              ${entry.totalSpend.toFixed(4)}
-                            </span>
+                          <div className="flex flex-col gap-1">
+                            <UsageTypeBadge usageType={entry.usageType} />
+                            <div className="text-muted-foreground text-xs">
+                              <span className="font-medium">
+                                {entry.totalTokens.toLocaleString()} tk
+                              </span>
+                              <span className="mx-1.5">•</span>
+                              <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                ${entry.totalSpend.toFixed(4)}
+                              </span>
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -488,5 +503,20 @@ export function UsageView() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+const FALLBACK_USAGE_TYPE: { icon: LucideIcon } = {
+  icon: HelpCircle,
+}
+
+function UsageTypeBadge({ usageType }: { usageType: UsageType }) {
+  const meta = USAGE_TYPE_META[usageType] ?? { ...FALLBACK_USAGE_TYPE, label: usageType }
+  const Icon = meta.icon
+  return (
+    <span className="bg-secondary text-secondary-foreground inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium">
+      <Icon className="h-3 w-3" />
+      {meta.label}
+    </span>
   )
 }
