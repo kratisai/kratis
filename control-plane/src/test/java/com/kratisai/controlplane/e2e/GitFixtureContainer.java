@@ -63,6 +63,7 @@ public class GitFixtureContainer extends GenericContainer<GitFixtureContainer> {
                 .withFileFromClasspath("Dockerfile", "fixtures/git/Dockerfile")
                 .withFileFromClasspath("httpd-git.conf", "fixtures/git/httpd-git.conf"));
         this.token = token;
+        withLabel("kratis.test.resource", "true");
         withExposedPorts(80, 2222);
     }
 

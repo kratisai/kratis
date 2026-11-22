@@ -1,4 +1,5 @@
 FROM debian:bookworm-slim
+LABEL kratis.test.resource=true
 RUN apt-get update && apt-get install -y --no-install-recommends \
     apache2 apache2-utils git openssh-server openssh-client \
     && rm -rf /var/lib/apt/lists/* \

@@ -166,7 +166,15 @@ public abstract class AbstractAgentExecutionRealTest {
             // Build the runner-base image
             long runnerImgStart = System.nanoTime();
             ProcessBuilder pbRunner = new ProcessBuilder(
-                    "docker", "build", "-t", RUNNER_IMAGE_NAME, "-f", "../build/Dockerfile.runner-base", "..");
+                    "docker",
+                    "build",
+                    "--label",
+                    "kratis.test.resource=true",
+                    "-t",
+                    RUNNER_IMAGE_NAME,
+                    "-f",
+                    "../build/Dockerfile.runner-base",
+                    "..");
             int exitCode = runQuietBuildProcess(pbRunner);
             TestTimingRegistry.instance().recordSubPhase("runnerImageBuild", System.nanoTime() - runnerImgStart);
             if (exitCode != 0) {
@@ -208,6 +216,8 @@ public abstract class AbstractAgentExecutionRealTest {
                 ProcessBuilder pbImage = new ProcessBuilder(
                         "docker",
                         "build",
+                        "--label",
+                        "kratis.test.resource=true",
                         "-t",
                         TEST_IMAGE_NAME,
                         "-f",
@@ -1005,6 +1015,15 @@ public abstract class AbstractAgentExecutionRealTest {
                 }
             } finally {
                 java.nio.file.Files.deleteIfExists(tempLog);
+            }
+            if (executionFailedEarly && "OpenCode".equals(getHarness().getName())) {
+                DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, containerId);
+                var opencodeLogs = verifier.executeInContainer(
+                        "sh", "-c", "tail -200 $HOME/.local/share/opencode/log/*.log 2>/dev/null || true");
+                String logText = new String(opencodeLogs.output(), StandardCharsets.UTF_8);
+                if (!logText.isBlank()) {
+                    logger.info("[test] OpenCode internal logs for {}:\n{}", containerId, logText);
+                }
             }
         } catch (Exception e) {
             logger.warn("[test] Failed to extract container logs for {}: {}", containerId, e.getMessage());

@@ -20,6 +20,7 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -85,6 +86,7 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
             .withNetworkMode(TEST_NETWORK_NAME)
             .withCreateContainerCmdModifier(cmd -> cmd.withAliases(POSTGRES_ALIAS))
             .withLabel("workspace.id", TestIsolationScope.workspaceScope())
+            .withLabel("kratis.test.resource", "true")
             .withReuse(true);
 
     static final GenericContainer<?> LITELLM_CONTAINER;
@@ -102,6 +104,7 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
         // 1. Start PostgreSQL (reused across test runs when reuse is enabled)
         long pgStart = System.nanoTime();
         POSTGRES_CONTAINER.start();
+        removeSupersededNetworkPeers(POSTGRES_CONTAINER.getContainerId(), "pgvector");
         long postgresStartNanos = System.nanoTime() - pgStart;
 
         // Datasource coordinates are global — all Spring contexts talk to the same Postgres
@@ -153,6 +156,7 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                 .withCreateContainerCmdModifier(cmd -> cmd.withAliases(LITELLM_ALIAS))
                 .withExtraHost("host.docker.internal", "host-gateway")
                 .withLabel("workspace.id", TestIsolationScope.workspaceScope())
+                .withLabel("kratis.test.resource", "true")
                 .withEnv("LITELLM_MASTER_KEY", "sk-test-master")
                 .withEnv("LITELLM_LOG", "INFO")
                 .withEnv("STORE_MODEL_IN_DB", "True")
@@ -173,7 +177,13 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
 
         logger.info("Starting LiteLLM proxy...");
         long litellmStart = System.nanoTime();
+        if (!hasLiteLLMSchema()) {
+            // Fresh Postgres has no LiteLLM tables yet; drop any stale LiteLLM container so startup runs prisma db push
+            removeSupersededNetworkPeers(POSTGRES_CONTAINER.getContainerId(), "litellm");
+        }
         LITELLM_CONTAINER.start();
+        removeSupersededNetworkPeers(
+                POSTGRES_CONTAINER.getContainerId(), LITELLM_CONTAINER.getContainerId(), "litellm");
         long litellmStartNanos = System.nanoTime() - litellmStart;
 
         String litellmMappedPort = String.valueOf(LITELLM_CONTAINER.getMappedPort(4000));
@@ -273,9 +283,58 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                     .createNetworkCmd()
                     .withName(TEST_NETWORK_NAME)
                     .withDriver("bridge")
+                    .withLabels(Map.of("kratis.test.resource", "true"))
                     .exec();
         } catch (ConflictException alreadyExists) {
             logger.debug("Reusing test network {}", TEST_NETWORK_NAME);
+        }
+    }
+
+    private static boolean hasLiteLLMSchema() {
+        String litellmDbUrl = buildLitellmJdbcUrl();
+        try (Connection conn = DriverManager.getConnection(
+                        litellmDbUrl, POSTGRES_CONTAINER.getUsername(), POSTGRES_CONTAINER.getPassword());
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery("SELECT to_regclass('public.\"LiteLLM_VerificationToken\"')")) {
+            return rs.next() && rs.getString(1) != null;
+        } catch (Exception e) {
+            logger.debug("Unable to inspect litellm schema readiness: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private static String buildLitellmJdbcUrl() {
+        String jdbcUrl = POSTGRES_CONTAINER.getJdbcUrl();
+        int queryStart = jdbcUrl.indexOf('?');
+        String cleanUrl = queryStart >= 0 ? jdbcUrl.substring(0, queryStart) : jdbcUrl;
+        int lastSlash = cleanUrl.lastIndexOf('/');
+        return cleanUrl.substring(0, lastSlash + 1) + "litellm";
+    }
+
+    private static void removeSupersededNetworkPeers(String activePgId, String imageSubstring) {
+        removeSupersededNetworkPeers(activePgId, null, imageSubstring);
+    }
+
+    private static void removeSupersededNetworkPeers(String activePgId, String activeLitellmId, String imageSubstring) {
+        try {
+            var client = DockerClientFactory.instance().client();
+            var containers = client.listContainersCmd()
+                    .withShowAll(true)
+                    .withNetworkFilter(List.of(TEST_NETWORK_NAME))
+                    .exec();
+            for (var c : containers) {
+                String id = c.getId();
+                if (id.equals(activePgId) || id.equals(activeLitellmId)) {
+                    continue;
+                }
+                String image = c.getImage() != null ? c.getImage() : "";
+                if (image.contains(imageSubstring)) {
+                    logger.info("Removing superseded {} peer {} on network {}", imageSubstring, id, TEST_NETWORK_NAME);
+                    client.removeContainerCmd(id).withForce(true).exec();
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to reconcile stale peers on network {}: {}", TEST_NETWORK_NAME, e.getMessage());
         }
     }
 

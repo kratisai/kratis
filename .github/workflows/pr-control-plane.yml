@@ -137,7 +137,10 @@ jobs:
           fi
 
       - name: Run Tests with Coverage (JaCoCo)
-        # Skip spotless, checkstyle, and PMD since they are validated in parallel validate job
+        # Skip spotless, checkstyle, and PMD since they are validated in parallel validate job.
+        # GitHub Actions ubuntu-latest has 4 vCPUs / 16 GiB RAM: cap E2E DinD lanes at 2 to prevent CPU/RAM contention.
+        env:
+          KRATIS_TEST_SLOT_GROUP_END_TO_END_MAX_CONCURRENCY: "2"
         run: ./mvnw clean test -Dspotless.skip=true -Dcheckstyle.skip=true -Dpmd.skip=true
 
       - name: Publish Test Timing Summary
