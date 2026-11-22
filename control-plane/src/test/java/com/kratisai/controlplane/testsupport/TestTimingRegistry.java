@@ -46,6 +46,7 @@ public final class TestTimingRegistry {
     private static final long NANOS_PER_MS = 1_000_000L;
     private static final double NANOS_PER_SEC = 1_000_000_000.0;
     private static final long DRAIN_WAIT_THRESHOLD_NANOS = 5_000_000L;
+    private static final long MAX_CLASS_IDLE_DRAIN_NANOS = 2_000_000_000L;
     private static final int TOP_LIMIT = 25;
 
     private static final TestTimingRegistry INSTANCE = new TestTimingRegistry();
@@ -442,6 +443,10 @@ public final class TestTimingRegistry {
             if (ct != null) {
                 ct.drainCalls.increment();
                 ct.drainNanos.add(clamped);
+                if (!hadActiveTask) {
+                    ct.drainIdleCalls.increment();
+                    ct.drainIdleNanos.add(clamped);
+                }
                 if (afterTestExec) {
                     ct.drainAfterTestExecNanos.add(clamped);
                 }
@@ -477,6 +482,10 @@ public final class TestTimingRegistry {
             if (ct != null) {
                 ct.processCalls.increment();
                 ct.processNanos.add(clamped);
+                if ("codebase-memory-mcp".equals(category) || "syft".equals(category)) {
+                    ct.realParserCommands.increment();
+                    ct.realParserNames.add(category);
+                }
             }
         }
     }
@@ -519,6 +528,88 @@ public final class TestTimingRegistry {
         return contexts.values().stream()
                 .mapToLong(c -> Math.max(0L, c.refreshDurationNanos.get()))
                 .sum();
+    }
+
+    /**
+     * Evaluates structural and performance regression gates for a completed test class. Returns a
+     * list of human-readable violation messages (empty when all gates pass).
+     */
+    public List<String> validateClassGates(Class<?> testClass) {
+        if (testClass == null) {
+            return List.of();
+        }
+        ClassTiming ct = classes.get(testClass.getName());
+        if (ct == null) {
+            return List.of();
+        }
+        List<String> violations = new ArrayList<>();
+
+        if (ct.springIntegrationTest && ct.slot != SLOT_NONE) {
+            List<ContextTrace> slotContexts = contexts.values().stream()
+                    .filter(c -> c.slot == ct.slot)
+                    .sorted(Comparator.comparing(c -> c.ctxId))
+                    .toList();
+            if (slotContexts.size() > 1) {
+                String details = slotContexts.stream()
+                        .map(c -> c.ctxId
+                                + "("
+                                + simpleName(c.triggerClass)
+                                + ", diff="
+                                + (c.differentiators.isEmpty() ? "<default>" : String.join(",", c.differentiators))
+                                + ")")
+                        .reduce((a, b) -> a + "; " + b)
+                        .orElse("");
+                violations.add(String.format(
+                        Locale.ROOT,
+                        "SLOT_%d forked %d Spring contexts (%s). Keep 1 context per slot via TestSpiesConfig and mutable properties.",
+                        ct.slot,
+                        slotContexts.size(),
+                        details));
+            }
+            for (ContextTrace c : slotContexts) {
+                if (c.closedDuringRun && c.userClasses.contains(ct.fqcn)) {
+                    violations.add(String.format(
+                            Locale.ROOT,
+                            "Context %s (SLOT_%d) closed mid-suite during %s (avoid @DirtiesContext / cache eviction).",
+                            c.ctxId,
+                            ct.slot,
+                            ct.simpleName));
+                }
+            }
+        }
+
+        if (ct.drainIdleCalls.sum() >= 2 && ct.drainIdleNanos.sum() > MAX_CLASS_IDLE_DRAIN_NANOS) {
+            violations.add(String.format(
+                    Locale.ROOT,
+                    "DrainExecutors idle-pool overhead reached %.2fs across %d idle calls (budget <= %.2fs); check Tracking* awaitIdle fast-path.",
+                    toSec(ct.drainIdleNanos.sum()),
+                    ct.drainIdleCalls.sum(),
+                    toSec(MAX_CLASS_IDLE_DRAIN_NANOS)));
+        }
+
+        if (ct.realParserCommands.sum() > 0 && !ct.usesRealNativeBinaries) {
+            violations.add(String.format(
+                    Locale.ROOT,
+                    "Executed real native binaries (%s, %d call(s)) without @UseRealNativeBinaries; annotate with @UseRealNativeBinaries or stub via IngestionTestStubs.",
+                    String.join(", ", ct.realParserNames),
+                    ct.realParserCommands.sum()));
+        }
+        return violations;
+    }
+
+    static boolean isRealParserOrSbomAllowed(Class<?> testClass) {
+        if (testClass == null) {
+            return false;
+        }
+        if (hasAnnotationInHierarchy(testClass, UseRealNativeBinaries.class)) {
+            return true;
+        }
+        for (var method : testClass.getDeclaredMethods()) {
+            if (method.isAnnotationPresent(UseRealNativeBinaries.class)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Emits formatted report to stdout and writes report files under {@code target/} once per run. */
@@ -1075,6 +1166,31 @@ public final class TestTimingRegistry {
                         simpleName(m.className),
                         m.methodName)));
 
+        // Regression Gate Summary
+        long forkedSlots = bySlot.entrySet().stream()
+                .filter(e -> e.getKey() != SLOT_NONE && e.getValue().size() > 1)
+                .count();
+        long unexpectedRealBinaryClasses = s.classes.stream()
+                .filter(c -> c.realParserCommands.sum() > 0 && !c.usesRealNativeBinaries)
+                .count();
+        long idleDrainViolations = s.classes.stream()
+                .filter(c -> c.drainIdleCalls.sum() >= 2 && c.drainIdleNanos.sum() > MAX_CLASS_IDLE_DRAIN_NANOS)
+                .count();
+        out.append('\n');
+        out.append(
+                "── Regression Gates ────────────────────────────────────────────────────────────────────────────────\n");
+        out.append(String.format(
+                Locale.ROOT,
+                "Context Forks (>1 ctx/slot): %d (%s) | Early Context Closures: %d (%s) | Idle Drain >2s Classes: %d (%s) | Unannotated Native-Binary Classes: %d (%s)%n",
+                forkedSlots,
+                forkedSlots == 0 ? "PASS" : "FAIL",
+                earlyClosures,
+                earlyClosures == 0 ? "PASS" : "FAIL",
+                idleDrainViolations,
+                idleDrainViolations == 0 ? "PASS" : "FAIL",
+                unexpectedRealBinaryClasses,
+                unexpectedRealBinaryClasses == 0 ? "PASS" : "FAIL"));
+
         out.append(
                 "====================================================================================================\n");
         return out.toString();
@@ -1090,6 +1206,7 @@ public final class TestTimingRegistry {
             String slotMode = springInt ? ThreadBoundContextCustomizer.getSlotModeForClass(testClass) : "UNIT";
             boolean dirties = hasAnnotationInHierarchy(testClass, DirtiesContext.class);
             boolean transactional = hasAnnotationInHierarchy(testClass, Transactional.class);
+            boolean realNativeBinaries = isRealParserOrSbomAllowed(testClass);
             return new ClassTiming(
                     testClass.getName(),
                     testClass.getSimpleName(),
@@ -1099,7 +1216,8 @@ public final class TestTimingRegistry {
                     slot,
                     slotMode,
                     dirties,
-                    transactional);
+                    transactional,
+                    realNativeBinaries);
         });
     }
 
@@ -1632,6 +1750,7 @@ public final class TestTimingRegistry {
         final String slotMode;
         final boolean dirtiesContext;
         final boolean transactional;
+        final boolean usesRealNativeBinaries;
 
         volatile String threadName;
         final AtomicLong startOffsetNanos = new AtomicLong(-1L);
@@ -1663,11 +1782,15 @@ public final class TestTimingRegistry {
 
         final LongAdder drainCalls = new LongAdder();
         final LongAdder drainNanos = new LongAdder();
+        final LongAdder drainIdleCalls = new LongAdder();
+        final LongAdder drainIdleNanos = new LongAdder();
         final LongAdder drainAfterTestExecNanos = new LongAdder();
         final LongAdder drainWaitEvents = new LongAdder();
 
         final LongAdder processCalls = new LongAdder();
         final LongAdder processNanos = new LongAdder();
+        final LongAdder realParserCommands = new LongAdder();
+        final Set<String> realParserNames = ConcurrentHashMap.newKeySet();
         final Map<String, LongAdder> subPhases = new ConcurrentHashMap<>();
 
         ClassTiming(
@@ -1679,7 +1802,8 @@ public final class TestTimingRegistry {
                 int slot,
                 String slotMode,
                 boolean dirtiesContext,
-                boolean transactional) {
+                boolean transactional,
+                boolean usesRealNativeBinaries) {
             this.fqcn = fqcn;
             this.simpleName = simpleName;
             this.springIntegrationTest = springIntegrationTest;
@@ -1689,6 +1813,7 @@ public final class TestTimingRegistry {
             this.slotMode = slotMode;
             this.dirtiesContext = dirtiesContext;
             this.transactional = transactional;
+            this.usesRealNativeBinaries = usesRealNativeBinaries;
         }
     }
 

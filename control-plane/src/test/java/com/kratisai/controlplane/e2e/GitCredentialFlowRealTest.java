@@ -33,6 +33,7 @@ import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.TestIsolationScope;
 import com.kratisai.controlplane.testsupport.TestTimingRegistry;
+import com.kratisai.controlplane.testsupport.UseRealNativeBinaries;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -65,6 +66,7 @@ import org.springframework.web.context.WebApplicationContext;
  */
 @SpringIntegrationTest
 @SlowTest(slotGroup = "E2E_GIT_CREDENTIAL")
+@UseRealNativeBinaries
 class GitCredentialFlowRealTest {
 
     private static final String SIDECAR_LOG_LOC = new SandboxProperties().getSidecarLog();

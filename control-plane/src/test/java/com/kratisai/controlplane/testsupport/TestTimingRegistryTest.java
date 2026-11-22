@@ -136,12 +136,74 @@ class TestTimingRegistryTest {
                 .contains("lockHeals=1")
                 .contains("agentTaskExecutor=1")
                 .contains("docker commit")
-                .contains("sleepSnapshot=0.32s");
+                .contains("sleepSnapshot=0.32s")
+                .contains("Regression Gates");
+    }
+
+    @Test
+    void detectsSlotContextForksEarlyClosuresIdleDrainAndUnexpectedNativeBinaries() throws Exception {
+        TestTimingRegistry registry = TestTimingRegistry.createForTest();
+        long t0 = 1_000_000_000L;
+        registry.markSuiteStartedAt(t0);
+
+        int slotA = ThreadBoundContextCustomizer.getSlotForClass(SampleSpringA.class);
+        try (AnnotationConfigApplicationContext ctx1 = new AnnotationConfigApplicationContext();
+                AnnotationConfigApplicationContext ctx2 = new AnnotationConfigApplicationContext()) {
+
+            registry.recordClassStarted(SampleSpringA.class, "worker-1", t0);
+            registry.registerContextInit(ctx1, "test_1111", 10 * MS, t0);
+            registry.recordContextCustomizer(ctx1, slotA, "HASH", SampleSpringA.class, List.of());
+            registry.recordClassContextUsage(SampleSpringA.class, ctx1, false, 100 * MS);
+
+            // Simulate a second context forked into the same slot and closed mid-suite
+            registry.registerContextInit(ctx2, "test_2222", 10 * MS, t0 + 100 * MS);
+            registry.recordContextCustomizer(ctx2, slotA, "HASH", SampleSpringA.class, List.of("@MockitoBean(Foo)"));
+            registry.recordClassContextUsage(SampleSpringA.class, ctx2, false, 100 * MS);
+            registry.recordContextClosed(ctx2, t0 + 200 * MS);
+
+            // Simulate idle DrainExecutors regression (> 2s idle across >=2 calls)
+            registry.recordDrainExecutors(1_500 * MS, false, List.of());
+            registry.recordDrainExecutors(1_500 * MS, true, List.of());
+
+            // Simulate unstubbed native parser call outside parser/E2E allowlist
+            registry.recordProcessExec(List.of("/opt/bin/codebase-memory-mcp", "cli"), 500 * MS, 0);
+            registry.recordClassFinished(SampleSpringA.class, false, t0 + 3_500 * MS);
+
+            List<String> violations = registry.validateClassGates(SampleSpringA.class);
+            assertThat(violations)
+                    .anyMatch(v -> v.contains("forked 2 Spring contexts"))
+                    .anyMatch(v -> v.contains("closed mid-suite"))
+                    .anyMatch(v -> v.contains("DrainExecutors idle-pool overhead"))
+                    .anyMatch(v -> v.contains("without @UseRealNativeBinaries"));
+        }
+
+        // @UseRealNativeBinaries (including @Inherited subclasses and method-level) permits native binary calls
+        assertThat(TestTimingRegistry.isRealParserOrSbomAllowed(SampleRealBinaryBase.class))
+                .isTrue();
+        assertThat(TestTimingRegistry.isRealParserOrSbomAllowed(SampleRealBinaryChild.class))
+                .isTrue();
+        assertThat(TestTimingRegistry.isRealParserOrSbomAllowed(SampleMethodLevelRealBinary.class))
+                .isTrue();
+        assertThat(TestTimingRegistry.isRealParserOrSbomAllowed(SampleSpringA.class))
+                .isFalse();
     }
 
     private static class SampleFastA {}
 
     private static class SampleFastB {}
+
+    @SpringIntegrationTest
+    private static class SampleSpringA {}
+
+    @UseRealNativeBinaries
+    private static class SampleRealBinaryBase {}
+
+    private static class SampleRealBinaryChild extends SampleRealBinaryBase {}
+
+    private static class SampleMethodLevelRealBinary {
+        @UseRealNativeBinaries
+        void runsRealBinary() {}
+    }
 
     @SlowTest(slotGroup = "E2E_DOCKER_CONTAINER")
     private static class SampleSlowTail {}

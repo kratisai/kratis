@@ -19,6 +19,7 @@ import com.kratisai.controlplane.service.ProcessExecutor;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.UseRealNativeBinaries;
 import com.kratisai.controlplane.testsupport.WikiPageContentFixtures;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
@@ -401,6 +402,7 @@ class WikiGenerationServiceTest {
     }
 
     @Test
+    @UseRealNativeBinaries
     void testWikiGeneration_withRealSccExecution() throws Exception {
         String sccPath = Path.of(sccBinaryPath).toAbsolutePath().toString();
         assertThat(Path.of(sccPath))

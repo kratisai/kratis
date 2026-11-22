@@ -28,6 +28,7 @@ import com.kratisai.controlplane.testsupport.SlowTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.TestIsolationScope;
 import com.kratisai.controlplane.testsupport.TestTimingRegistry;
+import com.kratisai.controlplane.testsupport.UseRealNativeBinaries;
 import com.kratisai.controlplane.testsupport.llm.UseRealLlmClient;
 import com.kratisai.controlplane.testsupport.llm.WireMockLlmServer;
 import com.kratisai.controlplane.websocket.ClientWebSocketFixture;
@@ -94,6 +95,7 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
  */
 @SlowTest(slotGroup = "E2E_DOCKER_CONTAINER", maxConcurrency = 3)
 @UseRealLlmClient
+@UseRealNativeBinaries
 public abstract class AbstractAgentExecutionRealTest {
 
     private static final String SIDECAR_LOG_LOC = new SandboxProperties().getSidecarLog();

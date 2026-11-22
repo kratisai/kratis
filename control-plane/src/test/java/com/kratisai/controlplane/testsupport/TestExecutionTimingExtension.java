@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.testsupport;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.extension.AfterAllCallback;
@@ -150,6 +151,15 @@ public class TestExecutionTimingExtension
         }
         boolean failed = context.getExecutionException().isPresent();
         TestTimingRegistry.instance().recordClassFinished(testClass, failed, now);
+        if (!failed) {
+            List<String> gateViolations = TestTimingRegistry.instance().validateClassGates(testClass);
+            if (!gateViolations.isEmpty()) {
+                throw new AssertionError("Performance/architecture regression gate failed for "
+                        + testClass.getSimpleName()
+                        + ":\n - "
+                        + String.join("\n - ", gateViolations));
+            }
+        }
     }
 
     private static final class ClassState {

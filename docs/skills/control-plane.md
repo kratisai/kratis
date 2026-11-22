@@ -23,7 +23,7 @@ description: Control-plane Java conventions. Use when changing control-plane Jav
 
 ## Commands
 
-See [`control-plane/README.md`](../../control-plane/README.md). Do not use `-Pfast` to mark a task complete. Tests: [`control-plane-testing.md`](control-plane-testing.md).
+See [`control-plane/README.md`](../../control-plane/README.md). Run `./mvnw test -Pfast` first for rapid feedback (`~2m`), then always run `./mvnw verify` (`~7m`) before marking a task complete. Tests: [`control-plane-testing.md`](control-plane-testing.md).
 
 ## Harness catalogue
 

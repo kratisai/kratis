@@ -14,19 +14,19 @@ See the [root README](../README.md) for product context.
 
 ```bash
 ./mvnw spring-boot:run          # dev; starts compose.yaml (Postgres, LiteLLM)
-./mvnw test -Pfast              # iteration only; skips @SlowTest
-./mvnw test                     # full suite, including E2E; required before done
-./mvnw verify                   # style + tests + coverage gate
+./mvnw test -Pfast              # fast iteration first (~2m); skips @SlowTest & JaCoCo
+./mvnw verify                   # full validation before done (~7m): style + all tests + E2E + SpotBugs + JaCoCo
+./mvnw clean verify             # required after spring-boot:process-test-aot so SpotBugs ignores target/spring-aot/
 ./mvnw spotless:apply           # Palantir Java Format
 ./mvnw spring-boot:process-aot  # GraalVM AOT check
 ./mvnw -Pnative native:compile  # native binary
 ```
 
-JaCoCo: `>90%` instruction and line, `>85%` branch. After `./mvnw test`, read `target/site/jacoco/jacoco.csv`.
+JaCoCo: `>90%` instruction and line, `>85%` branch. After `./mvnw verify`, read `target/site/jacoco/jacoco.csv` and `target/test-timing-summary.txt`.
 
 Dev stack lifecycle: Spring orchestrates `compose.yaml` (`spring-boot-docker-compose`) with `lifecycle-management=start-only`: the stack is started if needed but never torn down on exit — restarts reuse the running containers. Inert in prod/native, where the runtime image ships no compose file. LiteLLM is pinned by digest (`v1.102.0`) instead of tracking `main-stable`, so `up` reuses the cached image and only a recreated container pays its ~20s health-wait.
 
-Never use `@SpringBootTest` directly. Use `@SpringIntegrationTest`. Do not mock `ChatModel` with Mockito; use `FakeChatModel` and `PromptMatcher`. Details: [`docs/skills/control-plane-testing.md`](../docs/skills/control-plane-testing.md) and [`docs/skills/control-plane.md`](../docs/skills/control-plane.md).
+Never use `@SpringBootTest`, `@MockitoBean`, `@TestPropertySource`, `@DirtiesContext`, or per-class `@Import` on `@SpringIntegrationTest` classes. Use `TestSpiesConfig` for shared spies, `FakeChatModel` + `PromptMatcher` for LLM mocks, `@UseRealNativeBinaries` for real binary tests (and `IngestionTestStubs` elsewhere), and `TestIsolationScope` for Docker/temp isolation. Details: [`docs/skills/control-plane-testing.md`](../docs/skills/control-plane-testing.md) and [`docs/skills/control-plane.md`](../docs/skills/control-plane.md).
 
 ## Layout
 

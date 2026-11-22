@@ -9,6 +9,7 @@ import com.kratisai.controlplane.service.ProcessExecutor;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import com.kratisai.controlplane.testsupport.UseRealNativeBinaries;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 
+@UseRealNativeBinaries
 @SpringIntegrationTest
 class IngestionPipelineE2ETest {
 

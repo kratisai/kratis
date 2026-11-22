@@ -140,6 +140,24 @@ jobs:
         # Skip spotless, checkstyle, and PMD since they are validated in parallel validate job
         run: ./mvnw clean test -Dspotless.skip=true -Dcheckstyle.skip=true -Dpmd.skip=true
 
+      - name: Publish Test Timing Summary
+        if: always()
+        run: |
+          if [ -f target/test-timing-summary.txt ]; then
+            cat target/test-timing-summary.txt >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload Test Timing Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-plane-timing-reports
+          path: |
+            control-plane/target/test-timing-summary.txt
+            control-plane/target/test-timing-*.csv
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Add JaCoCo Report to PR
         uses: madrapps/jacoco-report@v1.7.1
         # Fork PRs get a read-only GITHUB_TOKEN and cannot comment; gate to same-repo PRs.

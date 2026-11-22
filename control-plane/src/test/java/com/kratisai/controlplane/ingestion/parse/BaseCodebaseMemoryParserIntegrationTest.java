@@ -14,6 +14,7 @@ import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.TestIsolationScope;
+import com.kratisai.controlplane.testsupport.UseRealNativeBinaries;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
@@ -22,7 +23,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 
-abstract @SpringIntegrationTest class BaseCodebaseMemoryParserIntegrationTest {
+@UseRealNativeBinaries
+@SpringIntegrationTest
+abstract class BaseCodebaseMemoryParserIntegrationTest {
 
     @Autowired
     protected CtxNodeRepository ctxNodeRepository;

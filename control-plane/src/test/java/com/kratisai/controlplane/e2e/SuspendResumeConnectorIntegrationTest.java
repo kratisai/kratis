@@ -24,6 +24,7 @@ import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.TestIsolationScope;
 import com.kratisai.controlplane.testsupport.TestTimingRegistry;
+import com.kratisai.controlplane.testsupport.UseRealNativeBinaries;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -43,6 +44,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
  */
 @SpringIntegrationTest
 @SlowTest(slotGroup = "E2E_DOCKER_CONTAINER", maxConcurrency = 3)
+@UseRealNativeBinaries
 class SuspendResumeConnectorIntegrationTest {
 
     private static final String RUNNER_IMAGE = TestIsolationScope.runnerImageTag();

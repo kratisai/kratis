@@ -32,14 +32,17 @@ cd web && npm run typecheck && npm run lint:fix && npm run format && npm test &&
 cd sidecar && go vet ./... && golangci-lint run ./... && go test -v -cover ./...
 ```
 
-`./mvnw test -Pfast` is for iteration only. Final validation is `./mvnw verify`.
+`./mvnw test -Pfast` (`~2m`, skips `@SlowTest`, E2E Docker, and JaCoCo) is the fast-feedback gate: run it first during iteration and before running the full suite. Final validation is always `./mvnw verify` (`~7m`). If you ran `spring-boot:process-test-aot`, run `./mvnw clean` before `spotbugs:check` or `verify` so generated `target/spring-aot/` classes are removed.
 
 The build is the formatter: Spotless (Palantir Java Format), Checkstyle, PMD, ESLint, Prettier, golangci-lint v2.13.1.
 
 
 ## Rules
 
-- Tests cover every functional change. New hooks, components, services, APIs, and stores need tests. A task is not done until `npm test` (web) or `./mvnw test` (control-plane) passes. Do not use `-Pfast` to mark work complete.
+- Tests cover every functional change. New hooks, components, services, APIs, and stores need tests. A task is not done until `npm test` (web) or `./mvnw verify` (control-plane) passes. Run `-Pfast` first for fast feedback, never as final validation.
+- Keep one Spring `ApplicationContext` per slot: never add `@MockitoBean`, `@MockitoSpyBean`, `@MockBean`, `@TestPropertySource`, `@DirtiesContext`, or per-class `@Import` on `@SpringIntegrationTest` classes (enforced by `TestArchitectureSanityTest` and `TestTimingRegistry`). Put shared spies in `TestSpiesConfig` + `ResetTestSpiesTestExecutionListener` and save/restore mutable `@ConfigurationProperties` in `@BeforeEach`/`@AfterEach` (only set `usageFinalizeDelay=ZERO` on pure `FakeChatModel` + `MockEmbeddingModel` tests, never on `@UseRealLlmClient` / `@UseRealEmbeddingClient`).
+- Preserve real native binary validation in tests annotated with `@UseRealNativeBinaries` (`codebase-memory-mcp`, `syft`, `scc`, Docker/sidecar; enforced against `IngestionTestStubs` by `TestArchitectureSanityTest`). Use `IngestionTestStubs` in non-`@UseRealNativeBinaries` ingestion orchestration tests (`TestTimingRegistry` fails otherwise).
+- Scope test Docker networks, `kratis.instance.id`, image tags, and temp dirs through `TestIsolationScope` so parallel branch/DinD runs never collide. Pass `.pollDelay(Duration.ZERO)` on `Awaitility` checks and terminate test sandboxes before returning from `@Test` methods that do not wait for agent setup completion (`GitCredentialFlowRealTest`).
 - Never skip tests for a missing tool, binary, Docker, or config. Fail with a clear assertion. Never treat a failing test as flaky.
 - Use `git mv` when renaming. Do not delete-and-rewrite.
 - Prefer enums and sealed/closed records over stringly-typed options. Cover every value.

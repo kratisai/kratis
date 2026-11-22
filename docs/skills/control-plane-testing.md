@@ -253,24 +253,41 @@ class SandboxExecutionWebSocketIntegrationTest {
 > Do **not** call `Assumptions.assumeTrue` / `assumeFalse`, or use conditional disable annotations, when a required binary, Docker image, tool, or config is missing. A wrong environment is a **failure**, not a skip. Assert the prerequisite (`assertThat(path).exists().isExecutable()`) or let the real call fail with a clear message, then fix CI/local setup (e.g. install `scc` to `../build/bin/scc` in `pr-control-plane.yml`). Soft-skips hide broken pipelines and rot fixtures.
 
 > [!CAUTION]
-> **VALIDATION RULE (`-Pfast` vs `./mvnw test`)**: `-Pfast` excludes all `@SlowTest` classes and is for rapid feedback only. Final validation of any task must run `./mvnw test` or `./mvnw verify`.
+> **TWO-STAGE VALIDATION RULE (`-Pfast` first -> `./mvnw verify` before completion)**:
+> 1. Run `./mvnw test -Pfast` (`~2m`, excludes `@SlowTest` and skips JaCoCo) first while iterating and before running the full suite so fast unit, Spring, controller, and ingestion errors fail early.
+> 2. Always run `./mvnw verify` (`~7m`, includes `@SlowTest`, E2E Docker harnesses, Spotless, Checkstyle, PMD, SpotBugs, and JaCoCo) before marking a task complete. If you ran `spring-boot:process-test-aot`, clean `target/spring-aot/` (`./mvnw clean verify`) so SpotBugs does not scan generated AOT classes.
 
 ```bash
-# Execute All Tests (MANDATORY for final task validation — runs full test suite including @SlowTest)
-./mvnw test
-
-# Execute Fast Tests Only (For rapid iteration feedback ONLY — NEVER use for final task validation!)
+# 1. Fast iteration suite (~2m; skips @SlowTest — ALWAYS run first, NEVER as final validation)
 ./mvnw test -Pfast
+
+# 2. Full validation gate (~7m; mandatory before completion — runs @SlowTest, E2E Docker, SpotBugs, JaCoCo)
+./mvnw verify
 
 # Run tests sequentially (useful for debugging threading/race conditions)
 ./mvnw test -Psequential
 
-# Single test class
+# Single test class / method
 ./mvnw test -Dtest=ChatServiceTest
-
-# Single test method
 ./mvnw test -Dtest=ChatServiceTest#sendMessage_shortMessage
 ```
+
+### Suite Timing & Regression Reports
+
+Every test run writes timing and context-cache diagnostics under `control-plane/target/`:
+- `target/test-timing-summary.txt`: wall clock, concurrency histogram, single-thread tail, worker utilization, per-slot spans, Spring context audit (`8` expected contexts = `1` per slot), `DatabaseCleaner` / `DrainExecutors` totals, `ProcessExecutor` breakdown, and E2E sub-phases.
+- `target/test-timing-report.csv`, `target/test-timing-contexts.csv`, `target/test-timing-timeline.csv`: per-class, per-context, and timeline CSVs.
+
+`TestTimingRegistry` and `TestArchitectureSanityTest` fail the build if a `@SpringIntegrationTest` forks a second Spring context in a slot, closes a context early, exceeds `DrainExecutors` idle overhead, or runs unstubbed `codebase-memory-mcp` / `syft` outside the designated real-binary tests below.
+
+### Tests That MUST Use Real Native Binaries (`@UseRealNativeBinaries`)
+
+Annotate tests that validate real native binaries (`codebase-memory-mcp`, `syft`, `scc`, `kratis-connector` / Docker DinD) with `@UseRealNativeBinaries` (mirroring `@UseRealLlmClient` and `@UseRealEmbeddingClient`). Do **not** stub out or skip native binaries in `@UseRealNativeBinaries` tests:
+
+- **Enforced in both directions:**
+  - `TestArchitectureSanityTest` fails if a `@UseRealNativeBinaries` test imports `IngestionTestStubs`.
+  - `TestTimingRegistry` fails if a test without `@UseRealNativeBinaries` executes unstubbed `codebase-memory-mcp` or `syft` through `ProcessExecutor`.
+- **Discovering all real-binary tests:** Search for `@UseRealNativeBinaries` across `control-plane/src/test/java` rather than maintaining a manual class list. Non-annotated ingestion orchestration tests must use `IngestionTestStubs.stubFastParserAndSurfaces(...)`.
 
 ### Testcontainer Reuse and Restart
 
@@ -354,26 +371,21 @@ void setUp() {
 ```
 
 **How it works under the hood:**
-- It queries `information_schema.tables` in the test schema (e.g. `test_abcd1234`).
-- It truncates every base table except Liquibase's `databasechangelog` / `databasechangeloglock`.
-- New migrations are included automatically. There is no table allow-list to maintain.
+- Discovers and caches the schema's base tables once per context (excluding Liquibase's `databasechangelog` / `databasechangeloglock`).
+- Runs a single MVCC-exact `UNION ALL WHERE EXISTS` probe (`DatabaseCleaner.buildNonEmptyCheckSql`) and skips `SET lock_timeout` / `TRUNCATE` when all tables are empty.
+- Runs `TRUNCATE TABLE ... CASCADE` only against the non-empty tables, avoiding unnecessary `ACCESS EXCLUSIVE` locks and redundant cleans between `@AfterEach` and `@BeforeEach`.
+- Calls `TestLiteLLMClient.cleanupTrackedModels()` to remove test-registered LiteLLM models.
 
 > [!IMPORTANT]
 > **Parallel Context Isolation:** Tests execute in parallel across independent Spring context slots, each with its own PostgreSQL schema. `DatabaseCleaner` only truncates the schema for the current slot.
 
-### 2. Mocks Strategy with Shared Context (`FakeChatModelConfig`)
+### 2. Mocks & Property Overrides with Shared Context (`FakeChatModelConfig`, `TestSpiesConfig`, `IngestionTestStubs`)
 
-To prevent dirtying the Spring Application Context (which leads to extremely slow test executions and "ApplicationContext failure threshold exceeded" errors), avoid using `@MockitoBean` or `@MockBean` on core shared infrastructure like `ChatModel` or `EmbeddingModel`.
+Spring's `DefaultCacheAwareContextLoaderDelegate` holds a global `synchronized (contextCache)` monitor lock during both `loadContext()` and `isContextLoaded()`. Any `@MockitoBean`, `@MockitoSpyBean`, `@TestPropertySource`, `@DirtiesContext`, or per-class `@Import` on `@SpringIntegrationTest` forks a bespoke `ApplicationContext`, runs Liquibase again, and stalls sibling worker threads. `TestArchitectureSanityTest` and `TestTimingRegistry` forbid these forks.
 
-**Do not use `@MockitoBean` as it dirties the spring context**
+Instead, rely on the shared `@SpringIntegrationTest` infrastructure:
 
-Instead, rely on the global `@SpringIntegrationTest` config which imports `FakeChatModelConfig`:
-
-- **Fakes, not mocks:** It registers hand-written `FakeChatModel` and `MockEmbeddingModel`
-  beans (plus factories that return them). They implement the Spring AI interfaces
-  directly, so they stay in step with library API changes without Mockito.
-- **Reset:** Keep tests isolated by calling `fakeChatModel.reset()` in `@BeforeEach`
-  (and `FakeChatModelConfig.clear()` to drop any real-model overrides):
+- **Fakes for AI models (`FakeChatModelConfig`):** Registers hand-written `FakeChatModel` and `MockEmbeddingModel` beans. Call `fakeChatModel.reset()` in `@BeforeEach` (and `FakeChatModelConfig.clear()` to drop any real-model overrides):
 
 ```java
 @Autowired private FakeChatModel fakeChatModel;
@@ -384,28 +396,20 @@ void setUp() {
 }
 ```
 
-### 3. Parallel Execution & Load Balancing (`@SlowTest`)
+- **Shared spies for Spring services (`TestSpiesConfig` + `ResetTestSpiesTestExecutionListener`):** Wraps shared beans (`TeamWikiWorker`, `TeamWikiGenerationService`, `SemanticIndexingService`, `VirtualKeyService`, `CodebaseMemoryParserService`, `SurfaceExtractionService`, and `TestLiteLLMClient` via `LiteLLMTestConfig`) using `AdditionalAnswers.delegatesTo` after AOP proxy creation so `@Async` and `@Transactional` proxies keep working. Autowire the bean and stub with `doReturn(...)` / `doNothing()` / `doThrow()` (never `when(spy.foo(...))`, which calls the real delegate during stub setup). `ResetTestSpiesTestExecutionListener` resets only already-instantiated lazy singletons between test methods.
+- **Ingestion binary stubs (`IngestionTestStubs`):** For ingestion orchestration tests not marked `@UseRealNativeBinaries`, call `IngestionTestStubs.stubFastParserAndSurfaces(...)` so tests persist realistic `CtxNode` / `CtxEdge` fixtures in milliseconds without running `codebase-memory-mcp` or `syft`.
+- **Per-test property overrides:** Save and restore mutable `@ConfigurationProperties` fields (`GitHubAppConfig`, `TelemetryProperties`, `LiteLLMProperties`) inside `@BeforeEach` / `@AfterEach` instead of `@TestPropertySource`. Only set `liteLLMProperties.setUsageFinalizeDelay(Duration.ZERO)` in pure `FakeChatModel` + `MockEmbeddingModel` tests—**never** in `@UseRealLlmClient` or `@UseRealEmbeddingClient` tests, where it would race with LiteLLM's async Postgres spend-log flush before `revokeKey`.
 
-Integration tests run concurrently (4 parallel threads by default). To prevent thread starvation and "bin packing" collisions (where multiple slow tests are randomly hashed to the same thread), the suite uses a dynamic load-balancing slot router.
+### 3. Parallel Execution, Slot Allocation, and E2E Hygiene (`@SlowTest`, `TestIsolationScope`)
 
-**The `@SlowTest` Annotation & Dedicated Slot Groups:**
-Any test class that takes a significant amount of pure execution time **MUST** be annotated with `@SlowTest`.
-- `@SlowTest` classes are routed via a round-robin assignment strategy to evenly distribute the heaviest tests across all 4 execution slots.
-- **Dedicated Slot Groups**: To serialize execution of resource-heavy tests (like Docker container-based E2E tests) without blocking standard parallel slots, you can assign them a dedicated slot group: `@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER")`. This hashes all matching tests to a dedicated Spring Context slot (outside the 0-3 pool range), running them sequentially inside their own isolated environment schema.
-- Fast tests continue to use deterministic hashing for optimal bin packing.
-- You can skip all `@SlowTest` annotated classes for rapid feedback by running `./mvnw test -Pfast`.
+Integration tests run concurrently (4 parallel threads by default) across isolated Spring context slots (`POOL_SIZE = 4`) and schemas:
 
-**Automated Validation (Dynamic Thresholds):**
-To prevent performance regressions and "flip-flopping" across different hardware environments, the test suite uses `SlowTestSuiteValidator` (a JUnit TestExecutionListener) to validate execution timings relative to the total suite execution time:
-- If a test takes **> 5%** of the total pure suite execution time and is missing `@SlowTest`, the build will fail.
-- If a test takes **< 2%** of the total pure suite execution time and has `@SlowTest`, the build will fail (remove the annotation).
-- Any test annotated with context-polluting annotations (like `@DirtiesContext`) **must** be annotated with `@SlowTest` because tearing down and rebuilding the Spring Context blocks the execution thread significantly.
-
-**Sandbox Lifecycle Sweep Isolation:**
-Because parallel Spring Contexts execute concurrently and share the host Docker environment, each context's `SandboxLifecycleService` runs independently. To prevent a sweep in one context from mistaking active containers from another context as "orphaned" and destroying them, the sweep is disabled during tests by setting `kratis.sandbox.lifecycle.enabled=false` in `src/test/resources/application.properties`.
-
-
-If you are debugging a flaky test and want to disable parallel execution entirely, run `./mvnw test -Psequential`. This falls back to assigning standard thread-bound slots (0-3) sequentially on the main thread, ensuring isolated database schemas remain separated but without concurrent execution overlap.
+- **Dedicated & Multi-Lane Slot Groups:** `@SlowTest(slotGroup = "...")` allocates dedicated slot(s) outside `0..3` so heavy Docker tests do not block fast slots. Multi-lane groups use `maxConcurrency` (e.g., `@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER", maxConcurrency = 3)`).
+- **Lock-Free Listener Context Lookup:** `TestExecutionListener`s resolve the active context via `ContextCacheTracker.resolvedContext(testContext)` so method-level listeners (`DrainExecutors`, `ResetChatModel`, `ResetTestSpies`) never block on `DefaultCacheAwareContextLoaderDelegate`'s global lock while sibling slots boot.
+- **Parallel Docker Branch Isolation (`TestIsolationScope`):** Derives a deterministic scope from `kratis.test.scope` / `KRATIS_TEST_SCOPE`, else `SHA-256(user.dir [+ "@" + containerHostname])`. `PostgresTestInitializer`, `TestDockerCleanupListener`, E2E/fixture image tags, and CBM/blob temp directories all use `TestIsolationScope` so parallel containers on different branches do not collide even on a shared Docker socket.
+- **E2E Polling & Drain Hygiene:** Always pass `.pollDelay(Duration.ZERO)` on `Awaitility` checks in E2E tests. In tests that inspect provisioning state and finish before agent setup completes (`GitCredentialFlowRealTest`), terminate the spawned sandbox at the end of the `@Test` method so WebSocket close aborts background setup before `DrainExecutors.afterTestExecution` runs. `src/test/resources/application.properties` sets `kratis.sandbox.docker.prompt-quiet-period=2s` (vs `10s` production default) for E2E turns.
+- **SlowTest Threshold Validation:** `SlowTestSuiteValidator` flags non-`@SlowTest` classes taking `> 5%` of pure execution time and `@SlowTest` classes taking `< 2%` (excluding `@DirtiesContext` context polluters).
+- **Sequential Debugging:** Run `./mvnw test -Psequential` to disable parallel execution while keeping slot isolation.
 
 ## Code Coverage & JaCoCo
 
