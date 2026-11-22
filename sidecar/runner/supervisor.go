@@ -136,6 +136,7 @@ type AgentSupervisor struct {
 type EventSink interface {
 	SendOutput(line string, stream string)
 	SendActivity(activity acp.Activity)
+	MarkAgentActivity()
 	SendComplete(info CompletionInfo)
 	RequestPermission(req acp.PermissionRequest) (selectedOptionID string, err error)
 	CreateElicitation(req acp.ElicitationRequest) (acp.ElicitationResult, error)
@@ -312,6 +313,10 @@ func (s *AgentSupervisor) SendOutput(line string, stream string) {
 
 func (s *AgentSupervisor) SendActivity(activity acp.Activity) {
 	s.eventSink.SendActivity(activity)
+}
+
+func (s *AgentSupervisor) MarkAgentActivity() {
+	s.eventSink.MarkAgentActivity()
 }
 
 // SetDebug controls whether the ACP handler relays sidecar-internal

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -2073,9 +2074,10 @@ func TestHandleElicitationRequest_FormModeStillReachesSink(t *testing.T) {
 // mockEventSink implements EventSink for testing
 
 type mockEventSink struct {
-	outputs      []capturedOutput
-	activities   []capturedActivity
-	permRequests []capturedPermissionRequest
+	outputs       []capturedOutput
+	activities    []capturedActivity
+	activityMarks atomic.Int64
+	permRequests  []capturedPermissionRequest
 	suggestions  []capturedSuggestion
 	cancelChan   chan struct{}
 	// Optional approval result; when zero-value the sink blocks on cancelChan.
@@ -2126,6 +2128,10 @@ func (m *mockEventSink) SendActivity(activity Activity) {
 		status:       string(activity.Status),
 		detail:       activity.Detail,
 	})
+}
+
+func (m *mockEventSink) MarkAgentActivity() {
+	m.activityMarks.Add(1)
 }
 
 func (m *mockEventSink) RequestPermission(req PermissionRequest) (string, error) {
@@ -2498,5 +2504,30 @@ func TestHandleSessionUpdate_NonSuggestionToolCallNotRelayedRaw(t *testing.T) {
 		if strings.HasPrefix(o.line, "[ACP][TOOL]") {
 			t.Fatalf("unexpected raw payload relay for execute tool call: %q", o.line)
 		}
+	}
+}
+
+func TestNotificationHandler_MarksAgentActivityExceptSuppressedReplay(t *testing.T) {
+	sink := &mockEventSink{}
+	h := NewHandler(sink, nil, "")
+	notif := h.NotificationHandler(nil)
+
+	// Attach-replayed session/update notifications must not extend post-turn activity.
+	h.SetSuppressSessionUpdates(true)
+	notif("session/update", map[string]interface{}{"update": map[string]interface{}{
+		"sessionUpdate": "agent_message_chunk",
+	}}, nil, false)
+	if got := sink.activityMarks.Load(); got != 0 {
+		t.Fatalf("expected 0 activity marks while suppressed, got %d", got)
+	}
+
+	// Non-suppressed session/update (even unhandled update types) and other ACP notifications mark activity.
+	h.SetSuppressSessionUpdates(false)
+	notif("session/update", map[string]interface{}{"update": map[string]interface{}{
+		"sessionUpdate": "usage_update",
+	}}, nil, false)
+	notif("custom/status_notification", map[string]interface{}{"state": "working"}, nil, false)
+	if got := sink.activityMarks.Load(); got != 2 {
+		t.Fatalf("expected 2 activity marks for live ACP notifications, got %d", got)
 	}
 }

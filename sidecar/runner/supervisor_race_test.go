@@ -17,6 +17,7 @@ type mockEventSink struct {
 	outputLines    []string
 	activityCalls  []string
 	activities     []acp.Activity
+	activityMarks  atomic.Int64
 	completions    []CompletionInfo
 	permRequests   []string
 	permCancelChan chan struct{}
@@ -36,6 +37,10 @@ func (m *mockEventSink) SendActivity(activity acp.Activity) {
 	defer m.mu.Unlock()
 	m.activityCalls = append(m.activityCalls, string(activity.ActivityType))
 	m.activities = append(m.activities, activity)
+}
+
+func (m *mockEventSink) MarkAgentActivity() {
+	m.activityMarks.Add(1)
 }
 
 func (m *mockEventSink) SendComplete(info CompletionInfo) {

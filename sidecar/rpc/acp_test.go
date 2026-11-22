@@ -4168,7 +4168,7 @@ func TestExecuteAcpPrompt_RelaunchWithoutRecordedCommand(t *testing.T) {
 
 func TestWaitForQuiet_ReturnsAfterFullQuietWindow(t *testing.T) {
 	c := &Client{}
-	c.markActivity()
+	c.MarkAgentActivity()
 	period := 120 * time.Millisecond
 
 	start := time.Now()
@@ -4182,14 +4182,14 @@ func TestWaitForQuiet_ReturnsAfterFullQuietWindow(t *testing.T) {
 
 func TestWaitForQuiet_RestartsOnActivity(t *testing.T) {
 	c := &Client{}
-	c.markActivity()
+	c.MarkAgentActivity()
 	period := 150 * time.Millisecond
 
 	// Emit activity partway through the first window; the guard must wait a
 	// further full period after it.
 	go func() {
 		time.Sleep(70 * time.Millisecond)
-		c.markActivity()
+		c.MarkAgentActivity()
 	}()
 
 	start := time.Now()
@@ -4233,7 +4233,7 @@ func TestDiffCheckAfterQuiet_EmitsWhenActivityOccurred(t *testing.T) {
 	}
 
 	before := client.lastActivityNanos.Load()
-	client.markActivity() // agent activity lands during the quiet wait
+	client.MarkAgentActivity() // agent activity lands during the quiet wait
 	client.diffCheckAfterQuiet(before)
 
 	params := captureDiffManifest(t, received)

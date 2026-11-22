@@ -583,7 +583,7 @@ func (c *Client) Close() {
 }
 
 func (c *Client) SendOutput(line string, stream string) {
-	c.markActivity()
+	c.MarkAgentActivity()
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	c.mu.Unlock()
@@ -640,7 +640,7 @@ func runeFloorBoundary(s string, n int) int {
 }
 
 func (c *Client) SendActivity(activity acp.Activity) {
-	c.markActivity()
+	c.MarkAgentActivity()
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	c.mu.Unlock()
@@ -666,7 +666,9 @@ func (c *Client) SetPromptQuietPeriod(period time.Duration) {
 	c.Timeouts.PromptQuietPeriod = period
 }
 
-func (c *Client) markActivity() {
+// MarkAgentActivity records observed agent output, ACP notification, or HITL activity so the
+// post-turn quiet guard extends its settle window while the agent remains active.
+func (c *Client) MarkAgentActivity() {
 	c.lastActivityNanos.Store(time.Now().UnixNano())
 }
 
@@ -1300,6 +1302,7 @@ func (c *Client) sendSuccessResponse(id interface{}, result interface{}) {
 // cancelled/timed out. The returned optionId is the user's selection; empty
 // means the request was cancelled.
 func (c *Client) RequestPermission(req acp.PermissionRequest) (string, error) {
+	c.MarkAgentActivity()
 	message := req.Title
 	if message == "" {
 		message = req.Command
@@ -1356,6 +1359,7 @@ func newHitlID() string {
 // plane as a HITL question and blocks until the user answers or it is
 // cancelled/timed out.
 func (c *Client) CreateElicitation(req acp.ElicitationRequest) (acp.ElicitationResult, error) {
+	c.MarkAgentActivity()
 	c.mu.Lock()
 	execID := c.currentExecutionID
 	c.mu.Unlock()
@@ -1387,6 +1391,7 @@ func (c *Client) CreateElicitation(req acp.ElicitationRequest) (acp.ElicitationR
 // re-registration reconciliation still reports the live question; its decision
 // is consumed here and carries no side effect.
 func (c *Client) DeliverSuggestion(req acp.SuggestionRequest) {
+	c.MarkAgentActivity()
 	if req.ActionID == "" {
 		req.ActionID = newHitlID()
 	}

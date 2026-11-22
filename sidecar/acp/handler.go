@@ -14,6 +14,7 @@ import (
 type EventSink interface {
 	SendOutput(line string, stream string)
 	SendActivity(activity Activity)
+	MarkAgentActivity()
 	RequestPermission(req PermissionRequest) (selectedOptionID string, err error)
 	CreateElicitation(req ElicitationRequest) (ElicitationResult, error)
 	DeliverSuggestion(req SuggestionRequest)
@@ -295,7 +296,12 @@ func (h *Handler) NotificationHandler(transport *AcpTransport) func(string, map[
 				h.debugf("[NOTIF] Dropping replayed session/update during attach suppression")
 				return
 			}
+			if h.sink != nil {
+				h.sink.MarkAgentActivity()
+			}
 			h.handleSessionUpdate(params)
+		} else if h.sink != nil {
+			h.sink.MarkAgentActivity()
 		}
 
 		if hasID {
