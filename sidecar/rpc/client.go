@@ -659,6 +659,13 @@ func (c *Client) SendActivity(activity acp.Activity) {
 	}
 }
 
+func (c *Client) SetPromptQuietPeriod(period time.Duration) {
+	if period < 0 {
+		period = 0
+	}
+	c.Timeouts.PromptQuietPeriod = period
+}
+
 func (c *Client) markActivity() {
 	c.lastActivityNanos.Store(time.Now().UnixNano())
 }

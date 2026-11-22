@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -151,4 +152,39 @@ func TestTerminalManager_MultipleTerminals(t *testing.T) {
 
 	tm.ReleaseTerminal(term1.ID)
 	tm.ReleaseTerminal(term2.ID)
+}
+
+func TestWaitAllExited_EmptyAndRunning(t *testing.T) {
+	dir := t.TempDir()
+	tm := NewTerminalManager(dir)
+	defer tm.ReleaseAll()
+
+	start := time.Now()
+	if !tm.WaitAllExited(time.Second) {
+		t.Fatal("Expected WaitAllExited to return true immediately when no terminals exist")
+	}
+	if time.Since(start) > 50*time.Millisecond {
+		t.Fatalf("Expected immediate return on empty manager, took %v", time.Since(start))
+	}
+
+	term, err := tm.CreateTerminal("sleep 0.08 && echo finished", dir)
+	if err != nil {
+		t.Fatalf("CreateTerminal failed: %v", err)
+	}
+	if tm.ActiveCount() != 1 {
+		t.Fatalf("Expected ActiveCount=1, got %d", tm.ActiveCount())
+	}
+	if tm.WaitAllExited(10 * time.Millisecond) {
+		t.Fatal("Expected WaitAllExited with short timeout to return false while running")
+	}
+	if !tm.WaitAllExited(2 * time.Second) {
+		t.Fatal("Expected WaitAllExited to return true once terminal exited")
+	}
+	if tm.ActiveCount() != 0 {
+		t.Fatalf("Expected ActiveCount=0 after exit, got %d", tm.ActiveCount())
+	}
+	out, _, exited := tm.GetOutput(term.ID)
+	if !exited || !strings.Contains(out, "finished") {
+		t.Errorf("Expected 'finished' and exited=true, got %q exited=%v", out, exited)
+	}
 }

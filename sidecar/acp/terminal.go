@@ -179,6 +179,61 @@ func (tm *TerminalManager) GetTerminal(id string) (*Terminal, bool) {
 	return term, ok
 }
 
+// ActiveCount returns the number of managed terminals whose command process has not yet exited.
+func (tm *TerminalManager) ActiveCount() int {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	active := 0
+	for _, term := range tm.terminals {
+		term.mu.RLock()
+		if term.ExitStatus == nil {
+			active++
+		}
+		term.mu.RUnlock()
+	}
+	return active
+}
+
+// WaitAllExited waits up to timeout for all currently running terminals to exit and drain their
+// output streams. Returns true immediately if no terminals are active or all finish in time.
+func (tm *TerminalManager) WaitAllExited(timeout time.Duration) bool {
+	tm.mu.RLock()
+	var active []*Terminal
+	for _, term := range tm.terminals {
+		term.mu.RLock()
+		running := term.ExitStatus == nil
+		term.mu.RUnlock()
+		if running {
+			active = append(active, term)
+		}
+	}
+	tm.mu.RUnlock()
+
+	if len(active) == 0 {
+		return true
+	}
+	if timeout <= 0 {
+		return false
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for _, term := range active {
+		select {
+		case <-term.Done:
+		case <-timer.C:
+			return false
+		}
+		select {
+		case <-term.relayDone:
+		case <-timer.C:
+			return false
+		}
+	}
+	return true
+}
+
 // releaseLocked kills the terminal's process group and closes its output
 // pipes so every reader goroutine unblocks even when a descendant of the
 // command still holds the original fds.

@@ -7,19 +7,22 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"kratis-connector/rpc"
 )
 
 // AgentConfig holds the parsed configuration for the agent.
 type AgentConfig struct {
-	Mode      string
-	Token     string
-	ServerURL string
-	Workspace string
-	LogFile   string
-	Debug     bool
+	Mode              string
+	Token             string
+	ServerURL         string
+	Workspace         string
+	LogFile           string
+	Debug             bool
+	PromptQuietPeriod time.Duration
 }
 
 // ParseConfig parses command-line flags and environment variables into an AgentConfig.
@@ -31,17 +34,33 @@ func ParseConfig(args []string) (*AgentConfig, error) {
 	serverURLFlag := fs.String("server-url", "", "Control plane WebSocket URL")
 	logFileFlag := fs.String("log-file", "", "Path to log file (if set, all log output is written to this file)")
 	debugFlag := fs.Bool("debug", false, "Relay sidecar-internal diagnostics into env.output")
+	quietPeriodFlag := fs.String(
+		"prompt-quiet-period", "", "Quiet settle duration after end_turn (e.g. 1s, 10s)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
 
+	quietPeriod := rpc.DefaultPromptQuietPeriod
+	rawQuiet := strings.TrimSpace(*quietPeriodFlag)
+	if rawQuiet == "" {
+		rawQuiet = strings.TrimSpace(os.Getenv("KRATIS_PROMPT_QUIET_PERIOD"))
+	}
+	if rawQuiet != "" {
+		parsed, err := time.ParseDuration(rawQuiet)
+		if err != nil || parsed < 0 {
+			return nil, fmt.Errorf("invalid prompt-quiet-period %q", rawQuiet)
+		}
+		quietPeriod = parsed
+	}
+
 	cfg := &AgentConfig{
-		Mode:      *modeFlag,
-		Token:     *tokenFlag,
-		ServerURL: *serverURLFlag,
-		LogFile:   *logFileFlag,
-		Debug:     *debugFlag,
+		Mode:              *modeFlag,
+		Token:             *tokenFlag,
+		ServerURL:         *serverURLFlag,
+		LogFile:           *logFileFlag,
+		Debug:             *debugFlag,
+		PromptQuietPeriod: quietPeriod,
 	}
 
 	if cfg.Token == "" {
@@ -97,6 +116,7 @@ func main() {
 
 	client := rpc.NewClient(cfg.ServerURL, cfg.Token, cfg.Workspace)
 	client.SetDebug(cfg.Debug)
+	client.SetPromptQuietPeriod(cfg.PromptQuietPeriod)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

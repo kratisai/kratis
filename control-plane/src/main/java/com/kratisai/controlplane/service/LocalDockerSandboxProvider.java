@@ -13,6 +13,7 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -948,6 +949,11 @@ public class LocalDockerSandboxProvider implements SandboxProvider {
                     sandboxProperties.getSidecarLog()));
             if (debug) {
                 execCommand.add("--debug");
+            }
+            Duration promptQuietPeriod = sandboxProperties.getDocker().getPromptQuietPeriod();
+            if (promptQuietPeriod != null && !Duration.ofSeconds(10).equals(promptQuietPeriod)) {
+                execCommand.add("--prompt-quiet-period");
+                execCommand.add(promptQuietPeriod.toMillis() + "ms");
             }
 
             logger.info("Starting connector in environment {} with command: {}", envId, String.join(" ", execCommand));

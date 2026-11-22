@@ -486,6 +486,10 @@ func (s *AgentSupervisor) terminate(emitComplete bool) (int, error) {
 	return exitCode, nil
 }
 
+func (s *AgentSupervisor) Terminals() *acp.TerminalManager {
+	return s.terminals
+}
+
 func (s *AgentSupervisor) ReleaseTerminals() {
 	if s.terminals != nil {
 		s.terminals.ReleaseAll()

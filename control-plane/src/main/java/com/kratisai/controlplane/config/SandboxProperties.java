@@ -75,6 +75,8 @@ public class SandboxProperties {
 
         private boolean debug = false;
 
+        private Duration promptQuietPeriod = Duration.ofSeconds(10);
+
         public String getConnectUrl() {
             return connectUrl;
         }
@@ -105,6 +107,16 @@ public class SandboxProperties {
 
         public void setDebug(boolean debug) {
             this.debug = debug;
+        }
+
+        /** Quiet settle duration passed to sidecar after an ACP {@code end_turn} response. */
+        public Duration getPromptQuietPeriod() {
+            return promptQuietPeriod;
+        }
+
+        /** Sets the quiet settle duration passed to sidecar after an ACP {@code end_turn} response. */
+        public void setPromptQuietPeriod(Duration promptQuietPeriod) {
+            this.promptQuietPeriod = promptQuietPeriod;
         }
     }
 

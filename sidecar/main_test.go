@@ -4,6 +4,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"kratis-connector/rpc"
 )
 
 func TestParseConfig_AllFlags(t *testing.T) {
@@ -129,5 +132,46 @@ func TestParseConfig_InvalidFlag(t *testing.T) {
 	_, err := ParseConfig([]string{"--unknown-flag"})
 	if err == nil {
 		t.Fatal("expected error for unknown flag")
+	}
+}
+
+func TestParseConfig_PromptQuietPeriodFlagAndEnv(t *testing.T) {
+	t.Setenv("KRATIS_PROMPT_QUIET_PERIOD", "2s")
+	cfg, err := ParseConfig([]string{"--token", "t", "--server-url", "ws://localhost:8080"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PromptQuietPeriod != 2*time.Second {
+		t.Errorf("expected env PromptQuietPeriod 2s, got %v", cfg.PromptQuietPeriod)
+	}
+
+	cfg, err = ParseConfig([]string{
+		"--token", "t",
+		"--server-url", "ws://localhost:8080",
+		"--prompt-quiet-period", "750ms",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PromptQuietPeriod != 750*time.Millisecond {
+		t.Errorf("expected flag PromptQuietPeriod 750ms, got %v", cfg.PromptQuietPeriod)
+	}
+
+	if _, err := ParseConfig([]string{
+		"--token", "t",
+		"--server-url", "ws://localhost:8080",
+		"--prompt-quiet-period", "-1s",
+	}); err == nil {
+		t.Fatal("expected error for negative --prompt-quiet-period")
+	}
+}
+
+func TestParseConfig_DefaultPromptQuietPeriod(t *testing.T) {
+	cfg, err := ParseConfig([]string{"--token", "t", "--server-url", "ws://localhost:8080"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PromptQuietPeriod != rpc.DefaultPromptQuietPeriod {
+		t.Errorf("expected default %v, got %v", rpc.DefaultPromptQuietPeriod, cfg.PromptQuietPeriod)
 	}
 }

@@ -4273,3 +4273,18 @@ func TestDiffCheckAfterQuiet_SkipsWithoutActivity(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 }
+
+func TestSetPromptQuietPeriod(t *testing.T) {
+	c := &Client{Timeouts: DefaultClientTimeouts()}
+	if c.Timeouts.PromptQuietPeriod != DefaultPromptQuietPeriod {
+		t.Fatalf("expected default %v, got %v", DefaultPromptQuietPeriod, c.Timeouts.PromptQuietPeriod)
+	}
+	c.SetPromptQuietPeriod(750 * time.Millisecond)
+	if c.Timeouts.PromptQuietPeriod != 750*time.Millisecond {
+		t.Fatalf("expected 750ms, got %v", c.Timeouts.PromptQuietPeriod)
+	}
+	c.SetPromptQuietPeriod(-5 * time.Second)
+	if c.Timeouts.PromptQuietPeriod != 0 {
+		t.Fatalf("expected negative duration clamped to 0, got %v", c.Timeouts.PromptQuietPeriod)
+	}
+}

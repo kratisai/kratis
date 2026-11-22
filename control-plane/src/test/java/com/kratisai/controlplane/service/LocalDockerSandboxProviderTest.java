@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -448,8 +449,30 @@ class LocalDockerSandboxProviderTest {
 
         verify(mockProcessExecutor, atLeastOnce())
                 .execute(
-                        argThat(cmd ->
-                                cmd.contains("--mode=sidecar") && cmd.stream().noneMatch(arg -> arg.equals("--debug"))),
+                        argThat(cmd -> cmd.contains("--mode=sidecar")
+                                && cmd.stream().noneMatch(arg -> arg.equals("--debug"))
+                                && cmd.stream().noneMatch(arg -> arg.equals("--prompt-quiet-period"))),
+                        any(),
+                        any());
+    }
+
+    @Test
+    void testInitializeWorkspaceForwardsCustomPromptQuietPeriod() throws Exception {
+        stubAllCommandsSucceed();
+        InstanceProperties instanceProperties = new InstanceProperties();
+        instanceProperties.setId("unit-test-instance");
+        SandboxProperties sandboxProperties = new SandboxProperties();
+        sandboxProperties.getDocker().setPromptQuietPeriod(Duration.ofSeconds(1));
+        LocalDockerSandboxProvider customProvider =
+                new LocalDockerSandboxProvider(mockProcessExecutor, sandboxProperties, instanceProperties);
+
+        customProvider.initializeWorkspace(UUID.randomUUID(), "test-token");
+
+        verify(mockProcessExecutor, atLeastOnce())
+                .execute(
+                        argThat(cmd -> cmd.contains("--mode=sidecar")
+                                && cmd.contains("--prompt-quiet-period")
+                                && cmd.contains("1000ms")),
                         any(),
                         any());
     }
