@@ -94,6 +94,8 @@ public class UsageService {
             UsageType usageType,
             String model,
             String agent,
+            String userEmailFilter,
+            SandboxExecutionStatus statusFilter,
             Pageable pageable) {
         validateMembership(userId, teamId);
         Instant start = computeStartTime(timeframe, startDate);
@@ -141,8 +143,6 @@ public class UsageService {
                     userEmail,
                     models,
                     UsageType.EXECUTION,
-                    exec.getTotalTokens(),
-                    exec.getTotalSpend(),
                     targetUrl));
         }
 
@@ -189,17 +189,11 @@ public class UsageService {
                     batch.getStartedAt(),
                     duration,
                     title,
-                    "Ingestion Worker",
+                    null,
                     status,
                     "system@kratis.ai",
                     models,
                     UsageType.INGESTION,
-                    batch.getModelUsage().stream()
-                            .mapToLong(usage -> usage.getTotalTokens() != null ? usage.getTotalTokens() : 0L)
-                            .sum(),
-                    batch.getModelUsage().stream()
-                            .mapToDouble(usage -> usage.getTotalSpend() != null ? usage.getTotalSpend() : 0.0)
-                            .sum(),
                     targetUrl));
         }
 
@@ -233,17 +227,11 @@ public class UsageService {
                     twBatch.getStartedAt(),
                     duration,
                     "Team Wiki Build (" + twBatch.getBuildMode().name().toLowerCase(Locale.ROOT) + ")",
-                    "Team Wiki Worker",
+                    null,
                     status,
                     "system@kratis.ai",
                     models,
                     UsageType.TEAM_WIKI,
-                    twBatch.getModelUsage().stream()
-                            .mapToLong(usage -> usage.getTotalTokens() != null ? usage.getTotalTokens() : 0L)
-                            .sum(),
-                    twBatch.getModelUsage().stream()
-                            .mapToDouble(usage -> usage.getTotalSpend() != null ? usage.getTotalSpend() : 0.0)
-                            .sum(),
                     "/wiki"));
         }
 
@@ -279,12 +267,12 @@ public class UsageService {
                             null,
                             title,
                             null,
-                            session.isEnded() ? SandboxExecutionStatus.COMPLETED : SandboxExecutionStatus.RUNNING,
+                            // A chat session is a billing window, not an operation; endedAt only
+                            // records a model/inactivity rollover, so there is no live status.
+                            null,
                             userEmail,
                             models,
                             UsageType.CHAT,
-                            tokens,
-                            spend,
                             targetUrl));
                 }
             }
@@ -301,6 +289,23 @@ public class UsageService {
                     }
                     if (agent != null && !agent.isBlank()) {
                         if (e.agentName() == null || !e.agentName().equalsIgnoreCase(agent)) {
+                            return false;
+                        }
+                    }
+                    if (userEmailFilter != null
+                            && !userEmailFilter.isBlank()
+                            && (e.userEmail() == null || !e.userEmail().equalsIgnoreCase(userEmailFilter.trim()))) {
+                        return false;
+                    }
+                    if (statusFilter != null) {
+                        boolean matches =
+                                switch (statusFilter) {
+                                    case COMPLETED ->
+                                        e.status() == SandboxExecutionStatus.COMPLETED
+                                                || e.status() == SandboxExecutionStatus.IDLE;
+                                    default -> e.status() == statusFilter;
+                                };
+                        if (!matches) {
                             return false;
                         }
                     }
@@ -322,8 +327,8 @@ public class UsageService {
     public UsageSummaryDto getUsageSummary(
             UUID userId, UUID teamId, String timeframe, Instant startDate, Instant endDate) {
         validateMembership(userId, teamId);
-        Page<UsageLogEntryDto> allEntries =
-                getUsageLogs(userId, teamId, timeframe, startDate, endDate, null, null, null, PageRequest.of(0, 10000));
+        Page<UsageLogEntryDto> allEntries = getUsageLogs(
+                userId, teamId, timeframe, startDate, endDate, null, null, null, null, null, PageRequest.of(0, 10000));
 
         double totalCost = 0.0;
         long totalTokens = 0L;
@@ -344,8 +349,10 @@ public class UsageService {
         Map<Instant, TimeSeriesAccumulator> timeSeriesMap = new TreeMap<>();
 
         for (UsageLogEntryDto entry : allEntries.getContent()) {
-            totalCost += entry.totalSpend();
-            totalTokens += entry.totalTokens();
+            double entrySpend = sumSpend(entry.models());
+            long entryTokens = sumTokens(entry.models());
+            totalCost += entrySpend;
+            totalTokens += entryTokens;
 
             // Per-model statistics come from the DTO's per-model rows,
             // so each model is attributed exactly its own spend and tokens.
@@ -370,9 +377,9 @@ public class UsageService {
 
                 // Agent share by cost
                 costByAgentCost.put(
-                        entry.agentName(), costByAgentCost.getOrDefault(entry.agentName(), 0.0) + entry.totalSpend());
+                        entry.agentName(), costByAgentCost.getOrDefault(entry.agentName(), 0.0) + entrySpend);
                 tokensByAgentCost.put(
-                        entry.agentName(), tokensByAgentCost.getOrDefault(entry.agentName(), 0L) + entry.totalTokens());
+                        entry.agentName(), tokensByAgentCost.getOrDefault(entry.agentName(), 0L) + entryTokens);
                 countByAgentCost.put(entry.agentName(), countByAgentCost.getOrDefault(entry.agentName(), 0L) + 1L);
             }
 
@@ -381,7 +388,7 @@ public class UsageService {
                 Instant hourKey = entry.timestamp().truncatedTo(ChronoUnit.HOURS);
                 timeSeriesMap
                         .computeIfAbsent(hourKey, k -> new TimeSeriesAccumulator())
-                        .add(entry.totalSpend(), entry.totalTokens());
+                        .add(entrySpend, entryTokens);
             }
         }
 
@@ -434,6 +441,18 @@ public class UsageService {
 
     private static boolean containsModel(Set<ModelUsageDto> models, String model) {
         return models.stream().anyMatch(m -> m.modelIdentifier().equalsIgnoreCase(model));
+    }
+
+    private static long sumTokens(Set<ModelUsageDto> models) {
+        return models.stream()
+                .mapToLong(model -> model.totalTokens() != null ? model.totalTokens() : 0L)
+                .sum();
+    }
+
+    private static double sumSpend(Set<ModelUsageDto> models) {
+        return models.stream()
+                .mapToDouble(model -> model.totalSpend() != null ? model.totalSpend() : 0.0)
+                .sum();
     }
 
     private static class TimeSeriesAccumulator {

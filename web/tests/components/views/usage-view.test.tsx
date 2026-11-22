@@ -35,8 +35,6 @@ const entryTemplate: UsageLogEntry = {
   status: 'COMPLETED',
   targetUrl: '/chats/chat-1/executions/exec-1',
   timestamp: new Date().toISOString(),
-  totalSpend: 0.03,
-  totalTokens: 1200,
   usageType: 'EXECUTION',
   userEmail: 'user@kratis.ai',
 }
@@ -50,15 +48,26 @@ vi.mock('@/lib/usage-api', async () => {
 })
 
 vi.mock('@/hooks/use-usage', () => ({
-  useUsageLogs: (teamId: null | string, params?: { usageType?: string }) => {
+  useUsageLogs: (
+    teamId: null | string,
+    params?: {
+      agent?: string
+      model?: string
+      page?: number
+      status?: string
+      timeframe?: string
+      usageType?: string
+      userEmail?: string
+    },
+  ) => {
     fetchUsageLogsMock(teamId, params)
     return {
       data: {
         content: logEntries,
-        number: 0,
+        number: params?.page ?? 0,
         size: 15,
         totalElements: logEntries.length,
-        totalPages: 1,
+        totalPages: 3,
       },
       isLoading: false,
       refetch: vi.fn(),
@@ -161,6 +170,8 @@ describe('UsageView', () => {
 
     // Both (kind, identifier) pairs render; the composite key keeps them distinct.
     expect(screen.getAllByText('shared-model')).toHaveLength(2)
+    expect(screen.getByText('200 tk')).toBeDefined()
+    expect(screen.getByText('$0.0200')).toBeDefined()
   })
 
   it('formats the log table duration as human-readable time, not raw seconds', () => {
@@ -191,14 +202,14 @@ describe('UsageView', () => {
     ]
     render(<UsageView />)
 
-    expect(screen.getByText('Execution')).toBeDefined()
-    expect(screen.getByText('Team Wiki')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'OpenCode execution' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Team Wiki' })).toBeDefined()
     // A usage type the web layer does not know yet falls back to the raw value
     // instead of crashing the table render.
     expect(screen.getByText('FUTURE_TYPE')).toBeDefined()
   })
 
-  it('renders a status badge for a chat row derived from the session', () => {
+  it('does not render a status badge for a chat row because sessions have no live status', () => {
     logEntries = [
       {
         ...entryTemplate,
@@ -213,22 +224,40 @@ describe('UsageView', () => {
     render(<UsageView />)
 
     expect(screen.getByText('Chat Session')).toBeDefined()
-    expect(screen.getByText('RUNNING')).toBeDefined()
-    expect(document.querySelector('.animate-spin')).not.toBeNull()
+    expect(screen.queryByText('Active')).toBeNull()
+    expect(screen.queryByText('Complete')).toBeNull()
+    expect(document.querySelector('.animate-spin')).toBeNull()
   })
 
-  it('renders a COMPLETED status badge for an ended chat session', () => {
+  it('renders an unrecognized status without crashing', () => {
     logEntries = [
       {
         ...entryTemplate,
-        id: 'chat-session-2',
-        status: 'COMPLETED',
-        usageType: 'CHAT',
+        // Double assertion marks the seed as deliberately out-of-union wire data.
+        status: 'CANCELLED' as unknown as UsageLogEntry['status'],
       },
     ]
     render(<UsageView />)
 
-    expect(screen.getByText('COMPLETED')).toBeDefined()
+    expect(screen.getByText('CANCELLED')).toBeDefined()
+  })
+
+  it('renders a settled IDLE execution as complete instead of as a running operation', () => {
+    logEntries = [{ ...entryTemplate, status: 'IDLE' }]
+    render(<UsageView />)
+
+    expect(screen.getByText('Complete')).toBeDefined()
+    expect(screen.queryByText('IDLE')).toBeNull()
+    expect(document.querySelector('.animate-spin')).toBeNull()
+  })
+
+  it('renders an active RUNNING execution with a spinner and friendly label', () => {
+    logEntries = [{ ...entryTemplate, status: 'RUNNING' }]
+    render(<UsageView />)
+
+    expect(screen.getByText('Active')).toBeDefined()
+    expect(screen.queryByText('RUNNING')).toBeNull()
+    expect(document.querySelector('.animate-spin')).not.toBeNull()
   })
 
   it('sends the selected usage type as a query param and the raw all value at the hook boundary', async () => {
@@ -242,18 +271,181 @@ describe('UsageView', () => {
       expect.objectContaining({ usageType: 'all' }),
     )
 
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ page: 1 }),
+    )
+
     await user.click(usageTypeSelect)
     await user.click(screen.getByRole('option', { name: 'Team Wiki' }))
     expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
       'team-1',
-      expect.objectContaining({ usageType: 'TEAM_WIKI' }),
+      expect.objectContaining({ page: 0, usageType: 'TEAM_WIKI' }),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await user.click(screen.getAllByRole('combobox')[1])
+    await user.click(screen.getByRole('option', { name: 'Executions' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ page: 0, usageType: 'EXECUTION' }),
     )
 
     await user.click(screen.getAllByRole('combobox')[1])
     await user.click(screen.getByRole('option', { name: 'All Types' }))
     expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
       'team-1',
-      expect.objectContaining({ usageType: 'all' }),
+      expect.objectContaining({ page: 0, usageType: 'all' }),
+    )
+  })
+
+  it('adds user, model, usage-type, and harness filters from the activity table', async () => {
+    const user = userEvent.setup()
+    render(<UsageView />)
+
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await user.click(screen.getByRole('button', { name: 'Filter by user user@kratis.ai' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ page: 0, userEmail: 'user@kratis.ai' }),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Filter by model gpt-4o' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ model: 'gpt-4o', page: 0, userEmail: 'user@kratis.ai' }),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'OpenCode execution' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({
+        agent: 'OpenCode',
+        model: 'gpt-4o',
+        page: 0,
+        usageType: 'EXECUTION',
+        userEmail: 'user@kratis.ai',
+      }),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'OpenCode execution' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({
+        agent: undefined,
+        model: 'gpt-4o',
+        page: 0,
+        usageType: 'all',
+        userEmail: 'user@kratis.ai',
+      }),
+    )
+  })
+
+  it('filters by chat and ingestion from their usage-type badges and toggles them off', async () => {
+    const user = userEvent.setup()
+    logEntries = [
+      entryTemplate,
+      {
+        ...entryTemplate,
+        activityTitle: 'Ask Kratis about onboarding',
+        agentName: null,
+        id: 'chat-1',
+        usageType: 'CHAT',
+      },
+      {
+        ...entryTemplate,
+        activityTitle: 'Repository ingestion',
+        agentName: null,
+        id: 'ingest-1',
+        usageType: 'INGESTION',
+      },
+    ]
+    render(<UsageView />)
+
+    await user.click(screen.getByRole('button', { name: 'OpenCode execution' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ agent: 'OpenCode', usageType: 'EXECUTION' }),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Chat Session' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ page: 0, usageType: 'CHAT' }),
+    )
+    expect(fetchUsageLogsMock.mock.lastCall?.[1]).toHaveProperty('agent', undefined)
+
+    await user.click(screen.getByRole('button', { name: 'Chat Session' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ page: 0, usageType: 'all' }),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Repository Ingestion' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ page: 0, usageType: 'INGESTION' }),
+    )
+  })
+
+  it('toggles user, model, and status filters off when clicked again', async () => {
+    const user = userEvent.setup()
+    render(<UsageView />)
+
+    const userButton = screen.getAllByRole('button', { name: 'Filter by user user@kratis.ai' })[0]
+    await user.click(userButton)
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ userEmail: 'user@kratis.ai' }),
+    )
+    await user.click(userButton)
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ userEmail: undefined }),
+    )
+
+    const modelButton = screen.getByRole('button', { name: 'Filter by model gpt-4o' })
+    await user.click(modelButton)
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ model: 'gpt-4o' }),
+    )
+    await user.click(modelButton)
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ model: undefined }),
+    )
+
+    const statusButton = screen.getAllByRole('button', { name: 'Complete' })[0]
+    await user.click(statusButton)
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ status: 'COMPLETED' }),
+    )
+    await user.click(statusButton)
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ status: undefined }),
+    )
+  })
+
+  it('filters by status from the status dropdown', async () => {
+    const user = userEvent.setup()
+    render(<UsageView />)
+
+    await user.click(screen.getAllByRole('combobox')[2])
+    await user.click(screen.getByRole('option', { name: 'Completed' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ page: 0, status: 'COMPLETED' }),
+    )
+
+    await user.click(screen.getAllByRole('combobox')[2])
+    await user.click(screen.getByRole('option', { name: 'All Statuses' }))
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ page: 0, status: undefined }),
     )
   })
 
@@ -277,9 +469,15 @@ describe('UsageView', () => {
       const urlWithoutType = mockFetch.mock.calls[0][0] as string
       expect(urlWithoutType).not.toContain('usageType')
 
-      await fetchUsageLogs('team-1', { usageType: 'TEAM_WIKI' })
+      await fetchUsageLogs('team-1', {
+        status: 'COMPLETED',
+        usageType: 'TEAM_WIKI',
+        userEmail: 'user@kratis.ai',
+      })
       const urlWithType = mockFetch.mock.calls[1][0] as string
       expect(urlWithType).toContain('usageType=TEAM_WIKI')
+      expect(urlWithType).toContain('userEmail=user%40kratis.ai')
+      expect(urlWithType).toContain('status=COMPLETED')
     } finally {
       globalThis.fetch = originalFetch
     }

@@ -120,34 +120,70 @@ class UsageServiceTest {
         chatUsageSessionRepository.save(chatSession);
 
         Page<UsageLogEntryDto> logs = usageService.getUsageLogs(
-                user.getId(), team.getId(), "7d", null, null, null, "gpt-4o", "OpenCode", PageRequest.of(0, 10));
+                user.getId(),
+                team.getId(),
+                "7d",
+                null,
+                null,
+                null,
+                "gpt-4o",
+                "OpenCode",
+                null,
+                null,
+                PageRequest.of(0, 10));
         assertThat(logs).isNotNull();
         assertThat(logs.getContent()).hasSize(1);
         UsageLogEntryDto execEntry = logs.getContent().getFirst();
         assertThat(execEntry.targetUrl()).isEqualTo("/chats/" + chat.getId() + "/executions/" + exec.getId());
 
         Page<UsageLogEntryDto> ingestionLogs = usageService.getUsageLogs(
-                user.getId(), team.getId(), "7d", null, null, UsageType.INGESTION, null, null, PageRequest.of(0, 10));
+                user.getId(),
+                team.getId(),
+                "7d",
+                null,
+                null,
+                UsageType.INGESTION,
+                null,
+                null,
+                null,
+                null,
+                PageRequest.of(0, 10));
         assertThat(ingestionLogs).isNotNull();
         assertThat(ingestionLogs.getContent()).hasSize(1);
         assertThat(ingestionLogs.getContent().getFirst().usageType()).isEqualTo(UsageType.INGESTION);
         assertThat(ingestionLogs.getContent().getFirst().targetUrl()).isEqualTo("/repos/" + repo.getId());
 
         Page<UsageLogEntryDto> chatLogs = usageService.getUsageLogs(
-                user.getId(), team.getId(), "7d", null, null, UsageType.CHAT, null, null, PageRequest.of(0, 10));
+                user.getId(),
+                team.getId(),
+                "7d",
+                null,
+                null,
+                UsageType.CHAT,
+                null,
+                null,
+                null,
+                null,
+                PageRequest.of(0, 10));
         assertThat(chatLogs).isNotNull();
         assertThat(chatLogs.getContent()).hasSize(1);
         UsageLogEntryDto chatEntry = chatLogs.getContent().getFirst();
         assertThat(chatEntry.activityTitle()).isEqualTo("Test Chat");
         assertThat(chatEntry.agentName()).isNull();
         assertThat(chatEntry.usageType()).isEqualTo(UsageType.CHAT);
-        assertThat(chatEntry.status()).isEqualTo(SandboxExecutionStatus.RUNNING);
+        assertThat(chatEntry.status()).isNull();
         assertThat(chatEntry.durationSeconds()).isNull();
         assertThat(chatEntry.models())
                 .extracting(ModelUsageDto::modelIdentifier)
                 .containsExactly("gpt-4o");
-        assertThat(chatEntry.totalTokens()).isEqualTo(250L);
-        assertThat(chatEntry.totalSpend()).isEqualTo(0.003);
+        assertThat(chatEntry.models().stream()
+                        .mapToLong(model -> model.totalTokens() != null ? model.totalTokens() : 0L)
+                        .sum())
+                .isEqualTo(250L);
+        assertThat(chatEntry.models().stream()
+                        .mapToDouble(model -> model.totalSpend() != null ? model.totalSpend() : 0.0)
+                        .sum())
+                .isEqualTo(0.003);
         assertThat(chatEntry.targetUrl()).isEqualTo("/chats/" + chat.getId());
 
         UsageSummaryDto summary = usageService.getUsageSummary(user.getId(), team.getId(), "30d", null, null);
@@ -171,7 +207,17 @@ class UsageServiceTest {
 
         // Filter by model "unknown"
         Page<UsageLogEntryDto> byModel = usageService.getUsageLogs(
-                user.getId(), team.getId(), "24h", null, null, null, "unknown", null, PageRequest.of(0, 10));
+                user.getId(),
+                team.getId(),
+                "24h",
+                null,
+                null,
+                null,
+                "unknown",
+                null,
+                null,
+                null,
+                PageRequest.of(0, 10));
         assertThat(byModel.getContent()).hasSize(1);
         assertThat(byModel.getContent().getFirst().models())
                 .extracting(ModelUsageDto::modelIdentifier)
@@ -179,14 +225,24 @@ class UsageServiceTest {
 
         // Filter by agent "SomeAgent" should exclude the chat session (since agentName is null)
         Page<UsageLogEntryDto> byAgent = usageService.getUsageLogs(
-                user.getId(), team.getId(), "24h", null, null, null, null, "SomeAgent", PageRequest.of(0, 10));
+                user.getId(),
+                team.getId(),
+                "24h",
+                null,
+                null,
+                null,
+                null,
+                "SomeAgent",
+                null,
+                null,
+                PageRequest.of(0, 10));
         assertThat(byAgent.getContent()).isEmpty();
 
         // Custom timeframe
         Instant start = Instant.now().minusSeconds(100);
         Instant end = Instant.now().plusSeconds(100);
         Page<UsageLogEntryDto> customLogs = usageService.getUsageLogs(
-                user.getId(), team.getId(), "custom", start, end, null, null, null, PageRequest.of(0, 10));
+                user.getId(), team.getId(), "custom", start, end, null, null, null, null, null, PageRequest.of(0, 10));
         assertThat(customLogs.getContent()).hasSize(1);
     }
 
@@ -207,6 +263,8 @@ class UsageServiceTest {
                                 null,
                                 null,
                                 null,
+                                null,
+                                null,
                                 PageRequest.of(0, 10))
                         .getContent())
                 .hasSize(1);
@@ -215,6 +273,8 @@ class UsageServiceTest {
                                 user.getId(),
                                 team.getId(),
                                 "last_7_days",
+                                null,
+                                null,
                                 null,
                                 null,
                                 null,
@@ -233,6 +293,8 @@ class UsageServiceTest {
                                 null,
                                 null,
                                 null,
+                                null,
+                                null,
                                 PageRequest.of(0, 10))
                         .getContent())
                 .hasSize(1);
@@ -246,12 +308,24 @@ class UsageServiceTest {
                                 null,
                                 null,
                                 null,
+                                null,
+                                null,
                                 PageRequest.of(0, 10))
                         .getContent())
                 .hasSize(1);
         assertThat(usageService
                         .getUsageLogs(
-                                user.getId(), team.getId(), null, null, null, null, null, null, PageRequest.of(0, 10))
+                                user.getId(),
+                                team.getId(),
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                PageRequest.of(0, 10))
                         .getContent())
                 .hasSize(1);
     }
@@ -297,7 +371,17 @@ class UsageServiceTest {
         sandboxExecutionRepository.save(otherHarness);
 
         Page<UsageLogEntryDto> logs = usageService.getUsageLogs(
-                user.getId(), team.getId(), "7d", null, null, UsageType.EXECUTION, null, null, PageRequest.of(0, 10));
+                user.getId(),
+                team.getId(),
+                "7d",
+                null,
+                null,
+                UsageType.EXECUTION,
+                null,
+                null,
+                null,
+                null,
+                PageRequest.of(0, 10));
         assertThat(logs.getContent()).hasSize(3);
         assertThat(logs.getContent())
                 .filteredOn(entry -> entry.activityTitle().endsWith("..."))
@@ -346,7 +430,17 @@ class UsageServiceTest {
         sandboxExecutionRepository.save(execution);
 
         Page<UsageLogEntryDto> logs = usageService.getUsageLogs(
-                user.getId(), team.getId(), "7d", null, null, UsageType.EXECUTION, null, null, PageRequest.of(0, 10));
+                user.getId(),
+                team.getId(),
+                "7d",
+                null,
+                null,
+                UsageType.EXECUTION,
+                null,
+                null,
+                null,
+                null,
+                PageRequest.of(0, 10));
 
         UsageLogEntryDto execEntry = logs.getContent().getFirst();
         assertThat(execEntry.activityTitle()).isEqualTo("Fix: Usage Log Execution Names");
@@ -369,14 +463,31 @@ class UsageServiceTest {
         ingestionBatchRepository.save(batch);
 
         Page<UsageLogEntryDto> ingestionLogs = usageService.getUsageLogs(
-                user.getId(), team.getId(), "7d", null, null, UsageType.INGESTION, null, null, PageRequest.of(0, 10));
+                user.getId(),
+                team.getId(),
+                "7d",
+                null,
+                null,
+                UsageType.INGESTION,
+                null,
+                null,
+                null,
+                null,
+                PageRequest.of(0, 10));
         assertThat(ingestionLogs.getContent()).hasSize(1);
         UsageLogEntryDto ingestionEntry = ingestionLogs.getContent().getFirst();
         assertThat(ingestionEntry.models())
                 .extracting(ModelUsageDto::modelIdentifier)
                 .containsExactly("gpt-4o", "text-embedding-3-small");
-        assertThat(ingestionEntry.totalTokens()).isEqualTo(500L);
-        assertThat(ingestionEntry.totalSpend()).isCloseTo(0.01, org.assertj.core.data.Offset.offset(0.000001));
+        assertThat(ingestionEntry.models().stream()
+                        .mapToLong(model -> model.totalTokens() != null ? model.totalTokens() : 0L)
+                        .sum())
+                .isEqualTo(500L);
+        assertThat(ingestionEntry.models().stream()
+                        .mapToDouble(model -> model.totalSpend() != null ? model.totalSpend() : 0.0)
+                        .sum())
+                .isCloseTo(0.01, org.assertj.core.data.Offset.offset(0.000001));
+        assertThat(ingestionEntry.agentName()).isNull();
 
         Page<UsageLogEntryDto> byEmbeddingModel = usageService.getUsageLogs(
                 user.getId(),
@@ -386,6 +497,8 @@ class UsageServiceTest {
                 null,
                 UsageType.INGESTION,
                 "text-embedding-3-small",
+                null,
+                null,
                 null,
                 PageRequest.of(0, 10));
         assertThat(byEmbeddingModel.getContent()).hasSize(1);
@@ -541,9 +654,9 @@ class UsageServiceTest {
         exec.setEnvironment(env);
         exec.setChat(chatRepository.save(new ChatEntity(team, user, "Exec Chat")));
         exec.setCanvas(canvasRepository.save(specCanvas(exec.getChat().getId(), "exec-canvas", "Exec Chat")));
-        exec.setStatus(SandboxExecutionStatus.COMPLETED);
         exec.setStartedAt(Instant.now().minusSeconds(10));
         exec.setModelName("gpt-4o");
+        exec.setStatus(SandboxExecutionStatus.IDLE);
         sandboxExecutionRepository.save(exec);
 
         TeamWikiBatch twBatch = new TeamWikiBatch(team, TeamWikiBuildMode.FULL, TeamWikiTriggerKind.MANUAL, null);
@@ -564,26 +677,95 @@ class UsageServiceTest {
         chatUsageSessionRepository.save(closedSession);
 
         Page<UsageLogEntryDto> execLogs = usageService.getUsageLogs(
-                user.getId(), team.getId(), "30d", null, null, UsageType.EXECUTION, null, null, PageRequest.of(0, 10));
+                user.getId(),
+                team.getId(),
+                "30d",
+                null,
+                null,
+                UsageType.EXECUTION,
+                null,
+                null,
+                null,
+                null,
+                PageRequest.of(0, 10));
         assertThat(execLogs.getContent()).hasSize(1);
         assertThat(execLogs.getContent().getFirst().usageType()).isEqualTo(UsageType.EXECUTION);
 
+        Page<UsageLogEntryDto> completedLogs = usageService.getUsageLogs(
+                user.getId(),
+                team.getId(),
+                "30d",
+                null,
+                null,
+                UsageType.EXECUTION,
+                null,
+                null,
+                null,
+                SandboxExecutionStatus.COMPLETED,
+                PageRequest.of(0, 10));
+        assertThat(completedLogs.getContent()).hasSize(1);
+        assertThat(completedLogs.getContent().getFirst().status()).isEqualTo(SandboxExecutionStatus.IDLE);
+
+        Page<UsageLogEntryDto> runningLogs = usageService.getUsageLogs(
+                user.getId(),
+                team.getId(),
+                "30d",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                SandboxExecutionStatus.RUNNING,
+                PageRequest.of(0, 10));
+        assertThat(runningLogs.getContent()).isEmpty();
+
         Page<UsageLogEntryDto> chatLogs = usageService.getUsageLogs(
-                user.getId(), team.getId(), "30d", null, null, UsageType.CHAT, null, null, PageRequest.of(0, 10));
+                user.getId(),
+                team.getId(),
+                "30d",
+                null,
+                null,
+                UsageType.CHAT,
+                null,
+                null,
+                null,
+                null,
+                PageRequest.of(0, 10));
         assertThat(chatLogs.getContent()).hasSize(2);
         assertThat(chatLogs.getContent())
                 .allSatisfy(entry -> assertThat(entry.usageType()).isEqualTo(UsageType.CHAT));
         assertThat(chatLogs.getContent())
-                .extracting(UsageLogEntryDto::status)
-                .containsExactlyInAnyOrder(SandboxExecutionStatus.RUNNING, SandboxExecutionStatus.COMPLETED);
+                .allSatisfy(entry -> assertThat(entry.status()).isNull());
 
         Page<UsageLogEntryDto> teamWikiLogs = usageService.getUsageLogs(
-                user.getId(), team.getId(), "30d", null, null, UsageType.TEAM_WIKI, null, null, PageRequest.of(0, 10));
+                user.getId(),
+                team.getId(),
+                "30d",
+                null,
+                null,
+                UsageType.TEAM_WIKI,
+                null,
+                null,
+                null,
+                null,
+                PageRequest.of(0, 10));
         assertThat(teamWikiLogs.getContent()).hasSize(1);
         assertThat(teamWikiLogs.getContent().getFirst().usageType()).isEqualTo(UsageType.TEAM_WIKI);
+        assertThat(teamWikiLogs.getContent().getFirst().agentName()).isNull();
 
         Page<UsageLogEntryDto> ingestionLogs = usageService.getUsageLogs(
-                user.getId(), team.getId(), "30d", null, null, UsageType.INGESTION, null, null, PageRequest.of(0, 10));
+                user.getId(),
+                team.getId(),
+                "30d",
+                null,
+                null,
+                UsageType.INGESTION,
+                null,
+                null,
+                null,
+                null,
+                PageRequest.of(0, 10));
         assertThat(ingestionLogs.getContent()).isEmpty();
     }
 }

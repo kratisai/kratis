@@ -32,8 +32,6 @@ class UsageDtoTest {
                 "user@example.com",
                 Set.of(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.05, 100L)),
                 UsageType.EXECUTION,
-                100L,
-                0.05,
                 "/chats/chat-1/executions/exec-1");
         assertThat(dto.id()).isEqualTo("id-1");
         assertThat(dto.timestamp()).isEqualTo(now);
@@ -44,8 +42,6 @@ class UsageDtoTest {
         assertThat(dto.userEmail()).isEqualTo("user@example.com");
         assertThat(dto.models()).extracting(ModelUsageDto::modelIdentifier).containsExactly("gpt-4o");
         assertThat(dto.usageType()).isEqualTo(UsageType.EXECUTION);
-        assertThat(dto.totalTokens()).isEqualTo(100L);
-        assertThat(dto.totalSpend()).isEqualTo(0.05);
         assertThat(dto.targetUrl()).isEqualTo("/chats/chat-1/executions/exec-1");
     }
 
@@ -63,8 +59,6 @@ class UsageDtoTest {
                         new ModelUsageDto(ModelKind.EMBEDDING, "text-embedding-3-small", null, 0.002, 100L),
                         new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.01, 500L)),
                 UsageType.INGESTION,
-                500L,
-                0.01,
                 "/repos/repo-1");
         assertThat(dto.models())
                 .extracting(ModelUsageDto::modelIdentifier)
@@ -84,8 +78,6 @@ class UsageDtoTest {
                 "user@example.com",
                 Set.of(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.0, 10L)),
                 UsageType.EXECUTION,
-                10L,
-                0.0,
                 null);
         assertThat(dto.targetUrl()).isNull();
     }
@@ -102,8 +94,6 @@ class UsageDtoTest {
                         "system@kratis.ai",
                         null,
                         UsageType.INGESTION,
-                        0L,
-                        0.0,
                         null))
                 .isInstanceOf(NullPointerException.class);
     }
@@ -151,13 +141,14 @@ class UsageDtoTest {
                 "user@example.com",
                 Set.of(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.05, 100L)),
                 UsageType.EXECUTION,
-                100L,
-                0.05,
                 "/chats/chat-1/executions/exec-1");
 
-        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(dto);
-        assertThat(json).contains("\"usageType\":\"EXECUTION\"");
-        assertThat(json).contains("\"modelIdentifier\":\"gpt-4o\"");
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        var json = mapper.readTree(mapper.writeValueAsString(dto));
+        assertThat(json.path("usageType").asText()).isEqualTo("EXECUTION");
+        assertThat(json.path("models").get(0).path("modelIdentifier").asText()).isEqualTo("gpt-4o");
+        assertThat(json.has("totalTokens")).isFalse();
+        assertThat(json.has("totalSpend")).isFalse();
     }
 
     @Test

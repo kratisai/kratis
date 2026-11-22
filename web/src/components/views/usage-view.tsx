@@ -23,7 +23,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 
-import type { UsageType } from '@/types/usage-types'
+import type { UsageLogEntry, UsageType } from '@/types/usage-types'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -46,12 +46,16 @@ const USAGE_TYPE_META: Partial<Record<UsageType, { icon: LucideIcon; label: stri
   TEAM_WIKI: { icon: BookOpen, label: 'Team Wiki' },
 }
 
+const FILTERABLE_STATUSES = new Set(['COMPLETED', 'FAILED', 'IDLE', 'RUNNING', 'UNKNOWN'])
+
 export function UsageView() {
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
   const [timeframe, setTimeframe] = useState('7d')
   const [usageType, setUsageType] = useState('all')
   const [modelFilter, setModelFilter] = useState('all')
   const [agentFilter, setAgentFilter] = useState('all')
+  const [userEmailFilter, setUserEmailFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [shareMetric, setShareMetric] = useState<'agent-cost' | 'agent-time' | 'model'>('model')
   const [page, setPage] = useState(0)
   const pageSize = 15
@@ -62,13 +66,46 @@ export function UsageView() {
     model: modelFilter === 'all' ? undefined : modelFilter,
     page,
     size: pageSize,
+    status: statusFilter === 'all' ? undefined : statusFilter,
     timeframe,
     usageType,
+    userEmail: userEmailFilter === 'all' ? undefined : userEmailFilter,
   })
 
   const handleRefresh = () => {
     void refetchSummary()
     void refetchLogs()
+  }
+
+  const applyUsageTypeFilter = (nextType: UsageType, harnessName: null | string) => {
+    const matches =
+      usageType === nextType &&
+      (nextType !== 'EXECUTION' || !harnessName || agentFilter === harnessName)
+    if (matches) {
+      setUsageType('all')
+      setAgentFilter('all')
+    } else {
+      setUsageType(nextType)
+      setAgentFilter(nextType === 'EXECUTION' && harnessName ? harnessName : 'all')
+    }
+    setPage(0)
+  }
+
+  const toggleModelFilter = (model: string) => {
+    setModelFilter((current) => (current === model ? 'all' : model))
+    setPage(0)
+  }
+
+  const toggleUserFilter = (email: string) => {
+    setUserEmailFilter((current) => (current === email ? 'all' : email))
+    setPage(0)
+  }
+
+  const toggleStatusFilter = (status: NonNullable<UsageLogEntry['status']>) => {
+    const normalized = status === 'IDLE' ? 'COMPLETED' : status
+    if (!FILTERABLE_STATUSES.has(normalized)) return
+    setStatusFilter((current) => (current === normalized ? 'all' : normalized))
+    setPage(0)
   }
 
   const currentPieData =
@@ -89,7 +126,13 @@ export function UsageView() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Select onValueChange={setTimeframe} value={timeframe}>
+          <Select
+            onValueChange={(value) => {
+              setTimeframe(value)
+              setPage(0)
+            }}
+            value={timeframe}
+          >
             <SelectTrigger className="w-[160px]">
               <Calendar className="mr-2 h-4 w-4" />
               <SelectValue placeholder="Timeframe" />
@@ -238,6 +281,7 @@ export function UsageView() {
                         } else {
                           setAgentFilter(item.label)
                         }
+                        setPage(0)
                       }}
                     >
                       <div className="flex items-center gap-2 truncate">
@@ -279,7 +323,14 @@ export function UsageView() {
             <span>Filters:</span>
           </div>
 
-          <Select onValueChange={setUsageType} value={usageType}>
+          <Select
+            onValueChange={(value) => {
+              setUsageType(value)
+              if (value !== 'EXECUTION') setAgentFilter('all')
+              setPage(0)
+            }}
+            value={usageType}
+          >
             <SelectTrigger className="h-9 w-[140px] text-xs">
               <SelectValue placeholder="Usage Type" />
             </SelectTrigger>
@@ -292,7 +343,32 @@ export function UsageView() {
             </SelectContent>
           </Select>
 
-          <Select onValueChange={setModelFilter} value={modelFilter}>
+          <Select
+            onValueChange={(value) => {
+              setStatusFilter(value)
+              setPage(0)
+            }}
+            value={statusFilter}
+          >
+            <SelectTrigger className="h-9 w-[140px] text-xs">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="RUNNING">Running</SelectItem>
+              <SelectItem value="COMPLETED">Completed</SelectItem>
+              <SelectItem value="FAILED">Failed</SelectItem>
+              <SelectItem value="UNKNOWN">Unknown</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select
+            onValueChange={(value) => {
+              setModelFilter(value)
+              setPage(0)
+            }}
+            value={modelFilter}
+          >
             <SelectTrigger className="h-9 w-[140px] text-xs">
               <SelectValue placeholder="Model" />
             </SelectTrigger>
@@ -306,7 +382,13 @@ export function UsageView() {
             </SelectContent>
           </Select>
 
-          <Select onValueChange={setAgentFilter} value={agentFilter}>
+          <Select
+            onValueChange={(value) => {
+              setAgentFilter(value)
+              setPage(0)
+            }}
+            value={agentFilter}
+          >
             <SelectTrigger className="h-9 w-[150px] text-xs">
               <SelectValue placeholder="Agent / Harness" />
             </SelectTrigger>
@@ -320,13 +402,37 @@ export function UsageView() {
             </SelectContent>
           </Select>
 
-          {(usageType !== 'all' || modelFilter !== 'all' || agentFilter !== 'all') && (
+          {userEmailFilter !== 'all' && (
+            <Button
+              aria-label="Clear user filter"
+              className="h-9 text-xs"
+              onClick={() => {
+                setUserEmailFilter('all')
+                setPage(0)
+              }}
+              size="sm"
+              variant="outline"
+            >
+              <User className="h-3.5 w-3.5" />
+              {userEmailFilter}
+              <XCircle className="h-3.5 w-3.5" />
+            </Button>
+          )}
+
+          {(usageType !== 'all' ||
+            statusFilter !== 'all' ||
+            modelFilter !== 'all' ||
+            agentFilter !== 'all' ||
+            userEmailFilter !== 'all') && (
             <Button
               className="text-muted-foreground hover:text-foreground h-9 text-xs"
               onClick={() => {
                 setUsageType('all')
+                setStatusFilter('all')
                 setModelFilter('all')
                 setAgentFilter('all')
+                setUserEmailFilter('all')
+                setPage(0)
               }}
               size="sm"
               variant="ghost"
@@ -354,16 +460,21 @@ export function UsageView() {
                   <th>Activity & Status</th>
                   <th>User</th>
                   <th>Model</th>
-                  <th>Usage Type & Cost</th>
+                  <th>Tokens & Cost</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {logsPage && logsPage.content.length > 0 ? (
                   logsPage.content.map((entry) => {
-                    const isSuccess = entry.status === 'COMPLETED'
-                    const isFailed = entry.status === 'FAILED'
-                    const isRunning = entry.status === 'RUNNING' || entry.status === 'IDLE'
-
+                    const totalTokens = entry.models.reduce(
+                      (total, model) => total + (model.totalTokens ?? 0),
+                      0,
+                    )
+                    const totalSpend = entry.models.reduce(
+                      (total, model) => total + (model.totalSpend ?? 0),
+                      0,
+                    )
+                    const status = entry.status
                     return (
                       <tr
                         className="hover:bg-muted/30 transition-colors [&_td]:px-4 [&_td]:py-3"
@@ -396,67 +507,61 @@ export function UsageView() {
                               {entry.activityTitle}
                             </div>
                           )}
-                          <div className="mt-1 flex items-center gap-2">
-                            {entry.agentName && (
-                              <span className="bg-secondary text-secondary-foreground inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium">
-                                <Sparkles className="h-3 w-3" />
-                                {entry.agentName}
-                              </span>
-                            )}
-                            {entry.status && (
-                              <span
-                                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                                  isSuccess
-                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                                    : isFailed
-                                      ? 'bg-destructive/10 text-destructive'
-                                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                                }`}
-                              >
-                                {isSuccess && <CheckCircle2 className="h-3 w-3" />}
-                                {isFailed && <XCircle className="h-3 w-3" />}
-                                {isRunning && <RefreshCw className="h-3 w-3 animate-spin" />}
-                                {entry.status}
-                              </span>
+                          <div className="mt-1 flex flex-wrap items-center gap-2">
+                            <UsageTypeBadge
+                              agentName={entry.agentName}
+                              onClick={() => applyUsageTypeFilter(entry.usageType, entry.agentName)}
+                              usageType={entry.usageType}
+                            />
+                            {status && entry.usageType !== 'CHAT' && (
+                              <UsageStatusBadge
+                                onClick={() => toggleStatusFilter(status)}
+                                status={status}
+                              />
                             )}
                           </div>
                         </td>
 
                         {/* 3. User */}
                         <td>
-                          <div className="text-foreground flex items-center gap-1.5 text-sm font-medium">
+                          <button
+                            aria-label={`Filter by user ${entry.userEmail}`}
+                            className="text-foreground hover:text-primary flex cursor-pointer items-center gap-1.5 text-sm font-medium hover:underline"
+                            onClick={() => toggleUserFilter(entry.userEmail)}
+                            type="button"
+                          >
                             <User className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
                             <span className="max-w-[180px] truncate">{entry.userEmail}</span>
-                          </div>
+                          </button>
                         </td>
 
                         {/* 4. Model */}
                         <td>
                           <div className="flex flex-wrap gap-1">
                             {entry.models.map((model) => (
-                              <div
-                                className="text-muted-foreground bg-muted/50 w-fit rounded px-2 py-0.5 font-mono text-xs"
+                              <button
+                                aria-label={`Filter by model ${model.modelIdentifier}`}
+                                className="text-muted-foreground bg-muted/50 hover:text-primary w-fit cursor-pointer rounded px-2 py-0.5 font-mono text-xs hover:underline"
                                 key={`${model.modelKind ?? 'UNKNOWN'}-${model.modelIdentifier}`}
+                                onClick={() => toggleModelFilter(model.modelIdentifier)}
+                                type="button"
                               >
                                 {model.modelIdentifier}
-                              </div>
+                              </button>
                             ))}
                           </div>
                         </td>
 
-                        {/* 5. Usage Type & Cost */}
+                        {/* 5. Tokens & Cost */}
                         <td>
-                          <div className="flex flex-col gap-1">
-                            <UsageTypeBadge usageType={entry.usageType} />
-                            <div className="text-muted-foreground text-xs">
-                              <span className="font-medium">
-                                {entry.totalTokens.toLocaleString()} tk
-                              </span>
-                              <span className="mx-1.5">•</span>
-                              <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                                ${entry.totalSpend.toFixed(4)}
-                              </span>
-                            </div>
+                          <div className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 text-xs">
+                            <span className="text-foreground font-medium">
+                              {totalTokens.toLocaleString()} tk
+                            </span>
+                            <span>•</span>
+                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                              ${totalSpend.toFixed(4)}
+                            </span>
                           </div>
                         </td>
                       </tr>
@@ -510,13 +615,95 @@ const FALLBACK_USAGE_TYPE: { icon: LucideIcon } = {
   icon: HelpCircle,
 }
 
-function UsageTypeBadge({ usageType }: { usageType: UsageType }) {
+function UsageTypeBadge({
+  agentName,
+  onClick,
+  usageType,
+}: {
+  agentName: null | string
+  onClick: () => void
+  usageType: UsageType
+}) {
   const meta = USAGE_TYPE_META[usageType] ?? { ...FALLBACK_USAGE_TYPE, label: usageType }
   const Icon = meta.icon
+  const combinedLabel = usageType === 'EXECUTION' && agentName
+  const label = combinedLabel ? `${agentName} execution` : meta.label
+  const title = combinedLabel
+    ? `Filter by ${agentName} executions`
+    : usageType === 'EXECUTION'
+      ? 'Filter by executions'
+      : `Filter by ${meta.label}`
   return (
-    <span className="bg-secondary text-secondary-foreground inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium">
+    <button
+      className="bg-secondary text-secondary-foreground hover:bg-secondary/80 inline-flex w-fit cursor-pointer items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors"
+      onClick={onClick}
+      title={title}
+      type="button"
+    >
       <Icon className="h-3 w-3" />
+      {label}
+    </button>
+  )
+}
+
+const USAGE_STATUS_META: Partial<
+  Record<
+    NonNullable<UsageLogEntry['status']>,
+    { className: string; icon: LucideIcon; label: string; spin?: boolean }
+  >
+> = {
+  COMPLETED: {
+    className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    icon: CheckCircle2,
+    label: 'Complete',
+  },
+  FAILED: {
+    className: 'bg-destructive/10 text-destructive',
+    icon: XCircle,
+    label: 'Failed',
+  },
+  IDLE: {
+    className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    icon: CheckCircle2,
+    label: 'Complete',
+  },
+  RUNNING: {
+    className: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+    icon: RefreshCw,
+    label: 'Active',
+    spin: true,
+  },
+  UNKNOWN: {
+    className: 'bg-muted text-muted-foreground',
+    icon: HelpCircle,
+    label: 'Unknown',
+  },
+}
+
+const FALLBACK_USAGE_STATUS = {
+  className: 'bg-muted text-muted-foreground',
+  icon: HelpCircle,
+  label: 'Unknown',
+}
+
+function UsageStatusBadge({
+  onClick,
+  status,
+}: {
+  onClick: () => void
+  status: NonNullable<UsageLogEntry['status']>
+}) {
+  const meta = USAGE_STATUS_META[status] ?? { ...FALLBACK_USAGE_STATUS, label: status }
+  const Icon = meta.icon
+  return (
+    <button
+      className={`inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold transition-opacity hover:opacity-80 ${meta.className}`}
+      onClick={onClick}
+      title={`Filter by ${meta.label.toLowerCase()} status`}
+      type="button"
+    >
+      <Icon className={meta.spin ? 'h-3 w-3 animate-spin' : 'h-3 w-3'} />
       {meta.label}
-    </span>
+    </button>
   )
 }

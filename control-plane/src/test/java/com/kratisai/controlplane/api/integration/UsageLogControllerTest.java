@@ -109,7 +109,7 @@ class UsageLogControllerTest {
         execution.setEnvironment(environment);
         execution.setCanvas(canvas);
         execution.setTaskPrompt("You are running as a non-root user inside a sandbox...");
-        execution.setStatus(SandboxExecutionStatus.COMPLETED);
+        execution.setStatus(SandboxExecutionStatus.IDLE);
         execution.setModelName("gpt-4o");
         sandboxExecutionRepository.save(execution);
 
@@ -119,6 +119,22 @@ class UsageLogControllerTest {
                 .andExpect(jsonPath("$.content[0].activityTitle").value("Fix: Usage Log Execution Names"))
                 .andExpect(jsonPath("$.content[0].models[0].modelIdentifier").value("gpt-4o"))
                 .andExpect(jsonPath("$.content[0].models[0].modelKind").value("CHAT"));
+
+        mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-logs")
+                        .queryParam("status", "COMPLETED")
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].status").value("IDLE"));
+        mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-logs")
+                        .queryParam("status", "RUNNING")
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+        mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-logs")
+                        .queryParam("status", "NOT_A_STATUS")
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -186,6 +202,17 @@ class UsageLogControllerTest {
                 .andExpect(jsonPath("$.content[0].usageType").value("TEAM_WIKI"))
                 .andExpect(jsonPath("$.content[0].activityTitle").value("Team Wiki Build (full)"))
                 .andExpect(jsonPath("$.content[0].id").value("team-wiki-" + teamWikiBatch.getId()));
+        mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-logs")
+                        .queryParam("userEmail", user.getEmail())
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].userEmail").value(user.getEmail()));
+        mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-logs")
+                        .queryParam("userEmail", "nobody@example.com")
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
         mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-logs?usageType=all")
                         .header("Authorization", "Bearer " + authToken))
                 .andExpect(status().isOk())

@@ -4,6 +4,7 @@ import com.kratisai.controlplane.api.restdto.PageResponseDto;
 import com.kratisai.controlplane.api.restdto.UsageLogEntryDto;
 import com.kratisai.controlplane.api.restdto.UsageSummaryDto;
 import com.kratisai.controlplane.config.SecurityUtil;
+import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.UsageType;
 import com.kratisai.controlplane.service.UsageService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -44,14 +45,16 @@ public class UsageLogController {
             summary = "Get paginated usage logs",
             description = "Returns human-friendly usage log entries spanning Executions, Repository Ingestion "
                     + "Batches, Team Wiki builds, and Chat Sessions. The optional usageType filter "
-                    + "accepts EXECUTION, INGESTION, TEAM_WIKI, or CHAT; unknown values yield 400.")
+                    + "accepts EXECUTION, INGESTION, TEAM_WIKI, or CHAT. The optional status filter "
+                    + "accepts RUNNING, COMPLETED, FAILED, IDLE, or UNKNOWN; COMPLETED also includes settled IDLE "
+                    + "entries. Unknown values for either filter yield 400.")
     @ApiResponses(
             value = {
                 @ApiResponse(
                         responseCode = "200",
                         description = "Usage logs retrieved successfully",
                         content = @Content(schema = @Schema(implementation = UsageLogEntryDto.class))),
-                @ApiResponse(responseCode = "400", description = "Unknown usage type", content = @Content),
+                @ApiResponse(responseCode = "400", description = "Unknown usage type or status", content = @Content),
                 @ApiResponse(responseCode = "403", description = "Not a member of this team", content = @Content)
             })
     public ResponseEntity<PageResponseDto<UsageLogEntryDto>> getUsageLogs(
@@ -62,6 +65,8 @@ public class UsageLogController {
             @RequestParam(required = false) String usageType,
             @RequestParam(required = false) String model,
             @RequestParam(required = false) String agent,
+            @RequestParam(required = false) String userEmail,
+            @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         UUID userId = SecurityUtil.getCurrentUserId();
@@ -74,6 +79,8 @@ public class UsageLogController {
                 parseUsageType(usageType),
                 model,
                 agent,
+                userEmail,
+                parseStatus(status),
                 PageRequest.of(page, size));
         return ResponseEntity.ok(PageResponseDto.from(logs));
     }
@@ -86,6 +93,17 @@ public class UsageLogController {
             return UsageType.valueOf(usageType.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown usage type: " + usageType);
+        }
+    }
+
+    private static SandboxExecutionStatus parseStatus(String status) {
+        if (status == null || status.isBlank() || "all".equalsIgnoreCase(status.trim())) {
+            return null;
+        }
+        try {
+            return SandboxExecutionStatus.valueOf(status.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown status: " + status);
         }
     }
 

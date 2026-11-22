@@ -9,8 +9,10 @@ export function useUsageLogs(
     model?: string
     page?: number
     size?: number
+    status?: string
     timeframe?: string
     usageType?: string
+    userEmail?: string
   },
 ) {
   return useQuery({

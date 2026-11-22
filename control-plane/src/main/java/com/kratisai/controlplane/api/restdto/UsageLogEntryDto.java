@@ -18,8 +18,6 @@ public record UsageLogEntryDto(
         String userEmail,
         Set<ModelUsageDto> models,
         UsageType usageType,
-        Long totalTokens,
-        Double totalSpend,
         String targetUrl) {
     public UsageLogEntryDto {
         Objects.requireNonNull(models, "models is required");

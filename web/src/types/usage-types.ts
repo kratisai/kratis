@@ -14,11 +14,9 @@ export interface UsageLogEntry {
   durationSeconds: null | number
   id: string
   models: ModelUsageDto[]
-  status: 'COMPLETED' | 'FAILED' | 'IDLE' | 'RUNNING' | null
+  status: 'COMPLETED' | 'FAILED' | 'IDLE' | 'RUNNING' | 'UNKNOWN' | null
   targetUrl?: null | string
   timestamp: string
-  totalSpend: number
-  totalTokens: number
   usageType: UsageType
   userEmail: string
 }

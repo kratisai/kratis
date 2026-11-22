@@ -13,8 +13,10 @@ export async function fetchUsageLogs(
     model?: string
     page?: number
     size?: number
+    status?: string
     timeframe?: string
     usageType?: string
+    userEmail?: string
   },
 ): Promise<PageResponse<UsageLogEntry>> {
   const query = new URLSearchParams()
@@ -22,6 +24,8 @@ export async function fetchUsageLogs(
   if (params.usageType && params.usageType !== 'all') query.append('usageType', params.usageType)
   if (params.model) query.append('model', params.model)
   if (params.agent) query.append('agent', params.agent)
+  if (params.userEmail) query.append('userEmail', params.userEmail)
+  if (params.status) query.append('status', params.status)
   if (params.page !== undefined) query.append('page', params.page.toString())
   if (params.size !== undefined) query.append('size', params.size.toString())
 
