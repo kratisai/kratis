@@ -19,6 +19,7 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -315,6 +316,12 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
         removeSupersededNetworkPeers(activePgId, null, imageSubstring);
     }
 
+    /**
+     * Removes older containers of the same role on {@link #TEST_NETWORK_NAME} whose IDs differ from
+     * this JVM's active containers (for example after a Testcontainers reuse-hash change). Assumes at
+     * most one test JVM runs per {@link TestIsolationScope}, and skips containers created within the
+     * last 60 seconds so two concurrent cold-starting suites never kill each other's fresh peers.
+     */
     private static void removeSupersededNetworkPeers(String activePgId, String activeLitellmId, String imageSubstring) {
         try {
             var client = DockerClientFactory.instance().client();
@@ -322,9 +329,14 @@ public class PostgresTestInitializer implements ApplicationContextInitializer<Co
                     .withShowAll(true)
                     .withNetworkFilter(List.of(TEST_NETWORK_NAME))
                     .exec();
+            long minCreatedEpochSec = Instant.now().getEpochSecond() - 60L;
             for (var c : containers) {
                 String id = c.getId();
                 if (id.equals(activePgId) || id.equals(activeLitellmId)) {
+                    continue;
+                }
+                Long created = c.getCreated();
+                if (created != null && created > minCreatedEpochSec) {
                     continue;
                 }
                 String image = c.getImage() != null ? c.getImage() : "";

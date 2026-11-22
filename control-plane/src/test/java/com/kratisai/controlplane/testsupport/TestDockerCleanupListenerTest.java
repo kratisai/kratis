@@ -42,6 +42,8 @@ class TestDockerCleanupListenerTest {
         assertThat(TestDockerCleanupListener.isStaleTestInstanceResource(
                         "kratis-test-ce082119", now.minus(Duration.ofHours(12)), now, maxAge))
                 .isFalse();
+        assertThat(TestDockerCleanupListener.isStaleTestInstanceResource("kratis-test-ce082119", null, now, maxAge))
+                .isFalse();
 
         // Dev / production snapshots and containers must NEVER be marked stale regardless of age
         assertThat(TestDockerCleanupListener.isStaleTestInstanceResource(

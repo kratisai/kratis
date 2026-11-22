@@ -1021,8 +1021,16 @@ public abstract class AbstractAgentExecutionRealTest {
                 var opencodeLogs = verifier.executeInContainer(
                         "sh", "-c", "tail -200 $HOME/.local/share/opencode/log/*.log 2>/dev/null || true");
                 String logText = new String(opencodeLogs.output(), StandardCharsets.UTF_8);
-                if (!logText.isBlank()) {
-                    logger.info("[test] OpenCode internal logs for {}:\n{}", containerId, logText);
+                if (opencodeLogs.exitCode() == 0) {
+                    if (!logText.isBlank()) {
+                        logger.info("[test] OpenCode internal logs for {}:\n{}", containerId, logText);
+                    }
+                } else {
+                    logger.warn(
+                            "[test] Failed to extract OpenCode internal logs for {} (exit code {}): {}",
+                            containerId,
+                            opencodeLogs.exitCode(),
+                            logText);
                 }
             }
         } catch (Exception e) {

@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.testsupport;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -231,11 +232,11 @@ public class TestDockerCleanupListener implements TestExecutionListener {
                         deleteDirectoryRecursively(entry);
                         deleted++;
                     }
-                } catch (IOException ignored) {
-                    // Best effort cleanup of orphaned temp directories
+                } catch (IOException | UncheckedIOException ignored) {
+                    // Best effort cleanup of orphaned temp directories (another worktree may prune concurrently)
                 }
             }
-        } catch (IOException e) {
+        } catch (IOException | UncheckedIOException e) {
             log.debug("Skipping temp directory prune under {}: {}", tempRoot, e.getMessage());
         }
         if (deleted > 0) {
