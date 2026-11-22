@@ -178,6 +178,11 @@ class GitCredentialFlowRealTest {
     void tearDown() {
         localDockerSandboxProvider.setConnectUrl(originalServerUrl);
         Mockito.reset(processExecutor);
+        terminateSpawnedSandbox();
+        databaseCleaner.cleanAll();
+    }
+
+    private void terminateSpawnedSandbox() {
         if (spawnedEnvId != null) {
             long start = System.nanoTime();
             try {
@@ -188,7 +193,6 @@ class GitCredentialFlowRealTest {
             TestTimingRegistry.instance().recordSubPhase("terminateSandbox", System.nanoTime() - start);
             spawnedEnvId = null;
         }
-        databaseCleaner.cleanAll();
     }
 
     @Test
@@ -201,6 +205,7 @@ class GitCredentialFlowRealTest {
         DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, "kratis-sandbox-" + spawnedEnvId);
         Awaitility.await()
                 .atMost(90, TimeUnit.SECONDS)
+                .pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofSeconds(1))
                 .untilAsserted(() -> {
                     ProcessExecutor.ProcessResult result =
@@ -216,6 +221,10 @@ class GitCredentialFlowRealTest {
         String sidecarLog = extractSidecarLog();
         assertThat(sidecarLog).contains("Registering Git credentials: credType=PAT");
         assertThat(sidecarLog).doesNotContain("could not read Username");
+
+        // Stop the container before DrainExecutors.afterTestExecution runs so in-flight OpenCode setup
+        // aborts via WebSocket close cleanly instead of blocking drain for ~10-20s per test.
+        terminateSpawnedSandbox();
     }
 
     @Test
@@ -233,6 +242,7 @@ class GitCredentialFlowRealTest {
         // The real git failure is recorded as an ERROR activity and fails the execution
         Awaitility.await()
                 .atMost(180, TimeUnit.SECONDS)
+                .pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofMillis(500))
                 .untilAsserted(() -> {
                     assertThat(sandboxExecutionRepository
@@ -245,6 +255,7 @@ class GitCredentialFlowRealTest {
                             .anySatisfy(activity -> assertThat(activity.getDescription())
                                     .contains("Authentication failed for '" + gitFixture.getGitHttpUrl()));
                 });
+        terminateSpawnedSandbox();
     }
 
     @Test
@@ -267,6 +278,7 @@ class GitCredentialFlowRealTest {
         DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, "kratis-sandbox-" + spawnedEnvId);
         Awaitility.await()
                 .atMost(90, TimeUnit.SECONDS)
+                .pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofSeconds(1))
                 .untilAsserted(() -> {
                     ProcessExecutor.ProcessResult result =
@@ -282,6 +294,8 @@ class GitCredentialFlowRealTest {
         String sidecarLog = extractSidecarLog();
         assertThat(sidecarLog).contains("Registering Git credentials: credType=SSH_KEY");
         assertThat(sidecarLog).doesNotContain("Permission denied");
+
+        terminateSpawnedSandbox();
     }
 
     @Test
@@ -291,6 +305,7 @@ class GitCredentialFlowRealTest {
         DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, "kratis-sandbox-" + spawnedEnvId);
         Awaitility.await()
                 .atMost(90, TimeUnit.SECONDS)
+                .pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofSeconds(1))
                 .untilAsserted(() -> {
                     ProcessExecutor.ProcessResult revParse =
@@ -305,6 +320,8 @@ class GitCredentialFlowRealTest {
                             .as("the initial empty commit must exist")
                             .isEqualTo("Initial commit");
                 });
+
+        terminateSpawnedSandbox();
     }
 
     /**
@@ -349,6 +366,7 @@ class GitCredentialFlowRealTest {
         long connectStart = System.nanoTime();
         Awaitility.await()
                 .atMost(90, TimeUnit.SECONDS)
+                .pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofMillis(500))
                 .untilAsserted(() -> {
                     var updated =

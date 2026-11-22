@@ -564,6 +564,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 Awaitility.await("file '%s' content in container for harness '%s'"
                                 .formatted(expectedFile.path(), getHarness().getName()))
                         .atMost(30, TimeUnit.SECONDS)
+                        .pollDelay(Duration.ZERO)
                         .pollInterval(Duration.ofMillis(500))
                         .untilAsserted(
                                 () -> verifier.verifyFileContains(expectedFile.path(), expectedFile.expectedContent()));
@@ -1037,6 +1038,7 @@ public abstract class AbstractAgentExecutionRealTest {
             try {
                 Awaitility.await("failure broadcast for harness " + getHarness().getName())
                         .atMost(15, TimeUnit.SECONDS)
+                        .pollDelay(Duration.ZERO)
                         .pollInterval(Duration.ofMillis(200))
                         .until(() -> executionFailedEarly);
             } catch (ConditionTimeoutException e) {
@@ -1133,33 +1135,6 @@ public abstract class AbstractAgentExecutionRealTest {
         };
     }
 
-    /**
-     * Checks whether all expected files exist in the container via
-     * {@code docker exec}. This is a success criteria (not completion) — it
-     * verifies the agent produced the expected output files.
-     */
-    private boolean allExpectedFilesExist() {
-        if (spawnedEnvId == null) {
-            return false;
-        }
-        List<ExpectedFile> expectedFiles = getExpectedFiles();
-        if (expectedFiles.isEmpty()) {
-            return true;
-        }
-        try {
-            DockerExecVerifier verifier = new DockerExecVerifier(processExecutor, "kratis-sandbox-" + spawnedEnvId);
-            for (ExpectedFile file : expectedFiles) {
-                if (!verifier.fileExists(file.path())) {
-                    return false;
-                }
-            }
-            return true;
-        } catch (Exception e) {
-            logger.debug("[test] Error checking expected files: {}", e.getMessage());
-            return false;
-        }
-    }
-
     private boolean isExecutionFailed(UUID envId) {
         try {
             return sandboxExecutionRepository.findAll().stream()
@@ -1240,6 +1215,7 @@ public abstract class AbstractAgentExecutionRealTest {
         long connectStart = System.nanoTime();
         Awaitility.await()
                 .atMost(60, TimeUnit.SECONDS)
+                .pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofMillis(500))
                 .untilAsserted(() -> {
                     ExecutionEnvironment updatedEnv =
@@ -1253,6 +1229,7 @@ public abstract class AbstractAgentExecutionRealTest {
         long acpInitStart = System.nanoTime();
         Awaitility.await("ACP agent initialization for harness " + getHarness().getName())
                 .atMost(180, TimeUnit.SECONDS)
+                .pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofSeconds(1))
                 .conditionEvaluationListener(awaitTimeoutDiagnostics("ACP agent initialization", env.getId()))
                 .until(() -> harnessStalled()
@@ -1277,15 +1254,15 @@ public abstract class AbstractAgentExecutionRealTest {
                         getHarness().getName(), collectUiOutputMessages())
                 .isFalse();
 
-        // Wait for prompt execution to complete: either all expected files exist, or the execution
-        // reaches IDLE/terminal state (indicating the ACP agent finished its turn).
+        // Wait for prompt execution to complete: execution reaches IDLE or terminal state
+        // (indicating the ACP agent finished its turn and sidecar completed post-turn settle).
         long promptStart = System.nanoTime();
         Awaitility.await("ACP prompt completion for harness " + getHarness().getName())
                 .atMost(300, TimeUnit.SECONDS)
-                .pollInterval(Duration.ofSeconds(2))
+                .pollDelay(Duration.ZERO)
+                .pollInterval(Duration.ofMillis(500))
                 .conditionEvaluationListener(awaitTimeoutDiagnostics("ACP prompt completion", env.getId()))
                 .until(() -> harnessStalled()
-                        || allExpectedFilesExist()
                         || isExecutionTerminalOrFailed(env.getId())
                         || getExecutionStatus(env.getId()) == SandboxExecutionStatus.IDLE);
         TestTimingRegistry.instance().recordSubPhase("awaitPromptComplete", System.nanoTime() - promptStart);
@@ -1313,6 +1290,7 @@ public abstract class AbstractAgentExecutionRealTest {
         Awaitility.await("ACP prompt completion status for harness "
                         + getHarness().getName())
                 .atMost(30, TimeUnit.SECONDS)
+                .pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofMillis(500))
                 .untilAsserted(() -> {
                     SandboxExecutionStatus status = getExecutionStatus(env.getId());
@@ -1332,6 +1310,7 @@ public abstract class AbstractAgentExecutionRealTest {
         // Fan-out is async, so the payload may arrive just after completion was detected; poll.
         Awaitility.await("execution_acp_initialized for harness " + getHarness().getName())
                 .atMost(30, TimeUnit.SECONDS)
+                .pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofMillis(500))
                 .untilAsserted(() -> assertThat(acpInitialized.get())
                         .as(
@@ -1362,6 +1341,7 @@ public abstract class AbstractAgentExecutionRealTest {
         if (!expectedActivities.isEmpty()) {
             Awaitility.await("expected activities for harness " + getHarness().getName())
                     .atMost(30, TimeUnit.SECONDS)
+                    .pollDelay(Duration.ZERO)
                     .pollInterval(Duration.ofMillis(500))
                     .untilAsserted(() -> assertThat(receivedActivityTypes)
                             .as(
@@ -1374,6 +1354,7 @@ public abstract class AbstractAgentExecutionRealTest {
         int expectedHitl = getExpectedHitlRequestCount();
         Awaitility.await("HITL request count for harness " + getHarness().getName())
                 .atMost(30, TimeUnit.SECONDS)
+                .pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofMillis(500))
                 .until(() -> harnessStalled() || hitlRequestCount.get() == expectedHitl);
         assertNoHarnessStall();
@@ -1404,13 +1385,7 @@ public abstract class AbstractAgentExecutionRealTest {
                     expectedFiles.size(),
                     getHarness().getName());
 
-            // Poll for files to appear (agent may still be writing)
-            Awaitility.await()
-                    .atMost(30, TimeUnit.SECONDS)
-                    .pollInterval(Duration.ofSeconds(1))
-                    .until(this::allExpectedFilesExist);
-
-            // Verify files with full content/permissions checks
+            // Verify files with full content/permissions checks (uses Awaitility for content)
             verifyExpectedFilesInContainer();
         } else {
             // No expected files defined; the last output chunks may still be draining (async fan-out).
@@ -1422,6 +1397,7 @@ public abstract class AbstractAgentExecutionRealTest {
             Awaitility.await("expected output in UI stream for harness "
                             + getHarness().getName())
                     .atMost(30, TimeUnit.SECONDS)
+                    .pollDelay(Duration.ZERO)
                     .pollInterval(Duration.ofMillis(500))
                     .untilAsserted(() -> assertThat(collectUiOutputMessages())
                             .as(
@@ -1440,6 +1416,7 @@ public abstract class AbstractAgentExecutionRealTest {
                     expectedToolOutput);
             Awaitility.await("tool output relay for harness " + getHarness().getName())
                     .atMost(30, TimeUnit.SECONDS)
+                    .pollDelay(Duration.ZERO)
                     .pollInterval(Duration.ofMillis(500))
                     .untilAsserted(() -> {
                         assertThat(collectedCommandActivityOutputs())
@@ -1486,7 +1463,8 @@ public abstract class AbstractAgentExecutionRealTest {
                     .isNotBlank();
             Awaitility.await()
                     .atMost(60, TimeUnit.SECONDS)
-                    .pollInterval(Duration.ofSeconds(2))
+                    .pollDelay(Duration.ZERO)
+                    .pollInterval(Duration.ofMillis(500))
                     .untilAsserted(() -> {
                         LlmUsageSnapshot snapshot = virtualKeyService.fetchUsage(virtualKey);
                         assertThat(snapshot.totalTokens())
@@ -1535,6 +1513,7 @@ public abstract class AbstractAgentExecutionRealTest {
         // Wait for the execution to reach a terminal state
         Awaitility.await()
                 .atMost(30, TimeUnit.SECONDS)
+                .pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofSeconds(1))
                 .untilAsserted(() -> {
                     SandboxExecution updatedExecution = sandboxExecutionRepository.findAll().stream()
@@ -1601,6 +1580,7 @@ public abstract class AbstractAgentExecutionRealTest {
             Awaitility.await("diff snapshot with expected files for "
                             + getHarness().getName())
                     .atMost(20, TimeUnit.SECONDS)
+                    .pollDelay(Duration.ZERO)
                     .pollInterval(Duration.ofMillis(500))
                     .ignoreExceptions()
                     .untilAsserted(() -> {
