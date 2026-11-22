@@ -3,6 +3,7 @@ package com.kratisai.controlplane.e2e;
 import com.kratisai.controlplane.model.AgentHarness;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
+import com.kratisai.controlplane.testsupport.SlowTest;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.llm.HttpRequestMatcher;
 import com.kratisai.controlplane.testsupport.llm.LlmMockScenarios;
@@ -11,6 +12,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 @SpringIntegrationTest
+@SlowTest(slotGroup = "END_TO_END", maxConcurrency = 4, lane = 3)
 class AiderExecutionRealTest extends AbstractAgentExecutionRealTest {
 
     @Test

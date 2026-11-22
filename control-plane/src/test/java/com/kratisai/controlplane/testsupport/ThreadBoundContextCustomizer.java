@@ -4,10 +4,12 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -54,6 +56,11 @@ public final class ThreadBoundContextCustomizer implements ContextCustomizer {
 
     static SlotAllocator createAllocatorForTest(int poolSize) {
         return new SlotAllocator(poolSize);
+    }
+
+    static SlotAllocator createAllocatorForTest(
+            int poolSize, Function<String, String> propLookup, Function<String, String> envLookup) {
+        return new SlotAllocator(poolSize, propLookup, envLookup);
     }
 
     private final int slot;
@@ -117,6 +124,8 @@ public final class ThreadBoundContextCustomizer implements ContextCustomizer {
 
     static final class SlotAllocator {
         private final int poolSize;
+        private final Function<String, String> propLookup;
+        private final Function<String, String> envLookup;
         private final Map<Class<?>, Integer> slowTestSlots = new ConcurrentHashMap<>();
         private final Map<String, int[]> groupLanePools = new ConcurrentHashMap<>();
         private final Map<Class<?>, Integer> groupClassSlots = new ConcurrentHashMap<>();
@@ -125,7 +134,13 @@ public final class ThreadBoundContextCustomizer implements ContextCustomizer {
         private final AtomicInteger groupSlotCounter;
 
         SlotAllocator(int poolSize) {
+            this(poolSize, System::getProperty, System::getenv);
+        }
+
+        SlotAllocator(int poolSize, Function<String, String> propLookup, Function<String, String> envLookup) {
             this.poolSize = poolSize;
+            this.propLookup = propLookup;
+            this.envLookup = envLookup;
             this.groupSlotCounter = new AtomicInteger(poolSize);
         }
 
@@ -139,7 +154,7 @@ public final class ThreadBoundContextCustomizer implements ContextCustomizer {
 
             String slotGroup = slowTest.slotGroup();
             if (slotGroup != null && !slotGroup.isEmpty()) {
-                int lanes = Math.max(1, slowTest.maxConcurrency());
+                int lanes = resolveMaxConcurrency(slotGroup, slowTest.maxConcurrency(), propLookup, envLookup);
                 int[] pool = groupLanePools.computeIfAbsent(slotGroup, k -> {
                     int[] allocated = new int[lanes];
                     for (int i = 0; i < lanes; i++) {
@@ -151,6 +166,9 @@ public final class ThreadBoundContextCustomizer implements ContextCustomizer {
                     if (pool.length == 1) {
                         return pool[0];
                     }
+                    if (slowTest.lane() >= 0) {
+                        return pool[Math.floorMod(slowTest.lane(), pool.length)];
+                    }
                     int idx = groupLaneCounters
                             .computeIfAbsent(slotGroup, g -> new AtomicInteger(0))
                             .getAndIncrement();
@@ -159,6 +177,32 @@ public final class ThreadBoundContextCustomizer implements ContextCustomizer {
             }
 
             return slowTestSlots.computeIfAbsent(testClass, k -> roundRobinCounter.getAndIncrement() % poolSize);
+        }
+
+        static int resolveMaxConcurrency(
+                String slotGroup,
+                int annotationDefault,
+                Function<String, String> propLookup,
+                Function<String, String> envLookup) {
+            String propKey = "kratis.test.slot-group." + slotGroup + ".max-concurrency";
+            String raw = propLookup.apply(propKey);
+            if (raw == null || raw.isBlank()) {
+                String envKey = "KRATIS_TEST_SLOT_GROUP_"
+                        + slotGroup.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "_")
+                        + "_MAX_CONCURRENCY";
+                raw = envLookup.apply(envKey);
+            }
+            if (raw != null && !raw.isBlank()) {
+                try {
+                    int parsed = Integer.parseInt(raw.trim());
+                    if (parsed >= 1) {
+                        return parsed;
+                    }
+                } catch (NumberFormatException ignored) {
+                    // Fall back to annotation default when override is invalid
+                }
+            }
+            return Math.max(1, annotationDefault);
         }
 
         String getSlotModeForClass(Class<?> testClass) {

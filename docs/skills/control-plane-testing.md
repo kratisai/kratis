@@ -340,7 +340,7 @@ docker restart <litellm-container>   # required — LiteLLM caches its model lis
 
 #### E2E Docker / sandbox stale state
 
-`*ExecutionRealTest` classes (`@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER")`) spawn real sandbox containers on the host Docker daemon. They are not flaky. Timeouts after a killed suite are almost always leftover containers or volumes.
+`*ExecutionRealTest` classes (`@SlowTest(slotGroup = "END_TO_END", maxConcurrency = 4)`) spawn real sandbox containers on the host Docker daemon. They are not flaky. Timeouts after a killed suite are almost always leftover containers or volumes.
 
 Do not label these tests flaky. Diagnose and reset per [`docs/knowledge/e2e-agent-orchestration.md`](../knowledge/e2e-agent-orchestration.md) (Host Docker Hygiene). Then re-run one harness (`./mvnw test -Dtest=OpenCodeExecutionRealTest`) before the full suite.
 ## Planning Agent Tests
@@ -404,11 +404,11 @@ void setUp() {
 
 Integration tests run concurrently (4 parallel threads by default) across isolated Spring context slots (`POOL_SIZE = 4`) and schemas:
 
-- **Dedicated & Multi-Lane Slot Groups:** `@SlowTest(slotGroup = "...")` allocates dedicated slot(s) outside `0..3` so heavy Docker tests do not block fast slots. Multi-lane groups use `maxConcurrency` (e.g., `@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER", maxConcurrency = 3)`).
+- **Dedicated & Multi-Lane Slot Groups:** `@SlowTest(slotGroup = "...")` allocates dedicated slot(s) outside `0..3` so heavy Docker tests do not block fast slots. Multi-lane groups use `maxConcurrency` and optional balanced `lane` hints (e.g., `@SlowTest(slotGroup = "END_TO_END", maxConcurrency = 4, lane = 0..3)`), and can be throttled per environment via `-Dkratis.test.slot-group.<GROUP>.max-concurrency=N` or `KRATIS_TEST_SLOT_GROUP_<GROUP>_MAX_CONCURRENCY=N`.
 - **Lock-Free Listener Context Lookup:** `TestExecutionListener`s resolve the active context via `ContextCacheTracker.resolvedContext(testContext)` so method-level listeners (`DrainExecutors`, `ResetChatModel`, `ResetTestSpies`) never block on `DefaultCacheAwareContextLoaderDelegate`'s global lock while sibling slots boot.
 - **Parallel Docker Branch Isolation (`TestIsolationScope`):** Derives a deterministic scope from `kratis.test.scope` / `KRATIS_TEST_SCOPE`, else `SHA-256(user.dir [+ "@" + containerHostname])`. `PostgresTestInitializer`, `TestDockerCleanupListener`, E2E/fixture image tags, and CBM/blob temp directories all use `TestIsolationScope` so parallel containers on different branches do not collide even on a shared Docker socket.
 - **E2E Polling & Drain Hygiene:** Always pass `.pollDelay(Duration.ZERO)` on `Awaitility` checks in E2E tests. In tests that inspect provisioning state and finish before agent setup completes (`GitCredentialFlowRealTest`), terminate the spawned sandbox at the end of the `@Test` method so WebSocket close aborts background setup before `DrainExecutors.afterTestExecution` runs. `src/test/resources/application.properties` sets `kratis.sandbox.docker.prompt-quiet-period=2s` (vs `10s` production default) for E2E turns.
-- **SlowTest Threshold Validation:** `SlowTestSuiteValidator` flags non-`@SlowTest` classes taking `> 5%` of pure execution time and `@SlowTest` classes taking `< 2%` (excluding `@DirtiesContext` context polluters).
+- **SlowTest Threshold Validation:** `SlowTestSuiteValidator` flags duration-only non-`@SlowTest` classes taking `> 5%` of pure execution time and plain `@SlowTest` classes taking `< 2%` (excluding `@DirtiesContext` context polluters and explicit `slotGroup` tests).
 - **Sequential Debugging:** Run `./mvnw test -Psequential` to disable parallel execution while keeping slot isolation.
 
 ## Code Coverage & JaCoCo

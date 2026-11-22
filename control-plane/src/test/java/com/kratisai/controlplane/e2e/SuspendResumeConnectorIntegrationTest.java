@@ -43,7 +43,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
  * provider suspend/resume contract and the state a woken connector inherits from its snapshot.
  */
 @SpringIntegrationTest
-@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER", maxConcurrency = 3)
+@SlowTest(slotGroup = "END_TO_END", maxConcurrency = 4, lane = 3)
 @UseRealNativeBinaries
 class SuspendResumeConnectorIntegrationTest {
 

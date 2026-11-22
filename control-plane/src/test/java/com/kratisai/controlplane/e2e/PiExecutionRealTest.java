@@ -4,6 +4,7 @@ import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.model.AgentHarness;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
+import com.kratisai.controlplane.testsupport.SlowTest;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.llm.HttpRequestMatcher;
 import com.kratisai.controlplane.testsupport.llm.LlmMockScenarios;
@@ -14,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @SpringIntegrationTest
+@SlowTest(slotGroup = "END_TO_END", maxConcurrency = 4, lane = 1)
 class PiExecutionRealTest extends AbstractAgentExecutionRealTest {
 
     private static final Logger logger = LoggerFactory.getLogger(PiExecutionRealTest.class);

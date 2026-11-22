@@ -26,7 +26,15 @@ public @interface SlowTest {
     /**
      * Maximum number of concurrent execution slots allocated to {@link #slotGroup()}.
      * Defaults to {@code 1} (strictly serialized on a single thread). Values {@code > 1}
-     * partition the group across dedicated lanes in round-robin order.
+     * partition the group across dedicated lanes. Can be overridden per environment via system
+     * property {@code kratis.test.slot-group.<GROUP>.max-concurrency} or environment variable
+     * {@code KRATIS_TEST_SLOT_GROUP_<GROUP>_MAX_CONCURRENCY}.
      */
     int maxConcurrency() default 1;
+
+    /**
+     * Optional zero-based lane index inside a multi-lane {@link #slotGroup()}, wrapped modulo the
+     * effective {@link #maxConcurrency()}. Defaults to {@code -1} (round-robin across lanes).
+     */
+    int lane() default -1;
 }

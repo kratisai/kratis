@@ -65,7 +65,7 @@ import org.springframework.web.context.WebApplicationContext;
  * fixture ({@link GitFixtureContainer}).
  */
 @SpringIntegrationTest
-@SlowTest(slotGroup = "E2E_GIT_CREDENTIAL")
+@SlowTest(slotGroup = "END_TO_END", maxConcurrency = 4, lane = 3)
 @UseRealNativeBinaries
 class GitCredentialFlowRealTest {
 

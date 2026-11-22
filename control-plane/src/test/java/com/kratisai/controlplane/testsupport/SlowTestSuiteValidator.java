@@ -52,6 +52,10 @@ public class SlowTestSuiteValidator implements TestExecutionListener {
                 LOWER_THRESHOLD_PERCENT * 100,
                 lowerThresholdMs);
 
+        validateEntries(allTimes, upperThresholdMs, lowerThresholdMs);
+    }
+
+    static void validateEntries(Map<Class<?>, AtomicLong> allTimes, long upperThresholdMs, long lowerThresholdMs) {
         for (Map.Entry<Class<?>, AtomicLong> entry : allTimes.entrySet()) {
             Class<?> testClass = entry.getKey();
 
@@ -60,14 +64,16 @@ public class SlowTestSuiteValidator implements TestExecutionListener {
             }
 
             long pureExecutionMs = entry.getValue().get();
-            boolean hasSlowTest = testClass.isAnnotationPresent(SlowTest.class);
+            SlowTest slowTest = testClass.getAnnotation(SlowTest.class);
+            boolean hasSlowTest = slowTest != null;
+            boolean hasSlotGroup = hasSlowTest && !slowTest.slotGroup().isEmpty();
             boolean isContextPolluter = testClass.isAnnotationPresent(DirtiesContext.class);
 
             if (!hasSlowTest && pureExecutionMs >= upperThresholdMs) {
                 throw new RuntimeException("🔴 @SlowTest VALIDATION FAILED: " + testClass.getSimpleName() + " took "
                         + pureExecutionMs + "ms (>= " + upperThresholdMs + "ms, " + (UPPER_THRESHOLD_PERCENT * 100)
                         + "% of total) and MUST be annotated with @SlowTest.");
-            } else if (hasSlowTest && !isContextPolluter && pureExecutionMs < lowerThresholdMs) {
+            } else if (hasSlowTest && !isContextPolluter && !hasSlotGroup && pureExecutionMs < lowerThresholdMs) {
                 throw new RuntimeException("🔴 @SlowTest VALIDATION FAILED: " + testClass.getSimpleName()
                         + " took only " + pureExecutionMs + "ms (< " + lowerThresholdMs + "ms, "
                         + (LOWER_THRESHOLD_PERCENT * 100) + "% of total) and MUST NOT be annotated with @SlowTest.");

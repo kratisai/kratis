@@ -93,7 +93,7 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
  * to capture all {@code execution_output} messages in real-time via WebSocket,
  * logging them with SLF4J.
  */
-@SlowTest(slotGroup = "E2E_DOCKER_CONTAINER", maxConcurrency = 3)
+@SlowTest(slotGroup = "END_TO_END", maxConcurrency = 4)
 @UseRealLlmClient
 @UseRealNativeBinaries
 public abstract class AbstractAgentExecutionRealTest {

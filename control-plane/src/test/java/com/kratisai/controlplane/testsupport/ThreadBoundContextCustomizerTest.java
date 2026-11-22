@@ -51,6 +51,37 @@ class ThreadBoundContextCustomizerTest {
     }
 
     @Test
+    void respectsExplicitLaneWrappingAndEnvironmentMaxConcurrencyOverrides() {
+        var envScoped = ThreadBoundContextCustomizer.createAllocatorForTest(
+                4, key -> "kratis.test.slot-group.MULTI.max-concurrency".equals(key) ? "2" : null, key -> null);
+
+        int lane0 = envScoped.getSlotForClass(PinnedLane0.class);
+        int lane1 = envScoped.getSlotForClass(PinnedLane1.class);
+        int lane2Wrapped = envScoped.getSlotForClass(PinnedLane2.class);
+        int lane3Wrapped = envScoped.getSlotForClass(PinnedLane3.class);
+
+        assertThat(Set.of(lane0, lane1)).hasSize(2).allSatisfy(s -> assertThat(s)
+                .isBetween(4, 5));
+        assertThat(lane2Wrapped).isEqualTo(lane0);
+        assertThat(lane3Wrapped).isEqualTo(lane1);
+
+        var envVarScoped = ThreadBoundContextCustomizer.createAllocatorForTest(
+                4, key -> null, key -> "KRATIS_TEST_SLOT_GROUP_END_TO_END_MAX_CONCURRENCY".equals(key) ? "3" : null);
+        assertThat(ThreadBoundContextCustomizer.SlotAllocator.resolveMaxConcurrency(
+                        "END_TO_END",
+                        4,
+                        key -> null,
+                        key -> "KRATIS_TEST_SLOT_GROUP_END_TO_END_MAX_CONCURRENCY".equals(key) ? "3" : null))
+                .isEqualTo(3);
+        int e0 = envVarScoped.getSlotForClass(E2eLane0.class);
+        int e1 = envVarScoped.getSlotForClass(E2eLane1.class);
+        int e2 = envVarScoped.getSlotForClass(E2eLane2.class);
+        int e3Wrapped = envVarScoped.getSlotForClass(E2eLane3.class);
+        assertThat(Set.of(e0, e1, e2)).hasSize(3);
+        assertThat(e3Wrapped).isEqualTo(e0);
+    }
+
+    @Test
     void customizerEqualityAndLockProviderMatchAssignedSlot() {
         var c1 = ThreadBoundContextCustomizer.forClass(SingleLane1.class);
         var c2 = ThreadBoundContextCustomizer.forClass(SingleLane2.class);
@@ -88,4 +119,28 @@ class ThreadBoundContextCustomizerTest {
 
     @SlowTest(slotGroup = "MULTI", maxConcurrency = 3)
     private static class MultiLane4 {}
+
+    @SlowTest(slotGroup = "MULTI", maxConcurrency = 4, lane = 0)
+    private static class PinnedLane0 {}
+
+    @SlowTest(slotGroup = "MULTI", maxConcurrency = 4, lane = 1)
+    private static class PinnedLane1 {}
+
+    @SlowTest(slotGroup = "MULTI", maxConcurrency = 4, lane = 2)
+    private static class PinnedLane2 {}
+
+    @SlowTest(slotGroup = "MULTI", maxConcurrency = 4, lane = 3)
+    private static class PinnedLane3 {}
+
+    @SlowTest(slotGroup = "END_TO_END", maxConcurrency = 4, lane = 0)
+    private static class E2eLane0 {}
+
+    @SlowTest(slotGroup = "END_TO_END", maxConcurrency = 4, lane = 1)
+    private static class E2eLane1 {}
+
+    @SlowTest(slotGroup = "END_TO_END", maxConcurrency = 4, lane = 2)
+    private static class E2eLane2 {}
+
+    @SlowTest(slotGroup = "END_TO_END", maxConcurrency = 4, lane = 3)
+    private static class E2eLane3 {}
 }
