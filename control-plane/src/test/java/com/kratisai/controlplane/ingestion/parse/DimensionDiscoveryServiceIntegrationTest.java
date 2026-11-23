@@ -373,4 +373,101 @@ class DimensionDiscoveryServiceIntegrationTest {
                 .isInstanceOf(DimensionDiscoveryService.DimensionDiscoveryException.class)
                 .hasMessageContaining("matched no files");
     }
+
+    @Test
+    void invalidJsonOnFirstShot_retriesWithGuidance_thenSucceeds() {
+        fakeChatModel.reset();
+        // Mirrors the production failure: unquoted property name ('patterns') in crossCutting[1].
+        String invalidJson = """
+                {
+                  "domains": [{"name": "User Management", "globPatterns": ["*User*.java"]}],
+                  "archetypes": [{"name": "Controller", "globPatterns": ["*Controller.java"]}],
+                  "crossCutting": [
+                    {"name": "Utils", "globPatterns": ["*util*.java"]},
+                    {"name": "Logging", patterns: ["*Log*.java"]}
+                  ],
+                  "additionalContextRequest": null
+                }
+                """;
+        fakeChatModel.addMatcherFirst(PromptMatcher.builder()
+                .contains("could not be parsed as the required JSON")
+                .response("""
+                        {
+                          "domains": [{"name": "User Management", "globPatterns": ["*User*.java"]}],
+                          "archetypes": [{"name": "Controller", "globPatterns": ["*Controller.java"]}],
+                          "crossCutting": [{"name": "Utils", "globPatterns": ["*util*.java"]}],
+                          "additionalContextRequest": null
+                        }
+                        """)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains("If you lack sufficient context")
+                .response(invalidJson)
+                .maxMatches(1)
+                .build());
+
+        dimensionDiscoveryService.discoverDimensions(batch, batchLogger);
+
+        assertThat(ctxDimensionRepository.findByBatchId(batch.getId())).hasSize(3);
+        assertThat(fakeChatModel.getInvocations()).hasSize(2);
+    }
+
+    @Test
+    void invalidJsonOnAllAttempts_failsIngestion() {
+        fakeChatModel.reset();
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains("If you lack sufficient context")
+                .response("{invalid json}")
+                .build());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> dimensionDiscoveryService.discoverDimensions(batch, batchLogger))
+                .isInstanceOf(DimensionDiscoveryService.DimensionDiscoveryException.class)
+                .hasMessageContaining("Failed to parse dimension JSON from LLM");
+        // 1 initial attempt + MAX_PARSE_RETRIES corrective attempts, then abort.
+        assertThat(fakeChatModel.getInvocations()).hasSize(3);
+    }
+
+    @Test
+    void invalidJsonOnSecondShot_retries_thenSucceeds() {
+        fakeChatModel.reset();
+        fakeChatModel.addMatcherFirst(PromptMatcher.builder()
+                .contains("could not be parsed as the required JSON")
+                .response("""
+                        {
+                          "domains": [{"name": "User Management", "globPatterns": ["*User*.java"]}],
+                          "archetypes": [{"name": "Controller", "globPatterns": ["*Controller.java"]}],
+                          "crossCutting": [{"name": "Utils", "globPatterns": ["*util*.java"]}],
+                          "additionalContextRequest": null
+                        }
+                        """)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains("If you lack sufficient context")
+                .response("""
+                        {
+                          "domains": [{"name": "User Management", "globPatterns": ["*User*.java"]}],
+                          "archetypes": [{"name": "Controller", "globPatterns": ["*Controller.java"]}],
+                          "crossCutting": [{"name": "Utils", "globPatterns": ["*util*.java"]}],
+                          "additionalContextRequest": {
+                            "ambiguousFilePaths": ["src/main/java/com/example/StringUtils.java"],
+                            "rationale": "Need to verify if this is a cross-cutting utility.",
+                            "certainDimensions": ["User Management", "Controller"],
+                            "expectedResolution": "Reading the file will confirm its utility nature."
+                          }
+                        }
+                        """)
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains("You previously requested additional context")
+                .response("{invalid json}")
+                .maxMatches(1)
+                .build());
+
+        dimensionDiscoveryService.discoverDimensions(batch, batchLogger);
+
+        assertThat(ctxDimensionRepository.findByBatchId(batch.getId())).hasSize(3);
+        assertThat(fakeChatModel.getInvocations()).hasSize(3);
+    }
 }

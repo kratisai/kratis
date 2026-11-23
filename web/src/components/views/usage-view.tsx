@@ -615,6 +615,13 @@ const FALLBACK_USAGE_TYPE: { icon: LucideIcon } = {
   icon: HelpCircle,
 }
 
+type UsageStatusMeta = {
+  className: string
+  icon: LucideIcon
+  label: string
+  spin?: boolean
+}
+
 function UsageTypeBadge({
   agentName,
   onClick,
@@ -646,12 +653,7 @@ function UsageTypeBadge({
   )
 }
 
-const USAGE_STATUS_META: Partial<
-  Record<
-    NonNullable<UsageLogEntry['status']>,
-    { className: string; icon: LucideIcon; label: string; spin?: boolean }
-  >
-> = {
+const USAGE_STATUS_META: Partial<Record<NonNullable<UsageLogEntry['status']>, UsageStatusMeta>> = {
   COMPLETED: {
     className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
     icon: CheckCircle2,
@@ -680,7 +682,7 @@ const USAGE_STATUS_META: Partial<
   },
 }
 
-const FALLBACK_USAGE_STATUS = {
+const FALLBACK_USAGE_STATUS: UsageStatusMeta = {
   className: 'bg-muted text-muted-foreground',
   icon: HelpCircle,
   label: 'Unknown',

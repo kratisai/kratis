@@ -12,7 +12,13 @@ import {
   mockListWikiPages,
   setupFetchMock,
 } from '../support/test-fetch-mocks'
-import { renderIntegration, screen, setAuthenticated, setUnauthenticated, waitFor } from '../support/test-render'
+import {
+  renderIntegration,
+  screen,
+  setAuthenticated,
+  setUnauthenticated,
+  waitFor,
+} from '../support/test-render'
 
 describe('Wiki Flow and Navigation', () => {
   setupFetchMock()
@@ -97,9 +103,7 @@ describe('Wiki Flow and Navigation', () => {
 
     const { user } = renderIntegration(['/wiki/repo-1/main-page'])
 
-    await waitFor(() => {
-      expect(screen.getByText('Welcome to the main page.')).toBeInTheDocument()
-    })
+    await screen.findByText('Welcome to the main page.', {}, { timeout: 5000 })
 
     expect(screen.getByTestId('wiki-sidebar-section')).toBeInTheDocument()
     expect(screen.getByTestId('wiki-content')).toBeInTheDocument()
@@ -110,9 +114,7 @@ describe('Wiki Flow and Navigation', () => {
 
     await user.click(screen.getByText('Sub Page'))
 
-    await waitFor(() => {
-      expect(screen.getByText('This is the sub-section of main page.')).toBeInTheDocument()
-    })
+    await screen.findByText('This is the sub-section of main page.', {}, { timeout: 5000 })
 
     expect(screen.getAllByText('Wiki').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Main Page').length).toBeGreaterThanOrEqual(2)
@@ -146,9 +148,7 @@ describe('Wiki Flow and Navigation', () => {
 
     renderIntegration(['/wiki/repo-1/main-page'])
 
-    await waitFor(() => {
-      expect(screen.getByText('Welcome to the main page.')).toBeInTheDocument()
-    })
+    await screen.findByText('Welcome to the main page.', {}, { timeout: 5000 })
 
     expect(screen.queryByTestId('wiki-desktop-sidebar')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /open wiki navigation/i })).not.toBeInTheDocument()
@@ -162,9 +162,7 @@ describe('Wiki Flow and Navigation', () => {
 
     const { user } = renderIntegration(['/wiki/repo-1/main-page'])
 
-    await waitFor(() => {
-      expect(screen.getByText('Welcome to the main page.')).toBeInTheDocument()
-    })
+    await screen.findByText('Welcome to the main page.', {}, { timeout: 5000 })
 
     await waitFor(() => {
       expect(screen.getByText('Sub Page')).toBeInTheDocument()
@@ -187,18 +185,14 @@ describe('Wiki Flow and Navigation', () => {
 
     const { user } = renderIntegration(['/wiki/repo-1/main-page'])
 
-    await waitFor(() => {
-      expect(screen.getByText('Welcome to the main page.')).toBeInTheDocument()
-    })
+    await screen.findByText('Welcome to the main page.', {}, { timeout: 5000 })
     await waitFor(() => {
       expect(screen.getByText('Sub Page')).toBeInTheDocument()
     })
 
     await user.click(screen.getByText('Sub Page'))
 
-    await waitFor(() => {
-      expect(screen.getByText('This is the sub-section of main page.')).toBeInTheDocument()
-    })
+    await screen.findByText('This is the sub-section of main page.', {}, { timeout: 5000 })
   })
 
   it('automatically redirects to the first top-level page when slug is omitted', async () => {
@@ -207,9 +201,7 @@ describe('Wiki Flow and Navigation', () => {
 
     renderIntegration(['/wiki/repo-1'])
 
-    await waitFor(() => {
-      expect(screen.getByText('Welcome to the main page.')).toBeInTheDocument()
-    })
+    await screen.findByText('Welcome to the main page.', {}, { timeout: 5000 })
   })
 
   it('shows not found error view when repository is not found', async () => {

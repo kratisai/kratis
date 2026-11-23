@@ -59,6 +59,14 @@ public class DimensionDiscoveryService {
             error handling, or testing).
             """;
 
+    private static final String PARSE_RETRY_GUIDANCE = """
+            Your previous response could not be parsed as the required JSON object. Return ONLY the \
+            complete JSON object in the required format, with every property name and string value \
+            double-quoted, and no comments, trailing commas, or markdown fences.
+            """;
+
+    private static final int MAX_PARSE_RETRIES = 2;
+
     private static final int NODE_DIMENSION_INSERT_BATCH_SIZE = 1_000;
 
     private final CtxDimensionRepository ctxDimensionRepository;
@@ -295,6 +303,40 @@ public class DimensionDiscoveryService {
             IngestionBatchLogService.BatchLogger batchLogger,
             String additionalGuidance) {
 
+        // LLMs occasionally emit malformed JSON (e.g. unquoted property names). Retry with
+        // corrective feedback instead of failing the whole ingestion on a single bad response.
+        String parseFailureFeedback = "";
+        try {
+            for (int attempt = 0; attempt <= MAX_PARSE_RETRIES; attempt++) {
+                try {
+                    return runDimensionDiscoveryShots(
+                            batch, annotatedTree, batchLogger, additionalGuidance, parseFailureFeedback);
+                } catch (InvalidDimensionJsonException e) {
+                    if (attempt == MAX_PARSE_RETRIES) {
+                        throw e;
+                    }
+                    batchLogger.warn(
+                            "PREPARE_DIMENSIONS",
+                            "LLM response was not valid JSON; retrying dimension discovery (attempt " + (attempt + 2)
+                                    + "): " + e.getMessage());
+                    parseFailureFeedback = "\n\n" + PARSE_RETRY_GUIDANCE;
+                }
+            }
+            throw new IllegalStateException("Unexpected exit from dimension discovery parse-retry loop");
+        } catch (Exception e) {
+            batchLogger.error(
+                    "PREPARE_DIMENSIONS", "Failed to generate or parse dimensions from LLM: " + e.getMessage());
+            throw new DimensionDiscoveryException("Failed to parse dimension JSON from LLM", e);
+        }
+    }
+
+    private DimensionDiscoveryResult runDimensionDiscoveryShots(
+            IngestionBatch batch,
+            String annotatedTree,
+            IngestionBatchLogService.BatchLogger batchLogger,
+            String additionalGuidance,
+            String parseFailureFeedback) {
+
         BeanOutputConverter<DimensionDiscoveryResult> converter =
                 new BeanOutputConverter<>(DimensionDiscoveryResult.class);
 
@@ -379,41 +421,40 @@ public class DimensionDiscoveryService {
         if (additionalGuidance != null && !additionalGuidance.isBlank()) {
             renderedShot1Prompt = renderedShot1Prompt + "\n\nAdditional guidance:\n" + additionalGuidance;
         }
+        renderedShot1Prompt = renderedShot1Prompt + parseFailureFeedback;
 
         ChatModel chatModel = getChatModel(batch);
-        try {
-            ChatClient chatClient = ChatClient.builder(chatModel).build();
-            ChatResponse shot1Response =
-                    chatClient.prompt(renderedShot1Prompt).call().chatResponse();
-            if (shot1Response == null) {
-                throw new DimensionDiscoveryException("LLM returned null response on first shot", null);
+        ChatClient chatClient = ChatClient.builder(chatModel).build();
+        ChatResponse shot1Response =
+                chatClient.prompt(renderedShot1Prompt).call().chatResponse();
+        if (shot1Response == null) {
+            throw new DimensionDiscoveryException("LLM returned null response on first shot", null);
+        }
+        String response1 = responseText(shot1Response);
+        if (response1 == null) {
+            throw new DimensionDiscoveryException("LLM returned null response on first shot", null);
+        }
+        DimensionDiscoveryResult result1 = convertDimensionResult(converter, response1);
+
+        // Check if additional context is requested and valid
+        if (result1.additionalContextRequest() != null
+                && result1.additionalContextRequest().ambiguousFilePaths() != null
+                && !result1.additionalContextRequest().ambiguousFilePaths().isEmpty()) {
+
+            DimensionDiscoveryResult.AdditionalContextRequest contextRequest = result1.additionalContextRequest();
+            List<String> requestedPaths = contextRequest.ambiguousFilePaths();
+
+            // Limit to max 10 files
+            if (requestedPaths.size() > 10) {
+                requestedPaths = requestedPaths.subList(0, 10);
             }
-            String response1 = responseText(shot1Response);
-            if (response1 == null) {
-                throw new DimensionDiscoveryException("LLM returned null response on first shot", null);
-            }
-            DimensionDiscoveryResult result1 = converter.convert(response1);
 
-            // Check if additional context is requested and valid
-            if (result1.additionalContextRequest() != null
-                    && result1.additionalContextRequest().ambiguousFilePaths() != null
-                    && !result1.additionalContextRequest().ambiguousFilePaths().isEmpty()) {
+            batchLogger.debug(
+                    "PREPARE_DIMENSIONS", "LLM requested additional context for " + requestedPaths.size() + " files.");
 
-                DimensionDiscoveryResult.AdditionalContextRequest contextRequest = result1.additionalContextRequest();
-                List<String> requestedPaths = contextRequest.ambiguousFilePaths();
+            String fileContents = readAmbiguousFiles(batch, requestedPaths);
 
-                // Limit to max 10 files
-                if (requestedPaths.size() > 10) {
-                    requestedPaths = requestedPaths.subList(0, 10);
-                }
-
-                batchLogger.debug(
-                        "PREPARE_DIMENSIONS",
-                        "LLM requested additional context for " + requestedPaths.size() + " files.");
-
-                String fileContents = readAmbiguousFiles(batch, requestedPaths);
-
-                String shot2PromptString = """
+            String shot2PromptString = """
                         You previously requested additional context to finalize the architectural dimension discovery.
                         Here is the information you requested:
 
@@ -439,39 +480,48 @@ public class DimensionDiscoveryService {
                         {format}
                         """;
 
-                String renderedShot2Prompt = shot2PromptString
-                        .replace("{tree}", annotatedTree)
-                        .replace("{initialDimensions}", formatDimensions(result1))
-                        .replace("{rules}", DIMENSION_RULES)
-                        .replace("{rationale}", contextRequest.rationale() != null ? contextRequest.rationale() : "N/A")
-                        .replace(
-                                "{expectedResolution}",
-                                contextRequest.expectedResolution() != null
-                                        ? contextRequest.expectedResolution()
-                                        : "N/A")
-                        .replace("{fileContents}", fileContents)
-                        .replace("{format}", converter.getFormat());
-                if (additionalGuidance != null && !additionalGuidance.isBlank()) {
-                    renderedShot2Prompt = renderedShot2Prompt + "\n\n" + additionalGuidance;
-                }
-
-                ChatResponse shot2Response =
-                        chatClient.prompt(renderedShot2Prompt).call().chatResponse();
-                if (shot2Response == null) {
-                    throw new DimensionDiscoveryException("LLM returned null response on second shot", null);
-                }
-                String response2 = responseText(shot2Response);
-                if (response2 == null) {
-                    throw new DimensionDiscoveryException("LLM returned null response on second shot", null);
-                }
-                return converter.convert(response2);
+            String renderedShot2Prompt = shot2PromptString
+                    .replace("{tree}", annotatedTree)
+                    .replace("{initialDimensions}", formatDimensions(result1))
+                    .replace("{rules}", DIMENSION_RULES)
+                    .replace("{rationale}", contextRequest.rationale() != null ? contextRequest.rationale() : "N/A")
+                    .replace(
+                            "{expectedResolution}",
+                            contextRequest.expectedResolution() != null ? contextRequest.expectedResolution() : "N/A")
+                    .replace("{fileContents}", fileContents)
+                    .replace("{format}", converter.getFormat());
+            if (additionalGuidance != null && !additionalGuidance.isBlank()) {
+                renderedShot2Prompt = renderedShot2Prompt + "\n\nAdditional guidance:\n" + additionalGuidance;
             }
+            renderedShot2Prompt = renderedShot2Prompt + parseFailureFeedback;
 
-            return result1;
-        } catch (Exception e) {
-            batchLogger.error(
-                    "PREPARE_DIMENSIONS", "Failed to generate or parse dimensions from LLM: " + e.getMessage());
-            throw new DimensionDiscoveryException("Failed to parse dimension JSON from LLM", e);
+            ChatResponse shot2Response =
+                    chatClient.prompt(renderedShot2Prompt).call().chatResponse();
+            if (shot2Response == null) {
+                throw new DimensionDiscoveryException("LLM returned null response on second shot", null);
+            }
+            String response2 = responseText(shot2Response);
+            if (response2 == null) {
+                throw new DimensionDiscoveryException("LLM returned null response on second shot", null);
+            }
+            return convertDimensionResult(converter, response2);
+        }
+
+        return result1;
+    }
+
+    private static DimensionDiscoveryResult convertDimensionResult(
+            BeanOutputConverter<DimensionDiscoveryResult> converter, String text) {
+        try {
+            return converter.convert(text);
+        } catch (RuntimeException e) {
+            throw new InvalidDimensionJsonException("LLM response was not valid JSON: " + e.getMessage(), e);
+        }
+    }
+
+    private static final class InvalidDimensionJsonException extends RuntimeException {
+        InvalidDimensionJsonException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 

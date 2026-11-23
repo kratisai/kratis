@@ -24,8 +24,11 @@ import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Executor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -197,11 +200,17 @@ public class PatternResearchService {
 
         List<CtxArchitecturePattern> patterns = new ArrayList<>();
         for (ArchitecturePatternResult pattern : patternResults) {
+            // Deduplicate by node id: the LLM may list the same exemplar file twice, and the
+            // join table enforces a (pattern_id, node_id) primary key.
             List<CtxNode> exemplarNodes = new ArrayList<>();
+            Set<UUID> seenNodeIds = new HashSet<>();
             if (pattern.exemplarPaths() != null) {
                 for (String exemplarPath : pattern.exemplarPaths()) {
-                    List<CtxNode> found = ctxNodeRepository.findByBatchIdAndPath(batch.getId(), exemplarPath);
-                    exemplarNodes.addAll(found);
+                    for (CtxNode node : ctxNodeRepository.findByBatchIdAndPath(batch.getId(), exemplarPath)) {
+                        if (seenNodeIds.add(node.getId())) {
+                            exemplarNodes.add(node);
+                        }
+                    }
                 }
             }
 

@@ -182,6 +182,33 @@ class PatternResearchServiceTest {
     }
 
     @Test
+    void duplicateExemplarPaths_savesPatternWithUniqueExemplarNodes() {
+        setupDimensionHub(controllerNode, controllerDimension, 0.9);
+
+        fakeChatModel.addMatcher(PromptMatcher.builder().response("""
+                [
+                  {
+                    "name": "MVC Architecture",
+                    "description": "LLM repeated the same exemplar file.",
+                    "exemplarPaths": [
+                      "src/main/java/com/example/UserController.java",
+                      "src/main/java/com/example/UserController.java"
+                    ]
+                  }
+                ]
+                """).build());
+
+        patternResearchService.researchPatterns(batch, batchLogger);
+
+        List<CtxArchitecturePattern> patterns =
+                ctxArchitecturePatternRepository.findByBatchIdWithExemplarNodes(batch.getId());
+        assertThat(patterns).hasSize(1);
+        assertThat(patterns.getFirst().getExemplarNodes()).hasSize(1);
+        assertThat(patterns.getFirst().getExemplarNodes().getFirst().getPath())
+                .isEqualTo("src/main/java/com/example/UserController.java");
+    }
+
+    @Test
     void noArchetypeHubs_skipsPatternDeduction() {
         // No dimension hubs set — Stage 2 should be skipped
         fakeChatModel.addMatcher(PromptMatcher.builder().response("[]").build());
