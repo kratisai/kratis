@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.kratisai.controlplane.agentloop.KratisToolException;
+import com.kratisai.controlplane.ingestion.write.WikiPageLinkExtractor;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.TeamWikiBatch;
@@ -15,6 +16,7 @@ import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
 import com.kratisai.controlplane.testsupport.WikiPageContentFixtures;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
 import com.kratisai.controlplane.validation.WikiPageContentValidator;
+import com.kratisai.controlplane.validation.mermaid.MermaidNormalizer;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,7 +52,9 @@ class WriteTeamWikiPageToolTest {
                 ctxWikiPageRepository,
                 teamWikiBatchRepository,
                 new MermaidDiagramValidator(),
-                new WikiPageContentValidator());
+                new MermaidNormalizer(),
+                new WikiPageContentValidator(),
+                new WikiPageLinkExtractor());
         batchId = UUID.randomUUID();
         repoBatchId = UUID.randomUUID();
         Team team = new Team();
@@ -63,6 +67,26 @@ class WriteTeamWikiPageToolTest {
                 batchId,
                 TeamWikiContext.REPO_BATCHES_KEY,
                 Map.of("orders-api", repoBatchId, "glark-newco/BookingService", repoBatchId)));
+    }
+
+    @Test
+    void writeTeamWikiPage_surgicallyFixesC4Commas() {
+        when(teamWikiBatchRepository.findByIdForUpdate(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "overview"))
+                .thenReturn(Optional.empty());
+        String content = VALID_CONTENT + """
+
+                ```mermaid
+                C4Context
+                Person(player "Player")
+                ```
+                """;
+
+        tool.writeTeamWikiPage("overview", "Team Overview", content, null, null, toolContext);
+
+        ArgumentCaptor<CtxWikiPage> captor = ArgumentCaptor.forClass(CtxWikiPage.class);
+        verify(ctxWikiPageRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getContent()).contains("Person(player, \"Player\")");
     }
 
     @Test
@@ -246,6 +270,62 @@ class WriteTeamWikiPageToolTest {
 
         assertThat(existing.getOrderIndex()).isEqualTo(50);
         verify(ctxWikiPageRepository).saveAndFlush(existing);
+    }
+
+    @Test
+    void writeTeamWikiPage_updateWithoutParentSlug_keepsExistingParent() {
+        CtxWikiPage parent = new CtxWikiPage(batch, batch.getTeam().getId(), null, "home", "Home", 0, "Home");
+        parent.setId(UUID.randomUUID());
+        CtxWikiPage existing = new CtxWikiPage(batch, batch.getTeam().getId(), parent, "child", "Old", 3, "Old");
+        existing.setId(UUID.randomUUID());
+
+        when(teamWikiBatchRepository.findByIdForUpdate(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "child"))
+                .thenReturn(Optional.of(existing));
+
+        tool.writeTeamWikiPage("child", "New Title", VALID_CONTENT, null, null, toolContext);
+
+        assertThat(existing.getParentPage()).isSameAs(parent);
+        assertThat(existing.getOrderIndex()).isEqualTo(3);
+    }
+
+    @Test
+    void writeTeamWikiPage_updateWithExplicitParent_reparentsPage() {
+        CtxWikiPage newParent = new CtxWikiPage(batch, batch.getTeam().getId(), null, "home", "Home", 0, "Home");
+        newParent.setId(UUID.randomUUID());
+        CtxWikiPage existing = new CtxWikiPage(batch, batch.getTeam().getId(), null, "child", "Old", 3, "Old");
+        existing.setId(UUID.randomUUID());
+
+        when(teamWikiBatchRepository.findByIdForUpdate(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "child"))
+                .thenReturn(Optional.of(existing));
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "home"))
+                .thenReturn(Optional.of(newParent));
+
+        tool.writeTeamWikiPage("child", "Child", VALID_CONTENT, "home", null, toolContext);
+
+        assertThat(existing.getParentPage()).isSameAs(newParent);
+    }
+
+    @Test
+    void writeTeamWikiPage_ignoresRepoLinksInsideCodeFences() {
+        when(teamWikiBatchRepository.findByIdForUpdate(batchId)).thenReturn(Optional.of(batch));
+        when(ctxWikiPageRepository.findByTeamWikiBatchIdAndPageSlug(batchId, "overview"))
+                .thenReturn(Optional.empty());
+        String content = VALID_CONTENT + """
+
+                ```markdown
+                Link syntax is `[Repo](/wiki/repo/does-not-exist)`.
+                ```
+
+                | Column | Value |
+                | --- | --- |
+                | inline | `/wiki/repo/also-missing` |
+                """;
+
+        String result = tool.writeTeamWikiPage("overview", "Overview", content, null, null, toolContext);
+
+        assertThat(result).contains("created successfully");
     }
 
     @Test

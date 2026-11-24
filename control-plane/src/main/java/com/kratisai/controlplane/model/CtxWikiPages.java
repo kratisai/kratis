@@ -1,7 +1,9 @@
 package com.kratisai.controlplane.model;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -32,6 +34,19 @@ public final class CtxWikiPages {
                 && pages.stream()
                         .anyMatch(candidate -> candidate.getParentPage() != null
                                 && page.getId().equals(candidate.getParentPage().getId()));
+    }
+
+    /** True when {@code candidate} is {@code ancestorId} or sits below it; existing cycles stop the walk. */
+    public static boolean isDescendantOf(CtxWikiPage candidate, UUID ancestorId) {
+        Objects.requireNonNull(ancestorId, "ancestorId is required");
+        Set<UUID> visited = new HashSet<>();
+        for (CtxWikiPage cursor = candidate; cursor != null; cursor = cursor.getParentPage()) {
+            UUID id = cursor.getId();
+            if (id == null) return false;
+            if (id.equals(ancestorId)) return true;
+            if (!visited.add(id)) return false;
+        }
+        return false;
     }
 
     public static int maxSiblingOrderIndex(List<CtxWikiPage> pages, CtxWikiPage parentPage) {

@@ -8,8 +8,10 @@ import com.kratisai.controlplane.api.wsdto.MessageRole;
 import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
 import com.kratisai.controlplane.service.ScratchpadService;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
-import com.kratisai.controlplane.validation.MermaidDiagramValidator.DiagramRepairRequest;
+import com.kratisai.controlplane.validation.mermaid.MermaidDiagramRepairer;
+import com.kratisai.controlplane.validation.mermaid.MermaidDiagramRepairer.DiagramRepairRequest;
 import com.kratisai.controlplane.validation.mermaid.MermaidGrammar;
+import com.kratisai.controlplane.validation.mermaid.MermaidNormalizer;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -41,7 +43,9 @@ public class PlanningAgentLoop {
     private final int maxIterations;
     private final Executor toolExecutor;
     private final Executor mermaidRepairExecutor;
+    private final MermaidNormalizer mermaidNormalizer;
     private final MermaidDiagramValidator mermaidDiagramValidator;
+    private final MermaidDiagramRepairer mermaidDiagramRepairer;
 
     public PlanningAgentLoop(
             ChatMemory chatMemory,
@@ -50,20 +54,24 @@ public class PlanningAgentLoop {
             int maxIterations,
             Executor toolExecutor,
             Executor mermaidRepairExecutor,
-            MermaidDiagramValidator mermaidDiagramValidator) {
+            MermaidNormalizer mermaidNormalizer,
+            MermaidDiagramValidator mermaidDiagramValidator,
+            MermaidDiagramRepairer mermaidDiagramRepairer) {
         this.chatMemory = chatMemory;
         this.scratchpadService = scratchpadService;
         this.toolCallbacks = toolCallbacks;
         this.maxIterations = maxIterations;
         this.toolExecutor = toolExecutor;
         this.mermaidRepairExecutor = mermaidRepairExecutor;
+        this.mermaidNormalizer = mermaidNormalizer;
         this.mermaidDiagramValidator = mermaidDiagramValidator;
+        this.mermaidDiagramRepairer = mermaidDiagramRepairer;
     }
 
     /** Run the ReAct loop for a chat. Emits chat stream payload chunks to a sink. */
     public void run(ChatClient chatClient, PlanningContext context, Sinks.Many<ClientPayload.ChatStreamPayload> sink) {
         List<Message> history = new ArrayList<>();
-        history.add(new SystemMessage(systemPrompt(scratchpadService.getFactsAsString(context.chatId()))));
+        history.add(new SystemMessage(systemPrompt()));
 
         List<Message> previousMessages = chatMemory.get(context.chatId().toString());
         if (!previousMessages.isEmpty()) {
@@ -81,6 +89,7 @@ public class PlanningAgentLoop {
         String output = ReActLoop.text(chatClient, toolCallbacks)
                 .maxIterations(maxIterations)
                 .executor(toolExecutor)
+                .turnFeedbackSupplier(() -> scratchpadFeedback(context.chatId()))
                 .onThought((attempt, text) ->
                         emitTelemetry(sink, context.chatId(), attempt, new TelemetryEvent.Thought(text)))
                 .onAnswerChunk((attempt, text) -> emitToSink(
@@ -112,11 +121,11 @@ public class PlanningAgentLoop {
     }
 
     private String finalizeMermaidOutput(ChatClient chatClient, String output) {
-        String normalized = mermaidDiagramValidator.normalizeFences(output);
+        String normalized = mermaidNormalizer.normalize(output);
         if (mermaidDiagramValidator.findIssues(normalized).isEmpty()) {
             return normalized;
         }
-        return mermaidDiagramValidator.repairDiagrams(
+        return mermaidDiagramRepairer.repairDiagrams(
                 normalized, request -> requestDiagramRepair(chatClient, request), mermaidRepairExecutor);
     }
 
@@ -171,7 +180,18 @@ public class PlanningAgentLoop {
         }
     }
 
-    private static String systemPrompt(String scratchpadFacts) {
+    private String scratchpadFeedback(UUID chatId) {
+        String facts = scratchpadService.getFactsAsString(chatId);
+        if (facts.isBlank()) {
+            return "";
+        }
+        return """
+                <scratchpad>
+                %s</scratchpad>
+                These notes are your working plan, replayed on every turn. Delete entries that are no longer accurate.""".formatted(facts);
+    }
+
+    private static String systemPrompt() {
         return """
                         You are Kratis, an autonomous enterprise architect and senior AI engineer. You operate within a secure sandboxed control plane with access to
                         repository codebases, documentation, dependency graphs, and execution tools.  Your goal is to assist the user in SDLC tasks across multiple
@@ -225,16 +245,12 @@ public class PlanningAgentLoop {
                            - NEVER use `newRepoName` when working on an existing repository or codebase.
                            - `newRepoName` is strictly reserved for brand-new greenfield projects where no repository exists yet.
 
-                        Include mermaid diagrams where needed. %2$s
+                        Include mermaid diagrams where needed. %s
 
                         Use your scratchpad to track a TODO list, and internal thoughts/lessons.  The scratchpad is not, and should not be presented to the user.  All
                         scratchpad entries will be replayed to you on every turn. Keep them short and remove when they are no-longer relevant.
 
-                        <scratchpad>
-                        %1$s
-                        </scratchpad>
-
                         When responding to the user, write prose following ASD-STE100 Simplified Technical English.
-                        """.formatted(scratchpadFacts, MermaidGrammar.GUIDANCE);
+                        """.formatted(MermaidGrammar.GUIDANCE);
     }
 }

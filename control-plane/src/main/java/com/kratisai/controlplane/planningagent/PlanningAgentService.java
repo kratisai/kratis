@@ -17,6 +17,8 @@ import com.kratisai.controlplane.service.ChatUsageSessionService;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ScratchpadService;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
+import com.kratisai.controlplane.validation.mermaid.MermaidDiagramRepairer;
+import com.kratisai.controlplane.validation.mermaid.MermaidNormalizer;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -85,7 +87,9 @@ public class PlanningAgentService {
             ScratchpadService scratchpadService,
             PlanningProperties planningProperties,
             ChatFluxRegistry chatFluxRegistry,
+            MermaidNormalizer mermaidNormalizer,
             MermaidDiagramValidator mermaidDiagramValidator,
+            MermaidDiagramRepairer mermaidDiagramRepairer,
             @Qualifier("agentTaskExecutor") AsyncTaskExecutor agentTaskExecutor,
             @Qualifier("mermaidRepairExecutor") Executor mermaidRepairExecutor) {
 
@@ -107,7 +111,9 @@ public class PlanningAgentService {
                 planningProperties.getMaxIterations(),
                 agentTaskExecutor,
                 mermaidRepairExecutor,
-                mermaidDiagramValidator);
+                mermaidNormalizer,
+                mermaidDiagramValidator,
+                mermaidDiagramRepairer);
     }
 
     /** Add AgentThinking to our tool-callbacks * */

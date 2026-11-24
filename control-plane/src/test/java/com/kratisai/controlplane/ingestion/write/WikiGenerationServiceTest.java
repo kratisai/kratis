@@ -3,7 +3,6 @@ package com.kratisai.controlplane.ingestion.write;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.agentloop.LlmErrorCategory;
@@ -31,21 +30,28 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage.ToolResponse;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 
 @SpringIntegrationTest
 class WikiGenerationServiceTest {
+
+    private static final String REPAIR_MARKER = "The wiki is incomplete. Fix these defects";
 
     @Autowired
     private WikiGenerationService wikiGenerationService;
@@ -114,29 +120,63 @@ class WikiGenerationServiceTest {
     }
 
     private static String pageCall(String slug, String title, String parentPageSlug) {
+        return pageCallWithContent(
+                slug, title, parentPageSlug, "# " + title + "\n\n" + WikiPageContentFixtures.WIKI_PAGE_BODY);
+    }
+
+    private static String pageCallWithContent(String slug, String title, String parentPageSlug, String content) {
         String parent = parentPageSlug == null ? "" : ",\"parentPageSlug\":\"" + parentPageSlug + "\"";
-        return "{\"pageSlug\":\"" + slug + "\",\"title\":\"" + title + "\",\"content\":\"# " + title + "\\n\\n"
-                + WikiPageContentFixtures.WIKI_PAGE_BODY + "\"" + parent + "}";
+        try {
+            return "{\"pageSlug\":\"" + slug + "\",\"title\":\"" + title + "\",\"content\":"
+                    + new ObjectMapper().writeValueAsString(content) + parent + "}";
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not encode test page call", e);
+        }
+    }
+
+    private static AssistantMessage toolCall(String id, String arguments) {
+        return AssistantMessage.builder()
+                .toolCalls(List.of(new AssistantMessage.ToolCall(id, "function", "write_wiki_page", arguments)))
+                .build();
+    }
+
+    private static AssistantMessage listPagesCall(String id) {
+        return AssistantMessage.builder()
+                .toolCalls(List.of(new AssistantMessage.ToolCall(id, "function", "list_wiki_pages", "{}")))
+                .build();
+    }
+
+    private static boolean hasWrittenPage(Prompt prompt) {
+        return prompt.getInstructions().stream()
+                .filter(ToolResponseMessage.class::isInstance)
+                .map(ToolResponseMessage.class::cast)
+                .flatMap(message -> message.getResponses().stream())
+                .anyMatch(response -> response.responseData() != null
+                        && response.responseData().contains("SUCCESS"));
+    }
+
+    private void addRepairMatcher(AssistantMessage response) {
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .contains(REPAIR_MARKER)
+                .response(response)
+                .maxMatches(1)
+                .build());
     }
 
     @Test
     void happyPath1_dynamicWikiGenerationWithTools() {
-        // Turn 1: LLM returns a ToolCall to write a wiki page
-        AssistantMessage.ToolCall toolCall1 = new AssistantMessage.ToolCall(
-                "call_1", "function", "write_wiki_page", pageCall("overview", "Overview", null));
-        AssistantMessage turn1Message =
-                AssistantMessage.builder().toolCalls(List.of(toolCall1)).build();
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_1", pageCall("overview", "Overview", null)))
+                .maxMatches(1)
+                .build());
+        addRepairMatcher(toolCall("repair_1", pageCall("overview", "Overview", null)));
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .build());
 
-        // Turn 2: LLM returns a final message indicating completion
-        AssistantMessage turn2Message = new AssistantMessage("Wiki generation complete.");
+        String result = wikiGenerationService.generateWiki(batch, batchLogger);
 
-        fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(turn1Message).maxMatches(1).build());
-        fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(turn2Message).maxMatches(1).build());
-
-        wikiGenerationService.generateWiki(batch, batchLogger);
-
+        assertThat(result).isEqualTo("generated 1 page(s)");
         List<CtxWikiPage> pages = ctxWikiPageRepository.findByBatchId(batch.getId());
         assertThat(pages).hasSize(1);
         assertThat(pages.getFirst().getPageSlug()).isEqualTo("overview");
@@ -146,27 +186,17 @@ class WikiGenerationServiceTest {
 
     @Test
     void happyPath2_multiplePagesGenerated() {
-        // Turn 1: LLM writes first page
-        AssistantMessage.ToolCall toolCall1 = new AssistantMessage.ToolCall(
-                "call_1", "function", "write_wiki_page", pageCall("architecture", "Architecture", null));
-        AssistantMessage turn1Message =
-                AssistantMessage.builder().toolCalls(List.of(toolCall1)).build();
-
-        // Turn 2: LLM writes second page
-        AssistantMessage.ToolCall toolCall2 =
-                new AssistantMessage.ToolCall("call_2", "function", "write_wiki_page", pageCall("api", "API", null));
-        AssistantMessage turn2Message =
-                AssistantMessage.builder().toolCalls(List.of(toolCall2)).build();
-
-        // Turn 3: LLM finishes
-        AssistantMessage turn3Message = new AssistantMessage("Done.");
-
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_1", pageCall("architecture", "Architecture", null)))
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_2", pageCall("api", "API", "architecture")))
+                .maxMatches(1)
+                .build());
+        addRepairMatcher(toolCall("repair_1", pageCall("api", "API", "architecture")));
         fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(turn1Message).maxMatches(1).build());
-        fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(turn2Message).maxMatches(1).build());
-        fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(turn3Message).maxMatches(1).build());
+                PromptMatcher.builder().response(new AssistantMessage("Done.")).build());
 
         wikiGenerationService.generateWiki(batch, batchLogger);
 
@@ -176,23 +206,62 @@ class WikiGenerationServiceTest {
     }
 
     @Test
-    void failureCase_infiniteToolLoop() {
-        // Configure the mock LLM to continuously return ToolCalls without ever yielding
-        // the final message.
-        AssistantMessage.ToolCall toolCall =
-                new AssistantMessage.ToolCall("call_1", "function", "get_architectural_patterns", "{}");
-        AssistantMessage infiniteMessage =
-                AssistantMessage.builder().toolCalls(List.of(toolCall)).build();
+    void failureCase_infiniteToolLoop_exhaustsBothPassesAndFails() {
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(AssistantMessage.builder()
+                        .toolCalls(List.of(new AssistantMessage.ToolCall(
+                                "call_1", "function", "get_architectural_patterns", "{}")))
+                        .build())
+                .build());
 
-        // Mock it to always return the tool call
+        assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch, batchLogger))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("incomplete wiki")
+                .hasMessageContaining("no wiki pages were written");
+
+        assertThat(ctxWikiPageRepository.findByBatchId(batch.getId())).isEmpty();
+    }
+
+    @Test
+    void turnExhaustion_succeedsWhenSavedWikiIsCoherent() {
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("page_1", pageCall("overview", "Overview", null)))
+                .maxMatches(1)
+                .build());
         fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(infiniteMessage).build());
+                PromptMatcher.builder().response(listPagesCall("list_1")).build());
 
-        var message =
-                assertThrows(RuntimeException.class, () -> wikiGenerationService.generateWiki(batch, batchLogger));
+        String result = wikiGenerationService.generateWiki(batch, batchLogger);
 
-        assertThat(message)
-                .hasMessageContaining("Exceeded maximum iterations (30) without yielding final completion message.");
+        assertThat(result).isEqualTo("generated 1 page(s) after turn exhaustion");
+        assertThat(ctxWikiPageRepository.findByBatchId(batch.getId()))
+                .extracting(CtxWikiPage::getPageSlug)
+                .containsExactly("overview");
+    }
+
+    @Test
+    void turnExhaustion_runsBoundedCompletionForMissingLinkedPages() {
+        String overviewContent =
+                "# Overview\n\nSee [Architecture](architecture).\n\n" + WikiPageContentFixtures.WIKI_PAGE_BODY;
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("root_1", pageCallWithContent("overview", "Overview", null, overviewContent)))
+                .maxMatches(1)
+                .build());
+        addRepairMatcher(toolCall("child_1", pageCall("architecture", "Architecture", "overview")));
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .condition(prompt -> prompt.getContents().contains(REPAIR_MARKER) && hasWrittenPage(prompt))
+                .response(new AssistantMessage("Wiki generation complete."))
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(
+                PromptMatcher.builder().response(listPagesCall("list_1")).build());
+
+        String result = wikiGenerationService.generateWiki(batch, batchLogger);
+
+        assertThat(result).isEqualTo("generated 2 page(s) after turn exhaustion");
+        assertThat(ctxWikiPageRepository.findByBatchId(batch.getId()))
+                .extracting(CtxWikiPage::getPageSlug)
+                .containsExactlyInAnyOrder("overview", "architecture");
     }
 
     @Test
@@ -210,35 +279,24 @@ class WikiGenerationServiceTest {
 
     @Test
     void toolExecutionException_wrapsErrorAsJsonForGoogleGenAi() {
-        // GoogleGenAiChatModel.parseJsonToMap rejects plain-text tool errors
-        AssistantMessage.ToolCall badCall =
-                new AssistantMessage.ToolCall("call_1", "function", "nonexistent_tool", "{}");
-        AssistantMessage assistantMessage =
-                AssistantMessage.builder().toolCalls(List.of(badCall)).build();
-
+        AssistantMessage unknownToolCall = AssistantMessage.builder()
+                .toolCalls(List.of(new AssistantMessage.ToolCall("call_1", "function", "nonexistent_tool", "{}")))
+                .build();
         AtomicReference<String> capturedToolResponse = new AtomicReference<>();
 
         fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(assistantMessage).maxMatches(1).build());
+                PromptMatcher.builder().response(unknownToolCall).maxMatches(1).build());
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .response(prompt -> {
-                    prompt.getInstructions().stream()
-                            .filter(ToolResponseMessage.class::isInstance)
-                            .map(ToolResponseMessage.class::cast)
-                            .findFirst()
-                            .ifPresent(trm -> capturedToolResponse.set(
-                                    trm.getResponses().getFirst().responseData()));
-                    AssistantMessage.ToolCall writeCall = new AssistantMessage.ToolCall(
-                            "call_2", "function", "write_wiki_page", pageCall("overview", "Overview", null));
-                    return new ChatResponse(List.of(new Generation(AssistantMessage.builder()
-                            .toolCalls(List.of(writeCall))
-                            .build())));
+                    latestToolResponse(prompt).ifPresent(response -> capturedToolResponse.set(response.responseData()));
+                    return new ChatResponse(
+                            List.of(new Generation(toolCall("call_2", pageCall("overview", "Overview", null)))));
                 })
                 .maxMatches(1)
                 .build());
+        addRepairMatcher(toolCall("repair_1", pageCall("overview", "Overview", null)));
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .response(new AssistantMessage("Wiki generation complete."))
-                .maxMatches(1)
                 .build());
 
         wikiGenerationService.generateWiki(batch, batchLogger);
@@ -249,9 +307,18 @@ class WikiGenerationServiceTest {
         assertThat(capturedToolResponse.get()).contains("Tool not found: nonexistent_tool");
     }
 
+    private static Optional<ToolResponse> latestToolResponse(Prompt prompt) {
+        List<ToolResponseMessage> responses = prompt.getInstructions().stream()
+                .filter(ToolResponseMessage.class::isInstance)
+                .map(ToolResponseMessage.class::cast)
+                .toList();
+        return responses.isEmpty()
+                ? Optional.empty()
+                : responses.getLast().getResponses().stream().reduce((a, b) -> b);
+    }
+
     @Test
     void happyPath3_wikiGenerationConsumesDimensionData() {
-        // Create a dimension to verify it's consumed in the system prompt
         CtxDimension dimension = new CtxDimension(
                 batch,
                 batch.getRepository().getTeam().getId(),
@@ -261,77 +328,58 @@ class WikiGenerationServiceTest {
                 List.of());
         ctxDimensionRepository.saveAndFlush(dimension);
 
-        // Turn 1: LLM returns a ToolCall to write a wiki page
-        // We verify the system prompt contains the dimension name "Authentication"
-        AssistantMessage.ToolCall toolCall1 = new AssistantMessage.ToolCall(
-                "call_1", "function", "write_wiki_page", pageCall("auth-overview", "Auth Overview", null));
-        AssistantMessage turn1Message =
-                AssistantMessage.builder().toolCalls(List.of(toolCall1)).build();
-
-        // Turn 2: LLM returns a final message indicating completion
-        AssistantMessage turn2Message = new AssistantMessage("Wiki generation complete.");
-
-        // First matcher checks for "Authentication" in the prompt (verifying dimension
-        // data is consumed)
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .contains("Authentication")
-                .response(turn1Message)
+                .response(toolCall("call_1", pageCall("auth-overview", "Auth Overview", null)))
                 .maxMatches(1)
                 .build());
-
-        // Second matcher handles the follow-up prompt after tool execution
-        fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(turn2Message).maxMatches(1).build());
+        addRepairMatcher(toolCall("repair_1", pageCall("auth-overview", "Auth Overview", null)));
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .build());
 
         wikiGenerationService.generateWiki(batch, batchLogger);
 
         List<CtxWikiPage> pages = ctxWikiPageRepository.findByBatchId(batch.getId());
         assertThat(pages).hasSize(1);
         assertThat(pages.getFirst().getPageSlug()).isEqualTo("auth-overview");
-        assertThat(pages.getFirst().getTitle()).isEqualTo("Auth Overview");
     }
 
     @Test
     void testHeuristics_and_complexityClassification() {
-        // Test Low LOC and Low Files -> Simple
         assertThat(wikiGenerationService.getComplexityClassification(1000, 10)).isEqualTo("Simple");
         assertThat(wikiGenerationService.calculateTargetPageCount(1000, 10)).isEqualTo(2);
 
-        // Test Low LOC and High Files -> Medium due to structural breadth
         assertThat(wikiGenerationService.getComplexityClassification(1000, 150)).isEqualTo("Medium");
         assertThat(wikiGenerationService.calculateTargetPageCount(1000, 150)).isEqualTo(9);
 
-        // Test High LOC and Low Files -> Medium due to low structural breadth
         assertThat(wikiGenerationService.getComplexityClassification(20000, 15)).isEqualTo("Medium");
         assertThat(wikiGenerationService.calculateTargetPageCount(20000, 15)).isEqualTo(13);
 
-        // Test High LOC and High Files -> Complex
         assertThat(wikiGenerationService.getComplexityClassification(20000, 150))
                 .isEqualTo("Complex");
         assertThat(wikiGenerationService.calculateTargetPageCount(20000, 150)).isEqualTo(20);
 
-        // Test Medium classification
         assertThat(wikiGenerationService.getComplexityClassification(8500, 85)).isEqualTo("Medium");
-        int mediumPages = wikiGenerationService.calculateTargetPageCount(8500, 85);
-        assertThat(mediumPages).isEqualTo(11);
+        assertThat(wikiGenerationService.calculateTargetPageCount(8500, 85)).isEqualTo(11);
     }
 
     @Test
     void testParseToolOutput_sccFormat() {
         String sccJsonOutput = """
-                                [
-                                  {
-                                    "Name": "Java",
-                                    "Code": 4500,
-                                    "Count": 35
-                                  },
-                                  {
-                                    "Name": "Markdown",
-                                    "Code": 100,
-                                    "Count": 3
-                                  }
-                                ]
-                                """;
+                        [
+                          {
+                            "Name": "Java",
+                            "Code": 4500,
+                            "Count": 35
+                          },
+                          {
+                            "Name": "Markdown",
+                            "Code": 100,
+                            "Count": 3
+                          }
+                        ]
+                        """;
         WikiGenerationService.RepoStats stats = wikiGenerationService.parseSccOutput(sccJsonOutput);
         assertThat(stats).isNotNull();
         assertThat(stats.linesOfCode()).isEqualTo(4600);
@@ -340,44 +388,35 @@ class WikiGenerationServiceTest {
 
     @Test
     void testWikiGeneration_withComplexityStatsInPrompt() throws Exception {
-        // Stub scc to return 4560 LOC and 23 files
         String mockSccJson = """
-                                [
-                                  {
-                                    "Name": "Java",
-                                    "Code": 4560,
-                                    "Count": 23
-                                  }
-                                ]
-                                """;
+                        [
+                          {
+                            "Name": "Java",
+                            "Code": 4560,
+                            "Count": 23
+                          }
+                        ]
+                        """;
         Mockito.doReturn(new ProcessExecutor.ProcessResult(0, mockSccJson.getBytes(StandardCharsets.UTF_8)))
                 .when(processExecutor)
                 .execute(Mockito.anyList(), Mockito.any(File.class), Mockito.any());
 
-        // Turn 1: LLM returns a ToolCall to write a wiki page
-        AssistantMessage.ToolCall toolCall = new AssistantMessage.ToolCall(
-                "call_1", "function", "write_wiki_page", pageCall("overview", "Overview", null));
-        AssistantMessage turn1Message =
-                AssistantMessage.builder().toolCalls(List.of(toolCall)).build();
-        AssistantMessage turn2Message = new AssistantMessage("Wiki generation complete.");
-
-        // Verify system prompt contains the complexity metrics
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .contains("Approximate Lines of Code: 4560")
                 .contains("Approximate Number of Files: 23")
                 .contains("Classification: Medium")
                 .contains("Suggested Target Number of Wiki Pages:")
-                .response(turn1Message)
+                .response(toolCall("call_1", pageCall("overview", "Overview", null)))
                 .maxMatches(1)
                 .build());
-
-        fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(turn2Message).maxMatches(1).build());
+        addRepairMatcher(toolCall("repair_1", pageCall("overview", "Overview", null)));
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .build());
 
         wikiGenerationService.generateWiki(batch, batchLogger);
 
-        List<CtxWikiPage> pages = ctxWikiPageRepository.findByBatchId(batch.getId());
-        assertThat(pages).hasSize(1);
+        assertThat(ctxWikiPageRepository.findByBatchId(batch.getId())).hasSize(1);
     }
 
     @Test
@@ -393,7 +432,6 @@ class WikiGenerationServiceTest {
 
     @Test
     void testWikiGeneration_withNonExistentCloneDir() {
-        // Ensure it doesn't exist
         deleteDirectoryRecursively(cloneDir);
 
         assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch, batchLogger))
@@ -445,16 +483,14 @@ class WikiGenerationServiceTest {
 
     @Test
     void tracksTokenUsageAndToolCallsAcrossTurns() {
-        AssistantMessage.ToolCall toolCall1 = new AssistantMessage.ToolCall(
-                "call_1", "function", "write_wiki_page", pageCall("overview", "Overview", null));
-        AssistantMessage turn1Message =
-                AssistantMessage.builder().toolCalls(List.of(toolCall1)).build();
-        AssistantMessage turn2Message = new AssistantMessage("Wiki generation complete.");
-
-        fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(turn1Message).maxMatches(1).build());
-        fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(turn2Message).maxMatches(1).build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_1", pageCall("overview", "Overview", null)))
+                .maxMatches(1)
+                .build());
+        addRepairMatcher(toolCall("repair_1", pageCall("overview", "Overview", null)));
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .build());
 
         wikiGenerationService.generateWiki(batch, batchLogger);
 
@@ -465,84 +501,208 @@ class WikiGenerationServiceTest {
 
     @Test
     void generateWiki_withNoPages_failsCompletionGateWithoutRecordingUsage() {
-        AssistantMessage turn1Message = new AssistantMessage("Wiki generation complete.");
-
-        fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(turn1Message).maxMatches(1).build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .build());
 
         assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch, batchLogger))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("produced no wiki pages");
+                .hasMessageContaining("no wiki pages were written");
 
         assertThat(usageTracker.snapshotAndClear(batch.getId())).isEmpty();
     }
 
     @Test
     void unknownParentSlug_isReportedToModelAndRecovered() {
-        AssistantMessage.ToolCall badChildCall = new AssistantMessage.ToolCall(
-                "call_1", "function", "write_wiki_page", pageCall("architecture", "Architecture", "home"));
-        AssistantMessage turn1 =
-                AssistantMessage.builder().toolCalls(List.of(badChildCall)).build();
-
-        AssistantMessage.ToolCall rootCall = new AssistantMessage.ToolCall(
-                "call_2", "function", "write_wiki_page", pageCall("overview", "Overview", null));
-        AssistantMessage turn2 =
-                AssistantMessage.builder().toolCalls(List.of(rootCall)).build();
-
-        AssistantMessage.ToolCall childCall = new AssistantMessage.ToolCall(
-                "call_3", "function", "write_wiki_page", pageCall("architecture", "Architecture", "overview"));
-        AssistantMessage turn3 =
-                AssistantMessage.builder().toolCalls(List.of(childCall)).build();
-
         AtomicReference<String> capturedError = new AtomicReference<>();
-        fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(turn1).maxMatches(1).build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_1", pageCall("architecture", "Architecture", "home")))
+                .maxMatches(1)
+                .build());
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .response(prompt -> {
-                    prompt.getInstructions().stream()
-                            .filter(ToolResponseMessage.class::isInstance)
-                            .map(ToolResponseMessage.class::cast)
-                            .findFirst()
-                            .ifPresent(trm -> capturedError.set(
-                                    trm.getResponses().getFirst().responseData()));
-                    return new ChatResponse(List.of(new Generation(turn2)));
+                    latestToolResponse(prompt).ifPresent(response -> capturedError.set(response.responseData()));
+                    return new ChatResponse(
+                            List.of(new Generation(toolCall("call_2", pageCall("overview", "Overview", null)))));
                 })
                 .maxMatches(1)
                 .build());
-        fakeChatModel.addMatcher(
-                PromptMatcher.builder().response(turn3).maxMatches(1).build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_3", pageCall("architecture", "Architecture", "overview")))
+                .maxMatches(1)
+                .build());
+        addRepairMatcher(toolCall("repair_1", pageCall("architecture", "Architecture", "overview")));
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .response(new AssistantMessage("Wiki generation complete."))
-                .maxMatches(1)
                 .build());
 
         wikiGenerationService.generateWiki(batch, batchLogger);
 
         assertThat(capturedError.get()).contains("does not exist").contains("Fix and retry");
-        List<CtxWikiPage> pages = ctxWikiPageRepository.findByBatchId(batch.getId());
-        assertThat(pages).extracting(CtxWikiPage::getPageSlug).containsExactlyInAnyOrder("overview", "architecture");
+        assertThat(ctxWikiPageRepository.findByBatchId(batch.getId()))
+                .extracting(CtxWikiPage::getPageSlug)
+                .containsExactlyInAnyOrder("overview", "architecture");
     }
 
     @Test
-    void systemPrompt_instructsRootFirstAndParentDiscovery() {
-        AssistantMessage.ToolCall toolCall = new AssistantMessage.ToolCall(
-                "call_1", "function", "write_wiki_page", pageCall("overview", "Overview", null));
+    void systemPrompt_encouragesWikiMapParallelismAndProseMargin() {
+        AtomicReference<String> systemText = new AtomicReference<>();
         fakeChatModel.addMatcher(PromptMatcher.builder()
-                .contains("list_wiki_pages")
-                .contains("Write the single top-level page FIRST")
-                .contains("If a tool call returns an ERROR")
-                .response(
-                        AssistantMessage.builder().toolCalls(List.of(toolCall)).build())
+                .response(prompt -> {
+                    if (systemText.get() == null) {
+                        prompt.getInstructions().stream()
+                                .filter(Message.class::isInstance)
+                                .map(Message::getText)
+                                .filter(Objects::nonNull)
+                                .findFirst()
+                                .ifPresent(systemText::set);
+                    }
+                    return new ChatResponse(
+                            List.of(new Generation(toolCall("call_1", pageCall("overview", "Overview", null)))));
+                })
+                .maxMatches(1)
+                .build());
+        addRepairMatcher(toolCall("repair_1", pageCall("overview", "Overview", null)));
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .build());
+
+        wikiGenerationService.generateWiki(batch, batchLogger);
+
+        assertThat(systemText.get())
+                .contains("Wiki Map")
+                .contains("in the same turn so they run in parallel")
+                .contains("at least 120 prose words")
+                .contains("Current wiki status")
+                .contains("advisory, not a minimum");
+    }
+
+    @Test
+    void turnFeedback_reportsMissingLinksOnLaterTurns() {
+        String overviewContent = "# Overview\n\nSee [Testing](testing).\n\n" + WikiPageContentFixtures.WIKI_PAGE_BODY;
+        AtomicReference<String> secondPrompt = new AtomicReference<>();
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_1", pageCallWithContent("overview", "Overview", null, overviewContent)))
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(prompt -> {
+                    if (secondPrompt.get() == null) {
+                        secondPrompt.set(prompt.getContents());
+                    }
+                    return new ChatResponse(List.of(new Generation(new AssistantMessage("Thinking."))));
+                })
+                .maxMatches(1)
+                .build());
+        addRepairMatcher(toolCall("repair_1", pageCall("testing", "Testing", "overview")));
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .condition(prompt -> prompt.getContents().contains(REPAIR_MARKER) && hasWrittenPage(prompt))
+                .response(new AssistantMessage("Wiki generation complete."))
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .build());
+
+        wikiGenerationService.generateWiki(batch, batchLogger);
+
+        assertThat(secondPrompt.get()).contains("Current wiki status").contains("testing (referenced by: overview)");
+    }
+
+    @Test
+    void fileLinks_doNotTriggerTheCompletionPass() {
+        String overviewContent = "# Overview\n\nRead [the README](README.md) and see [App](Application.java).\n\n"
+                + WikiPageContentFixtures.WIKI_PAGE_BODY;
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_1", pageCallWithContent("overview", "Overview", null, overviewContent)))
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .build());
+
+        String result = wikiGenerationService.generateWiki(batch, batchLogger);
+
+        assertThat(result).isEqualTo("generated 1 page(s)");
+        assertThat(fakeChatModel.getInvocations()).hasSize(2);
+    }
+
+    @Test
+    void multipleRoots_areReparentedDuringTheCompletionPass() {
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_1", pageCall("overview", "Overview", null)))
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_2", pageCall("architecture", "Architecture", null)))
                 .maxMatches(1)
                 .build());
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .response(new AssistantMessage("Wiki generation complete."))
                 .maxMatches(1)
                 .build());
+        addRepairMatcher(toolCall("repair_1", pageCall("architecture", "Architecture", "overview")));
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .condition(prompt -> prompt.getContents().contains(REPAIR_MARKER) && hasWrittenPage(prompt))
+                .response(new AssistantMessage("Wiki generation complete."))
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .build());
 
-        wikiGenerationService.generateWiki(batch, batchLogger);
+        String result = wikiGenerationService.generateWiki(batch, batchLogger);
 
-        assertThat(ctxWikiPageRepository.findByBatchId(batch.getId())).hasSize(1);
+        assertThat(result).isEqualTo("generated 2 page(s)");
+        CtxWikiPage child = ctxWikiPageRepository.findByBatchIdWithParent(batch.getId()).stream()
+                .filter(candidate -> "architecture".equals(candidate.getPageSlug()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(child.getParentPage()).isNotNull();
+        assertThat(child.getParentPage().getPageSlug()).isEqualTo("overview");
+    }
+
+    @Test
+    void multipleRoots_failTheBatchWhenTheCompletionPassLeavesThem() {
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_1", pageCall("overview", "Overview", null)))
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_2", pageCall("architecture", "Architecture", null)))
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .build());
+
+        assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch, batchLogger))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("multiple root pages")
+                .hasMessageContaining("architecture");
+    }
+
+    @Test
+    void missingLinksFromNonRootPages_areReportedWithTheirReferrer() {
+        String overviewContent = "# Overview\n\n" + WikiPageContentFixtures.WIKI_PAGE_BODY;
+        String architectureContent =
+                "# Architecture\n\nSee [Testing](testing).\n\n" + WikiPageContentFixtures.WIKI_PAGE_BODY;
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall("call_1", pageCallWithContent("overview", "Overview", null, overviewContent)))
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(toolCall(
+                        "call_2", pageCallWithContent("architecture", "Architecture", "overview", architectureContent)))
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(new AssistantMessage("Wiki generation complete."))
+                .build());
+
+        assertThatThrownBy(() -> wikiGenerationService.generateWiki(batch, batchLogger))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("testing (referenced by: architecture)");
     }
 
     // Best-effort cleanup in test teardown.

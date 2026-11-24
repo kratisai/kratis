@@ -13,7 +13,7 @@ import org.springframework.ai.chat.prompt.Prompt;
  */
 public class FakeChatModelMatchers {
 
-    private static final String WIKI_SYSTEM_PROMPT_MARKER =
+    static final String WIKI_SYSTEM_PROMPT_MARKER =
             "synthesize the human-readable high-level and architectural Markdown documentation for this codebase";
 
     public static List<PromptMatcher> ingestionPipelineMatchers() {
@@ -132,30 +132,31 @@ public class FakeChatModelMatchers {
                 "write_wiki_page",
                 "{\"pageSlug\":\"user-management-overview\",\"title\":\"User Management Overview\",\"content\":\"# User Management\\n\\n"
                         + WikiPageContentFixtures.WIKI_PAGE_BODY + "\"}");
-        AssistantMessage assistantMessage =
-                AssistantMessage.builder().toolCalls(List.of(toolCall)).build();
         return PromptMatcher.builder()
-                // Write one page per batch, not one page per test, so concurrent ingestions
-                // each produce a wiki rather than an empty one. Once a tool response is present
-                // the batch has already written its page and falls through to wikiCompleteMatcher.
-                .condition(prompt -> hasWikiSystemPrompt(prompt) && !hasToolResponse(prompt))
-                .response(assistantMessage)
+                .condition(prompt -> hasWikiSystemPrompt(prompt) && !hasSuccessfulWrite(prompt))
+                .response(
+                        AssistantMessage.builder().toolCalls(List.of(toolCall)).build())
                 .build();
     }
 
     public static PromptMatcher wikiCompleteMatcher() {
         return PromptMatcher.builder()
-                .contains(WIKI_SYSTEM_PROMPT_MARKER)
+                .condition(prompt -> hasWikiSystemPrompt(prompt) && hasSuccessfulWrite(prompt))
                 .response("Wiki generation complete.")
                 .build();
     }
 
     private static boolean hasWikiSystemPrompt(Prompt prompt) {
-        String contents = prompt.getContents();
-        return contents.contains(WIKI_SYSTEM_PROMPT_MARKER);
+        return prompt.getContents().contains(WIKI_SYSTEM_PROMPT_MARKER);
     }
 
-    private static boolean hasToolResponse(Prompt prompt) {
-        return prompt.getInstructions().stream().anyMatch(ToolResponseMessage.class::isInstance);
+    /** A failed write is still a tool response named write_wiki_page, so key on the success text. */
+    private static boolean hasSuccessfulWrite(Prompt prompt) {
+        return prompt.getInstructions().stream()
+                .filter(ToolResponseMessage.class::isInstance)
+                .map(ToolResponseMessage.class::cast)
+                .flatMap(message -> message.getResponses().stream())
+                .anyMatch(response -> "write_wiki_page".equals(response.name())
+                        && response.responseData().contains("SUCCESS"));
     }
 }

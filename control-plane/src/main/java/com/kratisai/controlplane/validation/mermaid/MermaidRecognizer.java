@@ -53,7 +53,7 @@ public final class MermaidRecognizer {
     private static final Pattern JOURNEY_SEPARATOR =
             Pattern.compile(";[ \\t]*(?:(?:title|section)[ \\t]|[^:;]+:[ \\t]*-?\\d+[ \\t]*:)");
     private static final Pattern ENTITY_PREFIX = Pattern.compile("#(?:quot|\\d+)$");
-    private static final Map<String, int[]> C4_ELEMENTS = Map.ofEntries(
+    static final Map<String, int[]> C4_ELEMENTS = Map.ofEntries(
             Map.entry("Boundary", new int[] {2, 3}),
             Map.entry("Component", new int[] {2, 4}),
             Map.entry("ComponentDb", new int[] {2, 4}),
@@ -416,7 +416,7 @@ public final class MermaidRecognizer {
             } else {
                 String first = flowNode(s);
                 StringBuilder result = new StringBuilder(first);
-                List<String> firstParts = Arrays.asList(first.split(" & "));
+                String[] firstParts = first.split(" & ");
                 List<String> firstIds = new ArrayList<>();
                 for (String part : firstParts) {
                     String firstId = flowPrefixId(part);
@@ -464,7 +464,7 @@ public final class MermaidRecognizer {
                         label = s.maybe("|") ? "|" + flowLabel(s, List.of("|")).label() + "|" : "";
                     }
                     String to = flowNode(s);
-                    List<String> toParts = Arrays.asList(to.split(" & "));
+                    String[] toParts = to.split(" & ");
                     for (String part : toParts) {
                         String toId = flowPrefixId(part);
                         endpoints.add(toId);
@@ -528,7 +528,7 @@ public final class MermaidRecognizer {
         boolean strippedTitle = false;
         if (header.matches("^pie[ \\t]+title(?:[ \\t]+.*)?$")) {
             String titlePart = header.substring(9).trim();
-            lines.add(0, "title " + titlePart);
+            lines.addFirst("title " + titlePart);
             header = "pie";
             strippedTitle = true;
         }
@@ -649,7 +649,7 @@ public final class MermaidRecognizer {
         boolean strippedTitle = false;
         if (header.matches("^journey[ \\t]+title(?:[ \\t]+.*)?$")) {
             String titlePart = header.substring(13).trim();
-            lines.add(0, "title " + titlePart);
+            lines.addFirst("title " + titlePart);
             header = "journey";
             strippedTitle = true;
         }
@@ -877,7 +877,14 @@ public final class MermaidRecognizer {
                 args.add(s.id());
             }
             while (s.maybe(",")) args.add(raw(s.quoted()));
-            s.literal(")");
+            if (!s.maybe(")")) {
+                s.space();
+                if (s.pos < s.line.length() && s.line.charAt(s.pos) == '"') {
+                    fail(
+                            "C4 arguments must be comma-separated, e.g. Person(alias, \"Label\", \"Description\") and Rel(fromAlias, toAlias, \"Label\")");
+                }
+                fail("expected )");
+            }
             boolean boundary = name.endsWith("Boundary");
             boolean open = s.maybe("{");
             s.done();

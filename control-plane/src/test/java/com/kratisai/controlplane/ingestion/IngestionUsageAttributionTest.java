@@ -113,8 +113,6 @@ class IngestionUsageAttributionTest {
                                 "write_wiki_page",
                                 "{\"pageSlug\":\"overview\",\"title\":\"Overview\",\"content\":\"# Overview\\n\\n"
                                         + WikiPageContentFixtures.WIKI_PAGE_BODY + "\"}"))
-                        // The tool-call turn stays in the conversation history, so without a
-                        // match cap every follow-up turn would loop back into another tool call.
                         .maxMatches(1)
                         .build(),
                 HttpRequestMatcher.builder()

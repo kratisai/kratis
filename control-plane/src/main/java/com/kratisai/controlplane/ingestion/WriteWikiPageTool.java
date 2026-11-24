@@ -1,6 +1,6 @@
 package com.kratisai.controlplane.ingestion;
 
-import static org.apache.commons.lang3.StringUtils.isEmpty;
+import static org.apache.commons.lang3.StringUtils.isBlank;
 
 import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.agentloop.KratisToolException;
@@ -12,6 +12,7 @@ import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.repository.IngestionBatchRepository;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
 import com.kratisai.controlplane.validation.WikiPageContentValidator;
+import com.kratisai.controlplane.validation.mermaid.MermaidNormalizer;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -29,23 +30,28 @@ public class WriteWikiPageTool {
     private final CtxWikiPageRepository ctxWikiPageRepository;
     private final IngestionBatchRepository ingestionBatchRepository;
     private final MermaidDiagramValidator mermaidDiagramValidator;
+    private final MermaidNormalizer mermaidNormalizer;
     private final WikiPageContentValidator wikiPageContentValidator;
 
     public WriteWikiPageTool(
             CtxWikiPageRepository ctxWikiPageRepository,
             IngestionBatchRepository ingestionBatchRepository,
             MermaidDiagramValidator mermaidDiagramValidator,
+            MermaidNormalizer mermaidNormalizer,
             WikiPageContentValidator wikiPageContentValidator) {
         this.ctxWikiPageRepository = ctxWikiPageRepository;
         this.ingestionBatchRepository = ingestionBatchRepository;
         this.mermaidDiagramValidator = mermaidDiagramValidator;
+        this.mermaidNormalizer = mermaidNormalizer;
         this.wikiPageContentValidator = wikiPageContentValidator;
     }
 
     @KratisTool(
             name = "write_wiki_page",
             description =
-                    "Write or update a wiki page for the repository. If a page with the same pageSlug already exists for this batch, its content will be replaced.")
+                    "Write or update a wiki page for the repository. If a page with the same pageSlug already exists"
+                            + " for this batch, its content, title and explicit parent/orderIndex are updated; an"
+                            + " omitted parentPageSlug keeps the page's current parent.")
     @Transactional
     public String writeWikiPage(
             @ToolParam(description = "Friendly url-slug for this wiki") String pageSlug,
@@ -59,8 +65,9 @@ public class WriteWikiPageTool {
                     String parentPageSlug,
             @ToolParam(
                             description = "Reading order among sibling pages, e.g. 10, 20, 30. Provide it so pages"
-                                    + " appear in a logical narrative order; when omitted the page is appended"
-                                    + " after its current siblings.",
+                                    + " appear in a logical narrative order; when omitted on a new page the page is"
+                                    + " appended after its current siblings, and when omitted on an update the"
+                                    + " existing order is kept.",
                             required = false)
                     Integer orderIndex,
             ToolContext toolContext) {
@@ -74,15 +81,14 @@ public class WriteWikiPageTool {
             throw new KratisToolException("content must not be blank.");
         }
 
-        content = mermaidDiagramValidator.normalizeFences(content);
+        UUID batchId = BatchContext.requireBatchId(toolContext, "WriteWikiPageTool");
+        content = mermaidNormalizer.normalize(content);
         wikiPageContentValidator.requireBody(content);
         List<String> mermaidIssues = mermaidDiagramValidator.findIssues(content);
         if (!mermaidIssues.isEmpty()) {
             throw new KratisToolException(
                     "Invalid Mermaid diagram syntax in content. Fix and retry:\n" + String.join("\n", mermaidIssues));
         }
-
-        UUID batchId = BatchContext.requireBatchId(toolContext, "WriteWikiPageTool");
 
         IngestionBatch batch = ingestionBatchRepository
                 .findById(batchId)
@@ -92,18 +98,15 @@ public class WriteWikiPageTool {
                 .findByBatchIdAndPageSlug(batchId, pageSlug)
                 .orElse(null);
 
-        CtxWikiPage parentPage = null;
-        if (!isEmpty(parentPageSlug)) {
-            parentPage = ctxWikiPageRepository
-                    .findByBatchIdAndPageSlug(batchId, parentPageSlug)
-                    .orElseThrow(() -> parentPageNotFound(batchId, parentPageSlug));
-        }
-
         Team team = batch.getRepository().getTeam();
 
         if (existingPage != null) {
+            CtxWikiPage targetParent = resolveParent(batchId, pageSlug, parentPageSlug, existingPage);
             existingPage.setTitle(title);
             existingPage.setContent(content);
+            if (targetParent != null) {
+                existingPage.setParentPage(targetParent);
+            }
             if (orderIndex != null) {
                 existingPage.setOrderIndex(orderIndex);
             }
@@ -112,6 +115,7 @@ public class WriteWikiPageTool {
             logPageWrite(toolContext, "Updated", title, pageSlug, content);
             return "SUCCESS: Wiki page '" + pageSlug + "' updated successfully.";
         } else {
+            CtxWikiPage parentPage = lookupParent(batchId, parentPageSlug);
             int effectiveOrderIndex = orderIndex != null ? orderIndex : nextSiblingOrderIndex(batchId, parentPage);
             CtxWikiPage newPage = new CtxWikiPage(
                     batch,
@@ -133,6 +137,33 @@ public class WriteWikiPageTool {
         int maxOrderIndex = CtxWikiPages.maxSiblingOrderIndex(
                 ctxWikiPageRepository.findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(batchId), parentPage);
         return maxOrderIndex + 10;
+    }
+
+    /** Parent for a new page: {@code null} means top level. A blank slug is treated as omitted. */
+    private CtxWikiPage lookupParent(UUID batchId, String parentPageSlug) {
+        if (isBlank(parentPageSlug)) return null;
+        return ctxWikiPageRepository
+                .findByBatchIdAndPageSlug(batchId, parentPageSlug)
+                .orElseThrow(() -> parentPageNotFound(batchId, parentPageSlug));
+    }
+
+    /**
+     * Parent for an update. Returns {@code null} when the caller omitted the slug, which leaves the page's
+     * current parent untouched rather than promoting it to a second root.
+     */
+    private CtxWikiPage resolveParent(UUID batchId, String pageSlug, String parentPageSlug, CtxWikiPage existingPage) {
+        if (isBlank(parentPageSlug)) return null;
+        if (parentPageSlug.equals(pageSlug)) {
+            throw new KratisToolException("A page cannot be its own parent: " + pageSlug);
+        }
+        CtxWikiPage candidate = ctxWikiPageRepository
+                .findByBatchIdAndPageSlug(batchId, parentPageSlug)
+                .orElseThrow(() -> parentPageNotFound(batchId, parentPageSlug));
+        if (CtxWikiPages.isDescendantOf(candidate, existingPage.getId())) {
+            throw new KratisToolException("Cannot set parentPageSlug to '" + candidate.getPageSlug()
+                    + "' because it is a descendant of '" + pageSlug + "'.");
+        }
+        return candidate;
     }
 
     private static void logPageWrite(

@@ -12,8 +12,10 @@ import com.kratisai.controlplane.model.CtxSurfaceAttribute;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.SurfaceDetection;
 import com.kratisai.controlplane.model.SurfaceRole;
+import com.kratisai.controlplane.model.TeamWikiBatch;
 import com.kratisai.controlplane.repository.CtxSurfaceRepository;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
+import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -34,6 +36,9 @@ class TeamWikiToolsTest {
     @Mock
     private CtxSurfaceRepository surfaceRepository;
 
+    @Mock
+    private TeamWikiBatchRepository teamWikiBatchRepository;
+
     private ListTeamWikiPagesTool listTool;
     private ReadTeamWikiPageTool readTool;
     private DeleteTeamWikiPageTool deleteTool;
@@ -47,7 +52,7 @@ class TeamWikiToolsTest {
     void setUp() {
         listTool = new ListTeamWikiPagesTool(wikiPageRepository);
         readTool = new ReadTeamWikiPageTool(wikiPageRepository);
-        deleteTool = new DeleteTeamWikiPageTool(wikiPageRepository);
+        deleteTool = new DeleteTeamWikiPageTool(wikiPageRepository, teamWikiBatchRepository);
         repoReadTools = new TeamWikiRepoReadTools(wikiPageRepository, surfaceRepository);
         twBatchId = UUID.randomUUID();
         repoBatchId = UUID.randomUUID();
@@ -88,6 +93,9 @@ class TeamWikiToolsTest {
 
     @Test
     void deleteTeamWikiPage_deletesChildrenRecursively() {
+        TeamWikiBatch batch = new TeamWikiBatch();
+        batch.setId(twBatchId);
+        when(teamWikiBatchRepository.findByIdForUpdate(twBatchId)).thenReturn(Optional.of(batch));
         CtxWikiPage parent = new CtxWikiPage();
         parent.setId(UUID.randomUUID());
         parent.setPageSlug("old-cluster");
@@ -106,6 +114,35 @@ class TeamWikiToolsTest {
         assertThat(result).contains("2 page(s) removed");
         verify(wikiPageRepository).delete(child);
         verify(wikiPageRepository).delete(parent);
+    }
+
+    @Test
+    void deleteTeamWikiPage_locksBatchBeforeDeleting() {
+        TeamWikiBatch batch = new TeamWikiBatch();
+        batch.setId(twBatchId);
+        CtxWikiPage target = new CtxWikiPage();
+        target.setId(UUID.randomUUID());
+        target.setPageSlug("stale");
+
+        when(teamWikiBatchRepository.findByIdForUpdate(twBatchId)).thenReturn(Optional.of(batch));
+        when(wikiPageRepository.findByTeamWikiBatchIdAndPageSlug(twBatchId, "stale"))
+                .thenReturn(Optional.of(target));
+        when(wikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(twBatchId))
+                .thenReturn(List.of(target));
+
+        deleteTool.deleteTeamWikiPage("stale", toolContext);
+
+        verify(teamWikiBatchRepository).findByIdForUpdate(twBatchId);
+        verify(wikiPageRepository).delete(target);
+    }
+
+    @Test
+    void deleteTeamWikiPage_withUnknownBatch_throwsToolException() {
+        when(teamWikiBatchRepository.findByIdForUpdate(twBatchId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> deleteTool.deleteTeamWikiPage("stale", toolContext))
+                .isInstanceOf(KratisToolException.class)
+                .hasMessageContaining("TeamWikiBatch not found");
     }
 
     @Test

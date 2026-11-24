@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.kratisai.controlplane.agentloop.ReActLoop.ToolPhase;
 import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.ingestion.write.SemanticIndexingService;
+import com.kratisai.controlplane.ingestion.write.WikiPageLinkExtractor;
 import com.kratisai.controlplane.model.Ceiling;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.Direction;
@@ -263,10 +264,11 @@ class TeamWikiCoverageTest {
                 null,
                 null,
                 snapshotService,
+                new WikiPageLinkExtractor(),
                 new ListTeamWikiPagesTool(null),
                 new ReadTeamWikiPageTool(null),
-                new WriteTeamWikiPageTool(null, null, null, null),
-                new DeleteTeamWikiPageTool(null),
+                new WriteTeamWikiPageTool(null, null, null, null, null, new WikiPageLinkExtractor()),
+                new DeleteTeamWikiPageTool(null, null),
                 new TeamWikiRepoReadTools(null, null),
                 Runnable::run,
                 mock(PlatformTransactionManager.class),

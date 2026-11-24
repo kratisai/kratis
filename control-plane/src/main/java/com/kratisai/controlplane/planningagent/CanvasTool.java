@@ -9,6 +9,7 @@ import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.service.BatchResolutionService;
 import com.kratisai.controlplane.service.CanvasService;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
+import com.kratisai.controlplane.validation.mermaid.MermaidNormalizer;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -26,14 +27,17 @@ public class CanvasTool {
     private final CanvasService canvasService;
     private final BatchResolutionService batchResolutionService;
     private final MermaidDiagramValidator mermaidDiagramValidator;
+    private final MermaidNormalizer mermaidNormalizer;
 
     public CanvasTool(
             CanvasService canvasService,
             BatchResolutionService batchResolutionService,
-            MermaidDiagramValidator mermaidDiagramValidator) {
+            MermaidDiagramValidator mermaidDiagramValidator,
+            MermaidNormalizer mermaidNormalizer) {
         this.canvasService = canvasService;
         this.batchResolutionService = batchResolutionService;
         this.mermaidDiagramValidator = mermaidDiagramValidator;
+        this.mermaidNormalizer = mermaidNormalizer;
     }
 
     @KratisTool(name = "list_canvas_documents", description = "List a summary of each document in the canvas")
@@ -105,7 +109,7 @@ public class CanvasTool {
         UUID teamId = (UUID) toolContext.getContext().get("teamId");
 
         validateWriteCanvasRequest(canvasType, repoName, newRepoName);
-        content = mermaidDiagramValidator.normalizeFences(content);
+        content = mermaidNormalizer.normalize(content);
         List<String> mermaidIssues = mermaidDiagramValidator.findIssues(content);
         if (!mermaidIssues.isEmpty()) {
             return "ERROR: Invalid Mermaid diagram syntax in content. Fix and retry:\n"
@@ -210,7 +214,7 @@ public class CanvasTool {
                 patchedContent = patchedContent.replace(target, replacement);
             }
 
-            patchedContent = mermaidDiagramValidator.normalizeFences(patchedContent);
+            patchedContent = mermaidNormalizer.normalize(patchedContent);
             List<String> mermaidIssues = mermaidDiagramValidator.findIssues(patchedContent);
             if (!mermaidIssues.isEmpty()) {
                 return "ERROR: Invalid Mermaid diagram syntax after patching. Fix and retry:\n"

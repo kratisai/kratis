@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.ingestion.teamwiki;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.model.Ceiling;
@@ -19,6 +20,7 @@ import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.TeamWikiBatch;
 import com.kratisai.controlplane.model.TeamWikiBuildMode;
+import com.kratisai.controlplane.model.TeamWikiSourceSnapshot;
 import com.kratisai.controlplane.model.TeamWikiTriggerKind;
 import com.kratisai.controlplane.repository.CtxArchitecturePatternRepository;
 import com.kratisai.controlplane.repository.CtxDimensionRepository;
@@ -249,6 +251,286 @@ class TeamWikiGenerationServiceTest {
                 .isEqualTo("Team Landscape Updated");
         assertThat(wikiPageRepository.findByTeamWikiBatchIdAndPageSlug(incBatch.getId(), "legacy-cluster"))
                 .isEmpty();
+    }
+
+    @Test
+    void generate_incrementalRepairsStaleRepoLinkOnUntouchedCopiedPage() {
+        TeamWikiBatch previous = activeTeamWikiBatchWith(WikiPageContentFixtures.WIKI_PAGE_BODY
+                + " Legacy link to [Gone](/wiki/repo/gone-api/overview) and [Billing](/wiki/repo/billing-api).");
+
+        TeamWikiBatch incBatch = newBatch(TeamWikiBuildMode.INCREMENTAL);
+        AtomicInteger steps = new AtomicInteger(0);
+        AtomicReference<String> repairPrompt = new AtomicReference<>();
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .condition(p -> true)
+                .response(prompt -> {
+                    int step = steps.getAndIncrement();
+                    if (step == 0) {
+                        return textResponse("Incremental update complete.");
+                    }
+                    if (repairPrompt.get() == null && prompt.getContents().contains("The team wiki is incomplete")) {
+                        repairPrompt.set(prompt.getContents());
+                    }
+                    return toolResponse(
+                            "write_team_wiki_page",
+                            Map.of(
+                                    "pageSlug",
+                                    "team-overview",
+                                    "title",
+                                    "Team Landscape",
+                                    "content",
+                                    WikiPageContentFixtures.WIKI_PAGE_BODY
+                                            + " Links [Orders](/wiki/repo/orders-api) and"
+                                            + " [Billing](/wiki/repo/billing-api)."));
+                })
+                .build());
+
+        var result = generationService.generate(
+                incBatch.getId(),
+                new TeamWikiBatchLogService.BatchLogger(incBatch.getId(), team.getId(), batchLogService));
+
+        assertThat(result.pageCount()).isEqualTo(1);
+        assertThat(repairPrompt.get()).contains("/wiki/repo/gone-api/overview");
+        assertThat(wikiPageRepository
+                        .findByTeamWikiBatchIdAndPageSlug(incBatch.getId(), "team-overview")
+                        .orElseThrow()
+                        .getContent())
+                .doesNotContain("gone-api");
+        assertThat(previous).isNotNull();
+    }
+
+    @Test
+    void generate_incrementalFailsWhenStaleRepoLinkIsNotRepaired() {
+        activeTeamWikiBatchWith(
+                WikiPageContentFixtures.WIKI_PAGE_BODY + " Legacy link to [Gone](/wiki/repo/gone-api).");
+        TeamWikiBatch incBatch = newBatch(TeamWikiBuildMode.INCREMENTAL);
+
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .condition(p -> true)
+                .response(new AssistantMessage("Incremental update complete."))
+                .build());
+
+        assertThatThrownBy(() -> generationService.generate(
+                        incBatch.getId(),
+                        new TeamWikiBatchLogService.BatchLogger(incBatch.getId(), team.getId(), batchLogService)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("repository links that are broken")
+                .hasMessageContaining("gone-api");
+    }
+
+    @Test
+    void generate_failsWhenActiveRepositoryIsNotLinkedFromTheWiki() {
+        TeamWikiBatch fullBatch = newBatch(TeamWikiBuildMode.FULL);
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .condition(p -> true)
+                .response(prompt -> toolResponse(
+                        "write_team_wiki_page",
+                        Map.of(
+                                "pageSlug",
+                                "team-overview",
+                                "title",
+                                "Team Landscape",
+                                "content",
+                                WikiPageContentFixtures.WIKI_PAGE_BODY
+                                        + " Links [Orders](/wiki/repo/orders-api) only.")))
+                .build());
+
+        assertThatThrownBy(() -> generationService.generate(
+                        fullBatch.getId(),
+                        new TeamWikiBatchLogService.BatchLogger(fullBatch.getId(), team.getId(), batchLogService)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("active repositories with no team wiki link")
+                .hasMessageContaining("billing-api");
+    }
+
+    @Test
+    void generate_failsWhenTheWikiHasMultipleRoots() {
+        TeamWikiBatch fullBatch = newBatch(TeamWikiBuildMode.FULL);
+        AtomicInteger steps = new AtomicInteger(0);
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .condition(p -> true)
+                .response(prompt -> {
+                    int step = steps.getAndIncrement();
+                    String bothRepos = WikiPageContentFixtures.WIKI_PAGE_BODY
+                            + " Links [Orders](/wiki/repo/orders-api) and [Billing](/wiki/repo/billing-api).";
+                    if (step == 0) {
+                        return toolResponse(
+                                "write_team_wiki_page",
+                                Map.of("pageSlug", "team-overview", "title", "Team Landscape", "content", bothRepos));
+                    }
+                    if (step == 1) {
+                        return toolResponse(
+                                "write_team_wiki_page",
+                                Map.of("pageSlug", "cluster", "title", "Cluster", "content", bothRepos));
+                    }
+                    return textResponse("Team wiki generation complete.");
+                })
+                .build());
+
+        assertThatThrownBy(() -> generationService.generate(
+                        fullBatch.getId(),
+                        new TeamWikiBatchLogService.BatchLogger(fullBatch.getId(), team.getId(), batchLogService)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("multiple root pages");
+    }
+
+    @Test
+    void generate_exhaustionSucceedsWhenSavedWikiIsCoherent() {
+        TeamWikiBatch fullBatch = newBatch(TeamWikiBuildMode.FULL);
+        AtomicInteger steps = new AtomicInteger(0);
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .condition(p -> true)
+                .response(prompt -> {
+                    if (steps.getAndIncrement() == 0) {
+                        return toolResponse(
+                                "write_team_wiki_page",
+                                Map.of(
+                                        "pageSlug",
+                                        "team-overview",
+                                        "title",
+                                        "Team Landscape",
+                                        "content",
+                                        WikiPageContentFixtures.WIKI_PAGE_BODY
+                                                + " Links [Orders](/wiki/repo/orders-api) and"
+                                                + " [Billing](/wiki/repo/billing-api)."));
+                    }
+                    return multiToolResponse(toolCall("list_team_wiki_pages", Map.of()));
+                })
+                .build());
+
+        var result = generationService.generate(
+                fullBatch.getId(),
+                new TeamWikiBatchLogService.BatchLogger(fullBatch.getId(), team.getId(), batchLogService));
+
+        assertThat(result.pageCount()).isEqualTo(1);
+    }
+
+    @Test
+    void generate_replaysWikiStatusOnLaterTurnsWithoutDuplicatingIt() {
+        TeamWikiBatch fullBatch = newBatch(TeamWikiBuildMode.FULL);
+        AtomicReference<String> firstPrompt = new AtomicReference<>();
+        AtomicReference<String> secondPrompt = new AtomicReference<>();
+        AtomicInteger steps = new AtomicInteger(0);
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .condition(p -> true)
+                .response(prompt -> {
+                    int step = steps.getAndIncrement();
+                    if (step == 0) {
+                        firstPrompt.set(prompt.getContents());
+                        return toolResponse(
+                                "write_team_wiki_page",
+                                Map.of(
+                                        "pageSlug",
+                                        "team-overview",
+                                        "title",
+                                        "Team Landscape",
+                                        "content",
+                                        WikiPageContentFixtures.WIKI_PAGE_BODY
+                                                + " Links [Orders](/wiki/repo/orders-api) and"
+                                                + " [Billing](/wiki/repo/billing-api)."));
+                    }
+                    secondPrompt.set(prompt.getContents());
+                    return textResponse("Team wiki generation complete.");
+                })
+                .build());
+
+        generationService.generate(
+                fullBatch.getId(),
+                new TeamWikiBatchLogService.BatchLogger(fullBatch.getId(), team.getId(), batchLogService));
+
+        assertThat(firstPrompt.get()).doesNotContain("- Saved pages (");
+        assertThat(secondPrompt.get()).contains("Current team wiki status").contains("Saved pages (1): team-overview");
+        assertThat(countOccurrences(secondPrompt.get(), "Current team wiki status:"))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void generate_usesSnapshotRelationsInsteadOfRelationsCreatedAfterCapture() {
+        TeamWikiSourceSnapshot snapshot =
+                snapshotService.captureCurrentState(team.getId()).snapshot();
+        Repository extra = testDataFactory.createRepository(
+                team, "shipping-api", TestDataFactory.getOrCreateDummyRepo(), "main", null);
+        IngestionBatch pending = new IngestionBatch(extra);
+        pending.setStatus(IngestionStatus.SUCCESS);
+        pending.setCommitHash("shipping-commit");
+        pending.setActive(true);
+        IngestionBatch extraBatch = ingestionBatchRepository.saveAndFlush(pending);
+        IngestionBatch existing = ingestionBatchRepository.findActiveByTeamId(team.getId()).stream()
+                .filter(candidate -> !candidate.getId().equals(extraBatch.getId()))
+                .findFirst()
+                .orElseThrow();
+        boolean extraFirst = extraBatch
+                        .getRepository()
+                        .getId()
+                        .toString()
+                        .compareTo(existing.getRepository().getId().toString())
+                < 0;
+        relationRepository.saveAndFlush(new CtxRepoRelation(
+                team.getId(),
+                extraFirst ? extraBatch : existing,
+                extraFirst ? existing : extraBatch,
+                Nature.CALLS,
+                extraFirst ? Direction.A_TO_B : Direction.B_TO_A,
+                Ceiling.CONFIRMED));
+
+        TeamWikiBatch fullBatch = teamWikiBatchRepository.saveAndFlush(
+                new TeamWikiBatch(team, TeamWikiBuildMode.FULL, TeamWikiTriggerKind.MANUAL, snapshot));
+        AtomicReference<String> promptText = new AtomicReference<>();
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .condition(p -> true)
+                .response(prompt -> {
+                    if (promptText.get() == null) {
+                        promptText.set(prompt.getContents());
+                        return toolResponse(
+                                "write_team_wiki_page",
+                                Map.of(
+                                        "pageSlug",
+                                        "team-overview",
+                                        "title",
+                                        "Team Landscape",
+                                        "content",
+                                        WikiPageContentFixtures.WIKI_PAGE_BODY
+                                                + " Links [Orders](/wiki/repo/orders-api) and"
+                                                + " [Billing](/wiki/repo/billing-api)."));
+                    }
+                    return textResponse("Team wiki generation complete.");
+                })
+                .build());
+
+        generationService.generate(
+                fullBatch.getId(),
+                new TeamWikiBatchLogService.BatchLogger(fullBatch.getId(), team.getId(), batchLogService));
+
+        assertThat(promptText.get()).contains("Billing calls Orders REST API");
+        assertThat(promptText.get()).doesNotContain("shipping-api");
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        int index = haystack.indexOf(needle);
+        while (index >= 0) {
+            count++;
+            index = haystack.indexOf(needle, index + needle.length());
+        }
+        return count;
+    }
+
+    private TeamWikiBatch newBatch(TeamWikiBuildMode mode) {
+        return teamWikiBatchRepository.saveAndFlush(new TeamWikiBatch(
+                team,
+                mode,
+                TeamWikiTriggerKind.MANUAL,
+                snapshotService.captureCurrentState(team.getId()).snapshot()));
+    }
+
+    private TeamWikiBatch activeTeamWikiBatchWith(String content) {
+        TeamWikiBatch previous = newBatch(TeamWikiBuildMode.FULL);
+        previous.setStatus(IngestionStatus.SUCCESS);
+        previous.setActive(true);
+        teamWikiBatchRepository.saveAndFlush(previous);
+        wikiPageRepository.saveAndFlush(
+                new CtxWikiPage(previous, team.getId(), null, "team-overview", "Team Landscape", 0, content));
+        return previous;
     }
 
     private static ChatResponse toolResponse(String toolName, Map<String, Object> args) {

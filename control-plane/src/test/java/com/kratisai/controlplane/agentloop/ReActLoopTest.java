@@ -305,6 +305,94 @@ class ReActLoopTest {
     }
 
     @Test
+    void turnFeedbackSupplier_replacesDynamicBlockOnEveryTurn() {
+        ToolCallback echo = tool("{\"ok\":true}");
+        FakeChatModel model = new FakeChatModel();
+        model.addMatcher(PromptMatcher.builder()
+                .response(assistantWithTools(toolCall("call_1", "echo", "{}")))
+                .maxMatches(1)
+                .build());
+        model.addMatcher(PromptMatcher.builder().response("done").maxMatches(1).build());
+        AtomicInteger readings = new AtomicInteger();
+
+        ReActLoop.text(client(model), new ToolCallback[] {echo})
+                .executor(Runnable::run)
+                .turnFeedbackSupplier(() -> "status-" + readings.incrementAndGet())
+                .run(List.of(new SystemMessage("base"), new UserMessage("go")), TOOL_CONTEXT);
+
+        List<String> prompts = model.getInvocations().stream()
+                .map(invocation -> invocation.prompt().getContents())
+                .toList();
+        assertThat(prompts).hasSize(2);
+        assertThat(prompts.getFirst()).contains("base").contains("status-1").doesNotContain("status-2");
+        assertThat(prompts.getLast()).contains("base").contains("status-2").doesNotContain("status-1");
+    }
+
+    @Test
+    void turnFeedbackSupplier_blankReadingsLeaveTheSystemMessageUntouched() {
+        FakeChatModel model = model(assistant("done"));
+        AtomicInteger readings = new AtomicInteger();
+
+        ReActLoop.text(client(model), noTools())
+                .executor(Runnable::run)
+                .turnFeedbackSupplier(() -> readings.incrementAndGet() == 1 ? "   " : null)
+                .run(List.of(new SystemMessage("base"), new UserMessage("go")), TOOL_CONTEXT);
+
+        assertThat(model.getInvocations())
+                .allSatisfy(invocation -> assertThat(invocation.prompt().getContents())
+                        .doesNotContain("null")
+                        .doesNotContain("   \nbase")
+                        .startsWith("base"));
+    }
+
+    @Test
+    void turnFeedbackSupplier_failureIsSwallowedWithoutBurningATurn() {
+        FakeChatModel model = model(assistant("done"));
+        AtomicInteger readings = new AtomicInteger();
+
+        String result = ReActLoop.text(client(model), noTools())
+                .executor(Runnable::run)
+                .turnFeedbackSupplier(() -> {
+                    readings.incrementAndGet();
+                    throw new IllegalStateException("status read failed");
+                })
+                .run(List.of(new SystemMessage("base"), new UserMessage("go")), TOOL_CONTEXT);
+
+        assertThat(result).isEqualTo("done");
+        assertThat(readings.get()).isEqualTo(1);
+        assertThat(model.getInvocations()).hasSize(1);
+        assertThat(model.getInvocations().getFirst().prompt().getContents())
+                .contains("base")
+                .doesNotContain("status read failed");
+    }
+
+    @Test
+    void turnFeedbackSupplier_stillRunsOnTheFinalTurn() {
+        ToolCallback echo = tool("{\"ok\":true}");
+        FakeChatModel model = new FakeChatModel();
+        model.addMatcher(PromptMatcher.builder()
+                .contains("status-final-turn")
+                .response("done")
+                .maxMatches(1)
+                .build());
+        model.addMatcher(PromptMatcher.builder()
+                .response(assistantWithTools(toolCall("call_1", "echo", "{}")))
+                .maxMatches(1)
+                .build());
+
+        String result = ReActLoop.text(client(model), new ToolCallback[] {echo})
+                .executor(Runnable::run)
+                .maxIterations(2)
+                .turnFeedbackSupplier(() -> "status-final-turn")
+                .run(List.of(new SystemMessage("base"), new UserMessage("go")), TOOL_CONTEXT);
+
+        assertThat(result).isEqualTo("done");
+        assertThat(model.getInvocations())
+                .allSatisfy(invocation ->
+                        assertThat(invocation.prompt().getContents()).contains("status-final-turn"));
+    }
+
+    @Test
     void fatalProviderError_terminatesImmediately() {
         PromptMatcher fatalMatcher = PromptMatcher.builder()
                 .throwsException(new NonTransientAiException("401 - invalid api key"))

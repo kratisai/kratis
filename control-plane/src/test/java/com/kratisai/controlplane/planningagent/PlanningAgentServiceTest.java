@@ -25,10 +25,12 @@ import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.ChatService;
 import com.kratisai.controlplane.service.ChatUsageSessionService;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
-import com.kratisai.controlplane.service.ScratchpadService;
+import com.kratisai.controlplane.testsupport.PlanningTestStubs;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
+import com.kratisai.controlplane.validation.mermaid.MermaidDiagramRepairer;
+import com.kratisai.controlplane.validation.mermaid.MermaidNormalizer;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -90,10 +92,12 @@ class PlanningAgentServiceTest {
                 mock(WikiTool.class),
                 mock(ScratchpadTool.class),
                 mock(WebSearchTool.class),
-                mock(ScratchpadService.class),
+                PlanningTestStubs.emptyScratchpad(),
                 new PlanningProperties(),
                 chatFluxRegistry,
+                new MermaidNormalizer(),
                 new MermaidDiagramValidator(),
+                new MermaidDiagramRepairer(new MermaidNormalizer()),
                 agentTaskExecutor,
                 Runnable::run);
     }

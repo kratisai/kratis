@@ -12,6 +12,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,6 +70,7 @@ public final class ReActLoop<T> {
     private @Nullable ToolEventListener onToolEvent;
     private @Nullable IntConsumer onToolCallCount;
     private @Nullable IntConsumer onAttemptAborted;
+    private @Nullable Supplier<String> turnFeedbackSupplier;
 
     private ReActLoop(
             ChatClient chatClient,
@@ -130,6 +132,11 @@ public final class ReActLoop<T> {
         return this;
     }
 
+    public ReActLoop<T> turnFeedbackSupplier(Supplier<String> turnFeedbackSupplier) {
+        this.turnFeedbackSupplier = Objects.requireNonNull(turnFeedbackSupplier, "turnFeedbackSupplier");
+        return this;
+    }
+
     public String format() {
         return converter != null ? converter.getFormat() : "";
     }
@@ -153,7 +160,9 @@ public final class ReActLoop<T> {
             boolean finalTurn = turn >= (maxIterations - 1);
             try {
                 applyFeedback(
-                        history, baseSystemText, feedback + turnBudgetNotice(maxIterations - turn - 1, finalTurn));
+                        history,
+                        baseSystemText,
+                        feedback + dynamicFeedback() + turnBudgetNotice(maxIterations - turn - 1, finalTurn));
                 feedback = "";
 
                 log.trace(
@@ -226,6 +235,21 @@ public final class ReActLoop<T> {
                 maxIterations,
                 lastValidationError);
         throw new ReActLoopExhaustedException(maxIterations, lastValidationError, history);
+    }
+
+    private String dynamicFeedback() {
+        if (turnFeedbackSupplier == null) {
+            return "";
+        }
+        String supplied;
+        try {
+            supplied = turnFeedbackSupplier.get();
+        } catch (RuntimeException e) {
+            // Advisory state only: never let a transient read abort or consume a turn.
+            log.warn("Turn feedback supplier failed; continuing without this turn's dynamic state: {}", e.toString());
+            return "";
+        }
+        return supplied == null || supplied.isBlank() ? "" : "\n" + supplied.strip() + "\n";
     }
 
     private static String turnBudgetNotice(int remainingAfterThisTurn, boolean finalTurn) {

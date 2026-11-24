@@ -62,38 +62,9 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
     }
 
     private void reapplyDefaultMatchers(FakeChatModel fakeChatModel) {
-        // 1. Wiki/Kratis matcher
-        fakeChatModel.addMatcher(PromptMatcher.builder()
-                .condition(prompt -> {
-                    String text = prompt.getContents().toLowerCase();
-                    return !isIngestionStructuredPrompt(text)
-                            && (text.contains("architectural patterns")
-                                    || text.contains("wiki documentation")
-                                    || text.contains("markdown documentation")
-                                    || text.contains("you are kratis"));
-                })
-                .responses(prompt -> {
-                    boolean hasToolResponse =
-                            prompt.getInstructions().stream().anyMatch(ToolResponseMessage.class::isInstance);
-                    if (hasToolResponse) {
-                        return List.of(new ChatResponse(
-                                List.of(new Generation(new AssistantMessage("Wiki generation complete.")))));
-                    } else {
-                        AssistantMessage.ToolCall toolCall = new AssistantMessage.ToolCall(
-                                "call_1",
-                                "function",
-                                "write_wiki_page",
-                                "{\"pageSlug\":\"user-management-overview\",\"title\":\"User Management Overview\",\"content\":\"# User Management\\n\\n"
-                                        + WikiPageContentFixtures.WIKI_PAGE_BODY + "\"}");
-                        AssistantMessage message = AssistantMessage.builder()
-                                .toolCalls(List.of(toolCall))
-                                .build();
-                        return List.of(new ChatResponse(List.of(new Generation(message))));
-                    }
-                })
-                .build());
+        fakeChatModel.addMatcher(FakeChatModelMatchers.wikiGenerationMatcher());
+        fakeChatModel.addMatcher(FakeChatModelMatchers.wikiCompleteMatcher());
 
-        // 2. Architecture pattern matcher
         fakeChatModel.addMatcher(PromptMatcher.builder()
                 .condition(prompt -> {
                     String text = prompt.getContents().toLowerCase();
@@ -155,12 +126,20 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
                 || text.contains(SYNOPSIS_MARKER_LOWER);
     }
 
+    /** A failed write is still a tool response named write_wiki_page, so key on the success text. */
+    private static boolean hasSuccessfulWrite(Prompt prompt) {
+        return prompt.getInstructions().stream()
+                .filter(ToolResponseMessage.class::isInstance)
+                .map(ToolResponseMessage.class::cast)
+                .flatMap(message -> message.getResponses().stream())
+                .anyMatch(response -> "write_wiki_page".equals(response.name())
+                        && response.responseData().contains("SUCCESS"));
+    }
+
     private void reapplyDefaultStubbing(ChatModel chatModel) {
         Mockito.doAnswer(invocation -> {
                     Prompt prompt = invocation.getArgument(0);
                     String text = prompt.getContents().toLowerCase();
-                    boolean hasToolResponse =
-                            prompt.getInstructions().stream().anyMatch(ToolResponseMessage.class::isInstance);
 
                     if (text.contains(DISCOVERY_MARKER_LOWER)) {
                         return new ChatResponse(List.of(new Generation(new AssistantMessage("{\"surfaces\":[]}"))));
@@ -173,23 +152,21 @@ public class ResetChatModelTestExecutionListener implements TestExecutionListene
                             || text.contains("wiki documentation")
                             || text.contains("markdown documentation")
                             || text.contains("you are kratis")) {
-                        if (hasToolResponse) {
-                            AssistantMessage message = new AssistantMessage("Wiki generation complete.");
-                            Generation generation = new Generation(message);
-                            return new ChatResponse(List.of(generation));
-                        } else {
-                            AssistantMessage.ToolCall toolCall = new AssistantMessage.ToolCall(
+                        AssistantMessage message;
+                        if (!hasSuccessfulWrite(prompt)) {
+                            AssistantMessage.ToolCall pageCall = new AssistantMessage.ToolCall(
                                     "call_1",
                                     "function",
                                     "write_wiki_page",
                                     "{\"pageSlug\":\"user-management-overview\",\"title\":\"User Management Overview\",\"content\":\"# User Management\\n\\n"
                                             + WikiPageContentFixtures.WIKI_PAGE_BODY + "\"}");
-                            AssistantMessage message = AssistantMessage.builder()
-                                    .toolCalls(List.of(toolCall))
+                            message = AssistantMessage.builder()
+                                    .toolCalls(List.of(pageCall))
                                     .build();
-                            Generation generation = new Generation(message);
-                            return new ChatResponse(List.of(generation));
+                        } else {
+                            message = new AssistantMessage("Wiki generation complete.");
                         }
+                        return new ChatResponse(List.of(new Generation(message)));
                     } else if (text.contains("architecture pattern")) {
                         String response = """
                         [

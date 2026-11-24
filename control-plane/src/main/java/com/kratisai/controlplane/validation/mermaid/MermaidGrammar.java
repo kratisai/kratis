@@ -21,7 +21,7 @@ public final class MermaidGrammar {
         return String.join(
                 " ",
                 List.of(
-                        "Write custom Kratis diagrams: a Mermaid-inspired subset, not full Mermaid. Supported types: flowchart, graph, sequenceDiagram, classDiagram, stateDiagram-v2, erDiagram, C4Context/Container/Component, pie, quadrantChart, xychart-beta, journey.",
+                        "Write mermaid diagrams using Kratis's custom mermaid-subset, not full Mermaid. Supported types: flowchart, graph, sequenceDiagram, classDiagram, stateDiagram-v2, erDiagram, C4Context/Container/Component, pie, quadrantChart, xychart-beta, journey.",
                         "Always wrap every diagram in a fenced code block with language mermaid (never use a diagram type such as flowchart, sequenceDiagram, or C4Context as the fence language, and never omit the fence language); put the diagram header on the first line inside the block, e.g. flowchart LR.",
                         "Always quote display text and labels with double quotes; unquoted labels are not part of this format.",
                         "Keep each line simple and unambiguous; quote all node, edge, subgraph, participant, state, and label text.",
@@ -30,7 +30,7 @@ public final class MermaidGrammar {
                         "Sequence diagram rules: left-to-right arrows only (->>, -->>); declare each participant once; aliases use participant ID as \"Display Name\"; participant and message names may contain words separated by spaces; grouped messages use rect ... end.",
                         "State diagram rules: e.g. state \"State Label\" as S1, [*] --> S1; composite states use state S1 { ... } and close with }; direction TD/TB/BT/LR/RL is allowed; state descriptions use S1 : \"text\".",
                         "ER diagram rules: use ENTITY { attributes } and ENTITY ||--o{ ENTITY : \"label\"; do not use ER cardinality in a flowchart.",
-                        "C4 rules: use Person, System, Container, Component, ContainerDb, SystemDb, ContainerQueue, SystemQueue, ComponentDb, ComponentQueue, boundaries and Rel; C4 accepts one title statement.",
+                        "C4 rules: use Person, System, Container, Component, ContainerDb, SystemDb, ContainerQueue, SystemQueue, ComponentDb, ComponentQueue, boundaries and Rel; separate arguments with commas, e.g. Person(alias, \"Label\", \"Description\"), Container(alias, \"Label\", \"Technology\", \"Description\"), Rel(fromAlias, toAlias, \"Label\"); C4 accepts one title statement.",
                         "Pie and journey headers support optional inline titles, e.g. pie title \"Distribution\".",
                         "Journey tasks use task: score: role; the role is optional.",
                         "One statement per line; close every block.",

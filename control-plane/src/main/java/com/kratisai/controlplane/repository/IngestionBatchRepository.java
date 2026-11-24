@@ -16,6 +16,11 @@ public interface IngestionBatchRepository extends JpaRepository<IngestionBatch, 
     @Query("SELECT ib FROM IngestionBatch ib JOIN FETCH ib.repository r JOIN FETCH r.team WHERE ib.id = :id")
     Optional<IngestionBatch> findByIdWithRepositoryAndTeam(@Param("id") UUID id);
 
+    @Query("SELECT DISTINCT ib FROM IngestionBatch ib JOIN FETCH ib.repository r JOIN FETCH r.team t"
+            + " LEFT JOIN FETCH t.ingestionProvider ip LEFT JOIN FETCH ip.team"
+            + " LEFT JOIN FETCH ib.modelUsage WHERE ib.id = :id")
+    Optional<IngestionBatch> findByIdForWikiGeneration(@Param("id") UUID id);
+
     List<IngestionBatch> findByRepositoryId(UUID repositoryId);
 
     @Query("SELECT ib FROM IngestionBatch ib WHERE ib.repository.team.id = :teamId AND ib.isActive = true")

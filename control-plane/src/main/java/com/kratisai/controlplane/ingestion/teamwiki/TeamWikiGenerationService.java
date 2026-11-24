@@ -7,14 +7,17 @@ import com.kratisai.controlplane.agentloop.ReActLoopFatalException;
 import com.kratisai.controlplane.config.IngestionProperties;
 import com.kratisai.controlplane.ingestion.relations.SynopsisFragments;
 import com.kratisai.controlplane.ingestion.teamwiki.TeamWikiSnapshotService.SnapshotDiff;
+import com.kratisai.controlplane.ingestion.write.WikiPageLinkExtractor;
 import com.kratisai.controlplane.model.CtxArchitecturePattern;
 import com.kratisai.controlplane.model.CtxDimension;
 import com.kratisai.controlplane.model.CtxRepoRelation;
 import com.kratisai.controlplane.model.CtxRepoSynopsis;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.CtxWikiPages;
+import com.kratisai.controlplane.model.Direction;
 import com.kratisai.controlplane.model.ModelKind;
 import com.kratisai.controlplane.model.ModelProvider;
+import com.kratisai.controlplane.model.Nature;
 import com.kratisai.controlplane.model.RelationRationales;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.TeamWikiBatch;
@@ -32,13 +35,19 @@ import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.validation.mermaid.MermaidGrammar;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -59,6 +68,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class TeamWikiGenerationService {
 
     private static final Logger logger = LoggerFactory.getLogger(TeamWikiGenerationService.class);
+    private static final int COMPLETION_TURNS = 12;
 
     private final ChatModelFactory chatModelFactory;
     private final LiteLLMProvisioningService litellmProvisioningService;
@@ -70,6 +80,7 @@ public class TeamWikiGenerationService {
     private final CtxDimensionRepository dimensionRepository;
     private final CtxArchitecturePatternRepository patternRepository;
     private final TeamWikiSnapshotService snapshotService;
+    private final WikiPageLinkExtractor wikiPageLinkExtractor;
     private final ToolCallback[] fullModeCallbacks;
     private final ToolCallback[] incrementalModeCallbacks;
     private final Executor agentTaskExecutor;
@@ -87,6 +98,7 @@ public class TeamWikiGenerationService {
             CtxDimensionRepository dimensionRepository,
             CtxArchitecturePatternRepository patternRepository,
             TeamWikiSnapshotService snapshotService,
+            WikiPageLinkExtractor wikiPageLinkExtractor,
             ListTeamWikiPagesTool listTeamWikiPagesTool,
             ReadTeamWikiPageTool readTeamWikiPageTool,
             WriteTeamWikiPageTool writeTeamWikiPageTool,
@@ -105,6 +117,7 @@ public class TeamWikiGenerationService {
         this.dimensionRepository = dimensionRepository;
         this.patternRepository = patternRepository;
         this.snapshotService = snapshotService;
+        this.wikiPageLinkExtractor = wikiPageLinkExtractor;
         this.fullModeCallbacks = ToolCallbackProvider.from(ToolCallbacks.from(
                         listTeamWikiPagesTool, readTeamWikiPageTool, writeTeamWikiPageTool, repoReadTools))
                 .getToolCallbacks();
@@ -134,65 +147,299 @@ public class TeamWikiGenerationService {
         contextMap.put(TeamWikiContext.LOGGER_KEY, batchLogger);
         ToolContext toolContext = new ToolContext(contextMap);
 
-        List<Message> history = new ArrayList<>();
-        history.add(new SystemMessage(setup.systemPrompt()));
-        history.add(new UserMessage(setup.userPrompt()));
-
         ToolCallback[] callbacks =
                 setup.buildMode() == TeamWikiBuildMode.INCREMENTAL ? incrementalModeCallbacks : fullModeCallbacks;
 
         long[] toolCallCount = {0L};
-        String result;
+        String result = runPass(
+                setup, callbacks, teamWikiBatchId, toolContext, batchLogger, maxIterations, null, toolCallCount);
+        boolean exhausted = result == null;
+
+        TeamWikiAudit audit = auditSnapshot(teamWikiBatchId, setup);
+        if (!audit.problems().isEmpty()) {
+            batchLogger.warn(
+                    "GENERATE_WIKI",
+                    "Team wiki batch " + teamWikiBatchId + " needs repair: " + String.join("; ", audit.problems())
+                            + ". Running one bounded completion pass.");
+            runPass(
+                    setup,
+                    callbacks,
+                    teamWikiBatchId,
+                    toolContext,
+                    batchLogger,
+                    COMPLETION_TURNS,
+                    repairPrompt(audit),
+                    toolCallCount);
+            audit = auditSnapshot(teamWikiBatchId, setup);
+        }
+        if (!audit.problems().isEmpty()) {
+            String message = "GENERATE_WIKI produced an incomplete team wiki for batch " + teamWikiBatchId + ": "
+                    + String.join("; ", audit.problems()) + ".";
+            batchLogger.error("GENERATE_WIKI", message);
+            throw new IllegalStateException(message);
+        }
+
+        List<String> unmentionedRepos = findUncoveredRepos(setup.snapshot().repos(), audit.pages());
+        if (!unmentionedRepos.isEmpty()) {
+            batchLogger.warn(
+                    "GENERATE_WIKI",
+                    "Team wiki batch " + teamWikiBatchId + " did not mention repositories by name: "
+                            + unmentionedRepos);
+        }
+        if (exhausted) {
+            batchLogger.warn(
+                    "GENERATE_WIKI",
+                    "Team wiki batch " + teamWikiBatchId + " exhausted " + maxIterations
+                            + " turns; keeping the saved wiki because the audit passed.");
+        }
+
+        return new GenerationResult(audit.savedSlugs().size(), toolCallCount[0]);
+    }
+
+    /**
+     * Runs one bounded agent pass. A null {@code repairInstruction} runs the original build task; otherwise the
+     * instruction is appended as a further user turn. The result is {@code null} when the pass exhausted its turn
+     * budget, which the caller resolves through the audit rather than by discarding the saved pages.
+     */
+    private String runPass(
+            GenerationSetup setup,
+            ToolCallback[] callbacks,
+            UUID teamWikiBatchId,
+            ToolContext toolContext,
+            TeamWikiBatchLogService.BatchLogger batchLogger,
+            int maxTurns,
+            String repairInstruction,
+            long[] toolCallCount) {
+        List<Message> history = new ArrayList<>();
+        history.add(new SystemMessage(setup.systemPrompt()));
+        history.add(new UserMessage(setup.userPrompt()));
+        if (repairInstruction != null) {
+            history.add(new UserMessage(repairInstruction));
+        }
         try {
-            result = ReActLoop.text(setup.chatClient(), callbacks)
-                    .maxIterations(maxIterations)
+            String result = ReActLoop.text(setup.chatClient(), callbacks)
+                    .maxIterations(maxTurns)
                     .executor(agentTaskExecutor)
+                    .turnFeedbackSupplier(() -> buildTeamWikiStatus(teamWikiBatchId, setup))
                     .onToolCallCount(count -> toolCallCount[0] += count)
                     .onThought((attempt, thought) -> logger.debug("GENERATE_TEAM_WIKI: {}", thought))
                     .onToolEvent((attempt, taskId, toolName, phase, detail) ->
                             logToolEvent(batchLogger, toolName, phase, detail))
                     .run(history, toolContext);
+            logger.info("GENERATE_TEAM_WIKI: LLM finished with message: {}", result);
+            return result;
         } catch (ReActLoopFatalException e) {
             batchLogger.error(
                     "GENERATE_WIKI", "Team wiki generation aborted for " + teamWikiBatchId + ": " + e.getMessage());
             throw e;
         } catch (ReActLoopExhaustedException e) {
-            String message = "GENERATE_WIKI failed for team wiki batch " + teamWikiBatchId
-                    + ": Exceeded maximum iterations (" + maxIterations + ") without completion.";
-            batchLogger.error("GENERATE_WIKI", message);
-            throw new RuntimeException(message, e);
-        }
-
-        logger.info("GENERATE_TEAM_WIKI: LLM finished with message: {}", result);
-
-        List<CtxWikiPage> generatedPages =
-                transactionTemplate.execute(status -> ctxWikiPageRepository.findByTeamWikiBatchId(teamWikiBatchId));
-        if (generatedPages == null || generatedPages.isEmpty()) {
-            String message = "GENERATE_WIKI produced no team wiki pages for batch " + teamWikiBatchId;
-            batchLogger.error("GENERATE_WIKI", message);
-            throw new IllegalStateException(message);
-        }
-
-        int rootCount = transactionTemplate.execute(status -> CtxWikiPages.topLevelPages(
-                        ctxWikiPageRepository.findByTeamWikiBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(
-                                teamWikiBatchId))
-                .size());
-        if (rootCount > 1) {
             batchLogger.warn(
                     "GENERATE_WIKI",
-                    "Team wiki batch " + teamWikiBatchId + " has " + rootCount
-                            + " top-level pages; expected a single root page.");
+                    "GENERATE_WIKI exhausted " + maxTurns + " turns for team wiki batch " + teamWikiBatchId
+                            + "; auditing the saved pages instead of discarding them.");
+            return null;
         }
-
-        List<String> uncoveredRepos = findUncoveredRepos(setup.snapshot().repos(), generatedPages);
-        if (!uncoveredRepos.isEmpty()) {
-            batchLogger.warn(
-                    "GENERATE_WIKI",
-                    "Team wiki batch " + teamWikiBatchId + " did not reference repositories: " + uncoveredRepos);
-        }
-
-        return new GenerationResult(generatedPages.size(), toolCallCount[0]);
     }
+
+    /** Descriptive, live state for the model; identical shape to the repair audit so both stay in step. */
+    private String buildTeamWikiStatus(UUID teamWikiBatchId, GenerationSetup setup) {
+        List<CtxWikiPage> pages = readPages(teamWikiBatchId);
+        if (pages.isEmpty()) return "";
+        TeamWikiAudit audit = audit(pages, setup);
+        StringBuilder status = new StringBuilder("Current team wiki status:\n");
+        status.append("- Root pages: ")
+                .append(audit.rootSlugs().size())
+                .append(" — ")
+                .append(audit.rootSlugs().isEmpty() ? "(none)" : String.join(", ", audit.rootSlugs()))
+                .append(audit.rootSlugs().size() == 1 ? "" : " (exactly one root is required)")
+                .append('\n');
+        status.append("- Saved pages (")
+                .append(audit.savedSlugs().size())
+                .append("): ")
+                .append(String.join(", ", audit.savedSlugs()))
+                .append('\n');
+        status.append("- Team page links with no matching page: ")
+                .append(renderLinkMap(audit.missingTeamLinks()))
+                .append('\n');
+        status.append("- Repository wiki links that are broken: ")
+                .append(renderLinkMap(audit.brokenRepoLinks()))
+                .append('\n');
+        status.append("- Active repositories with no team wiki link: ")
+                .append(audit.unlinkedRepos().isEmpty() ? "(none)" : String.join(", ", audit.unlinkedRepos()))
+                .append('\n');
+        if (!audit.unreachableSlugs().isEmpty()) {
+            status.append("- Pages not reachable from the root: ")
+                    .append(String.join(", ", audit.unreachableSlugs()))
+                    .append('\n');
+        }
+        return status.toString();
+    }
+
+    private static String renderLinkMap(Map<String, List<String>> links) {
+        if (links.isEmpty()) return "(none - all links resolve)";
+        return links.entrySet().stream()
+                .map(entry -> entry.getKey() + " (referenced by: " + String.join(", ", entry.getValue()) + ")")
+                .toList()
+                .toString();
+    }
+
+    private String repairPrompt(TeamWikiAudit audit) {
+        StringBuilder prompt = new StringBuilder("""
+                The team wiki is incomplete. Fix these defects, then confirm completion:
+                """);
+        for (String problem : audit.problems()) {
+            prompt.append("- ").append(problem).append('\n');
+        }
+        prompt.append('\n')
+                .append("Saved pages: ")
+                .append(audit.savedSlugs().isEmpty() ? "(none)" : String.join(", ", audit.savedSlugs()))
+                .append('\n');
+        if (!audit.missingTeamLinks().isEmpty()) {
+            prompt.append("Create the missing team pages with write_team_wiki_page using the slugs named above, or ")
+                    .append("remove the links that point at them.\n");
+        }
+        if (!audit.brokenRepoLinks().isEmpty()) {
+            prompt.append("Repair the broken repository links listed above. Repository links must use the exact ")
+                    .append("form /wiki/repo/{repoName} or /wiki/repo/{repoName}/{pageSlug} for repositories and ")
+                    .append("pages that exist in this build. Update the pages that contain them.\n");
+        }
+        if (!audit.unlinkedRepos().isEmpty()) {
+            prompt.append("Add links to every active repository named above; each must be reachable from the team ")
+                    .append("wiki through at least one /wiki/repo/{repoName} link.\n");
+        }
+        if (audit.rootSlugs().size() > 1) {
+            prompt.append("Keep '")
+                    .append(audit.rootSlugs().getFirst())
+                    .append("' as the only root: re-save the other top-level pages with its slug as parentPageSlug.\n");
+        }
+        if (!audit.unreachableSlugs().isEmpty()) {
+            prompt.append("Re-save the unreachable pages with a parentPageSlug of an existing page so they sit ")
+                    .append("under the root.\n");
+        }
+        prompt.append("\nWrite independent pages in parallel within one turn where possible.");
+        return prompt.toString();
+    }
+
+    private TeamWikiAudit auditSnapshot(UUID teamWikiBatchId, GenerationSetup setup) {
+        return audit(readPages(teamWikiBatchId), setup);
+    }
+
+    private List<CtxWikiPage> readPages(UUID teamWikiBatchId) {
+        List<CtxWikiPage> pages = transactionTemplate.execute(
+                status -> ctxWikiPageRepository.findByTeamWikiBatchIdWithParent(teamWikiBatchId));
+        return pages == null ? List.of() : pages;
+    }
+
+    /**
+     * Ground truth over the persisted team wiki: one root, everything reachable, every team and repository
+     * link resolvable against this build's snapshot, and every active repository linked.
+     */
+    private TeamWikiAudit audit(List<CtxWikiPage> pages, GenerationSetup setup) {
+        Map<String, CtxWikiPage> bySlug = new LinkedHashMap<>();
+        for (CtxWikiPage page : pages) bySlug.putIfAbsent(page.getPageSlug(), page);
+        List<String> savedSlugs = List.copyOf(bySlug.keySet());
+        List<String> rootSlugs = CtxWikiPages.topLevelPages(pages).stream()
+                .map(CtxWikiPage::getPageSlug)
+                .toList();
+
+        Set<String> repoNames = setup.repoPageSlugsByName().keySet();
+        Map<String, List<String>> missingTeamLinks = new LinkedHashMap<>();
+        Map<String, List<String>> brokenRepoLinks = new LinkedHashMap<>();
+        Set<String> linkedRepos = new LinkedHashSet<>();
+        for (CtxWikiPage page : pages) {
+            WikiPageLinkExtractor.WikiLinks links = wikiPageLinkExtractor.extractWikiLinks(page.getContent());
+            for (String slug : links.teamPageSlugs()) {
+                if (!bySlug.containsKey(slug)) {
+                    addReferrer(missingTeamLinks, slug, page.getPageSlug());
+                }
+            }
+            for (String repoPath : links.repoPaths()) {
+                Optional<TeamWikiLinkResolver.RepoTarget> resolved = TeamWikiLinkResolver.resolve(repoPath, repoNames);
+                if (resolved.isEmpty()) {
+                    addReferrer(brokenRepoLinks, "/wiki/repo/" + repoPath, page.getPageSlug());
+                    continue;
+                }
+                TeamWikiLinkResolver.RepoTarget target = resolved.get();
+                linkedRepos.add(target.repoName());
+                String pageSlug = target.pageSlug();
+                if (pageSlug != null
+                        && !setup.repoPageSlugsByName()
+                                .getOrDefault(target.repoName(), Set.of())
+                                .contains(pageSlug)) {
+                    addReferrer(brokenRepoLinks, "/wiki/repo/" + repoPath, page.getPageSlug());
+                }
+            }
+        }
+
+        List<String> unlinkedRepos =
+                repoNames.stream().filter(name -> !linkedRepos.contains(name)).toList();
+        List<String> unreachable = rootSlugs.size() == 1 ? unreachableFromRoot(pages, rootSlugs.getFirst()) : List.of();
+
+        List<String> problems = new ArrayList<>();
+        if (pages.isEmpty()) {
+            problems.add("no team wiki pages were written");
+        } else if (rootSlugs.isEmpty()) {
+            problems.add("no root page: every page has a parentPageSlug");
+        } else if (rootSlugs.size() > 1) {
+            problems.add("multiple root pages: " + String.join(", ", rootSlugs));
+        }
+        if (!missingTeamLinks.isEmpty()) {
+            problems.add("team links with no matching page: " + renderLinkMap(missingTeamLinks));
+        }
+        if (!brokenRepoLinks.isEmpty()) {
+            problems.add("repository links that are broken: " + renderLinkMap(brokenRepoLinks));
+        }
+        if (!unlinkedRepos.isEmpty()) {
+            problems.add("active repositories with no team wiki link: " + String.join(", ", unlinkedRepos));
+        }
+        if (!unreachable.isEmpty()) {
+            problems.add("pages not reachable from the root: " + String.join(", ", unreachable));
+        }
+        return new TeamWikiAudit(
+                pages,
+                savedSlugs,
+                rootSlugs,
+                Map.copyOf(missingTeamLinks),
+                Map.copyOf(brokenRepoLinks),
+                unlinkedRepos,
+                unreachable,
+                List.copyOf(problems));
+    }
+
+    private static void addReferrer(Map<String, List<String>> targets, String key, String referrer) {
+        List<String> referrers = targets.computeIfAbsent(key, ignored -> new ArrayList<>());
+        if (!referrers.contains(referrer)) referrers.add(referrer);
+    }
+
+    private List<String> unreachableFromRoot(List<CtxWikiPage> pages, String rootSlug) {
+        Map<String, CtxWikiPage> bySlug = new LinkedHashMap<>();
+        for (CtxWikiPage page : pages) bySlug.putIfAbsent(page.getPageSlug(), page);
+        CtxWikiPage root = bySlug.get(rootSlug);
+        if (root == null) return List.of();
+
+        Set<String> visited = new LinkedHashSet<>();
+        Deque<CtxWikiPage> queue = new ArrayDeque<>();
+        queue.add(root);
+        while (!queue.isEmpty()) {
+            CtxWikiPage current = queue.removeFirst();
+            if (current.getId() == null || !visited.add(current.getPageSlug())) continue;
+            queue.addAll(CtxWikiPages.childPages(pages, current.getId()));
+        }
+        return pages.stream()
+                .map(CtxWikiPage::getPageSlug)
+                .filter(slug -> !visited.contains(slug))
+                .toList();
+    }
+
+    private record TeamWikiAudit(
+            List<CtxWikiPage> pages,
+            List<String> savedSlugs,
+            List<String> rootSlugs,
+            Map<String, List<String>> missingTeamLinks,
+            Map<String, List<String>> brokenRepoLinks,
+            List<String> unlinkedRepos,
+            List<String> unreachableSlugs,
+            List<String> problems) {}
 
     private GenerationSetup prepareGeneration(UUID teamWikiBatchId) {
         TeamWikiBatch batch = teamWikiBatchRepository
@@ -220,14 +467,14 @@ public class TeamWikiGenerationService {
             repoBatchIdsByName.put(repo.repoName(), repo.batchId());
         }
 
-        String repoInventory = buildRepoInventory(snapshot.repos());
-        String relationsSection = buildRelationsSection(team.getId());
+        RepoInventory inventory = buildRepoInventory(snapshot.repos());
+        String relationsSection = buildRelationsSection(snapshot, team.getId());
         String deltaSection = effectiveMode == TeamWikiBuildMode.INCREMENTAL
                 ? buildDeltaSection(previousActive.getSourceSnapshot(), snapshot)
                 : "";
 
         String systemPrompt =
-                buildSystemPrompt(team.getName(), effectiveMode, repoInventory, relationsSection, deltaSection);
+                buildSystemPrompt(team.getName(), effectiveMode, inventory.text(), relationsSection, deltaSection);
         String userPrompt = effectiveMode == TeamWikiBuildMode.INCREMENTAL
                 ? "Inspect the existing team wiki pages and the structural changes, then update, add, or remove"
                         + " pages so the team wiki accurately covers all active repositories and clusters."
@@ -235,7 +482,13 @@ public class TeamWikiGenerationService {
                         + " team-wide wiki documentation.";
 
         return new GenerationSetup(
-                chatClientFor(batch, team), effectiveMode, snapshot, repoBatchIdsByName, systemPrompt, userPrompt);
+                chatClientFor(batch, team),
+                effectiveMode,
+                snapshot,
+                repoBatchIdsByName,
+                inventory.pageSlugsByName(),
+                systemPrompt,
+                userPrompt);
     }
 
     private void copyPreviousPages(UUID previousBatchId, TeamWikiBatch targetBatch) {
@@ -265,12 +518,15 @@ public class TeamWikiGenerationService {
         ctxWikiPageRepository.saveAllAndFlush(clonesByOldId.values());
     }
 
-    private String buildRepoInventory(List<RepoEntry> repos) {
+    private record RepoInventory(String text, Map<String, Set<String>> pageSlugsByName) {}
+
+    private RepoInventory buildRepoInventory(List<RepoEntry> repos) {
         List<UUID> batchIds = repos.stream().map(RepoEntry::batchId).toList();
         Map<UUID, CtxRepoSynopsis> synopses = new HashMap<>();
         for (CtxRepoSynopsis s : synopsisRepository.findByBatchIdIn(batchIds)) {
             synopses.put(s.getBatch().getId(), s);
         }
+        Map<String, Set<String>> pageSlugsByName = new LinkedHashMap<>();
 
         StringBuilder sb = new StringBuilder();
         for (RepoEntry repo : repos) {
@@ -316,6 +572,9 @@ public class TeamWikiGenerationService {
             }
 
             List<CtxWikiPage> pages = ctxWikiPageRepository.findByBatchId(repo.batchId());
+            pageSlugsByName.put(
+                    repo.repoName(),
+                    pages.stream().map(CtxWikiPage::getPageSlug).collect(Collectors.toCollection(LinkedHashSet::new)));
             if (!pages.isEmpty()) {
                 sb.append("- Repo Wiki Pages (link via `/wiki/repo/")
                         .append(repo.repoName())
@@ -328,34 +587,69 @@ public class TeamWikiGenerationService {
             }
             sb.append('\n');
         }
-        return sb.toString().stripTrailing();
+        return new RepoInventory(sb.toString().stripTrailing(), Map.copyOf(pageSlugsByName));
     }
 
-    private String buildRelationsSection(UUID teamId) {
-        List<CtxRepoRelation> relations = relationRepository.findCurrentByTeamId(teamId);
+    /**
+     * Renders the relations captured in this build's snapshot, not whatever is current in the database:
+     * relations created after the batch was queued would otherwise describe repositories the wiki inventory
+     * does not contain.
+     */
+    private String buildRelationsSection(TeamWikiSourceSnapshot snapshot, UUID teamId) {
+        List<RelationEntry> relations = snapshot.relations();
         if (relations.isEmpty()) {
             return "No cross-repository relations detected. All active repositories are currently standalone.";
         }
+        Map<String, CtxRepoRelation> rationales = indexRelationsBySnapshotBatches(snapshot, teamId);
+
         StringBuilder sb = new StringBuilder();
-        for (CtxRepoRelation rel : relations) {
-            String sentence = TeamWikiSnapshotService.renderRelation(
-                    rel.getBatchA().getRepository().getName(),
-                    rel.getBatchB().getRepository().getName(),
-                    rel.getNature(),
-                    rel.getDirection());
+        for (RelationEntry rel : relations) {
             sb.append("- ")
-                    .append(sentence)
+                    .append(TeamWikiSnapshotService.renderRelation(
+                            rel.repoAName(), rel.repoBName(), rel.nature(), rel.direction()))
                     .append(" [")
-                    .append(rel.getConfidence())
+                    .append(rel.confidence())
                     .append("]");
-            String rationale =
-                    String.join("; ", RelationRationales.extract(rel.getCitations(), rel.getId(), objectMapper));
-            if (!rationale.isBlank()) {
-                sb.append(" — ").append(rationale);
+            CtxRepoRelation stored =
+                    rationales.get(relationKey(rel.repoAId(), rel.repoBId(), rel.nature(), rel.direction()));
+            if (stored != null) {
+                String rationale = String.join(
+                        "; ", RelationRationales.extract(stored.getCitations(), stored.getId(), objectMapper));
+                if (!rationale.isBlank()) {
+                    sb.append(" — ").append(rationale);
+                }
             }
             sb.append('\n');
         }
         return sb.toString().stripTrailing();
+    }
+
+    private Map<String, CtxRepoRelation> indexRelationsBySnapshotBatches(TeamWikiSourceSnapshot snapshot, UUID teamId) {
+        Map<UUID, UUID> batchIdByRepoId = new HashMap<>();
+        for (RepoEntry repo : snapshot.repos()) {
+            batchIdByRepoId.put(repo.repoId(), repo.batchId());
+        }
+        Map<String, CtxRepoRelation> indexed = new HashMap<>();
+        for (CtxRepoRelation rel : relationRepository.findCurrentByTeamId(teamId)) {
+            UUID snapshotBatchA =
+                    batchIdByRepoId.get(rel.getBatchA().getRepository().getId());
+            UUID snapshotBatchB =
+                    batchIdByRepoId.get(rel.getBatchB().getRepository().getId());
+            if (snapshotBatchA == null
+                    || snapshotBatchB == null
+                    || !snapshotBatchA.equals(rel.getBatchA().getId())
+                    || !snapshotBatchB.equals(rel.getBatchB().getId())) {
+                continue;
+            }
+            indexed.put(
+                    relationKey(rel.getRepositoryAId(), rel.getRepositoryBId(), rel.getNature(), rel.getDirection()),
+                    rel);
+        }
+        return indexed;
+    }
+
+    private static String relationKey(UUID repoAId, UUID repoBId, Nature nature, Direction direction) {
+        return repoAId + "|" + repoBId + "|" + nature + "|" + direction;
     }
 
     String buildDeltaSection(TeamWikiSourceSnapshot previous, TeamWikiSourceSnapshot current) {
@@ -425,12 +719,21 @@ public class TeamWikiGenerationService {
                   2. Update only the pages affected by the delta below, add pages for new clusters/repos, and call
                      `delete_team_wiki_page` for any obsolete pages (for example, deleted repositories).
                   3. Preserve unchanged pages as-is so prior work is not discarded.
+                  4. Repair links on pages you did not otherwise change: the 'Current team wiki status' block reports
+                     repository links that no longer resolve because a repository or page was removed or re-ingested.
+                  5. Keep exactly one root page. Omitting parentPageSlug when updating a page keeps that page's
+                     current parent; pass parentPageSlug explicitly only to create a child page or to reparent.
                   """ : """
                   Build Mode: FULL REBUILD.
-                  Write the single top-level root page FIRST (omit `parentPageSlug`), then create child pages beneath it.
+                  Write the single top-level root page FIRST (omit `parentPageSlug`), and make its body a table of
+                  contents that links to every child page you plan to write, using either a relative slug
+                  (`[Cluster](orders-checkout-cluster)`) or `/wiki/team/{pageSlug}`.
+                  Once the root page is saved, write its child pages: issue all sibling write_team_wiki_page calls in
+                  the same turn so they run in parallel, then repeat for the next level.
                   For child pages, specify parentPageSlug and an orderIndex (e.g. 10, 20, 30) to establish logical
                   narrative order. An orderIndex is expected for every child page; when one is missing, the page is
                   appended after its current siblings.
+                  Omitting parentPageSlug when updating an existing page keeps that page's current parent.
                   """;
 
         return """
@@ -452,11 +755,20 @@ public class TeamWikiGenerationService {
                    have no cross-repo relations.  Don't infer clusters where there are no relations.
                 3. **Hierarchy**: Maintain exactly one top-level root page (no `parentPageSlug`) and well-organized
                    child pages beneath it (e.g., system landscape overview, one page per major cluster/sub-cluster,
-                   cross-cutting/shared infrastructure, and standalone services).
+                   cross-cutting/shared infrastructure, and standalone services). Every link you write must point at a
+                   page that exists before you finish.
                 4. **Diagrams & Tables**: Include clear Mermaid architecture/sequence diagrams and tables where helpful.
                    %s
-                5. **Prose**: Write prose following ASD-STE100 Simplified Technical English.
-                6. **Completion**: When done, return a concise plain-text confirmation such as "Team wiki generation complete."
+                5. **Prose**: Write at least 120 prose words on every page: headings, code blocks, and raw HTML are
+                   excluded, and table text counts as prose. Do not pad with repetitive text. Write prose following
+                   ASD-STE100 Simplified Technical English.
+                6. **Coverage**: Every active ingested repository listed below must be linked from the wiki with a
+                   `/wiki/repo/{repoName}` link.
+                7. **Completion**: When done, return a concise plain-text confirmation such as "Team wiki generation complete."
+
+                A 'Current team wiki status' block is appended to these instructions on every turn. It reports saved
+                pages, links with no matching page, broken repository links, and repositories that nothing links to.
+                Treat it as ground truth and finish only when it reports no gaps.
 
                 %s
 
@@ -499,6 +811,7 @@ public class TeamWikiGenerationService {
         }
     }
 
+    /** Advisory only: name mentions are not proof of coverage, which the audit checks through links. */
     static List<String> findUncoveredRepos(List<RepoEntry> repos, List<CtxWikiPage> pages) {
         String combined =
                 pages.stream().map(p -> p.getTitle() + "\n" + p.getContent()).reduce("", (a, b) -> a + "\n" + b);
@@ -518,6 +831,7 @@ public class TeamWikiGenerationService {
             TeamWikiBuildMode buildMode,
             TeamWikiSourceSnapshot snapshot,
             Map<String, UUID> repoBatchIdsByName,
+            Map<String, Set<String>> repoPageSlugsByName,
             String systemPrompt,
             String userPrompt) {}
 }

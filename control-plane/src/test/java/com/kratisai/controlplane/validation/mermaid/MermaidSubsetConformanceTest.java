@@ -68,8 +68,9 @@ class MermaidSubsetConformanceTest {
         assertThat(MermaidGrammar.GUIDANCE)
                 .doesNotContain("```")
                 .contains(
-                        "custom Kratis diagrams",
-                        "Mermaid-inspired subset",
+                        "Kratis's custom",
+                        "mermaid-subset",
+                        "not full Mermaid",
                         "Always quote display text and labels",
                         "stateDiagram-v2",
                         "quadrantChart")

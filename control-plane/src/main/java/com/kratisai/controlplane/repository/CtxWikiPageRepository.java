@@ -16,6 +16,10 @@ public interface CtxWikiPageRepository extends JpaRepository<CtxWikiPage, UUID> 
 
     List<CtxWikiPage> findByBatchIdOrderByOrderIndexAscTitleAscPageSlugAsc(UUID batchId);
 
+    @Query("SELECT p FROM CtxWikiPage p LEFT JOIN FETCH p.parentPage WHERE p.batch.id = :batchId"
+            + " ORDER BY p.orderIndex ASC, p.title ASC, p.pageSlug ASC")
+    List<CtxWikiPage> findByBatchIdWithParent(@Param("batchId") UUID batchId);
+
     Optional<CtxWikiPage> findByBatchIdAndId(UUID batchId, UUID id);
 
     Optional<CtxWikiPage> findByBatchIdAndPageSlug(UUID batchId, String pageSlug);
@@ -27,6 +31,10 @@ public interface CtxWikiPageRepository extends JpaRepository<CtxWikiPage, UUID> 
     Optional<CtxWikiPage> findByTeamWikiBatchIdAndId(UUID teamWikiBatchId, UUID id);
 
     Optional<CtxWikiPage> findByTeamWikiBatchIdAndPageSlug(UUID teamWikiBatchId, String pageSlug);
+
+    @Query("SELECT p FROM CtxWikiPage p LEFT JOIN FETCH p.parentPage WHERE p.teamWikiBatch.id = :teamWikiBatchId"
+            + " ORDER BY p.orderIndex ASC, p.title ASC, p.pageSlug ASC")
+    List<CtxWikiPage> findByTeamWikiBatchIdWithParent(@Param("teamWikiBatchId") UUID teamWikiBatchId);
 
     @Modifying
     @Query("DELETE FROM CtxWikiPage p WHERE p.batch.id = :batchId")

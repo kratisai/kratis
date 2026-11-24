@@ -9,6 +9,7 @@ import com.kratisai.controlplane.service.CanvasService;
 import com.kratisai.controlplane.service.ScratchpadService;
 import com.kratisai.controlplane.service.TeamService;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
+import com.kratisai.controlplane.validation.mermaid.MermaidNormalizer;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -76,8 +77,11 @@ class ToolBeanUnitTest {
         CanvasService mockService = mock(CanvasService.class);
         when(mockService.getCanvasesForChat(any(UUID.class))).thenReturn(List.of());
 
-        CanvasTool canvasTool =
-                new CanvasTool(mockService, mock(BatchResolutionService.class), new MermaidDiagramValidator());
+        CanvasTool canvasTool = new CanvasTool(
+                mockService,
+                mock(BatchResolutionService.class),
+                new MermaidDiagramValidator(),
+                new MermaidNormalizer());
         ToolContext toolContext = new PlanningContext(UUID.randomUUID(), UUID.randomUUID()).toToolContext();
 
         String result = canvasTool.listCanvasDocuments(toolContext);
@@ -95,8 +99,11 @@ class ToolBeanUnitTest {
         CanvasEntity doc2 = new CanvasEntity(chatIdUuid, "doc-2", "Document Two", "Content 2");
         when(mockService.getCanvasesForChat(chatIdUuid)).thenReturn(List.of(doc1, doc2));
 
-        CanvasTool canvasTool =
-                new CanvasTool(mockService, mock(BatchResolutionService.class), new MermaidDiagramValidator());
+        CanvasTool canvasTool = new CanvasTool(
+                mockService,
+                mock(BatchResolutionService.class),
+                new MermaidDiagramValidator(),
+                new MermaidNormalizer());
         ToolContext toolContext = new PlanningContext(UUID.randomUUID(), chatIdUuid).toToolContext();
 
         String result = canvasTool.listCanvasDocuments(toolContext);
@@ -114,8 +121,11 @@ class ToolBeanUnitTest {
         CanvasEntity canvas = new CanvasEntity(chatIdUuid, "doc-1", "Test Document", "# Hello World");
         when(mockService.getCanvas(chatIdUuid, "doc-1")).thenReturn(canvas);
 
-        CanvasTool canvasTool =
-                new CanvasTool(mockService, mock(BatchResolutionService.class), new MermaidDiagramValidator());
+        CanvasTool canvasTool = new CanvasTool(
+                mockService,
+                mock(BatchResolutionService.class),
+                new MermaidDiagramValidator(),
+                new MermaidNormalizer());
         ToolContext toolContext = new PlanningContext(UUID.randomUUID(), chatIdUuid).toToolContext();
 
         String result = canvasTool.retrieveFromCanvas("doc-1", toolContext);
@@ -131,8 +141,11 @@ class ToolBeanUnitTest {
         UUID chatIdUuid = UUID.randomUUID();
         when(mockService.getCanvas(chatIdUuid, "nonexistent")).thenReturn(null);
 
-        CanvasTool canvasTool =
-                new CanvasTool(mockService, mock(BatchResolutionService.class), new MermaidDiagramValidator());
+        CanvasTool canvasTool = new CanvasTool(
+                mockService,
+                mock(BatchResolutionService.class),
+                new MermaidDiagramValidator(),
+                new MermaidNormalizer());
         ToolContext toolContext = new PlanningContext(UUID.randomUUID(), chatIdUuid).toToolContext();
 
         String result = canvasTool.retrieveFromCanvas("nonexistent", toolContext);
@@ -147,8 +160,11 @@ class ToolBeanUnitTest {
         UUID chatIdUuid = UUID.randomUUID();
         when(mockService.getCanvas(chatIdUuid, "doc-1")).thenThrow(new RuntimeException("Database error"));
 
-        CanvasTool canvasTool =
-                new CanvasTool(mockService, mock(BatchResolutionService.class), new MermaidDiagramValidator());
+        CanvasTool canvasTool = new CanvasTool(
+                mockService,
+                mock(BatchResolutionService.class),
+                new MermaidDiagramValidator(),
+                new MermaidNormalizer());
         ToolContext toolContext = new PlanningContext(UUID.randomUUID(), chatIdUuid).toToolContext();
 
         String result = canvasTool.retrieveFromCanvas("doc-1", toolContext);

@@ -14,15 +14,19 @@ import static org.mockito.Mockito.when;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
 import com.kratisai.controlplane.service.ScratchpadService;
+import com.kratisai.controlplane.testsupport.PlanningTestStubs;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
+import com.kratisai.controlplane.validation.mermaid.MermaidDiagramRepairer;
+import com.kratisai.controlplane.validation.mermaid.MermaidNormalizer;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -199,12 +203,14 @@ class PlanningAgentLoopTest {
     void transientFailure_emitsRetractBeforeRetry() {
         PlanningAgentLoop loop = new PlanningAgentLoop(
                 chatMemory,
-                mock(ScratchpadService.class),
+                PlanningTestStubs.emptyScratchpad(),
                 noTools(),
                 25,
                 Runnable::run,
                 Runnable::run,
-                new MermaidDiagramValidator());
+                new MermaidNormalizer(),
+                new MermaidDiagramValidator(),
+                new MermaidDiagramRepairer(new MermaidNormalizer()));
 
         loop.run(ChatClient.builder(new FlakyStreamingChatModel()).build(), context, sink);
 
@@ -292,6 +298,66 @@ class PlanningAgentLoopTest {
         verify(chatMemory).add(eq(chatId.toString()), argThat(isAssistantText(expected)));
     }
 
+    @Test
+    void scratchpadFeedback_appendsFactsToTheSystemMessageExactlyOnce() {
+        ScratchpadService scratchpad = mock(ScratchpadService.class);
+        when(scratchpad.getFactsAsString(chatId)).thenReturn("\n- write the API page");
+        AtomicReference<String> firstPrompt = new AtomicReference<>();
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(prompt -> {
+                    firstPrompt.set(prompt.getContents());
+                    return new ChatResponse(List.of(new Generation(new AssistantMessage("done"))));
+                })
+                .maxMatches(1)
+                .build());
+
+        loop(noTools(), scratchpad).run(chatClient, context, sink);
+
+        assertThat(countOccurrences(firstPrompt.get(), "<scratchpad>")).isEqualTo(1);
+        assertThat(firstPrompt.get()).contains("- write the API page");
+    }
+
+    @Test
+    void scratchpadFeedback_refreshesSavedFactsOnLaterTurns() {
+        ScratchpadService scratchpad = mock(ScratchpadService.class);
+        ToolCallback saveTool = tool();
+        when(scratchpad.getFactsAsString(chatId)).thenReturn("").thenReturn("\n- step one done");
+        List<String> prompts = new ArrayList<>();
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(prompt -> {
+                    prompts.add(prompt.getContents());
+                    return new ChatResponse(List.of(new Generation(AssistantMessage.builder()
+                            .toolCalls(List.of(
+                                    new AssistantMessage.ToolCall("call_1", "function", "list_repositories", "{}")))
+                            .build())));
+                })
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .response(prompt -> {
+                    prompts.add(prompt.getContents());
+                    return new ChatResponse(List.of(new Generation(new AssistantMessage("done"))));
+                })
+                .maxMatches(1)
+                .build());
+
+        loop(new ToolCallback[] {saveTool}, scratchpad).run(chatClient, context, sink);
+
+        assertThat(prompts).hasSize(2);
+        assertThat(prompts.getFirst()).doesNotContain("<scratchpad>");
+        assertThat(prompts.getLast()).contains("<scratchpad>").contains("- step one done");
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        int index = haystack.indexOf(needle);
+        while (index >= 0) {
+            count++;
+            index = haystack.indexOf(needle, index + needle.length());
+        }
+        return count;
+    }
+
     @SuppressFBWarnings({"NP_NULL_PARAM_DEREF_ALL_TARGETS_DANGEROUS", "NP_NULL_PARAM_DEREF_NONVIRTUAL"})
     private static void nullDirectiveContext(PlanningContext context) {
         PlanningContext.continuation(context.teamId(), context.chatId(), null);
@@ -306,14 +372,20 @@ class PlanningAgentLoopTest {
     }
 
     private PlanningAgentLoop loop(ToolCallback[] tools) {
+        return loop(tools, PlanningTestStubs.emptyScratchpad());
+    }
+
+    private PlanningAgentLoop loop(ToolCallback[] tools, ScratchpadService scratchpadService) {
         return new PlanningAgentLoop(
                 chatMemory,
-                mock(ScratchpadService.class),
+                scratchpadService,
                 tools,
                 25,
                 Runnable::run,
                 Runnable::run,
-                new MermaidDiagramValidator());
+                new MermaidNormalizer(),
+                new MermaidDiagramValidator(),
+                new MermaidDiagramRepairer(new MermaidNormalizer()));
     }
 
     private static org.mockito.ArgumentMatcher<Message> isAssistantText(String text) {
@@ -329,12 +401,12 @@ class PlanningAgentLoopTest {
         private int calls;
 
         @Override
-        public ChatResponse call(Prompt prompt) {
+        public @NonNull ChatResponse call(@NonNull Prompt prompt) {
             throw new UnsupportedOperationException("call is not used by the ReAct loop");
         }
 
         @Override
-        public Flux<ChatResponse> stream(Prompt prompt) {
+        public @NonNull Flux<ChatResponse> stream(@NonNull Prompt prompt) {
             if (++calls == 1) {
                 ChatResponse partial = new ChatResponse(List.of(new Generation(new AssistantMessage("partial"))));
                 return Flux.concat(Flux.just(partial), Flux.error(new TransientAiException("503")));
@@ -343,7 +415,7 @@ class PlanningAgentLoopTest {
         }
 
         @Override
-        public ChatOptions getDefaultOptions() {
+        public @NonNull ChatOptions getDefaultOptions() {
             return delegate.getDefaultOptions();
         }
     }
@@ -359,17 +431,17 @@ class PlanningAgentLoopTest {
         }
 
         @Override
-        public ChatResponse call(Prompt prompt) {
+        public @NonNull ChatResponse call(@NonNull Prompt prompt) {
             return new ChatResponse(List.of(new Generation(new AssistantMessage(repairedText))));
         }
 
         @Override
-        public Flux<ChatResponse> stream(Prompt prompt) {
+        public @NonNull Flux<ChatResponse> stream(@NonNull Prompt prompt) {
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(streamedText)))));
         }
 
         @Override
-        public ChatOptions getDefaultOptions() {
+        public @NonNull ChatOptions getDefaultOptions() {
             return delegate.getDefaultOptions();
         }
     }

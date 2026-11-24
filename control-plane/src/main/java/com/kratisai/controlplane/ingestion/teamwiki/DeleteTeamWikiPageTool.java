@@ -5,6 +5,7 @@ import com.kratisai.controlplane.agentloop.KratisToolException;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.repository.CtxWikiPageRepository;
+import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.ai.chat.model.ToolContext;
@@ -16,9 +17,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class DeleteTeamWikiPageTool {
 
     private final CtxWikiPageRepository ctxWikiPageRepository;
+    private final TeamWikiBatchRepository teamWikiBatchRepository;
 
-    public DeleteTeamWikiPageTool(CtxWikiPageRepository ctxWikiPageRepository) {
+    public DeleteTeamWikiPageTool(
+            CtxWikiPageRepository ctxWikiPageRepository, TeamWikiBatchRepository teamWikiBatchRepository) {
         this.ctxWikiPageRepository = ctxWikiPageRepository;
+        this.teamWikiBatchRepository = teamWikiBatchRepository;
     }
 
     @KratisTool(
@@ -33,6 +37,10 @@ public class DeleteTeamWikiPageTool {
             throw new KratisToolException("pageSlug must not be blank.");
         }
         UUID batchId = TeamWikiContext.requireBatchId(toolContext, "DeleteTeamWikiPageTool");
+        // Deleting cascades to children, so serialize with page writes on the same batch.
+        teamWikiBatchRepository
+                .findByIdForUpdate(batchId)
+                .orElseThrow(() -> new KratisToolException("TeamWikiBatch not found: " + batchId));
         CtxWikiPage target = ctxWikiPageRepository
                 .findByTeamWikiBatchIdAndPageSlug(batchId, pageSlug)
                 .orElseThrow(() -> new KratisToolException(

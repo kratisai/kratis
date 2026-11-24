@@ -1,9 +1,10 @@
 package com.kratisai.controlplane.ingestion.teamwiki;
 
-import static org.apache.commons.lang3.StringUtils.isEmpty;
+import static org.apache.commons.lang3.StringUtils.isBlank;
 
 import com.kratisai.controlplane.agentloop.KratisTool;
 import com.kratisai.controlplane.agentloop.KratisToolException;
+import com.kratisai.controlplane.ingestion.write.WikiPageLinkExtractor;
 import com.kratisai.controlplane.model.CtxWikiPage;
 import com.kratisai.controlplane.model.CtxWikiPages;
 import com.kratisai.controlplane.model.TeamWikiBatch;
@@ -11,13 +12,10 @@ import com.kratisai.controlplane.repository.CtxWikiPageRepository;
 import com.kratisai.controlplane.repository.TeamWikiBatchRepository;
 import com.kratisai.controlplane.validation.MermaidDiagramValidator;
 import com.kratisai.controlplane.validation.WikiPageContentValidator;
-import java.util.HashSet;
+import com.kratisai.controlplane.validation.mermaid.MermaidNormalizer;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
@@ -29,29 +27,34 @@ import org.springframework.transaction.annotation.Transactional;
 public class WriteTeamWikiPageTool {
 
     private static final Logger logger = LoggerFactory.getLogger(WriteTeamWikiPageTool.class);
-    private static final Pattern REPO_WIKI_LINK_PATTERN =
-            Pattern.compile("\\(/wiki/repo/([^\\s)#?]+)(?:[?#][^)\\s]*)?\\)");
 
     private final CtxWikiPageRepository ctxWikiPageRepository;
     private final TeamWikiBatchRepository teamWikiBatchRepository;
     private final MermaidDiagramValidator mermaidDiagramValidator;
+    private final MermaidNormalizer mermaidNormalizer;
     private final WikiPageContentValidator wikiPageContentValidator;
+    private final WikiPageLinkExtractor wikiPageLinkExtractor;
 
     public WriteTeamWikiPageTool(
             CtxWikiPageRepository ctxWikiPageRepository,
             TeamWikiBatchRepository teamWikiBatchRepository,
             MermaidDiagramValidator mermaidDiagramValidator,
-            WikiPageContentValidator wikiPageContentValidator) {
+            MermaidNormalizer mermaidNormalizer,
+            WikiPageContentValidator wikiPageContentValidator,
+            WikiPageLinkExtractor wikiPageLinkExtractor) {
         this.ctxWikiPageRepository = ctxWikiPageRepository;
         this.teamWikiBatchRepository = teamWikiBatchRepository;
         this.mermaidDiagramValidator = mermaidDiagramValidator;
+        this.mermaidNormalizer = mermaidNormalizer;
         this.wikiPageContentValidator = wikiPageContentValidator;
+        this.wikiPageLinkExtractor = wikiPageLinkExtractor;
     }
 
     @KratisTool(
             name = "write_team_wiki_page",
             description = "Create or update a team wiki page. If a page with the same pageSlug already exists in this"
-                    + " build, its title, parent, and content will be updated.")
+                    + " build, its title, content, and explicit parent/orderIndex are updated; an omitted"
+                    + " parentPageSlug keeps the page's current parent.")
     @Transactional
     public String writeTeamWikiPage(
             @ToolParam(description = "Friendly URL slug for this team wiki page") String pageSlug,
@@ -81,7 +84,7 @@ public class WriteTeamWikiPageTool {
             throw new KratisToolException("content must not be blank.");
         }
 
-        content = mermaidDiagramValidator.normalizeFences(content);
+        content = mermaidNormalizer.normalize(content);
         wikiPageContentValidator.requireBody(content);
         List<String> mermaidIssues = mermaidDiagramValidator.findIssues(content);
         if (!mermaidIssues.isEmpty()) {
@@ -96,25 +99,19 @@ public class WriteTeamWikiPageTool {
                 .findByIdForUpdate(batchId)
                 .orElseThrow(() -> new KratisToolException("TeamWikiBatch not found: " + batchId));
 
-        CtxWikiPage parentPage = null;
-        if (!isEmpty(parentPageSlug)) {
-            if (parentPageSlug.equals(pageSlug)) {
-                throw new KratisToolException("A page cannot be its own parent: " + pageSlug);
-            }
-            parentPage = ctxWikiPageRepository
-                    .findByTeamWikiBatchIdAndPageSlug(batchId, parentPageSlug)
-                    .orElseThrow(() -> parentPageNotFound(batchId, parentPageSlug));
-        }
+        CtxWikiPage requestedParent = lookupParent(batchId, pageSlug, parentPageSlug);
 
         CtxWikiPage existingPage = ctxWikiPageRepository
                 .findByTeamWikiBatchIdAndPageSlug(batchId, pageSlug)
                 .orElse(null);
 
         if (existingPage != null) {
-            ensureNoParentCycle(existingPage, parentPage);
+            ensureNoParentCycle(existingPage, requestedParent);
             existingPage.setTitle(title);
             existingPage.setContent(content);
-            existingPage.setParentPage(parentPage);
+            if (requestedParent != null) {
+                existingPage.setParentPage(requestedParent);
+            }
             if (orderIndex != null) {
                 existingPage.setOrderIndex(orderIndex);
             }
@@ -124,13 +121,24 @@ public class WriteTeamWikiPageTool {
             return "SUCCESS: Team wiki page '" + pageSlug + "' updated successfully.";
         }
 
-        int effectiveOrderIndex = orderIndex != null ? orderIndex : nextSiblingOrderIndex(batchId, parentPage);
+        int effectiveOrderIndex = orderIndex != null ? orderIndex : nextSiblingOrderIndex(batchId, requestedParent);
         CtxWikiPage newPage = new CtxWikiPage(
-                batch, batch.getTeam().getId(), parentPage, pageSlug, title, effectiveOrderIndex, content);
+                batch, batch.getTeam().getId(), requestedParent, pageSlug, title, effectiveOrderIndex, content);
         ctxWikiPageRepository.saveAndFlush(newPage);
         logger.info("WriteTeamWikiPageTool: Created team wiki page: {}", pageSlug);
         logPageWrite(toolContext, "Created", title, pageSlug, content);
         return "SUCCESS: Team wiki page '" + pageSlug + "' created successfully.";
+    }
+
+    /** {@code null} means no parent was requested; callers must not read that as "make it a root". */
+    private CtxWikiPage lookupParent(UUID batchId, String pageSlug, String parentPageSlug) {
+        if (isBlank(parentPageSlug)) return null;
+        if (parentPageSlug.equals(pageSlug)) {
+            throw new KratisToolException("A page cannot be its own parent: " + pageSlug);
+        }
+        return ctxWikiPageRepository
+                .findByTeamWikiBatchIdAndPageSlug(batchId, parentPageSlug)
+                .orElseThrow(() -> parentPageNotFound(batchId, parentPageSlug));
     }
 
     private int nextSiblingOrderIndex(UUID batchId, CtxWikiPage parentPage) {
@@ -144,17 +152,9 @@ public class WriteTeamWikiPageTool {
         if (candidateParent == null || existingPage.getId() == null) {
             return;
         }
-        Set<UUID> visited = new HashSet<>();
-        CtxWikiPage cursor = candidateParent;
-        while (cursor != null) {
-            if (existingPage.getId().equals(cursor.getId())) {
-                throw new KratisToolException("Cannot set parentPageSlug to '" + candidateParent.getPageSlug()
-                        + "' because it is a descendant of '" + existingPage.getPageSlug() + "'.");
-            }
-            if (cursor.getId() != null && !visited.add(cursor.getId())) {
-                break;
-            }
-            cursor = cursor.getParentPage();
+        if (CtxWikiPages.isDescendantOf(candidateParent, existingPage.getId())) {
+            throw new KratisToolException("Cannot set parentPageSlug to '" + candidateParent.getPageSlug()
+                    + "' because it is a descendant of '" + existingPage.getPageSlug() + "'.");
         }
     }
 
@@ -162,37 +162,17 @@ public class WriteTeamWikiPageTool {
         if (repoBatchIdsByName.isEmpty()) {
             return;
         }
-        Matcher matcher = REPO_WIKI_LINK_PATTERN.matcher(content);
-        while (matcher.find()) {
-            String rawPath = matcher.group(1);
-            if (rawPath.endsWith("/")) {
-                rawPath = rawPath.substring(0, rawPath.length() - 1);
-            }
-
-            String repoName = null;
-            String targetSlug = null;
-            UUID repoBatchId = repoBatchIdsByName.get(rawPath);
-            if (repoBatchId != null) {
-                repoName = rawPath;
-            } else {
-                int lastSlash = rawPath.lastIndexOf('/');
-                if (lastSlash > 0) {
-                    String candidateRepo = rawPath.substring(0, lastSlash);
-                    UUID candidateBatch = repoBatchIdsByName.get(candidateRepo);
-                    if (candidateBatch != null) {
-                        repoName = candidateRepo;
-                        targetSlug = rawPath.substring(lastSlash + 1);
-                        repoBatchId = candidateBatch;
-                    }
-                }
-            }
-
-            if (repoBatchId == null) {
+        for (String rawPath : wikiPageLinkExtractor.extractWikiLinks(content).repoPaths()) {
+            TeamWikiLinkResolver.RepoTarget target = TeamWikiLinkResolver.resolve(rawPath, repoBatchIdsByName.keySet())
+                    .orElse(null);
+            if (target == null) {
                 throw new KratisToolException("Invalid repository wiki link '/wiki/repo/" + rawPath
                         + "': repository is not in the active ingested repositories "
                         + repoBatchIdsByName.keySet().stream().sorted().toList() + ".");
             }
-            if (targetSlug != null && !targetSlug.isBlank()) {
+            UUID repoBatchId = repoBatchIdsByName.get(target.repoName());
+            String targetSlug = target.pageSlug();
+            if (targetSlug != null) {
                 boolean exists = ctxWikiPageRepository
                         .findByBatchIdAndPageSlug(repoBatchId, targetSlug)
                         .isPresent();
@@ -201,10 +181,10 @@ public class WriteTeamWikiPageTool {
                             .map(CtxWikiPage::getPageSlug)
                             .sorted()
                             .toList();
-                    throw new KratisToolException("Invalid repository wiki link '/wiki/repo/" + repoName + "/"
-                            + targetSlug + "': slug '" + targetSlug + "' does not exist in '" + repoName
+                    throw new KratisToolException("Invalid repository wiki link '/wiki/repo/" + target.repoName() + "/"
+                            + targetSlug + "': slug '" + targetSlug + "' does not exist in '" + target.repoName()
                             + "'. Available slugs: " + availableSlugs
-                            + ", or link to the repo root '/wiki/repo/" + repoName + "'.");
+                            + ", or link to the repo root '/wiki/repo/" + target.repoName() + "'.");
                 }
             }
         }

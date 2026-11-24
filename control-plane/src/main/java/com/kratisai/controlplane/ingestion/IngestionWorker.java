@@ -242,7 +242,7 @@ public class IngestionWorker {
                 batch -> patternResearchService.researchPatterns(batch, batchLogger),
                 summary -> summary);
 
-        executePhase(
+        executePhaseOutsideTransaction(
                 batchId,
                 batchLogger,
                 "GENERATE_WIKI",
@@ -288,14 +288,41 @@ public class IngestionWorker {
             IngestionBatch batch = loadBatch(batchId);
             return phaseAction.apply(batch);
         });
-        String detail = completionSummary.apply(result);
+        return recordPhaseResult(batchLogger, phaseName, startNanos, result, completionSummary.apply(result));
+    }
+
+    private <T> T executePhaseOutsideTransaction(
+            UUID batchId,
+            IngestionBatchLogService.BatchLogger batchLogger,
+            String phaseName,
+            Function<IngestionBatch, T> phaseAction,
+            Function<T, String> completionSummary) {
+        long startNanos = System.nanoTime();
+        logger.debug("{}: starting", phaseName);
+        IngestionBatch batch = transactionTemplate.execute(status -> loadBatchForWikiGeneration(batchId));
+        T result = phaseAction.apply(batch);
+        return recordPhaseResult(batchLogger, phaseName, startNanos, result, completionSummary.apply(result));
+    }
+
+    private <T> T recordPhaseResult(
+            IngestionBatchLogService.BatchLogger batchLogger,
+            String phaseName,
+            long startNanos,
+            T result,
+            String completionSummary) {
         String elapsed = formatDuration(System.nanoTime() - startNanos);
-        String message = detail == null || detail.isBlank()
+        String message = completionSummary == null || completionSummary.isBlank()
                 ? phaseName + " completed in " + elapsed + "."
-                : phaseName + " completed in " + elapsed + ": " + detail + ".";
+                : phaseName + " completed in " + elapsed + ": " + completionSummary + ".";
         batchLogger.info(phaseName, message);
         logger.debug("{}: {}", phaseName, message);
         return result;
+    }
+
+    private IngestionBatch loadBatchForWikiGeneration(UUID batchId) {
+        return ingestionBatchRepository
+                .findByIdForWikiGeneration(batchId)
+                .orElseThrow(() -> new IllegalStateException("Ingestion batch not found: " + batchId));
     }
 
     private static String formatDuration(long nanos) {
