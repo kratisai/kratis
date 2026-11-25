@@ -1,0 +1,20 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ChatUsageChangedResult
+type: object
+required:
+- type
+- teamId
+- chatId
+properties:
+  type:
+    type: string
+    const: "chat_usage_changed"
+    enum:
+    - "chat_usage_changed"
+  teamId:
+    type: string
+    format: uuid
+  chatId:
+    type: string
+    format: uuid
+additionalProperties: true

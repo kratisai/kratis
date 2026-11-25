@@ -27,6 +27,7 @@ public enum ClientPayloadType {
     EXECUTION_OUTPUT("execution_output"),
     EXECUTION_COMPLETE("execution_complete"),
     EXECUTION_STATUS_CHANGED("execution_status_changed"),
+    CHAT_USAGE_CHANGED("chat_usage_changed"),
     EXECUTION_ACTIVITY("execution_activity"),
     EXECUTION_SUBSCRIPTION("execution_subscription"),
     EXECUTION_ACP_INITIALIZED("execution_acp_initialized"),

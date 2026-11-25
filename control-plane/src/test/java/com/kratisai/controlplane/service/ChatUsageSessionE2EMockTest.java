@@ -10,22 +10,27 @@ import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ChatUsageSession;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
+import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 class ChatUsageSessionE2EMockTest {
 
     private ChatUsageSessionRepository chatUsageSessionRepository;
+    private ChatRepository chatRepository;
     private ChatUsageSessionService chatUsageSessionService;
 
     @BeforeEach
     void setUp() {
         chatUsageSessionRepository = mock(ChatUsageSessionRepository.class);
+        chatRepository = mock(ChatRepository.class);
         LiteLLMClient liteLLMClient = mock(LiteLLMClient.class);
         when(liteLLMClient.generateKey(any())).thenReturn(new GenerateKeyResponse("sk-test-virtual-key", "Test Key"));
         when(liteLLMClient.keyInfo(any()))
@@ -34,7 +39,8 @@ class ChatUsageSessionE2EMockTest {
                 .thenReturn(List.of(new SpendLogEntry(300L, 200L, 100L, 2.0, "raw", "gpt-4o")));
 
         VirtualKeyService virtualKeyService = new VirtualKeyService(liteLLMClient);
-        chatUsageSessionService = new ChatUsageSessionService(chatUsageSessionRepository, virtualKeyService);
+        chatUsageSessionService = new ChatUsageSessionService(
+                chatUsageSessionRepository, chatRepository, virtualKeyService, mock(ApplicationEventPublisher.class));
     }
 
     @Test
@@ -57,20 +63,18 @@ class ChatUsageSessionE2EMockTest {
             return s;
         });
 
-        // 1. Initial session creation & virtual-key assignment
         ChatUsageSession activeSession = chatUsageSessionService.getOrCreateActiveSession(chat, List.of("gpt-4o"));
         assertThat(activeSession).isNotNull();
         assertThat(activeSession.getUsage().getVirtualKey()).isEqualTo("sk-test-virtual-key");
         assertThat(activeSession.isEnded()).isFalse();
 
-        // 2. Simulate activity and usage refresh
         when(chatUsageSessionRepository.findByChatId(chat.getId())).thenReturn(List.of(activeSession));
+        when(chatRepository.findById(chat.getId())).thenReturn(Optional.of(chat));
 
         chatUsageSessionService.refreshUsageForChat(chat.getId());
         assertThat(activeSession.getUsage().getTotalSpend()).isEqualTo(2.0);
         assertThat(activeSession.getUsage().getTotalTokens()).isEqualTo(300L);
 
-        // 3. Simulate inactivity timeout (> 4 hours gap)
         activeSession.getUsage().setUsageLastUpdatedAt(Instant.now().minus(5, ChronoUnit.HOURS));
         when(chatUsageSessionRepository.findByChatIdOrderByStartedAtDesc(chat.getId()))
                 .thenReturn(List.of(activeSession));

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kratisai.controlplane.api.restdto.ChatDto;
+import com.kratisai.controlplane.api.restdto.ChatUsageDto;
 import com.kratisai.controlplane.api.restdto.TopicStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
@@ -212,7 +213,40 @@ public class ChatService {
     }
 
     private ChatDto toChatDto(ChatEntity chat) {
-        List<ChatUsageSession> sessions = chatUsageSessionRepository.findByChatId(chat.getId());
+        ChatUsageDto usage = aggregateUsage(chat.getId());
+        SandboxExecution latest = sandboxExecutionRepository
+                .findFirstByChatIdOrderByStartedAtDesc(chat.getId())
+                .orElse(null);
+
+        return new ChatDto(
+                chat.getId(),
+                chat.getTeam().getId(),
+                chat.getTitle(),
+                chat.getUser().getDisplayName(),
+                chat.getCreatedAt(),
+                chat.getUpdatedAt(),
+                chat.getArchivedAt(),
+                usage.totalSpend(),
+                usage.totalTokens(),
+                usage.promptTokens(),
+                usage.completionTokens(),
+                usage.usageLastUpdatedAt(),
+                chat.isAllowAllPermissions(),
+                deriveStatus(chat, latest),
+                deriveLastActivityAt(chat, latest));
+    }
+
+    @Transactional(readOnly = true)
+    public ChatUsageDto getChatUsage(UUID chatId, UUID teamId, UUID userId) {
+        verifyChat(chatId, teamId);
+        if (!teamMemberRepository.existsByTeamIdAndUserId(teamId, userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this team");
+        }
+        return aggregateUsage(chatId);
+    }
+
+    private ChatUsageDto aggregateUsage(UUID chatId) {
+        List<ChatUsageSession> sessions = chatUsageSessionRepository.findByChatId(chatId);
         double totalSpend = sessions.stream()
                 .mapToDouble(sess -> sess.getUsage().getTotalSpend() != null
                         ? sess.getUsage().getTotalSpend()
@@ -238,27 +272,7 @@ public class ChatService {
                 .filter(Objects::nonNull)
                 .max(Instant::compareTo)
                 .orElse(null);
-
-        SandboxExecution latest = sandboxExecutionRepository
-                .findFirstByChatIdOrderByStartedAtDesc(chat.getId())
-                .orElse(null);
-
-        return new ChatDto(
-                chat.getId(),
-                chat.getTeam().getId(),
-                chat.getTitle(),
-                chat.getUser().getDisplayName(),
-                chat.getCreatedAt(),
-                chat.getUpdatedAt(),
-                chat.getArchivedAt(),
-                totalSpend,
-                totalTokens,
-                promptTokens,
-                completionTokens,
-                usageLastUpdatedAt,
-                chat.isAllowAllPermissions(),
-                deriveStatus(chat, latest),
-                deriveLastActivityAt(chat, latest));
+        return new ChatUsageDto(totalSpend, totalTokens, promptTokens, completionTokens, usageLastUpdatedAt);
     }
 
     private TopicStatus deriveStatus(ChatEntity chat, SandboxExecution latest) {
@@ -346,7 +360,7 @@ public class ChatService {
         eventPublisher.publishEvent(new TeamEntityChangedEvent(chat.getTeam().getId(), TeamEntityType.CHATS));
     }
 
-    /** Verify that a chat exists and belongs to the given team. Returns the chat if valid. */
+    /** Verify that a chat exists and belongs to the given team. Callers enforce team membership. */
     public void verifyChat(UUID chatId, UUID teamId) {
         chatRepository
                 .findByIdAndTeamId(chatId, teamId)

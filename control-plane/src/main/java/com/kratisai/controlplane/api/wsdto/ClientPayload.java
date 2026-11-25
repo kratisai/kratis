@@ -250,6 +250,18 @@ public sealed interface ClientPayload {
         }
     }
 
+    record ChatUsageChangedResult(ClientPayloadType type, UUID teamId, UUID chatId) implements ClientPayload {
+        public ChatUsageChangedResult {
+            Objects.requireNonNull(type, "type is required");
+            Objects.requireNonNull(teamId, "teamId is required");
+            Objects.requireNonNull(chatId, "chatId is required");
+        }
+
+        public ChatUsageChangedResult(UUID teamId, UUID chatId) {
+            this(ClientPayloadType.CHAT_USAGE_CHANGED, teamId, chatId);
+        }
+    }
+
     record ExecutionStatusChangedResult(ClientPayloadType type, UUID teamId, UUID chatId, UUID executionId)
             implements ClientPayload {
         public ExecutionStatusChangedResult {

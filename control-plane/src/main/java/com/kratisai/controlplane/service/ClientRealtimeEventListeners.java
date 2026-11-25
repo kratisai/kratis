@@ -110,6 +110,16 @@ public class ClientRealtimeEventListeners {
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onChatUsageChangedEvent(ChatUsageChangedEvent event) {
+        try {
+            dispatch.broadcastNotificationToTeam(
+                    event.teamId(), new ChatUsageChangedResult(event.teamId(), event.chatId()));
+        } catch (Exception e) {
+            logger.error("Failed to publish chat usage changed event for chat {}", event.chatId(), e);
+        }
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onExecutionStatusChangedEvent(ExecutionStatusChangedEvent event) {
         try {
             dispatch.broadcastNotificationToTeam(

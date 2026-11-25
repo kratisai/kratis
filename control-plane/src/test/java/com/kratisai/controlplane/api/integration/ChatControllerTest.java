@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.*;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
+import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
 import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.JwtService;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
@@ -17,6 +18,7 @@ import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
 import com.kratisai.controlplane.testsupport.llm.FakeChatModel;
 import com.kratisai.controlplane.testsupport.llm.PromptMatcher;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -47,6 +49,9 @@ class ChatControllerTest {
 
     @Autowired
     private ChatRepository chatRepository;
+
+    @Autowired
+    private ChatUsageSessionRepository chatUsageSessionRepository;
 
     @Autowired
     private DatabaseCleaner databaseCleaner;
@@ -86,6 +91,31 @@ class ChatControllerTest {
     }
 
     // ==================== Happy Path Tests ====================
+
+    @Test
+    void getChatUsage_returnsAggregateWithoutVirtualKey() throws Exception {
+        Team team = teamRepository.findById(UUID.fromString(teamId)).orElseThrow();
+        User user = userRepository.findById(userId).orElseThrow();
+        ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "Usage chat"));
+        ChatUsageSession session = new ChatUsageSession(chat, "sk-secret-virtual-key");
+        session.getUsage().setTotalSpend(1.25);
+        session.getUsage().setTotalTokens(250L);
+        session.getUsage().setPromptTokens(150L);
+        session.getUsage().setCompletionTokens(100L);
+        session.getUsage().setUsageLastUpdatedAt(Instant.parse("2026-01-01T00:00:00Z"));
+        chatUsageSessionRepository.save(session);
+
+        mockMvc.perform(get("/api/v1/chats/{id}/usage", chat.getId())
+                        .param("teamId", teamId)
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalSpend").value(1.25))
+                .andExpect(jsonPath("$.totalTokens").value(250))
+                .andExpect(jsonPath("$.promptTokens").value(150))
+                .andExpect(jsonPath("$.completionTokens").value(100))
+                .andExpect(jsonPath("$.usageLastUpdatedAt").value("2026-01-01T00:00:00Z"))
+                .andExpect(jsonPath("$.virtualKey").doesNotExist());
+    }
 
     @Test
     void createChat_validRequest_registersFluxAndReturns202() throws Exception {
@@ -292,6 +322,47 @@ class ChatControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].title").value("New Chat"))
                 .andExpect(jsonPath("$[1].title").value("Old Chat"));
+    }
+
+    @Test
+    void getChatUsage_forNonMemberReturns403() throws Exception {
+        Team team = teamRepository.findById(UUID.fromString(teamId)).orElseThrow();
+        User user = userRepository.findById(userId).orElseThrow();
+        ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "Usage chat"));
+        RegisterUserRequest request = new RegisterUserRequest("usage-outsider@example.com", "password123", "Outsider");
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated());
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new LoginRequest("usage-outsider@example.com", "password123"))))
+                .andExpect(status().isOk())
+                .andReturn();
+        String outsiderToken = objectMapper
+                .readTree(result.getResponse().getContentAsString())
+                .path("accessToken")
+                .asText();
+
+        mockMvc.perform(get("/api/v1/chats/{id}/usage", chat.getId())
+                        .param("teamId", teamId)
+                        .header("Authorization", "Bearer " + outsiderToken))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void getChatUsage_forMissingChatReturns404() throws Exception {
+        mockMvc.perform(get("/api/v1/chats/{id}/usage", UUID.randomUUID())
+                        .param("teamId", teamId)
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getChatUsage_requiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/v1/chats/{id}/usage", UUID.randomUUID()).param("teamId", teamId))
+                .andExpect(status().isUnauthorized());
     }
 
     // ==================== Edge Cases ====================

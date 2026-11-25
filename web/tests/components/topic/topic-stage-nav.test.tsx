@@ -20,6 +20,10 @@ vi.mock('@/hooks/use-diff', () => ({
   useDiffSummary: () => mockUseDiffSummary(),
 }))
 
+vi.mock('@/components/chat/chat-usage-summary', () => ({
+  ChatUsageSummary: () => null,
+}))
+
 function canvasDoc(overrides: Partial<CanvasDocument> = {}): CanvasDocument {
   return {
     canvasType: 'SPEC',

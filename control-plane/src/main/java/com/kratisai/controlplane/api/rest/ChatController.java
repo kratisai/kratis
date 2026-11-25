@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.api.rest;
 
 import com.kratisai.controlplane.api.restdto.ChatDto;
+import com.kratisai.controlplane.api.restdto.ChatUsageDto;
 import com.kratisai.controlplane.api.restdto.CreateChatRequest;
 import com.kratisai.controlplane.api.restdto.CreateChatResponse;
 import com.kratisai.controlplane.api.restdto.UpdateChatPermissionsRequest;
@@ -68,6 +69,21 @@ public class ChatController {
         UUID userId = SecurityUtil.getCurrentUserId();
         boolean onlyMine = "mine".equalsIgnoreCase(filter);
         return ResponseEntity.ok(chatService.listChatsForTeam(teamId, userId, onlyMine, status));
+    }
+
+    @GetMapping("/{id}/usage")
+    @Operation(summary = "Get chat usage", description = "Returns aggregate LLM usage for a chat")
+    @ApiResponses(
+            value = {
+                @ApiResponse(
+                        responseCode = "200",
+                        description = "Aggregate chat usage",
+                        content = @Content(schema = @Schema(implementation = ChatUsageDto.class))),
+                @ApiResponse(responseCode = "403", description = "Not a member of this team", content = @Content),
+                @ApiResponse(responseCode = "404", description = "Chat not found", content = @Content)
+            })
+    public ResponseEntity<ChatUsageDto> getChatUsage(@PathVariable UUID id, @RequestParam UUID teamId) {
+        return ResponseEntity.ok(chatService.getChatUsage(id, teamId, SecurityUtil.getCurrentUserId()));
     }
 
     @PostMapping

@@ -1,9 +1,11 @@
 package com.kratisai.controlplane.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 import com.kratisai.controlplane.api.restdto.ChatDto;
+import com.kratisai.controlplane.api.restdto.ChatUsageDto;
 import com.kratisai.controlplane.api.restdto.TopicStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.model.ChangeSet;
@@ -28,6 +30,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 class ChatServiceTest {
 
@@ -205,6 +209,75 @@ class ChatServiceTest {
                 .thenReturn(Optional.of(execution));
 
         assertThat(listSingleChat(chat).lastActivityAt()).isEqualTo(completedAt);
+    }
+
+    @Test
+    void verifyChat_existingChatWithoutHttpSecurityContext_doesNotThrow() {
+        UUID chatId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        ChatEntity chat = new ChatEntity();
+        chat.setId(chatId);
+        when(chatRepository.findByIdAndTeamId(chatId, teamId)).thenReturn(Optional.of(chat));
+
+        chatService.verifyChat(chatId, teamId);
+    }
+
+    @Test
+    void verifyChat_missingChat_throwsNotFound() {
+        UUID chatId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        when(chatRepository.findByIdAndTeamId(chatId, teamId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> chatService.verifyChat(chatId, teamId))
+                .isInstanceOfSatisfying(ResponseStatusException.class, ex -> assertThat(ex.getStatusCode())
+                        .isEqualTo(HttpStatus.NOT_FOUND));
+    }
+
+    @Test
+    void getChatUsage_nonMember_throwsForbidden() {
+        UUID chatId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        ChatEntity chat = persistedChat(Instant.now());
+        chat.getTeam().setId(teamId);
+        chat.setId(chatId);
+        when(chatRepository.findByIdAndTeamId(chatId, teamId)).thenReturn(Optional.of(chat));
+        when(teamMemberRepository.existsByTeamIdAndUserId(teamId, userId)).thenReturn(false);
+
+        assertThatThrownBy(() -> chatService.getChatUsage(chatId, teamId, userId))
+                .isInstanceOfSatisfying(ResponseStatusException.class, ex -> assertThat(ex.getStatusCode())
+                        .isEqualTo(HttpStatus.FORBIDDEN));
+    }
+
+    @Test
+    void getChatUsage_totalsMatchChatListPath() {
+        UUID teamId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        ChatEntity chat = persistedChat(Instant.parse("2026-05-01T10:00:00Z"));
+        chat.getTeam().setId(teamId);
+        when(chatRepository.findByIdAndTeamId(chat.getId(), teamId)).thenReturn(Optional.of(chat));
+        when(teamMemberRepository.existsByTeamIdAndUserId(teamId, userId)).thenReturn(true);
+        when(chatRepository.findTop20ByTeamIdAndArchivedAtIsNullOrderByUpdatedAtDesc(teamId))
+                .thenReturn(List.of(chat));
+        when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
+                .thenReturn(Optional.empty());
+        ChatUsageSession session = new ChatUsageSession(chat, "key-1");
+        session.getUsage().setTotalSpend(1.25);
+        session.getUsage().setTotalTokens(250L);
+        session.getUsage().setPromptTokens(150L);
+        session.getUsage().setCompletionTokens(100L);
+        session.getUsage().setUsageLastUpdatedAt(Instant.parse("2026-01-01T00:00:00Z"));
+        when(chatUsageSessionRepository.findByChatId(chat.getId())).thenReturn(List.of(session));
+
+        ChatDto listDto =
+                chatService.listChatsForTeam(teamId, userId, false, "active").getFirst();
+        ChatUsageDto usage = chatService.getChatUsage(chat.getId(), teamId, userId);
+
+        assertThat(usage.totalSpend()).isEqualTo(listDto.totalSpend());
+        assertThat(usage.totalTokens()).isEqualTo(listDto.totalTokens());
+        assertThat(usage.promptTokens()).isEqualTo(listDto.promptTokens());
+        assertThat(usage.completionTokens()).isEqualTo(listDto.completionTokens());
+        assertThat(usage.usageLastUpdatedAt()).isEqualTo(listDto.usageLastUpdatedAt());
     }
 
     private ChatEntity persistedChat(Instant updatedAt) {

@@ -2,6 +2,7 @@ package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
@@ -31,6 +32,10 @@ public class ChatFluxRegistry {
 
     public boolean containsKey(UUID chatId) {
         return activeStreams.containsKey(chatId);
+    }
+
+    public Set<UUID> activeChatIds() {
+        return Set.copyOf(activeStreams.keySet());
     }
 
     public int size() {

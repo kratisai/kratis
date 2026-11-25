@@ -192,6 +192,10 @@ x-kratis-notifications:
   summary: Execution status or usage change for a chat's executions; receivers invalidate the chat execution list
   schema:
     $ref: ./schemas/results/execution_status_changed.schema.yaml
+- name: chat_usage_changed
+  summary: Planning chat usage changed; receivers invalidate the chat usage query
+  schema:
+    $ref: ./schemas/results/chat_usage_changed.schema.yaml
 - name: execution_activity
   summary: Agent activity event from an execution
   schema:

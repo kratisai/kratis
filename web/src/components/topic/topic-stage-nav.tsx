@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ExecutionDisplayStatus, SandboxExecutionDto } from '@/lib/execution-api'
 import type { CanvasDocument } from '@/types/canvas-types'
 
+import { ChatUsageSummary } from '@/components/chat/chat-usage-summary'
 import { AgentBrandIcon } from '@/components/session/agent-brand-icon'
 import { harnessDisplayName } from '@/components/session/execution-harness-badge'
 import { Button } from '@/components/ui/button'
@@ -244,6 +245,10 @@ export function TopicStageNav({
               </DropdownMenu>
             </>
           )}
+          <span className="text-muted-foreground/60">|</span>
+          <span onClick={(e) => e.stopPropagation()}>
+            <ChatUsageSummary chatId={chatId} />
+          </span>
         </div>
       </div>
 

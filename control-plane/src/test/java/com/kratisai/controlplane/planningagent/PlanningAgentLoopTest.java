@@ -11,6 +11,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.kratisai.controlplane.agentloop.AgentActivityListener;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.planningagent.telemetry.TelemetryEvent;
 import com.kratisai.controlplane.service.ScratchpadService;
@@ -54,6 +55,8 @@ class PlanningAgentLoopTest {
     private List<ClientPayload.ChatStreamPayload> emissions;
     private Sinks.Many<ClientPayload.ChatStreamPayload> sink;
     private UUID chatId;
+    private AgentActivityListener activityListener;
+    private List<UUID> activityChats;
 
     @BeforeEach
     void setUp() {
@@ -66,6 +69,59 @@ class PlanningAgentLoopTest {
         sink = Sinks.many().replay().all();
         emissions = new ArrayList<>();
         sink.asFlux().subscribe(emissions::add);
+        activityChats = new ArrayList<>();
+        activityListener = activityChats::add;
+    }
+
+    @Test
+    void emitsActivityForEveryTelemetryChunkAndRetractionExactlyOnce() {
+        ToolCallback tool = tool();
+        AssistantMessage.ToolCall toolCall =
+                new AssistantMessage.ToolCall("call_1", "function", "list_repositories", "{}");
+        fakeChatModel.addMatcher(PromptMatcher.builder()
+                .responses(p -> List.of(
+                        new ChatResponse(List.of(new Generation(AssistantMessage.builder()
+                                .toolCalls(List.of(toolCall))
+                                .build()))),
+                        new ChatResponse(List.of(new Generation(new AssistantMessage("partial"))))))
+                .maxMatches(1)
+                .build());
+        fakeChatModel.addMatcher(
+                PromptMatcher.builder().response("answer").maxMatches(1).build());
+        PlanningAgentLoop loop = loop(new ToolCallback[] {tool}, PlanningTestStubs.emptyScratchpad(), activityListener);
+
+        loop.run(chatClient, context, sink);
+
+        assertThat(activityChats).isNotEmpty().containsOnly(chatId);
+        assertThat(activityChats).hasSize((int) emissions.stream()
+                .filter(payload -> payload instanceof ClientPayload.MessageChunkResult
+                        || payload instanceof ClientPayload.MessageRetractResult
+                        || payload instanceof ClientPayload.TelemetryResult)
+                .count());
+    }
+
+    @Test
+    void absentActivityListenerDoesNotInterruptLoop() {
+        fakeChatModel.addMatcher(
+                PromptMatcher.builder().response("answer").maxMatches(1).build());
+        loop(noTools(), PlanningTestStubs.emptyScratchpad(), null).run(chatClient, context, sink);
+        assertThat(emissions).anyMatch(ClientPayload.MessageChunkResult.class::isInstance);
+    }
+
+    @Test
+    void activityListenerFailureDoesNotAbortStream() {
+        fakeChatModel.addMatcher(
+                PromptMatcher.builder().response("answer").maxMatches(1).build());
+        AgentActivityListener failingListener = id -> {
+            throw new IllegalStateException("scheduler unavailable");
+        };
+
+        loop(noTools(), PlanningTestStubs.emptyScratchpad(), failingListener).run(chatClient, context, sink);
+
+        assertThat(emissions)
+                .anyMatch(payload ->
+                        payload instanceof ClientPayload.MessageChunkResult chunk && "answer".equals(chunk.content()));
+        verify(chatMemory).add(eq(chatId.toString()), argThat(isAssistantText("answer")));
     }
 
     @Test
@@ -94,9 +150,7 @@ class PlanningAgentLoopTest {
     void nullAssistantResponse_skipsMemoryAndEmitsNothing() {
         fakeChatModel.addMatcher(
                 PromptMatcher.builder().responses(p -> List.of()).maxMatches(1).build());
-
         loop(noTools()).run(chatClient, context, sink);
-
         verify(chatMemory, never()).add(any(), (Message) any());
         verify(chatMemory, never()).add(any(), anyList());
         assertThat(emissions).isEmpty();
@@ -210,7 +264,8 @@ class PlanningAgentLoopTest {
                 Runnable::run,
                 new MermaidNormalizer(),
                 new MermaidDiagramValidator(),
-                new MermaidDiagramRepairer(new MermaidNormalizer()));
+                new MermaidDiagramRepairer(new MermaidNormalizer()),
+                activityListener);
 
         loop.run(ChatClient.builder(new FlakyStreamingChatModel()).build(), context, sink);
 
@@ -224,6 +279,7 @@ class PlanningAgentLoopTest {
                     return chunk.attempt() + ":" + chunk.content();
                 })
                 .containsExactly("1:partial", "2:recovered");
+        assertThat(activityChats).containsOnly(chatId);
     }
 
     @Test
@@ -240,9 +296,7 @@ class PlanningAgentLoopTest {
                 ```""";
         ChatClient client =
                 ChatClient.builder(new MermaidRepairChatModel(streamed, null)).build();
-
         loop(noTools()).run(client, context, sink);
-
         String expected = """
                 Here is the flow:
                 ```mermaid
@@ -278,9 +332,7 @@ class PlanningAgentLoopTest {
                 ```""";
         ChatClient client = ChatClient.builder(new MermaidRepairChatModel(streamed, repaired))
                 .build();
-
         loop(noTools()).run(client, context, sink);
-
         String expected = """
                 Architecture:
                 ```mermaid
@@ -310,9 +362,7 @@ class PlanningAgentLoopTest {
                 })
                 .maxMatches(1)
                 .build());
-
         loop(noTools(), scratchpad).run(chatClient, context, sink);
-
         assertThat(countOccurrences(firstPrompt.get(), "<scratchpad>")).isEqualTo(1);
         assertThat(firstPrompt.get()).contains("- write the API page");
     }
@@ -340,9 +390,7 @@ class PlanningAgentLoopTest {
                 })
                 .maxMatches(1)
                 .build());
-
         loop(new ToolCallback[] {saveTool}, scratchpad).run(chatClient, context, sink);
-
         assertThat(prompts).hasSize(2);
         assertThat(prompts.getFirst()).doesNotContain("<scratchpad>");
         assertThat(prompts.getLast()).contains("<scratchpad>").contains("- step one done");
@@ -372,10 +420,15 @@ class PlanningAgentLoopTest {
     }
 
     private PlanningAgentLoop loop(ToolCallback[] tools) {
-        return loop(tools, PlanningTestStubs.emptyScratchpad());
+        return loop(tools, PlanningTestStubs.emptyScratchpad(), activityListener);
     }
 
     private PlanningAgentLoop loop(ToolCallback[] tools, ScratchpadService scratchpadService) {
+        return loop(tools, scratchpadService, activityListener);
+    }
+
+    private PlanningAgentLoop loop(
+            ToolCallback[] tools, ScratchpadService scratchpadService, AgentActivityListener listener) {
         return new PlanningAgentLoop(
                 chatMemory,
                 scratchpadService,
@@ -385,7 +438,8 @@ class PlanningAgentLoopTest {
                 Runnable::run,
                 new MermaidNormalizer(),
                 new MermaidDiagramValidator(),
-                new MermaidDiagramRepairer(new MermaidNormalizer()));
+                new MermaidDiagramRepairer(new MermaidNormalizer()),
+                listener);
     }
 
     private static org.mockito.ArgumentMatcher<Message> isAssistantText(String text) {
@@ -447,20 +501,38 @@ class PlanningAgentLoopTest {
     }
 
     private static ToolCallback tool() {
-        ToolCallback tool = mock(ToolCallback.class);
-        ToolDefinition definition = mock(ToolDefinition.class);
-        when(definition.name()).thenReturn("list_repositories");
-        when(tool.getToolDefinition()).thenReturn(definition);
-        when(tool.call(any(), any())).thenReturn("{\"repos\":[]}");
-        return tool;
+        return new ToolCallback() {
+            @Override
+            public ToolDefinition getToolDefinition() {
+                return ToolDefinition.builder()
+                        .name("list_repositories")
+                        .description("list repositories")
+                        .inputSchema("{}")
+                        .build();
+            }
+
+            @Override
+            public String call(String input) {
+                return "[]";
+            }
+        };
     }
 
     private static ToolCallback failingTool() {
-        ToolCallback tool = mock(ToolCallback.class);
-        ToolDefinition definition = mock(ToolDefinition.class);
-        when(definition.name()).thenReturn("list_repositories");
-        when(tool.getToolDefinition()).thenReturn(definition);
-        when(tool.call(any(), any())).thenThrow(new RuntimeException("boom"));
-        return tool;
+        return new ToolCallback() {
+            @Override
+            public ToolDefinition getToolDefinition() {
+                return ToolDefinition.builder()
+                        .name("list_repositories")
+                        .description("list repositories")
+                        .inputSchema("{}")
+                        .build();
+            }
+
+            @Override
+            public String call(String input) {
+                throw new IllegalStateException("boom");
+            }
+        };
     }
 }

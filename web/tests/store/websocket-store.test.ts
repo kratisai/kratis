@@ -9,6 +9,7 @@ import { useAuthStore } from '@/store/auth-store'
 import { useChatStore } from '@/store/chat-store'
 import { useExecutionStore } from '@/store/execution-store'
 import {
+  handleChatUsageChangedResult,
   handleExecutionCompleteResult,
   handleExecutionDiffChangedResult,
   handleExecutionStatusChangedResult,
@@ -70,6 +71,44 @@ describe('resyncActiveExecution', () => {
     resyncActiveExecution()
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['chat-executions', 'chat-1'] })
+  })
+})
+
+describe('handleChatUsageChangedResult', () => {
+  beforeEach(() => {
+    useAuthStore.setState({ currentTeamId: 'team-1' })
+    vi.restoreAllMocks()
+  })
+
+  afterEach(() => {
+    useAuthStore.setState({ currentTeamId: null })
+  })
+
+  it('invalidates only the matching chat usage query', () => {
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined)
+
+    handleChatUsageChangedResult({ chatId: 'chat-1', teamId: 'team-1', type: 'chat_usage_changed' })
+
+    expect(invalidateSpy).toHaveBeenCalledTimes(1)
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['chat-usage', 'team-1', 'chat-1'] })
+  })
+
+  it('ignores notifications for another team', () => {
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined)
+
+    handleChatUsageChangedResult({ chatId: 'chat-1', teamId: 'team-other', type: 'chat_usage_changed' })
+
+    expect(invalidateSpy).not.toHaveBeenCalled()
+  })
+
+  it('does not invalidate chat lists or team usage', () => {
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined)
+
+    handleChatUsageChangedResult({ chatId: 'chat-other', teamId: 'team-1', type: 'chat_usage_changed' })
+
+    expect(invalidateSpy).toHaveBeenCalledTimes(1)
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['chats', 'team-1'] })
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['team-usage-summary', 'team-1'] })
   })
 })
 

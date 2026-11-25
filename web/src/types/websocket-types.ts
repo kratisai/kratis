@@ -118,6 +118,12 @@ export interface ChatUnsubscribeParams {
   chatId: string
 }
 
+export interface ChatUsageChangedResult {
+  chatId: string
+  teamId: string
+  type: 'chat_usage_changed'
+}
+
 export interface ClientRpcMethods {
   auth: AuthParams
   'chat.continue': ChatContinueParams
@@ -267,6 +273,7 @@ export type JsonRpcResult =
   | CanvasResult
   | ChatErrorResult
   | ChatSubscriptionResult
+  | ChatUsageChangedResult
   | CompleteResult
   | ExecutionActivityResult
   | ExecutionCompleteResult

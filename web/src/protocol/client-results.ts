@@ -160,6 +160,13 @@ export const CLIENT_RESULTS = {
   chat_subscription: z
     .object({ chatId: uuid, status: z.string(), type: z.literal('chat_subscription') })
     .strict(),
+  chat_usage_changed: z
+    .object({
+      chatId: uuid,
+      teamId: uuid,
+      type: z.literal('chat_usage_changed'),
+    })
+    .strict(),
   complete: z
     .object({
       chatId: uuid.nullable().optional(),

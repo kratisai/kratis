@@ -6,35 +6,43 @@ import static org.mockito.Mockito.*;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ChatUsageSession;
 import com.kratisai.controlplane.model.LlmUsageSnapshot;
+import com.kratisai.controlplane.model.Team;
+import com.kratisai.controlplane.model.event.ChatUsageChangedEvent;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 class ChatUsageSessionServiceRefreshTest {
 
     private ChatUsageSessionRepository chatUsageSessionRepository;
+    private ChatRepository chatRepository;
     private VirtualKeyService virtualKeyService;
+    private ApplicationEventPublisher eventPublisher;
     private ChatUsageSessionService chatUsageSessionService;
 
     @BeforeEach
     void setUp() {
         chatUsageSessionRepository = mock(ChatUsageSessionRepository.class);
-        ChatRepository chatRepository = mock(ChatRepository.class);
+        chatRepository = mock(ChatRepository.class);
         virtualKeyService = mock(VirtualKeyService.class);
-        chatUsageSessionService =
-                new ChatUsageSessionService(chatUsageSessionRepository, chatRepository, virtualKeyService);
+        eventPublisher = mock(ApplicationEventPublisher.class);
+        chatUsageSessionService = new ChatUsageSessionService(
+                chatUsageSessionRepository, chatRepository, virtualKeyService, eventPublisher);
     }
 
     @Test
     void refreshUsageForChat_fetchesUsageFromLiteLLMAndUpdatesActiveSessions() {
-        ChatEntity chat = new ChatEntity();
-        chat.setId(UUID.randomUUID());
-
+        UUID teamId = UUID.randomUUID();
+        ChatEntity chat = chat(teamId);
         ChatUsageSession session = new ChatUsageSession(chat, "sk-test-virtual-key");
         when(chatUsageSessionRepository.findByChatId(chat.getId())).thenReturn(List.of(session));
+        when(chatRepository.findById(chat.getId())).thenReturn(Optional.of(chat));
 
         when(virtualKeyService.fetchUsage("sk-test-virtual-key"))
                 .thenReturn(new LlmUsageSnapshot(2.25, 450L, 300L, 150L));
@@ -48,6 +56,41 @@ class ChatUsageSessionServiceRefreshTest {
         assertThat(session.getUsage().getCompletionTokens()).isEqualTo(150L);
         assertThat(session.getUsage().getUsageLastUpdatedAt()).isNotNull();
         verify(chatUsageSessionRepository).save(session);
+        verify(eventPublisher).publishEvent(new ChatUsageChangedEvent(teamId, chat.getId()));
+    }
+
+    @Test
+    void refreshUsageForChat_doesNotPublishWhenThereAreNoSessions() {
+        UUID teamId = UUID.randomUUID();
+        ChatEntity chat = chat(teamId);
+        when(chatUsageSessionRepository.findByChatId(chat.getId())).thenReturn(List.of());
+        chatUsageSessionService.refreshUsageForChat(chat.getId());
+
+        verify(chatRepository, never()).findById(chat.getId());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void refreshUsageForChat_doesNotPublishWhenChatIsMissing() {
+        UUID chatId = UUID.randomUUID();
+        ChatUsageSession session = new ChatUsageSession(new ChatEntity(), "sk-test-virtual-key");
+        when(chatUsageSessionRepository.findByChatId(chatId)).thenReturn(List.of(session));
+        when(chatRepository.findById(chatId)).thenReturn(Optional.empty());
+        when(virtualKeyService.fetchUsage("sk-test-virtual-key"))
+                .thenReturn(new LlmUsageSnapshot(2.25, 450L, 300L, 150L));
+
+        chatUsageSessionService.refreshUsageForChat(chatId);
+
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    private static ChatEntity chat(UUID teamId) {
+        Team team = new Team();
+        team.setId(teamId);
+        ChatEntity chat = new ChatEntity();
+        chat.setId(UUID.randomUUID());
+        chat.setTeam(team);
+        return chat;
     }
 
     @Test
@@ -72,93 +115,65 @@ class ChatUsageSessionServiceRefreshTest {
     }
 
     @Test
-    void isVirtualKeyValid_returnsFalseForNullOrBlankKey() {
-        // Test via getOrCreateActiveSession rollover path with invalid key
+    void getOrCreateActiveSession_reusesRecentSessionWhenStoredKeyIsValid() {
         ChatEntity chat = new ChatEntity();
         chat.setId(UUID.randomUUID());
-        ChatUsageSession session = new ChatUsageSession(chat, "sk-invalid-key");
-        session.setId(UUID.randomUUID());
+        ChatUsageSession session = new ChatUsageSession(chat, "sk-valid-key", "gpt-4o");
+        session.getUsage().setUsageLastUpdatedAt(Instant.now().minusSeconds(3600));
         when(chatUsageSessionRepository.findByChatIdOrderByStartedAtDesc(chat.getId()))
                 .thenReturn(List.of(session));
-        when(chatUsageSessionRepository.save(any(ChatUsageSession.class))).thenAnswer(inv -> {
-            ChatUsageSession s = inv.getArgument(0);
-            if (s.getId() == null) s.setId(UUID.randomUUID());
-            return s;
-        });
-        when(virtualKeyService.fetchUsage("sk-invalid-key")).thenThrow(new RuntimeException("404 Not Found"));
+        when(virtualKeyService.keyExists("sk-valid-key")).thenReturn(true);
 
-        ChatUsageSession newSession = chatUsageSessionService.getOrCreateActiveSession(chat, List.of("gpt-4o"));
+        ChatUsageSession activeSession = chatUsageSessionService.getOrCreateActiveSession(chat, List.of("gpt-4o"));
 
-        assertThat(newSession.getId()).isNotEqualTo(session.getId());
-        assertThat(session.isEnded()).isTrue();
-        verify(virtualKeyService, atLeastOnce()).fetchUsage("sk-invalid-key");
+        assertThat(activeSession).isSameAs(session);
+        assertThat(session.isEnded()).isFalse();
+        verify(virtualKeyService).keyExists("sk-valid-key");
+        verify(virtualKeyService, never()).fetchUsage(any());
+        verify(chatUsageSessionRepository, never()).save(any());
     }
 
     @Test
-    void isVirtualKeyValid_returnsFalseForExpiredKey() {
+    void getOrCreateActiveSession_rollsOverWhenStoredKeyIsUnknown() {
         ChatEntity chat = new ChatEntity();
         chat.setId(UUID.randomUUID());
-        ChatUsageSession session = new ChatUsageSession(chat, "sk-expired-key");
-        session.setId(UUID.randomUUID());
+        ChatUsageSession session = new ChatUsageSession(chat, "sk-unknown-key", "gpt-4o");
+        session.getUsage().setUsageLastUpdatedAt(Instant.now().minusSeconds(3600));
         when(chatUsageSessionRepository.findByChatIdOrderByStartedAtDesc(chat.getId()))
                 .thenReturn(List.of(session));
-        when(chatUsageSessionRepository.save(any(ChatUsageSession.class))).thenAnswer(inv -> {
-            ChatUsageSession s = inv.getArgument(0);
-            if (s.getId() == null) s.setId(UUID.randomUUID());
-            return s;
-        });
-        when(virtualKeyService.fetchUsage("sk-expired-key")).thenThrow(new RuntimeException("key expired"));
+        when(virtualKeyService.keyExists("sk-unknown-key")).thenReturn(false);
+        when(virtualKeyService.fetchUsage("sk-unknown-key")).thenReturn(new LlmUsageSnapshot(1.0, 100L, 60L, 40L));
+        when(virtualKeyService.generateKey(anyString(), anyList())).thenReturn("sk-new-key");
+        when(chatUsageSessionRepository.save(any(ChatUsageSession.class))).thenAnswer(inv -> inv.getArgument(0));
 
         ChatUsageSession newSession = chatUsageSessionService.getOrCreateActiveSession(chat, List.of("gpt-4o"));
 
-        assertThat(newSession.getId()).isNotEqualTo(session.getId());
+        assertThat(newSession).isNotSameAs(session);
+        assertThat(newSession.getUsage().getVirtualKey()).isEqualTo("sk-new-key");
         assertThat(session.isEnded()).isTrue();
-        verify(virtualKeyService, atLeastOnce()).fetchUsage("sk-expired-key");
+        assertThat(session.getUsage().getTotalTokens()).isEqualTo(100L);
+        verify(virtualKeyService).keyExists("sk-unknown-key");
+        verify(virtualKeyService).fetchUsage("sk-unknown-key");
+        verify(virtualKeyService).revokeKey("sk-unknown-key");
     }
 
     @Test
-    void isVirtualKeyValid_returnsFalseForUnauthorizedKey() {
+    void getOrCreateActiveSession_rollsOverWhenStoredKeyIsMissing() {
         ChatEntity chat = new ChatEntity();
         chat.setId(UUID.randomUUID());
-        ChatUsageSession session = new ChatUsageSession(chat, "sk-unauthorized-key");
-        session.setId(UUID.randomUUID());
+        ChatUsageSession session = new ChatUsageSession(chat, null, "gpt-4o");
+        session.getUsage().setUsageLastUpdatedAt(Instant.now().minusSeconds(3600));
         when(chatUsageSessionRepository.findByChatIdOrderByStartedAtDesc(chat.getId()))
                 .thenReturn(List.of(session));
-        when(chatUsageSessionRepository.save(any(ChatUsageSession.class))).thenAnswer(inv -> {
-            ChatUsageSession s = inv.getArgument(0);
-            if (s.getId() == null) s.setId(UUID.randomUUID());
-            return s;
-        });
-        when(virtualKeyService.fetchUsage("sk-unauthorized-key")).thenThrow(new RuntimeException("401 Unauthorized"));
+        when(virtualKeyService.generateKey(anyString(), anyList())).thenReturn("sk-new-key");
+        when(chatUsageSessionRepository.save(any(ChatUsageSession.class))).thenAnswer(inv -> inv.getArgument(0));
 
         ChatUsageSession newSession = chatUsageSessionService.getOrCreateActiveSession(chat, List.of("gpt-4o"));
 
-        assertThat(newSession.getId()).isNotEqualTo(session.getId());
+        assertThat(newSession).isNotSameAs(session);
         assertThat(session.isEnded()).isTrue();
-        verify(virtualKeyService, atLeastOnce()).fetchUsage("sk-unauthorized-key");
-    }
-
-    @Test
-    void getOrCreateActiveSession_rollsOverWhenKeyInvalidButWithinTimeThreshold() {
-        ChatEntity chat = new ChatEntity();
-        chat.setId(UUID.randomUUID());
-        ChatUsageSession session = new ChatUsageSession(chat, "sk-invalid-key");
-        session.setId(UUID.randomUUID());
-        // Session is recent (within 4h) but key is invalid
-        session.getUsage().setUsageLastUpdatedAt(java.time.Instant.now().minusSeconds(3600)); // 1 hour ago
-        when(chatUsageSessionRepository.findByChatIdOrderByStartedAtDesc(chat.getId()))
-                .thenReturn(List.of(session));
-        when(chatUsageSessionRepository.save(any(ChatUsageSession.class))).thenAnswer(inv -> {
-            ChatUsageSession s = inv.getArgument(0);
-            if (s.getId() == null) s.setId(UUID.randomUUID());
-            return s;
-        });
-        when(virtualKeyService.fetchUsage("sk-invalid-key")).thenThrow(new RuntimeException("404 Not Found"));
-
-        ChatUsageSession newSession = chatUsageSessionService.getOrCreateActiveSession(chat, List.of("gpt-4o"));
-
-        assertThat(newSession.getId()).isNotEqualTo(session.getId());
-        assertThat(session.isEnded()).isTrue();
-        verify(virtualKeyService, atLeastOnce()).fetchUsage("sk-invalid-key");
+        verify(virtualKeyService).keyExists(null);
+        verify(virtualKeyService, never()).fetchUsage(any());
+        verify(virtualKeyService, never()).revokeKey(any());
     }
 }

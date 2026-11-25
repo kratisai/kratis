@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.planningagent;
 
+import com.kratisai.controlplane.agentloop.AgentActivityListener;
 import com.kratisai.controlplane.agentloop.ChatResponseAssembler;
 import com.kratisai.controlplane.agentloop.LlmErrorCategory;
 import com.kratisai.controlplane.agentloop.ReActLoopExhaustedException;
@@ -13,6 +14,7 @@ import com.kratisai.controlplane.repository.ModelProviderRepository;
 import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.ChatService;
+import com.kratisai.controlplane.service.ChatTurnEventService;
 import com.kratisai.controlplane.service.ChatUsageSessionService;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.ScratchpadService;
@@ -40,6 +42,7 @@ import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.augment.AugmentedToolCallbackProvider;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.stereotype.Service;
@@ -69,6 +72,7 @@ public class PlanningAgentService {
     private final ChatTitleService chatTitleService;
     private final ChatFluxRegistry chatFluxRegistry;
     private final AsyncTaskExecutor agentTaskExecutor;
+    private final ChatTurnEventService chatTurnEventService;
 
     public PlanningAgentService(
             ModelProviderRepository modelProviderRepository,
@@ -91,7 +95,9 @@ public class PlanningAgentService {
             MermaidDiagramValidator mermaidDiagramValidator,
             MermaidDiagramRepairer mermaidDiagramRepairer,
             @Qualifier("agentTaskExecutor") AsyncTaskExecutor agentTaskExecutor,
-            @Qualifier("mermaidRepairExecutor") Executor mermaidRepairExecutor) {
+            @Qualifier("mermaidRepairExecutor") Executor mermaidRepairExecutor,
+            ObjectProvider<AgentActivityListener> agentActivityListenerProvider,
+            ChatTurnEventService chatTurnEventService) {
 
         this.modelProviderRepository = modelProviderRepository;
         this.chatModelFactory = chatModelFactory;
@@ -101,6 +107,7 @@ public class PlanningAgentService {
         this.chatTitleService = chatTitleService;
         this.chatFluxRegistry = chatFluxRegistry;
         this.agentTaskExecutor = agentTaskExecutor;
+        this.chatTurnEventService = chatTurnEventService;
 
         ToolCallback[] toolCallbacks =
                 getWrappedTools(canvasTool, repositoryTool, dimensionTool, wikiTool, scratchpadTool, webSearchTool);
@@ -113,7 +120,8 @@ public class PlanningAgentService {
                 mermaidRepairExecutor,
                 mermaidNormalizer,
                 mermaidDiagramValidator,
-                mermaidDiagramRepairer);
+                mermaidDiagramRepairer,
+                agentActivityListenerProvider.getIfAvailable());
     }
 
     /** Add AgentThinking to our tool-callbacks * */
@@ -427,7 +435,16 @@ public class PlanningAgentService {
         } finally {
             chatFluxRegistry.remove(context.chatId(), stream);
             chatUsageSessionService.syncUsage(context.chatId(), virtualKey);
-            chatService.publishChatsChanged(context.teamId());
+            try {
+                chatTurnEventService.publishTurnCompleted(context.teamId(), context.chatId());
+            } catch (Exception e) {
+                logger.warn("Failed to publish turn completion for chat {}", context.chatId(), e);
+            }
+            try {
+                chatService.publishChatsChanged(context.teamId());
+            } catch (Exception e) {
+                logger.warn("Failed to publish chats changed for team {}", context.teamId(), e);
+            }
         }
         if (!Thread.currentThread().isInterrupted() && !pausedByShutdown) {
             try {

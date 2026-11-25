@@ -13,6 +13,14 @@ export interface ChatDto {
   updatedAt: string
 }
 
+export interface ChatUsageDto {
+  completionTokens: null | number
+  promptTokens: null | number
+  totalSpend: null | number
+  totalTokens: null | number
+  usageLastUpdatedAt: null | string
+}
+
 export interface CreateChatParams {
   message: string
   modelName: string
@@ -57,6 +65,13 @@ export async function fetchChats(
 ): Promise<ChatDto[]> {
   const response = await fetchWithAuth(
     `/api/v1/chats?teamId=${encodeURIComponent(teamId)}&filter=${encodeURIComponent(filter)}&status=${encodeURIComponent(status)}`,
+  )
+  return response.json()
+}
+
+export async function fetchChatUsage(teamId: string, chatId: string): Promise<ChatUsageDto> {
+  const response = await fetchWithAuth(
+    `/api/v1/chats/${encodeURIComponent(chatId)}/usage?teamId=${encodeURIComponent(teamId)}`,
   )
   return response.json()
 }

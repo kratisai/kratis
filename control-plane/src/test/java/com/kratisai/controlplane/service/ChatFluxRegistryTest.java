@@ -27,6 +27,7 @@ class ChatFluxRegistryTest {
 
         assertThat(registry.containsKey(chatId)).isTrue();
         assertThat(registry.size()).isEqualTo(1);
+        assertThat(registry.activeChatIds()).containsExactly(chatId);
         assertThat(registry.get(chatId)).isSameAs(flux);
     }
 

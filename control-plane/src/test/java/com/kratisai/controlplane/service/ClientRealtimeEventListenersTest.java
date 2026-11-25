@@ -11,6 +11,7 @@ import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.api.wsdto.CanvasEvent;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
+import com.kratisai.controlplane.api.wsdto.ClientPayload.ChatUsageChangedResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionAcpInitializedResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionActivityResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionCompleteResult;
@@ -30,6 +31,7 @@ import com.kratisai.controlplane.model.RepositoryType;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.event.CanvasDeletedEvent;
+import com.kratisai.controlplane.model.event.ChatUsageChangedEvent;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionAcpInitializedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
@@ -203,6 +205,20 @@ class ClientRealtimeEventListenersTest {
         assertThat(result.sessionId()).isEqualTo("acp-sess-1");
         assertThat(result.agentName()).isEqualTo("goose");
         assertThat(result.agentVersion()).isEqualTo("1.46.0");
+    }
+
+    @Test
+    void onChatUsageChangedEvent_broadcastsScopedUsageChanged() {
+        UUID teamId = UUID.randomUUID();
+        UUID chatId = UUID.randomUUID();
+
+        listeners.onChatUsageChangedEvent(new ChatUsageChangedEvent(teamId, chatId));
+
+        ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
+        verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
+        ChatUsageChangedResult result = (ChatUsageChangedResult) captor.getValue();
+        assertThat(result.teamId()).isEqualTo(teamId);
+        assertThat(result.chatId()).isEqualTo(chatId);
     }
 
     @Test

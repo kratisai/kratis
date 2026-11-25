@@ -9,6 +9,7 @@ import com.kratisai.controlplane.client.litellm.LiteLLMDto.*;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ChatUsageSession;
 import com.kratisai.controlplane.model.LlmUsageSnapshot;
+import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
 import java.time.Instant;
@@ -17,6 +18,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 class ChatUsageSessionServiceTest {
 
@@ -37,8 +39,8 @@ class ChatUsageSessionServiceTest {
                 .thenReturn(List.of(new SpendLogEntry(100L, 80L, 20L, 1.5, "raw-chat", "group-chat")));
 
         VirtualKeyService virtualKeyService = new VirtualKeyService(liteLLMClient);
-        chatUsageSessionService =
-                new ChatUsageSessionService(chatUsageSessionRepository, chatRepository, virtualKeyService);
+        chatUsageSessionService = new ChatUsageSessionService(
+                chatUsageSessionRepository, chatRepository, virtualKeyService, mock(ApplicationEventPublisher.class));
     }
 
     @Test
@@ -104,6 +106,10 @@ class ChatUsageSessionServiceTest {
     void refreshUsageForChat_updatesActiveSessions() {
         ChatEntity chat = new ChatEntity();
         chat.setId(UUID.randomUUID());
+        Team team = new Team();
+        team.setId(UUID.randomUUID());
+        chat.setTeam(team);
+        when(chatRepository.findById(chat.getId())).thenReturn(Optional.of(chat));
 
         ChatUsageSession session = new ChatUsageSession(chat, "sk-test-virtual-key");
         when(chatUsageSessionRepository.findByChatId(chat.getId())).thenReturn(List.of(session));
@@ -136,19 +142,18 @@ class ChatUsageSessionServiceTest {
     }
 
     @Test
-    void syncUsage_fallsBackToRecordUsageWhenNotFoundByKey() {
+    void syncUsage_unknownKeyWithoutSessionsLeavesPersistedUsageUntouched() {
         UUID sessionId = UUID.randomUUID();
         String virtualKey = "sk-test-virtual-key";
 
         when(chatUsageSessionRepository.findByVirtualKey(virtualKey)).thenReturn(Optional.empty());
         when(chatUsageSessionRepository.findByChatIdOrderByStartedAtDesc(sessionId))
                 .thenReturn(List.of());
-        when(chatUsageSessionRepository.save(any(ChatUsageSession.class))).thenAnswer(inv -> inv.getArgument(0));
 
         chatUsageSessionService.syncUsage(sessionId, virtualKey);
 
         verify(chatUsageSessionRepository).findByVirtualKey(virtualKey);
-        // Should create new session via recordUsage path
+        verify(chatUsageSessionRepository, never()).save(any(ChatUsageSession.class));
     }
 
     @Test

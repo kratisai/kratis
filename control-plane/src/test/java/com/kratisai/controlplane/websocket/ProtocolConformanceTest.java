@@ -216,7 +216,8 @@ class ProtocolConformanceTest {
         Path clientValid = protocolDir().resolve("client/examples/results/valid");
         Set<String> coveredTypes = new HashSet<>();
         for (File file : listJsonFiles(clientValid)) {
-            JsonNode result = MAPPER.readTree(file);
+            JsonNode envelope = MAPPER.readTree(file);
+            JsonNode result = envelope.has("result") ? envelope.path("result") : envelope;
             String wireType = result.path("type").asText();
             Class<?> record = clientResultRecord(ClientPayloadType.fromWire(wireType));
             coveredTypes.add(wireType);
@@ -249,7 +250,8 @@ class ProtocolConformanceTest {
         }
 
         for (File file : listJsonFiles(protocolDir().resolve("client/examples/results/invalid"))) {
-            JsonNode result = MAPPER.readTree(file);
+            JsonNode envelope = MAPPER.readTree(file);
+            JsonNode result = envelope.has("result") ? envelope.path("result") : envelope;
             String wireType = result.path("type").asText();
             ClientPayloadType payloadType;
             try {
@@ -893,6 +895,7 @@ class ProtocolConformanceTest {
             case EXECUTION_OUTPUT -> ClientPayload.ExecutionOutputResult.class;
             case EXECUTION_COMPLETE -> ClientPayload.ExecutionCompleteResult.class;
             case EXECUTION_STATUS_CHANGED -> ClientPayload.ExecutionStatusChangedResult.class;
+            case CHAT_USAGE_CHANGED -> ClientPayload.ChatUsageChangedResult.class;
             case EXECUTION_ACTIVITY -> ClientPayload.ExecutionActivityResult.class;
             case EXECUTION_SUBSCRIPTION -> ClientPayload.ExecutionSubscriptionResult.class;
             case EXECUTION_ACP_INITIALIZED -> ClientPayload.ExecutionAcpInitializedResult.class;

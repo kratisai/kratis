@@ -6,12 +6,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.kratisai.controlplane.agentloop.AgentActivityListener;
 import com.kratisai.controlplane.agentloop.ReActLoopPausedException;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.config.PlanningProperties;
@@ -23,6 +25,7 @@ import com.kratisai.controlplane.repository.ModelProviderRepository;
 import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatModelFactory;
 import com.kratisai.controlplane.service.ChatService;
+import com.kratisai.controlplane.service.ChatTurnEventService;
 import com.kratisai.controlplane.service.ChatUsageSessionService;
 import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.testsupport.PlanningTestStubs;
@@ -50,6 +53,7 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import reactor.core.Disposable;
@@ -58,6 +62,13 @@ import reactor.core.publisher.Sinks;
 
 class PlanningAgentServiceTest {
 
+    @SuppressWarnings("unchecked")
+    private static ObjectProvider<AgentActivityListener> mockAgentActivityListenerProvider() {
+        ObjectProvider<AgentActivityListener> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(null);
+        return provider;
+    }
+
     private ModelProviderRepository modelProviderRepository;
     private ChatModelFactory chatModelFactory;
     private ChatService chatService;
@@ -65,6 +76,7 @@ class PlanningAgentServiceTest {
     private LiteLLMProvisioningService liteLLMProvisioningService;
     private ChatTitleService chatTitleService;
     private ChatFluxRegistry chatFluxRegistry;
+    private ChatTurnEventService chatTurnEventService;
     private PlanningAgentService planningAgentService;
 
     @BeforeEach
@@ -76,6 +88,7 @@ class PlanningAgentServiceTest {
         liteLLMProvisioningService = mock(LiteLLMProvisioningService.class);
         chatTitleService = mock(ChatTitleService.class);
         chatFluxRegistry = new ChatFluxRegistry();
+        chatTurnEventService = mock(ChatTurnEventService.class);
         AsyncTaskExecutor agentTaskExecutor = new SimpleAsyncTaskExecutor("test-agent-");
 
         planningAgentService = new PlanningAgentService(
@@ -99,7 +112,9 @@ class PlanningAgentServiceTest {
                 new MermaidDiagramValidator(),
                 new MermaidDiagramRepairer(new MermaidNormalizer()),
                 agentTaskExecutor,
-                Runnable::run);
+                Runnable::run,
+                mockAgentActivityListenerProvider(),
+                chatTurnEventService);
     }
 
     @Test
@@ -206,6 +221,43 @@ class PlanningAgentServiceTest {
         verify(chatUsageSessionService, timeout(5000)).syncUsage(chatId, "vk-123");
         verify(chatService, never()).saveAssistantErrorMessage(any(), anyString(), anyInt());
         assertThat(chatFluxRegistry.containsKey(chatId)).isFalse();
+    }
+
+    @Test
+    void execute_turnEventFailureStillPublishesChatsChanged() throws Exception {
+        UUID teamId = UUID.randomUUID();
+        UUID providerId = UUID.randomUUID();
+        UUID chatId = UUID.randomUUID();
+
+        ModelProvider provider = new ModelProvider("TestProvider", ProviderType.OPENAI, "key", "url");
+        when(modelProviderRepository.findByTeamIdAndId(teamId, providerId)).thenReturn(Optional.of(provider));
+        when(liteLLMProvisioningService.buildLiteLLMModelName(any(), any())).thenReturn("litellm-model");
+
+        ChatUsageSession session = mock(ChatUsageSession.class);
+        LlmUsage usage = mock(LlmUsage.class);
+        when(usage.getVirtualKey()).thenReturn("vk-123");
+        when(session.getUsage()).thenReturn(usage);
+        when(chatUsageSessionService.getOrCreateActiveSession(chatId, "gpt-4o", "litellm-model"))
+                .thenReturn(session);
+        when(chatModelFactory.createChatModelViaLiteLLM(any(), any(), any(), eq(true)))
+                .thenReturn(mock(ChatModel.class));
+
+        Field orchestrationLoopField = PlanningAgentService.class.getDeclaredField("orchestrationLoop");
+        orchestrationLoopField.setAccessible(true);
+        orchestrationLoopField.set(planningAgentService, mock(PlanningAgentLoop.class));
+
+        doThrow(new IllegalStateException("database unavailable"))
+                .when(chatTurnEventService)
+                .publishTurnCompleted(teamId, chatId);
+
+        CountDownLatch completed = new CountDownLatch(1);
+        planningAgentService
+                .streamMessage(teamId, providerId, "gpt-4o", chatId, "Hello")
+                .subscribe(payload -> {}, error -> completed.countDown(), completed::countDown);
+
+        assertThat(completed.await(3, TimeUnit.SECONDS)).isTrue();
+        verify(chatTurnEventService, timeout(5000)).publishTurnCompleted(teamId, chatId);
+        verify(chatService, timeout(5000).times(2)).publishChatsChanged(teamId);
     }
 
     @Test

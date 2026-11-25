@@ -3,6 +3,7 @@ package com.kratisai.controlplane.service;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ChatUsageSession;
 import com.kratisai.controlplane.model.LlmUsageSnapshot;
+import com.kratisai.controlplane.model.event.ChatUsageChangedEvent;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
 import java.time.Duration;
@@ -13,7 +14,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,20 +27,17 @@ public class ChatUsageSessionService {
     private final ChatUsageSessionRepository chatUsageSessionRepository;
     private final ChatRepository chatRepository;
     private final VirtualKeyService virtualKeyService;
+    private final ApplicationEventPublisher eventPublisher;
 
-    @Autowired
     public ChatUsageSessionService(
             ChatUsageSessionRepository chatUsageSessionRepository,
             ChatRepository chatRepository,
-            VirtualKeyService virtualKeyService) {
+            VirtualKeyService virtualKeyService,
+            ApplicationEventPublisher eventPublisher) {
         this.chatUsageSessionRepository = chatUsageSessionRepository;
         this.chatRepository = chatRepository;
         this.virtualKeyService = virtualKeyService;
-    }
-
-    ChatUsageSessionService(
-            ChatUsageSessionRepository chatUsageSessionRepository, VirtualKeyService virtualKeyService) {
-        this(chatUsageSessionRepository, null, virtualKeyService);
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -99,12 +97,8 @@ public class ChatUsageSessionService {
 
     @Transactional
     public ChatUsageSession getOrCreateActiveSession(UUID sessionId, String modelName, String litellmModelAlias) {
-        ChatEntity chat = null;
-        boolean chatExists = false;
-        if (chatRepository != null) {
-            chat = chatRepository.findById(sessionId).orElse(null);
-            chatExists = chat != null;
-        }
+        ChatEntity chat = chatRepository.findById(sessionId).orElse(null);
+        boolean chatExists = chat != null;
         if (chat == null) {
             chat = new ChatEntity();
             chat.setId(sessionId);
@@ -167,6 +161,9 @@ public class ChatUsageSessionService {
     @Transactional
     public void refreshUsageForChat(UUID chatId) {
         List<ChatUsageSession> sessions = chatUsageSessionRepository.findByChatId(chatId);
+        if (sessions.isEmpty()) {
+            return;
+        }
         for (ChatUsageSession session : sessions) {
             if (session.getUsage().getVirtualKey() != null && !session.isEnded()) {
                 try {
@@ -179,6 +176,10 @@ public class ChatUsageSessionService {
                 }
             }
         }
+        chatRepository
+                .findById(chatId)
+                .map(chat -> chat.getTeam().getId())
+                .ifPresent(teamId -> eventPublisher.publishEvent(new ChatUsageChangedEvent(teamId, chatId)));
     }
 
     @Transactional

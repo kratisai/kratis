@@ -1,5 +1,6 @@
 package com.kratisai.controlplane.planningagent;
 
+import com.kratisai.controlplane.agentloop.AgentActivityListener;
 import com.kratisai.controlplane.agentloop.ReActLoop;
 import com.kratisai.controlplane.agentloop.ReActLoop.ToolPhase;
 import com.kratisai.controlplane.api.wsdto.ClientPayload;
@@ -46,6 +47,7 @@ public class PlanningAgentLoop {
     private final MermaidNormalizer mermaidNormalizer;
     private final MermaidDiagramValidator mermaidDiagramValidator;
     private final MermaidDiagramRepairer mermaidDiagramRepairer;
+    private final AgentActivityListener agentActivityListener;
 
     public PlanningAgentLoop(
             ChatMemory chatMemory,
@@ -56,7 +58,8 @@ public class PlanningAgentLoop {
             Executor mermaidRepairExecutor,
             MermaidNormalizer mermaidNormalizer,
             MermaidDiagramValidator mermaidDiagramValidator,
-            MermaidDiagramRepairer mermaidDiagramRepairer) {
+            MermaidDiagramRepairer mermaidDiagramRepairer,
+            AgentActivityListener agentActivityListener) {
         this.chatMemory = chatMemory;
         this.scratchpadService = scratchpadService;
         this.toolCallbacks = toolCallbacks;
@@ -66,6 +69,7 @@ public class PlanningAgentLoop {
         this.mermaidNormalizer = mermaidNormalizer;
         this.mermaidDiagramValidator = mermaidDiagramValidator;
         this.mermaidDiagramRepairer = mermaidDiagramRepairer;
+        this.agentActivityListener = agentActivityListener;
     }
 
     /** Run the ReAct loop for a chat. Emits chat stream payload chunks to a sink. */
@@ -94,11 +98,14 @@ public class PlanningAgentLoop {
                         emitTelemetry(sink, context.chatId(), attempt, new TelemetryEvent.Thought(text)))
                 .onAnswerChunk((attempt, text) -> emitToSink(
                         sink,
+                        context.chatId(),
                         new ClientPayload.MessageChunkResult(context.chatId(), context.messageId(), attempt, text)))
                 .onToolEvent((attempt, taskId, toolName, phase, detail) ->
                         emitToolEvent(sink, context.chatId(), attempt, taskId, toolName, phase, detail))
                 .onAttemptAborted(attempt -> emitToSink(
-                        sink, new ClientPayload.MessageRetractResult(context.chatId(), context.messageId(), attempt)))
+                        sink,
+                        context.chatId(),
+                        new ClientPayload.MessageRetractResult(context.chatId(), context.messageId(), attempt)))
                 .run(history, toolContext);
 
         if (output == null) {
@@ -109,6 +116,7 @@ public class PlanningAgentLoop {
         if (!finalOutput.equals(output)) {
             emitToSink(
                     sink,
+                    context.chatId(),
                     new ClientPayload.MessageResult(
                             ClientPayloadType.MESSAGE,
                             finalOutput,
@@ -171,12 +179,20 @@ public class PlanningAgentLoop {
 
     private void emitTelemetry(
             Sinks.Many<ClientPayload.ChatStreamPayload> sink, UUID chatId, int attempt, TelemetryEvent event) {
-        emitToSink(sink, new ClientPayload.TelemetryResult(chatId, attempt, event));
+        emitToSink(sink, chatId, new ClientPayload.TelemetryResult(chatId, attempt, event));
     }
 
-    private void emitToSink(Sinks.Many<ClientPayload.ChatStreamPayload> sink, ClientPayload.ChatStreamPayload result) {
+    private void emitToSink(
+            Sinks.Many<ClientPayload.ChatStreamPayload> sink, UUID chatId, ClientPayload.ChatStreamPayload result) {
         synchronized (sinkLock) {
             sink.tryEmitNext(result);
+        }
+        if (agentActivityListener != null) {
+            try {
+                agentActivityListener.onAgentActivity(chatId);
+            } catch (RuntimeException e) {
+                log.warn("Agent activity listener failed for chat {}", chatId, e);
+            }
         }
     }
 

@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import type {
   CanvasResult,
   ChatErrorResult,
+  ChatUsageChangedResult,
   ClientRpcMethods,
   CompleteResult,
   ExecutionActivityResult,
@@ -256,6 +257,9 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
           break
         case 'chat_subscription':
           confirmSubscription(response.id)
+          break
+        case 'chat_usage_changed':
+          handleChatUsageChangedResult(response.result)
           break
         case 'complete':
           handleCompleteResult(response.result)
@@ -727,6 +731,11 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
     unsubscribe,
   }
 })
+
+export function handleChatUsageChangedResult(result: ChatUsageChangedResult): void {
+  if (result.teamId !== useAuthStore.getState().currentTeamId) return
+  void queryClient.invalidateQueries({ queryKey: ['chat-usage', result.teamId, result.chatId] })
+}
 
 export function handleExecutionCompleteResult(result: ExecutionCompleteResult): void {
   const statusText = result.status === 'FAILED' ? 'FAILED' : 'successfully'
