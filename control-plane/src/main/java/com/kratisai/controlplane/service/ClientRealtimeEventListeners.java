@@ -99,17 +99,6 @@ public class ClientRealtimeEventListeners {
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void onSandboxExecutionCompleteEvent(SandboxExecutionCompleteEvent event) {
-        try {
-            dispatch.broadcastNotificationToTeam(
-                    event.teamId(),
-                    new ExecutionCompleteResult(event.executionId(), event.exitCode(), event.status(), event.reason()));
-        } catch (Exception e) {
-            logger.error("Failed to publish execution complete event for execution {}", event.executionId(), e);
-        }
-    }
-
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onChatUsageChangedEvent(ChatUsageChangedEvent event) {
         try {
             dispatch.broadcastNotificationToTeam(

@@ -37,7 +37,6 @@ export interface CreateChatResponse {
 
 export type TopicStatus =
   | 'Blocked'
-  | 'Failed'
   | 'Idle'
   | 'MR pushed'
   | 'Planning'

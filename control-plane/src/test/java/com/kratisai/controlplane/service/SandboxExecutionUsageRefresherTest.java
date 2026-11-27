@@ -233,8 +233,8 @@ class SandboxExecutionUsageRefresherTest {
         // The completion transaction commits the terminal status before the complete event fires,
         // so the already-dispatched refresh skips the fetch via the status guard.
         when(execution.getStatus()).thenReturn(SandboxExecutionStatus.COMPLETED);
-        refresher.onSandboxExecutionCompleteEvent(
-                new SandboxExecutionCompleteEvent(teamId, executionId, 0, SandboxExecutionStatus.COMPLETED));
+        refresher.onSandboxExecutionCompleteEvent(new SandboxExecutionCompleteEvent(
+                teamId, executionId, 0, SandboxExecutionStatus.COMPLETED, null, false));
 
         verify(windowFutures.getFirst()).cancel(false);
         runImmediateTask(0);

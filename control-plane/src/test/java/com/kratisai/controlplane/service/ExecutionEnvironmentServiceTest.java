@@ -317,26 +317,6 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
-    void suspendAfterLostRuntime_sealsFailedExecutionsWithoutChangingStatus() {
-        ExecutionEnvironment env = createSandboxEnvironment();
-        SandboxExecution failed = createRunningExecution(env);
-        failed.setStatus(SandboxExecutionStatus.FAILED);
-        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
-                .thenReturn(Optional.of(failed));
-
-        executionEnvironmentService.suspendAfterLostRuntime(env);
-
-        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
-        verify(eventPublisher, atLeastOnce()).publishEvent(eventCaptor.capture());
-        assertThat(eventCaptor.getAllValues())
-                .filteredOn(SandboxExecutionSuspendedEvent.class::isInstance)
-                .hasSize(1)
-                .first()
-                .isEqualTo(new SandboxExecutionSuspendedEvent(TEAM_ID, EXECUTION_ID, ENV_ID));
-        assertThat(failed.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
-    }
-
-    @Test
     void deleteEnvironment_revokesActiveVirtualKeysBeforeDeleting() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setType(ExecutionEnvironmentType.CONNECTOR);
@@ -412,7 +392,7 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
-    void failStrandedExecution_settlesExecutionLeftByDeadEnvironmentAsUnknown() {
+    void settleStrandedExecution_settlesInterruptedTurnAsIdle() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.TERMINATED);
         SandboxExecution execution = createRunningExecution(env);
@@ -421,9 +401,9 @@ class ExecutionEnvironmentServiceTest {
                 .thenReturn(Optional.empty());
         when(activityRepository.nextSequence(EXECUTION_ID)).thenReturn(1L);
 
-        executionEnvironmentService.failStrandedExecution(EXECUTION_ID);
+        executionEnvironmentService.settleStrandedExecution(EXECUTION_ID);
 
-        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.UNKNOWN);
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(execution.getCompletedAt()).isNotNull();
         verify(eventPublisher).publishEvent(any(SandboxExecutionCompleteEvent.class));
         verify(eventPublisher).publishEvent(any(ExecutionStatusChangedEvent.class));
@@ -632,7 +612,7 @@ class ExecutionEnvironmentServiceTest {
         executionEnvironmentService.suspendAfterLostRuntime(env);
 
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.SLEEPING);
-        assertThat(running.getStatus()).isEqualTo(SandboxExecutionStatus.UNKNOWN);
+        assertThat(running.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
     }
 
     @Test
@@ -712,7 +692,7 @@ class ExecutionEnvironmentServiceTest {
 
         verify(sandboxProvider).destroy(ENV_ID);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
-        assertThat(active.getStatus()).isEqualTo(SandboxExecutionStatus.UNKNOWN);
+        assertThat(active.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         verify(executionEnvironmentRepository).save(env);
     }
 
@@ -733,7 +713,7 @@ class ExecutionEnvironmentServiceTest {
         executionEnvironmentService.reconcilePurgedEnvironment(env);
 
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.TERMINATED);
-        assertThat(active.getStatus()).isEqualTo(SandboxExecutionStatus.UNKNOWN);
+        assertThat(active.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         verify(executionEnvironmentRepository).save(env);
         verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
         verify(activityRepository, never()).findByExecutionIdAndActionId(EXECUTION_ID, "sandbox-purged");
@@ -770,12 +750,12 @@ class ExecutionEnvironmentServiceTest {
     }
 
     @Test
-    void reconcilePurgedEnvironment_withFailedExecution_publishesSuspendedEvent() {
+    void reconcilePurgedEnvironment_withIdleExecution_publishesSuspendedEvent() {
         ExecutionEnvironment env = createSandboxEnvironment();
         env.setStatus(EnvironmentStatus.CONNECTED);
         env.setLastActivityAt(Instant.now());
         SandboxExecution failed = createRunningExecution(env);
-        failed.setStatus(SandboxExecutionStatus.FAILED);
+        failed.setStatus(SandboxExecutionStatus.IDLE);
         when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENV_ID))
                 .thenReturn(Optional.of(failed));
         when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(failed));

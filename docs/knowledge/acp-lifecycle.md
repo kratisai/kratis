@@ -232,9 +232,12 @@ control-plane and awaits further instructions (typically process shutdown).
 
 **Entry:** An unrecoverable error occurred at any stage.
 
-The client sends `env.complete` with a non-zero exit code and an error
-message to the control-plane. Cleanup follows the same pattern as
-`Terminating` (kill process, drain readers).
+The connector sends `env.complete` with the process exit code and error reason; an unexpected exit
+is an error even when the process returns code 0. The control plane records an `ERROR` activity
+and settles the execution to `IDLE`. When the environment was `CONNECTED`, it moves to
+`PENDING_CONNECT` and triggers one fresh `env.launch_acp_agent`; if that launch fails, a
+`SANDBOX` suspends to `SLEEPING`. Cleanup follows the same pattern as `Terminating` (kill
+process, drain readers).
 
 ---
 
@@ -359,9 +362,13 @@ ownership of the turn. The terminal outcome always arrives as
 for the agent to go quiet.  This absorbs harnesses that keep working after
 signalling `end_turn`
 
-A relaunch handshake (`env.acp_initialized` with `relaunch: true`) replaces a
-terminated session. The control plane must not re-dispatch the task prompt in
-that case; the caller that requested the relaunch delivers its own prompt.
+`env.acp_initialized` is informational: it reports the session established by the synchronous
+launch handshake. The control plane does not dispatch a prompt from this notification, whether
+the connector created a new session or re-attached a persisted one. `env.acp_prompt` never launches or relaunches an
+agent; the control plane launches it with `env.launch_acp_agent` while bringing up or resuming
+the environment, waits for the launch result, and only then marks a sandbox environment
+`CONNECTED`. The task prompt is dispatched by that same flow. `isSteering` is true only when
+the execution was already `RUNNING`; an `IDLE` follow-up is a normal turn.
 
 ### 5.1 Stop Reasons
 
@@ -452,20 +459,21 @@ The sidecar translates ACP events into Kratis-native WebSocket messages:
 |-----------|----------------------|
 | Agent stdout line (non-JSON protocol violation) | `env.output` with `stream: "stdout"` |
 | Agent stderr line | `env.output` with `stream: "stderr"` |
-| `initialize` + `session/new` complete | `env.acp_initialized` with `sessionId`, `agentName`, `agentVersion` (`relaunch: true` when replacing a terminated session) |
+| `initialize` + session setup complete | `env.acp_initialized` with `sessionId`, `agentName`, `agentVersion`; informational only |
 | `session/update` (all variants) | `env.output` or structured `env.activity` events |
 | `session/request_permission` | Permission request via WebSocket, await response |
 | `env.acp_prompt` accepted | `env.acp_prompt` result with `status: "accepted"` (dispatch acknowledgement) |
 | `session/prompt` response with stopReason, after quiet window | `env.acp_prompt_complete` with `stopReason` and `promptId` |
 | Agent process exit | `env.complete` with `exitCode` |
 | Deliberate stop (`env.cancel_agent` or internal teardown) | `env.complete` with `exitCode` and `terminated: true`; an expected pause, not an error, even when signal-terminated |
-| Launch failure | `env.complete` with `exitCode: -1` |
+| Agent launch failure | `env.complete` with `exitCode: -1`, `terminated: false`, and a launch error reason |
 
-On `env.complete` the control plane sets the execution status to `FAILED` only for an
-unexpected non-zero exit (`terminated: true` excluded); every other outcome — a sandbox
-sleep, an explicit stop, or a finished turn — leaves it `IDLE`. The agent process ending is a
-pause, not task completion: an execution becomes `COMPLETED` only once its change is merged
-(not tracked in this flow), so it stays steerable across a sandbox sleep and resume.
+On `env.complete` the control plane always settles the execution to `IDLE`. A deliberate stop
+(`terminated: true`) is an expected pause. Any other agent process exit—including exit code 0—is
+recorded as an `ERROR` activity. If the environment was `CONNECTED`, it moves to `PENDING_CONNECT`
+for one fresh `env.launch_acp_agent` attempt; if that launch fails, a `SANDBOX` suspends cleanly
+to `SLEEPING` so its snapshot is preserved for resume. The execution stays `IDLE` throughout,
+ready for the next instruction once the agent is restored.
 
 ### 9.1 `session/update` relay model
 
@@ -580,6 +588,13 @@ agent process lifecycle:
 - `initialize` handshake with version negotiation (owned by `supervisor.Launch()`)
 - `session/new` to create a session; `session/resume` (preferred) or `session/load` to re-attach to a
   stored session id persisted at `<credentials-dir>/acp_session_id` (owned by `supervisor.Launch()`)
+- Agent launch is driven by the control plane through `env.launch_acp_agent`; the control
+  plane supplies the agent command and marks a sandbox environment `CONNECTED` only after the
+  launch succeeds. A failed launch records the error, settles the execution to `IDLE`, and
+  suspends the sandbox to `SLEEPING`; a `CONNECTOR` remains `CONNECTED` because its WebSocket is
+  its readiness signal. `env.acp_prompt` only prompts a live session and never launches an agent.
+  After an abnormal agent exit on a `CONNECTED` sandbox, the control plane relaunches through the
+  same path.
 - `session/prompt` to send prompts (owned by `supervisor.Prompt()`)
 - `session/cancel` as a notification (no `id` field) during terminate
 - Session updates replayed while attaching (`session/load` or `session/resume`,

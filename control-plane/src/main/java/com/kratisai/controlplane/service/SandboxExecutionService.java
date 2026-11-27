@@ -24,6 +24,7 @@ import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.repository.*;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.io.Serial;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,6 +39,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
@@ -64,7 +66,7 @@ public class SandboxExecutionService {
     private final CanvasService canvasService;
     private final ModelProviderRepository modelProviderRepository;
     private final TransactionTemplate transactionTemplate;
-    private final TransactionTemplate finalizeUsageTransactionTemplate;
+    private final TransactionTemplate requiresNewTransactionTemplate;
     private final SandboxProvisioningService sandboxProvisioningService;
     private final VirtualKeyService virtualKeyService;
     private final EnvironmentRpcClient environmentRpcClient;
@@ -77,7 +79,27 @@ public class SandboxExecutionService {
     // because every call site already holds a transaction.
     private final ObjectProvider<ExecutionEnvironmentService> executionEnvironmentServiceProvider;
 
+    static final int MAX_AUTOMATIC_RELAUNCHES = 3;
+    static final int MAX_TRACKED_AUTOMATIC_RELAUNCHES = 512;
+
     final Map<UUID, String> activePromptIds = new ConcurrentHashMap<>();
+    private final Set<UUID> automaticRelaunchInFlight = ConcurrentHashMap.newKeySet();
+    final Map<UUID, Integer> automaticRelaunchCounts = Collections.synchronizedMap(new BoundedRelaunchCounts());
+
+    /** LRU-bounded so abandoned capped executions cannot grow this state forever. */
+    private static final class BoundedRelaunchCounts extends LinkedHashMap<UUID, Integer> {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        BoundedRelaunchCounts() {
+            super(16, 0.75f, true);
+        }
+
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<UUID, Integer> eldest) {
+            return size() > MAX_TRACKED_AUTOMATIC_RELAUNCHES;
+        }
+    }
 
     public SandboxExecutionService(
             PlatformTransactionManager transactionManager,
@@ -100,7 +122,8 @@ public class SandboxExecutionService {
             SandboxProperties sandboxProperties,
             ObjectProvider<ExecutionEnvironmentService> executionEnvironmentServiceProvider) {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
-        this.finalizeUsageTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.chatRepository = chatRepository;
         this.executionEnvironmentRepository = executionEnvironmentRepository;
@@ -225,7 +248,7 @@ public class SandboxExecutionService {
                         new TeamEntityChangedEvent(environment.getTeam().getId(), TeamEntityType.ENVIRONMENTS)));
 
             } catch (Exception e) {
-                handleExecutionFailure(execution, "Failed to spawn or initialize sandbox container", e);
+                handleExecutionError(execution, "Failed to spawn or initialize sandbox container", e);
                 throw new RuntimeException("Failed to provision environment", e);
             }
         } else {
@@ -322,6 +345,7 @@ public class SandboxExecutionService {
     }
 
     private void runDispatch(UUID executionId, boolean launchOnly) {
+        UUID environmentId = null;
         try {
             SandboxExecution managed = transactionTemplate.execute(status -> {
                 SandboxExecution reloaded = sandboxExecutionRepository
@@ -330,17 +354,25 @@ public class SandboxExecutionService {
                 touchExecutionGraph(reloaded);
                 return reloaded;
             });
+            environmentId =
+                    managed.getEnvironment() != null ? managed.getEnvironment().getId() : null;
             if (!launchOnly && managed.getRepository() != null) {
                 sandboxProvisioningService.dispatchCheckout(managed);
             } else {
+                markEnvironmentPending(environmentId);
                 sandboxProvisioningService.launchAgent(managed);
+                markEnvironmentConnected(environmentId);
+                if (managed.getStatus() == SandboxExecutionStatus.RUNNING) {
+                    dispatchAcpPrompt(managed);
+                }
             }
         } catch (Exception e) {
-            handleExecutionFailure(
+            handleExecutionError(
                     executionId,
                     null,
                     launchOnly ? "Failed to launch agent after checkout" : "Failed to dispatch execution",
                     e);
+            sleepSandboxAfterLaunchFailure(environmentId);
         }
     }
 
@@ -398,15 +430,15 @@ public class SandboxExecutionService {
         }
         String taskPrompt =
                 ActiveTaskPrompt.buildTaskPrompt(canvas.getContent(), sandboxProperties.getActiveTaskFile());
-        dispatchAcpPrompt(execution, taskPrompt, true, false, false);
+        dispatchAcpPrompt(execution, taskPrompt, true, false);
     }
 
     public void dispatchSteeringPrompt(SandboxExecution execution, String promptText) {
-        dispatchAcpPrompt(execution, promptText, false, false, true);
+        dispatchAcpPrompt(execution, promptText, false, true);
     }
 
     private void dispatchAcpPrompt(
-            SandboxExecution execution, String promptText, boolean failOnError, boolean relaunch, boolean isSteering) {
+            SandboxExecution execution, String promptText, boolean failOnError, boolean isSteering) {
         UUID executionId = execution.getId();
         UUID environmentId = execution.getEnvironment().getId();
         String promptId = UUID.randomUUID().toString();
@@ -418,8 +450,7 @@ public class SandboxExecutionService {
                                 promptText != null ? promptText : "",
                                 executionId.toString(),
                                 promptId,
-                                isSteering ? Boolean.TRUE : null,
-                                relaunch ? Boolean.TRUE : null));
+                                isSteering ? Boolean.TRUE : null));
                 if (result == null || result.status() == PromptStatus.FAILED) {
                     handlePromptDispatchFailure(
                             executionId,
@@ -428,11 +459,10 @@ public class SandboxExecutionService {
                             failOnError);
                 } else {
                     logger.info(
-                            "Dispatched ACP prompt to execution environment {} for execution {} (promptId={}){}",
+                            "Dispatched ACP prompt to execution environment {} for execution {} (promptId={})",
                             environmentId,
                             executionId,
-                            promptId,
-                            relaunch ? " (reattached/relaunched agent session)" : "");
+                            promptId);
                 }
             } catch (EnvironmentRpcClient.EnvironmentRpcException e) {
                 logger.warn(
@@ -475,7 +505,7 @@ public class SandboxExecutionService {
 
     private void handlePromptDispatchFailure(UUID executionId, String message, boolean failOnError) {
         if (failOnError) {
-            failExecutionIfStillRunning(executionId, message);
+            settleExecutionIdleIfRunning(executionId, message);
         } else {
             logger.warn(message + " (steering prompt; execution stays RUNNING)");
         }
@@ -498,13 +528,6 @@ public class SandboxExecutionService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution does not belong to chat");
         }
 
-        if (execution.getStatus() != SandboxExecutionStatus.RUNNING
-                && execution.getStatus() != SandboxExecutionStatus.IDLE
-                && execution.getStatus() != SandboxExecutionStatus.FAILED) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST, "Cannot steer execution in state " + execution.getStatus());
-        }
-
         ExecutionEnvironment environment = execution.getEnvironment();
         if (environment == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Execution has no associated environment");
@@ -513,8 +536,11 @@ public class SandboxExecutionService {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT, "Environment is not awake; resume it before steering");
         }
+        if (execution.getStatus() == SandboxExecutionStatus.COMPLETED) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "Completed executions cannot be steered; start a new execution");
+        }
 
-        boolean recovering = execution.getStatus() == SandboxExecutionStatus.FAILED;
         touchExecutionGraph(execution);
         try {
             executionEnvironmentServiceProvider.getObject().touchActiveEnvironment(environment.getId());
@@ -522,6 +548,7 @@ public class SandboxExecutionService {
             // Best-effort: a failed liveness stamp must never fail the steering it accompanies.
             logger.warn("Failed to record user activity on environment {}: {}", environment.getId(), e.getMessage());
         }
+        boolean wasRunning = execution.getStatus() == SandboxExecutionStatus.RUNNING;
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         execution.setCompletedAt(null);
         execution.setExitCode(null);
@@ -530,14 +557,7 @@ public class SandboxExecutionService {
                 new ExecutionStatusChangedEvent(chat.getTeam().getId(), chatId, executionId));
 
         String compiledPrompt = compileSteeringPrompt(request);
-        if (recovering) {
-            if (logger.isInfoEnabled()) {
-                logger.info("Recovering failed execution {} with steering prompt", executionId);
-            }
-            dispatchAcpPrompt(execution, compiledPrompt, true, true, true);
-        } else {
-            dispatchSteeringPrompt(execution, compiledPrompt);
-        }
+        dispatchAcpPrompt(execution, compiledPrompt, !wasRunning, wasRunning);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -593,7 +613,7 @@ public class SandboxExecutionService {
         return sb.toString();
     }
 
-    private void failExecutionIfStillRunning(UUID executionId, String message) {
+    private void settleExecutionIdleIfRunning(UUID executionId, String message) {
         try {
             transactionTemplate.executeWithoutResult(status -> {
                 SandboxExecution execution =
@@ -604,10 +624,10 @@ public class SandboxExecutionService {
                     return;
                 }
                 logger.error(message);
-                markFailedAndPublish(execution, message);
+                markIdleAndPublish(execution, message);
             });
         } catch (Exception e) {
-            logger.error("Failed to mark execution {} failed after prompt dispatch error", executionId, e);
+            logger.error("Failed to settle execution {} after prompt dispatch error", executionId, e);
         }
     }
 
@@ -660,25 +680,15 @@ public class SandboxExecutionService {
             if (execution == null || execution.getStatus() == SandboxExecutionStatus.COMPLETED) {
                 return;
             }
-            if (execution.getStatus() == SandboxExecutionStatus.FAILED) {
-                if (execution.getEnvironment() != null) {
-                    eventPublisher.publishEvent(new SandboxExecutionSuspendedEvent(
-                            execution.getChat().getTeam().getId(),
-                            executionId,
-                            execution.getEnvironment().getId()));
-                } else {
-                    dispatchExecutor.execute(() -> finalizeUsageAndRevokeKey(executionId));
-                }
-                return;
-            }
             activePromptIds.remove(executionId);
+            automaticRelaunchCounts.remove(executionId);
             execution.setStatus(SandboxExecutionStatus.COMPLETED);
             execution.setCompletedAt(Instant.now());
             sandboxExecutionRepository.save(execution);
             UUID teamId = execution.getChat().getTeam().getId();
             String reason = "execution halted";
             eventPublisher.publishEvent(new SandboxExecutionCompleteEvent(
-                    teamId, executionId, 0, SandboxExecutionStatus.COMPLETED, reason));
+                    teamId, executionId, 0, SandboxExecutionStatus.COMPLETED, reason, false));
             eventPublisher.publishEvent(
                     new ExecutionStatusChangedEvent(teamId, execution.getChat().getId(), executionId));
         });
@@ -832,11 +842,12 @@ public class SandboxExecutionService {
             return;
         }
 
+        automaticRelaunchCounts.remove(executionId);
         UUID teamId = execution.getChat().getTeam().getId();
 
         if (stopReason == StopReason.REFUSAL) {
             activePromptIds.remove(executionId);
-            execution.setStatus(SandboxExecutionStatus.FAILED);
+            execution.setStatus(SandboxExecutionStatus.IDLE);
             execution.setCompletedAt(Instant.now());
             chatRepository.touchUpdatedAt(execution.getChat().getId(), Instant.now());
             sandboxExecutionRepository.save(execution);
@@ -844,11 +855,11 @@ public class SandboxExecutionService {
             activityPersistenceService.recordExecutionError(executionId, "agent refused the task", 0);
 
             eventPublisher.publishEvent(new SandboxExecutionCompleteEvent(
-                    teamId, execution.getId(), 0, execution.getStatus(), "agent refused the task"));
+                    teamId, execution.getId(), 0, execution.getStatus(), "agent refused the task", false));
             eventPublisher.publishEvent(
                     new ExecutionStatusChangedEvent(teamId, execution.getChat().getId(), execution.getId()));
 
-            logger.info("ACP prompt refusal for execution {} → status=FAILED", executionId);
+            logger.info("ACP prompt refusal for execution {} → status=IDLE", executionId);
         } else {
             execution.setStatus(SandboxExecutionStatus.IDLE);
             execution.setCompletedAt(null);
@@ -868,16 +879,16 @@ public class SandboxExecutionService {
     }
 
     @Transactional
-    public void failExecution(UUID executionId) {
-        failExecution(executionId, null);
+    public void settleExecutionIdle(UUID executionId) {
+        settleExecutionIdle(executionId, null);
     }
 
     @Transactional
-    public void failExecution(UUID executionId, String reason) {
+    public void settleExecutionIdle(UUID executionId, String reason) {
         SandboxExecution execution = sandboxExecutionRepository
                 .findById(executionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Execution not found"));
-        markFailedAndPublish(execution, reason);
+        markIdleAndPublish(execution, reason);
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -907,15 +918,14 @@ public class SandboxExecutionService {
                     return execution;
                 })
                 .orElse(null));
-        if (latest != null
-                && (latest.getStatus() == SandboxExecutionStatus.IDLE
-                        || latest.getStatus() == SandboxExecutionStatus.FAILED)) {
+        if (latest != null && latest.getStatus() == SandboxExecutionStatus.IDLE) {
+            automaticRelaunchCounts.remove(latest.getId());
             logger.info(
-                    "Relaunching agent for {} execution {} on resumed environment {}",
-                    latest.getStatus(),
+                    "Launching agent for idle execution {} on resumed environment {}",
                     latest.getId(),
                     event.environmentId());
-            // Credentials live only in the connector's memory; the relaunched sandbox needs them too.
+            // Credentials live only in the connector's memory; the resumed sandbox needs them, and
+            // the agent is launched here so a later prompt only sends the turn.
             dispatchExecutor.execute(() -> {
                 reestablishGitCredentials(event.environmentId());
                 runDispatch(latest.getId(), true);
@@ -923,6 +933,119 @@ public class SandboxExecutionService {
             return;
         }
         reestablishGitCredentials(event.environmentId());
+        markEnvironmentConnected(event.environmentId());
+    }
+
+    private void markEnvironmentPending(UUID environmentId) {
+        if (environmentId == null) {
+            return;
+        }
+        requiresNewTransactionTemplate.executeWithoutResult(status -> {
+            ExecutionEnvironment env =
+                    executionEnvironmentRepository.findById(environmentId).orElse(null);
+            // A CONNECTOR daemon is ready as soon as its WebSocket is live; only a sandbox has a
+            // separate agent-launch readiness step.
+            if (env == null
+                    || env.getType() != ExecutionEnvironmentType.SANDBOX
+                    || env.getStatus() == EnvironmentStatus.PENDING_CONNECT) {
+                return;
+            }
+            env.setStatus(EnvironmentStatus.PENDING_CONNECT);
+            env.setLastActivityAt(Instant.now());
+            executionEnvironmentRepository.save(env);
+            eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
+        });
+    }
+
+    private void markEnvironmentConnected(UUID environmentId) {
+        if (environmentId == null) {
+            return;
+        }
+        requiresNewTransactionTemplate.executeWithoutResult(status -> {
+            ExecutionEnvironment env =
+                    executionEnvironmentRepository.findById(environmentId).orElse(null);
+            if (env == null || env.getStatus() == EnvironmentStatus.CONNECTED) {
+                return;
+            }
+            env.setStatus(EnvironmentStatus.CONNECTED);
+            env.setLastActivityAt(Instant.now());
+            executionEnvironmentRepository.save(env);
+            eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
+        });
+    }
+
+    public void relaunchAgentAfterCrash(UUID executionId) {
+        Runnable work = () -> dispatchExecutor.execute(() -> {
+            if (!automaticRelaunchInFlight.add(executionId)) {
+                logger.debug("Automatic agent relaunch already in flight for execution {}", executionId);
+                return;
+            }
+            UUID environmentId = null;
+            try {
+                SandboxExecution managed = transactionTemplate.execute(status -> {
+                    SandboxExecution reloaded = sandboxExecutionRepository
+                            .findById(executionId)
+                            .orElseThrow(() -> new IllegalStateException("Execution not found: " + executionId));
+                    touchExecutionGraph(reloaded);
+                    return reloaded;
+                });
+                if (managed.getStatus() != SandboxExecutionStatus.IDLE || managed.getEnvironment() == null) {
+                    return;
+                }
+                environmentId = managed.getEnvironment().getId();
+                int attempt = automaticRelaunchCounts.merge(executionId, 1, Integer::sum);
+                if (attempt > MAX_AUTOMATIC_RELAUNCHES) {
+                    String reason =
+                            "Automatic agent relaunch limit reached (" + MAX_AUTOMATIC_RELAUNCHES + " attempts)";
+                    logger.warn("{} for execution {}; leaving IDLE", reason, executionId);
+                    activityPersistenceService.recordExecutionError(executionId, reason, null);
+                    sleepSandboxAfterLaunchFailure(environmentId);
+                    return;
+                }
+                sandboxProvisioningService.launchAgent(managed);
+                markEnvironmentConnected(environmentId);
+                logger.info(
+                        "Relaunched ACP agent for execution {} after process exit (attempt {}/{})",
+                        executionId,
+                        attempt,
+                        MAX_AUTOMATIC_RELAUNCHES);
+            } catch (Exception e) {
+                logger.error("Failed to relaunch ACP agent after crash for execution {}", executionId, e);
+                String reason = "Failed to relaunch agent after crash: " + e.getMessage();
+                activityPersistenceService.recordExecutionError(executionId, reason, null);
+                sleepSandboxAfterLaunchFailure(environmentId);
+            } finally {
+                automaticRelaunchInFlight.remove(executionId);
+            }
+        });
+        if (isSynchronizationActive()) {
+            registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    work.run();
+                }
+            });
+        } else {
+            work.run();
+        }
+    }
+
+    private void sleepSandboxAfterLaunchFailure(UUID environmentId) {
+        if (environmentId == null) {
+            return;
+        }
+        Runnable work = () ->
+                executionEnvironmentServiceProvider.ifAvailable(svc -> svc.sleepAfterLaunchFailure(environmentId));
+        if (isSynchronizationActive()) {
+            registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    work.run();
+                }
+            });
+        } else {
+            work.run();
+        }
     }
 
     private void reestablishGitCredentials(UUID environmentId) {
@@ -945,25 +1068,25 @@ public class SandboxExecutionService {
         }
     }
 
-    private void handleExecutionFailure(UUID executionId, SandboxExecution fallback, String logMessage, Exception e) {
+    private void handleExecutionError(UUID executionId, SandboxExecution fallback, String logMessage, Exception e) {
         logger.error(logMessage, e);
         try {
             transactionTemplate.executeWithoutResult(status -> {
                 SandboxExecution execution =
                         sandboxExecutionRepository.findById(executionId).orElse(null);
                 if (execution == null && fallback != null) {
-                    markFailedAndPublish(fallback, logMessage);
+                    markIdleAndPublish(fallback, logMessage);
                     return;
                 }
                 if (execution == null) {
                     return;
                 }
-                markFailedAndPublish(execution, logMessage);
+                markIdleAndPublish(execution, logMessage);
             });
         } catch (Exception nested) {
             if (fallback != null) {
                 try {
-                    transactionTemplate.executeWithoutResult(status -> markFailedAndPublish(fallback, logMessage));
+                    transactionTemplate.executeWithoutResult(status -> markIdleAndPublish(fallback, logMessage));
                 } catch (Exception ignored) {
                     // best effort for unit tests without a real TM
                 }
@@ -972,13 +1095,13 @@ public class SandboxExecutionService {
         }
     }
 
-    private void handleExecutionFailure(SandboxExecution execution, String logMessage, Exception e) {
-        handleExecutionFailure(execution.getId(), execution, logMessage, e);
+    private void handleExecutionError(SandboxExecution execution, String logMessage, Exception e) {
+        handleExecutionError(execution.getId(), execution, logMessage, e);
     }
 
-    private void markFailedAndPublish(SandboxExecution execution, String reason) {
+    private void markIdleAndPublish(SandboxExecution execution, String reason) {
         activePromptIds.remove(execution.getId());
-        execution.setStatus(SandboxExecutionStatus.FAILED);
+        execution.setStatus(SandboxExecutionStatus.IDLE);
         execution.setCompletedAt(Instant.now());
         sandboxExecutionRepository.save(execution);
         cancelPendingPermissions(execution, "execution failed");
@@ -987,18 +1110,24 @@ public class SandboxExecutionService {
         }
         UUID teamId = execution.getChat().getTeam().getId();
         eventPublisher.publishEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), -1, execution.getStatus(), reason));
+                new SandboxExecutionCompleteEvent(teamId, execution.getId(), -1, execution.getStatus(), reason, false));
         eventPublisher.publishEvent(
                 new ExecutionStatusChangedEvent(teamId, execution.getChat().getId(), execution.getId()));
+        if (execution.getEnvironment() != null
+                && execution.getEnvironment().getType() == ExecutionEnvironmentType.SANDBOX
+                && execution.getEnvironment().getStatus() == EnvironmentStatus.PENDING_CONNECT) {
+            sleepSandboxAfterLaunchFailure(execution.getEnvironment().getId());
+        }
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onSandboxExecutionCompleteEvent(SandboxExecutionCompleteEvent event) {
-        // IDLE and FAILED executions remain steerable while the sandbox is awake; their virtual key
-        // is revoked when the sandbox suspends/terminates or the execution finishes terminally.
-        if (event.status() != SandboxExecutionStatus.COMPLETED && event.status() != SandboxExecutionStatus.UNKNOWN) {
+        // IDLE executions remain steerable while the sandbox is awake; their virtual key is revoked
+        // when the sandbox suspends/terminates or the execution finishes terminally.
+        if (event.status() != SandboxExecutionStatus.COMPLETED) {
             return;
         }
+        automaticRelaunchCounts.remove(event.executionId());
         // FinalizeUsage blocks for 3+LiteLLM seconds. Don't block the sidecar-rpc
         // thread.
         dispatchExecutor.execute(() -> finalizeUsageAndRevokeKey(event.executionId()));
@@ -1069,7 +1198,7 @@ public class SandboxExecutionService {
 
     private void sealUsageSegment(UUID executionId, String token) {
         try {
-            finalizeUsageTransactionTemplate.executeWithoutResult(status -> {
+            requiresNewTransactionTemplate.executeWithoutResult(status -> {
                 SandboxExecution execution = sandboxExecutionRepository
                         .findByIdForUpdate(executionId)
                         .orElse(null);
@@ -1088,7 +1217,7 @@ public class SandboxExecutionService {
 
     private void applyFinalUsage(UUID executionId, String token, LlmUsageSnapshot snapshot) {
         try {
-            finalizeUsageTransactionTemplate.executeWithoutResult(status -> {
+            requiresNewTransactionTemplate.executeWithoutResult(status -> {
                 SandboxExecution execution = sandboxExecutionRepository
                         .findByIdForUpdate(executionId)
                         .orElse(null);

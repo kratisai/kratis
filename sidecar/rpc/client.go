@@ -109,15 +109,6 @@ type Client struct {
 	// supervisor manages the ACP agent lifecycle
 	supervisor *runner.AgentSupervisor
 
-	// acpAgentCommand remembers the agent command used for the current ACP
-	// session so env.acp_prompt with relaunch=true can spawn a fresh session
-	// with the same command.
-	acpAgentCommand string
-
-	// acpAgentLogFiles remembers the diagnostic files tailed for the current
-	// ACP session so a relaunch tails the same set.
-	acpAgentLogFiles []string
-
 	// terminalManager manages ACP terminal sessions
 	terminalManager *acp.TerminalManager
 

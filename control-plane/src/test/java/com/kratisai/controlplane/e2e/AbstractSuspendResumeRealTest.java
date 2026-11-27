@@ -157,10 +157,9 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
         List<String> usageKeysBefore = usageKeys(executionId);
         assertThat(usageKeysBefore).hasSize(1);
         long llmRequestsBeforeResume = wireMockLlmServer.getTotalMatchedRequests();
-        int acpInitializedBefore = acpInitializedCount();
 
         resumeViaRest(envId);
-        awaitResumed(envId, acpInitializedBefore);
+        awaitResumed(envId);
 
         Map<String, String> afterResume = readLiveState();
         assertThat(afterResume)
@@ -206,9 +205,8 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
         String snapshotImage = "kratis-snapshot-" + envId + ":latest";
         String headBefore = readSnapshotState(snapshotImage).get("head");
 
-        int acpInitialized = acpInitializedCount();
         resumeViaRest(envId);
-        awaitResumed(envId, acpInitialized);
+        awaitResumed(envId);
         runInSandbox(executionId, "echo second > " + WORKSPACE + "/second_cycle.txt");
 
         environmentService.sleepEnvironmentInternal(
@@ -222,9 +220,8 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
                 .as("committing a new snapshot must remove the superseded image")
                 .hasLineCount(1);
 
-        acpInitialized = acpInitializedCount();
         resumeViaRest(envId);
-        awaitResumed(envId, acpInitialized);
+        awaitResumed(envId);
         assertThat(createDockerVerifier().fileExists(WORKSPACE + "/second_cycle.txt"))
                 .as("work done between the cycles survives the second snapshot")
                 .isTrue();
@@ -275,7 +272,7 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
         TestTimingRegistry.instance().recordSubPhase("resumeViaRest", System.nanoTime() - start);
     }
 
-    protected void awaitResumed(UUID envId, int acpInitializedBefore) throws Exception {
+    protected void awaitResumed(UUID envId) throws Exception {
         long start = System.nanoTime();
         ResumeBaseline baseline = resumeBaselines.getOrDefault(envId, new ResumeBaseline(registrationCount(envId), 0));
         Awaitility.await("resumed environment connected")
@@ -291,16 +288,14 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
                     public void onTimeout(TimeoutEvent timeoutEvent) {
                         logger.error(
                                 "[test] Timed out waiting for resumed environment {}. status={}, registrations={} "
-                                        + "(baseline {}), acpInitialized={} (before {})",
+                                        + "(baseline {})",
                                 envId,
                                 environmentRepository
                                         .findById(envId)
                                         .map(ExecutionEnvironment::getStatus)
                                         .orElse(null),
                                 registrationCount(envId),
-                                baseline.registrations(),
-                                acpInitializedCount(),
-                                acpInitializedBefore);
+                                baseline.registrations());
                     }
                 })
                 .untilAsserted(() -> {
@@ -308,10 +303,6 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
                             environmentRepository.findById(envId).orElseThrow();
                     assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
                 });
-        Awaitility.await("agent session re-attached after resume")
-                .atMost(Duration.ofSeconds(180))
-                .pollInterval(Duration.ofSeconds(1))
-                .until(() -> acpInitializedCount() > acpInitializedBefore);
         assertSingleResumeRegistration(envId, baseline);
         TestTimingRegistry.instance().recordSubPhase("awaitResumed", System.nanoTime() - start);
     }
@@ -319,9 +310,8 @@ abstract class AbstractSuspendResumeRealTest extends AbstractAgentExecutionRealT
     /**
      * A resume must produce exactly one connector process, one initial registration and one
      * agent relaunch. A duplicate initial registration means a second connector started on the
-     * resumed container; the register handler now suppresses its relaunch, but the extra process
-     * still steals the session mapping and races heartbeats, so fail loudly here. The sidecar
-     * log survives inside the snapshot, so boot lines are diffed across the resume.
+     * resumed container and races heartbeats, so fail loudly here. The sidecar log survives inside
+     * the snapshot, so boot lines are diffed across the resume.
      */
     private void assertSingleResumeRegistration(UUID envId, ResumeBaseline baseline) throws Exception {
         assertThat(registrationCount(envId) - baseline.registrations())

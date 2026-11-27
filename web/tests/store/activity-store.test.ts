@@ -1589,8 +1589,8 @@ describe('activity-store', () => {
     })
   })
 
-  describe('execution complete closes trailing streams', () => {
-    it('closes a trailing message stream when the execution completes', () => {
+  describe('backend activity settlement closes trailing streams', () => {
+    it('closes a trailing message stream when the control plane settles it', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
@@ -1600,23 +1600,25 @@ describe('activity-store', () => {
           detail: { messageId: 'msg-1', role: 'agent' },
         }),
       )
-      store.handleExecutionComplete({
-        executionId: 'exec-1',
-        exitCode: 0,
-        status: 'COMPLETED',
-        type: 'execution_complete',
-      })
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'msg-1',
+          activityType: 'MESSAGE',
+          description: 'trailing message',
+          detail: { messageId: 'msg-1', role: 'agent' },
+          status: 'completed',
+        }),
+      )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities[0]).toMatchObject({
-        collapsed: true,
         state: 'completed',
         type: 'message',
       })
       expect(activities[0].endedAt).toBeDefined()
     })
 
-    it('keeps the plan open when the execution completes', () => {
+    it('keeps the plan open when the control plane settles it', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
@@ -1626,12 +1628,15 @@ describe('activity-store', () => {
           detail: { plan: [{ content: 'Ship it', priority: 'high', status: 'in_progress' }] },
         }),
       )
-      store.handleExecutionComplete({
-        executionId: 'exec-1',
-        exitCode: 0,
-        status: 'COMPLETED',
-        type: 'execution_complete',
-      })
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'plan-1',
+          activityType: 'PLAN',
+          description: 'Agent plan updated',
+          detail: { plan: [{ content: 'Ship it', priority: 'high', status: 'in_progress' }] },
+          status: 'completed',
+        }),
+      )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities[0]).toMatchObject({
@@ -1641,50 +1646,28 @@ describe('activity-store', () => {
       })
     })
 
-    it('closes a trailing thinking stream when the execution completes', () => {
-      const store = useActivityStore.getState()
-      store.handleActivityEvent(
-        activityResult({ activityType: 'THINKING', description: 'last thought' }),
-      )
-      store.handleExecutionComplete({
-        executionId: 'exec-1',
-        exitCode: 0,
-        status: 'COMPLETED',
-        type: 'execution_complete',
-      })
-
-      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities[0]).toMatchObject({ state: 'completed', type: 'thinking' })
-    })
-
-    it('closes multiple trailing open streams when the execution completes', () => {
+    it('closes a trailing thinking stream when the control plane settles it', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({
           actionId: 'thought-1',
           activityType: 'THINKING',
-          description: 'reasoning',
+          description: 'last thought',
           detail: { messageId: 'thought-1' },
         }),
       )
       store.handleActivityEvent(
         activityResult({
-          actionId: 'msg-1',
-          activityType: 'MESSAGE',
-          description: 'message',
-          detail: { messageId: 'msg-1', role: 'agent' },
+          actionId: 'thought-1',
+          activityType: 'THINKING',
+          description: 'last thought',
+          detail: { messageId: 'thought-1' },
+          status: 'completed',
         }),
       )
-      store.handleExecutionComplete({
-        executionId: 'exec-1',
-        exitCode: 0,
-        status: 'COMPLETED',
-        type: 'execution_complete',
-      })
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities[0]).toMatchObject({ state: 'completed', type: 'thinking' })
-      expect(activities[1]).toMatchObject({ state: 'completed', type: 'message' })
+      expect(activities[0]).toMatchObject({ collapsed: true, state: 'completed', type: 'thinking' })
     })
   })
 
@@ -2005,17 +1988,25 @@ describe('activity-store', () => {
       expect(activities[1]).toMatchObject({ actionId: 'tc-1', state: 'active' })
     })
 
-    it('auto-collapses a trailing thinking stream when the execution completes', () => {
+    it('auto-collapses a trailing thinking stream when the control plane settles it', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
-        activityResult({ activityType: 'THINKING', description: 'last thought' }),
+        activityResult({
+          actionId: 'thought-collapse',
+          activityType: 'THINKING',
+          description: 'last thought',
+          detail: { messageId: 'thought-collapse' },
+        }),
       )
-      store.handleExecutionComplete({
-        executionId: 'exec-1',
-        exitCode: 0,
-        status: 'COMPLETED',
-        type: 'execution_complete',
-      })
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'thought-collapse',
+          activityType: 'THINKING',
+          description: 'last thought',
+          detail: { messageId: 'thought-collapse' },
+          status: 'completed',
+        }),
+      )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities[0]).toMatchObject({ collapsed: true, state: 'completed' })
@@ -2135,18 +2126,20 @@ describe('activity-store', () => {
     })
   })
 
-  describe('execution complete closes every open activity', () => {
-    it('closes and collapses an active tool execution when the execution completes', () => {
+  describe('backend activity settlement closes open tool and command records', () => {
+    it('closes and collapses an active tool execution when the control plane settles it', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({ actionId: 'search-1', activityType: 'RESEARCH', description: 'glob' }),
       )
-      store.handleExecutionComplete({
-        executionId: 'exec-1',
-        exitCode: 0,
-        status: 'COMPLETED',
-        type: 'execution_complete',
-      })
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'search-1',
+          activityType: 'RESEARCH',
+          description: 'glob',
+          status: 'completed',
+        }),
+      )
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities[0]).toMatchObject({
@@ -2154,44 +2147,22 @@ describe('activity-store', () => {
         collapsed: true,
         state: 'completed',
       })
-      expect(activities[0].endedAt).toBeDefined()
     })
 
-    it('closes every active command, not just the last one', () => {
+    it('marks an active command as error with the exit code when settled as failed', () => {
       const store = useActivityStore.getState()
       store.handleActivityEvent(
         activityResult({ actionId: 'cmd-1', activityType: 'COMMAND', description: 'npm test' }),
       )
       store.handleActivityEvent(
         activityResult({
-          actionId: 'cmd-2',
+          actionId: 'cmd-1',
           activityType: 'COMMAND',
-          description: 'npm run build',
+          description: 'npm test',
+          detail: { exitCode: 1 },
+          status: 'failed',
         }),
       )
-      store.handleExecutionComplete({
-        executionId: 'exec-1',
-        exitCode: 0,
-        status: 'COMPLETED',
-        type: 'execution_complete',
-      })
-
-      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
-      expect(activities[0]).toMatchObject({ state: 'completed' })
-      expect(activities[1]).toMatchObject({ state: 'completed' })
-    })
-
-    it('marks an active command as error with the exit code on a failed execution', () => {
-      const store = useActivityStore.getState()
-      store.handleActivityEvent(
-        activityResult({ actionId: 'cmd-1', activityType: 'COMMAND', description: 'npm test' }),
-      )
-      store.handleExecutionComplete({
-        executionId: 'exec-1',
-        exitCode: 1,
-        status: 'FAILED',
-        type: 'execution_complete',
-      })
 
       const activities = useActivityStore.getState().activitiesByExecution['exec-1']
       expect(activities[0]).toMatchObject({

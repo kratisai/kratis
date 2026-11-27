@@ -2,6 +2,7 @@ package com.kratisai.controlplane.service;
 
 import com.kratisai.controlplane.api.restdto.ModelUsageDto;
 import com.kratisai.controlplane.api.restdto.UsageLogEntryDto;
+import com.kratisai.controlplane.api.restdto.UsageLogStatus;
 import com.kratisai.controlplane.api.restdto.UsageSummaryDto;
 import com.kratisai.controlplane.model.CanvasEntity;
 import com.kratisai.controlplane.model.ChatEntity;
@@ -95,7 +96,7 @@ public class UsageService {
             String model,
             String agent,
             String userEmailFilter,
-            SandboxExecutionStatus statusFilter,
+            UsageLogStatus statusFilter,
             Pageable pageable) {
         validateMembership(userId, teamId);
         Instant start = computeStartTime(timeframe, startDate);
@@ -139,7 +140,7 @@ public class UsageService {
                     duration,
                     title,
                     agentName,
-                    exec.getStatus(),
+                    usageLogStatus(exec.getStatus()),
                     userEmail,
                     models,
                     UsageType.EXECUTION,
@@ -165,12 +166,7 @@ public class UsageService {
                 duration = batch.getCompletedAt().getEpochSecond()
                         - batch.getStartedAt().getEpochSecond();
             }
-            SandboxExecutionStatus status = SandboxExecutionStatus.COMPLETED;
-            if (batch.getStatus() == IngestionStatus.FAILED) {
-                status = SandboxExecutionStatus.FAILED;
-            } else if (batch.getStatus() == IngestionStatus.PROCESSING || batch.getStatus() == IngestionStatus.QUEUED) {
-                status = SandboxExecutionStatus.RUNNING;
-            }
+            UsageLogStatus status = usageLogStatus(batch.getStatus());
             Set<ModelUsageDto> models = batch.getModelUsage().stream()
                     .map(u -> new ModelUsageDto(
                             u.getModelKind(),
@@ -206,13 +202,7 @@ public class UsageService {
                 duration = twBatch.getCompletedAt().getEpochSecond()
                         - twBatch.getStartedAt().getEpochSecond();
             }
-            SandboxExecutionStatus status = SandboxExecutionStatus.COMPLETED;
-            if (twBatch.getStatus() == IngestionStatus.FAILED) {
-                status = SandboxExecutionStatus.FAILED;
-            } else if (twBatch.getStatus() == IngestionStatus.PROCESSING
-                    || twBatch.getStatus() == IngestionStatus.QUEUED) {
-                status = SandboxExecutionStatus.RUNNING;
-            }
+            UsageLogStatus status = usageLogStatus(twBatch.getStatus());
             Set<ModelUsageDto> models = twBatch.getModelUsage().stream()
                     .map(u -> new ModelUsageDto(
                             u.getModelKind(),
@@ -298,16 +288,10 @@ public class UsageService {
                         return false;
                     }
                     if (statusFilter != null) {
-                        boolean matches =
-                                switch (statusFilter) {
-                                    case COMPLETED ->
-                                        e.status() == SandboxExecutionStatus.COMPLETED
-                                                || e.status() == SandboxExecutionStatus.IDLE;
-                                    default -> e.status() == statusFilter;
-                                };
-                        if (!matches) {
-                            return false;
+                        if (statusFilter == UsageLogStatus.COMPLETED) {
+                            return e.status() == UsageLogStatus.COMPLETED || e.status() == UsageLogStatus.IDLE;
                         }
+                        return e.status() == statusFilter;
                     }
                     return true;
                 })
@@ -437,6 +421,22 @@ public class UsageService {
         costByModel.put(modelName, costByModel.getOrDefault(modelName, 0.0) + cost);
         tokensByModel.put(modelName, tokensByModel.getOrDefault(modelName, 0L) + tokens);
         countByModel.put(modelName, countByModel.getOrDefault(modelName, 0L) + 1L);
+    }
+
+    private static UsageLogStatus usageLogStatus(SandboxExecutionStatus status) {
+        return switch (status) {
+            case RUNNING -> UsageLogStatus.RUNNING;
+            case IDLE -> UsageLogStatus.IDLE;
+            case COMPLETED -> UsageLogStatus.COMPLETED;
+        };
+    }
+
+    private static UsageLogStatus usageLogStatus(IngestionStatus status) {
+        return switch (status) {
+            case QUEUED, PROCESSING -> UsageLogStatus.RUNNING;
+            case SUCCESS -> UsageLogStatus.COMPLETED;
+            case FAILED -> UsageLogStatus.FAILED;
+        };
     }
 
     private static boolean containsModel(Set<ModelUsageDto> models, String model) {

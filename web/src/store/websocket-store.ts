@@ -8,7 +8,6 @@ import type {
   ClientRpcMethods,
   CompleteResult,
   ExecutionActivityResult,
-  ExecutionCompleteResult,
   ExecutionDiffChangedResult,
   ExecutionLogsResult,
   ExecutionOutputResult,
@@ -266,9 +265,6 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
           break
         case 'execution_activity':
           handleExecutionActivityResult(response.result)
-          break
-        case 'execution_complete':
-          handleExecutionCompleteResult(response.result)
           break
         case 'execution_diff_changed':
           handleExecutionDiffChangedResult(response.result)
@@ -735,17 +731,6 @@ export const useWebSocketStore = create<WebSocketState>((set, _get) => {
 export function handleChatUsageChangedResult(result: ChatUsageChangedResult): void {
   if (result.teamId !== useAuthStore.getState().currentTeamId) return
   void queryClient.invalidateQueries({ queryKey: ['chat-usage', result.teamId, result.chatId] })
-}
-
-export function handleExecutionCompleteResult(result: ExecutionCompleteResult): void {
-  const statusText = result.status === 'FAILED' ? 'FAILED' : 'successfully'
-  useExecutionStore
-    .getState()
-    .addLog(
-      result.executionId,
-      `[System] Command completed ${statusText} with exit code ${result.exitCode}.`,
-    )
-  useActivityStore.getState().handleExecutionComplete(result)
 }
 
 export function handleExecutionDiffChangedResult(result: ExecutionDiffChangedResult): void {

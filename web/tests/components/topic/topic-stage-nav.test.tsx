@@ -258,7 +258,7 @@ describe('TopicStageNav', () => {
             harness: 'PI',
             id: 'exec-sleep',
             startedAt: new Date(Date.now() - 20000).toISOString(),
-            status: 'FAILED',
+            status: 'IDLE',
           },
         ]}
       />,

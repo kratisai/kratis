@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.model.ModelKind;
-import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.UsageType;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.time.Instant;
@@ -28,7 +27,7 @@ class UsageDtoTest {
                 10L,
                 "Title",
                 "Agent",
-                SandboxExecutionStatus.COMPLETED,
+                UsageLogStatus.COMPLETED,
                 "user@example.com",
                 Set.of(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.05, 100L)),
                 UsageType.EXECUTION,
@@ -38,7 +37,7 @@ class UsageDtoTest {
         assertThat(dto.durationSeconds()).isEqualTo(10L);
         assertThat(dto.activityTitle()).isEqualTo("Title");
         assertThat(dto.agentName()).isEqualTo("Agent");
-        assertThat(dto.status()).isEqualTo(SandboxExecutionStatus.COMPLETED);
+        assertThat(dto.status()).isEqualTo(UsageLogStatus.COMPLETED);
         assertThat(dto.userEmail()).isEqualTo("user@example.com");
         assertThat(dto.models()).extracting(ModelUsageDto::modelIdentifier).containsExactly("gpt-4o");
         assertThat(dto.usageType()).isEqualTo(UsageType.EXECUTION);
@@ -53,7 +52,7 @@ class UsageDtoTest {
                 null,
                 "Ingestion",
                 "Ingestion Worker",
-                SandboxExecutionStatus.COMPLETED,
+                UsageLogStatus.COMPLETED,
                 "system@kratis.ai",
                 Set.of(
                         new ModelUsageDto(ModelKind.EMBEDDING, "text-embedding-3-small", null, 0.002, 100L),
@@ -74,7 +73,7 @@ class UsageDtoTest {
                 null,
                 "Orphan Entry",
                 "Agent",
-                SandboxExecutionStatus.COMPLETED,
+                UsageLogStatus.COMPLETED,
                 "user@example.com",
                 Set.of(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.0, 10L)),
                 UsageType.EXECUTION,
@@ -90,7 +89,7 @@ class UsageDtoTest {
                         null,
                         "Ingestion",
                         "Ingestion Worker",
-                        SandboxExecutionStatus.COMPLETED,
+                        UsageLogStatus.COMPLETED,
                         "system@kratis.ai",
                         null,
                         UsageType.INGESTION,
@@ -137,7 +136,7 @@ class UsageDtoTest {
                 10L,
                 "Title",
                 "Agent",
-                SandboxExecutionStatus.COMPLETED,
+                UsageLogStatus.COMPLETED,
                 "user@example.com",
                 Set.of(new ModelUsageDto(ModelKind.CHAT, "gpt-4o", null, 0.05, 100L)),
                 UsageType.EXECUTION,

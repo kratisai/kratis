@@ -14,7 +14,7 @@ import reactor.core.publisher.Flux;
 
 /**
  * Handles {@code env.checkout_complete} JSON-RPC notifications from the sidecar. Resumes execution
- * of the sandbox command if cloning succeeded, or fails the execution if cloning failed.
+ * of the sandbox command if cloning succeeded, or settles the execution to IDLE if cloning failed.
  */
 @Component
 public class EnvironmentCheckoutCompleteRpcHandler
@@ -56,7 +56,7 @@ public class EnvironmentCheckoutCompleteRpcHandler
             sandboxExecutionService.resumeAfterCheckout(executionId);
         } else {
             logger.error("Checkout failed for execution {}: {}", executionId, params.error());
-            sandboxExecutionService.failExecution(executionId, params.error());
+            sandboxExecutionService.settleExecutionIdle(executionId, params.error());
         }
 
         return Flux.empty();

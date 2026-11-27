@@ -28,14 +28,18 @@ public interface SandboxExecutionActivityRepository extends JpaRepository<Sandbo
     List<SandboxExecutionActivity> findByExecutionIdAndStatusOrderBySequenceAsc(
             UUID executionId, ActivityStatus status);
 
+    List<SandboxExecutionActivity> findByExecutionIdAndStatusInOrderBySequenceAsc(
+            UUID executionId, Collection<ActivityStatus> statuses);
+
     List<SandboxExecutionActivity> findByExecutionIdAndStatus(UUID executionId, ActivityStatus status);
 
-    boolean existsByExecutionIdAndStatus(UUID executionId, ActivityStatus status);
-
-    @Query("SELECT DISTINCT a.executionId FROM SandboxExecutionActivity a"
-            + " WHERE a.executionId IN :executionIds AND a.status = :status")
-    List<UUID> findExecutionIdsWithStatus(
-            @Param("executionIds") Collection<UUID> executionIds, @Param("status") ActivityStatus status);
+    @Query(
+            value = "SELECT DISTINCT a.execution_id FROM sandbox_execution_activities a"
+                    + " WHERE a.execution_id IN (:executionIds)"
+                    + " AND a.status = 'PENDING'"
+                    + " AND a.detail -> 'hitl' ->> 'state' = 'awaiting_human'",
+            nativeQuery = true)
+    List<UUID> findExecutionIdsWithPendingHitl(@Param("executionIds") Collection<UUID> executionIds);
 
     List<SandboxExecutionActivity> findByStatusAndCreatedAtBefore(ActivityStatus status, Instant cutoff);
 
@@ -44,10 +48,22 @@ public interface SandboxExecutionActivityRepository extends JpaRepository<Sandbo
     List<SandboxExecutionActivity> findByEnvironmentIdAndStatus(
             @Param("environmentId") UUID environmentId, @Param("status") ActivityStatus status);
 
-    @Query("SELECT COUNT(a) > 0 FROM SandboxExecutionActivity a JOIN SandboxExecution e ON a.executionId = e.id"
-            + " WHERE e.environment.id = :environmentId AND a.status = :status")
-    boolean existsByEnvironmentIdAndStatus(
-            @Param("environmentId") UUID environmentId, @Param("status") ActivityStatus status);
+    @Query(
+            value = "SELECT EXISTS (SELECT 1 FROM sandbox_execution_activities a"
+                    + " WHERE a.execution_id = :executionId"
+                    + " AND a.status = 'PENDING'"
+                    + " AND a.detail -> 'hitl' ->> 'state' = 'awaiting_human')",
+            nativeQuery = true)
+    boolean existsPendingHitlForExecution(@Param("executionId") UUID executionId);
+
+    @Query(
+            value = "SELECT EXISTS (SELECT 1 FROM sandbox_execution_activities a"
+                    + " JOIN sandbox_executions e ON a.execution_id = e.id"
+                    + " WHERE e.environment_id = :environmentId"
+                    + " AND a.status = 'PENDING'"
+                    + " AND a.detail -> 'hitl' ->> 'state' = 'awaiting_human')",
+            nativeQuery = true)
+    boolean existsPendingHitlForEnvironment(@Param("environmentId") UUID environmentId);
 
     /** An environment outlives its executions; action ids are only unique within one execution. */
     @Query("SELECT a FROM SandboxExecutionActivity a JOIN SandboxExecution e ON a.executionId = e.id"

@@ -14,7 +14,7 @@ import reactor.core.publisher.Flux;
 /**
  * Handles {@code env.acp_prompt_complete} JSON-RPC notifications from the sidecar. This notification
  * is sent when a session/prompt completes with a stopReason. The handler maps the stopReason to an
- * execution status (COMPLETED or FAILED) and persists the result. The sidecar agent remains alive
+ * execution back to IDLE and persists the result. The sidecar agent remains alive
  * and can receive more prompts or be cancelled via env.acp_cancel.
  */
 @Component

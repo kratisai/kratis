@@ -208,15 +208,6 @@ export const CLIENT_RESULTS = {
       type: z.literal('execution_activity'),
     })
     .strict(),
-  execution_complete: z
-    .object({
-      executionId: uuid,
-      exitCode: z.number().int(),
-      reason: z.string().optional(),
-      status: z.enum(['RUNNING', 'IDLE', 'COMPLETED', 'FAILED']),
-      type: z.literal('execution_complete'),
-    })
-    .strict(),
   execution_diff_changed: z
     .object({
       chatId: uuid,

@@ -227,7 +227,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                 port,
                 auth,
                 scenario,
-                client -> client.expectTrigger("execution_output", 1).expectTrigger("execution_complete", 1),
+                client -> client.expectTrigger("execution_output", 1).expectTrigger("execution_status_changed", 1),
                 sidecar -> sidecar.withAcpCommand("echo 'Hello World'")
                         .expectTrigger("env.launch_acp_agent", 1))) {
             assertThat(pair.sidecar().awaitTrigger("env.launch_acp_agent", 5, TimeUnit.SECONDS)).isTrue();

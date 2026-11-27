@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.kratisai.controlplane.api.restdto.SteerExecutionRequest;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.model.ChatEntity;
+import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
+import com.kratisai.controlplane.repository.ExecutionEnvironmentRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
@@ -39,6 +41,9 @@ class SandboxResumeWebSocketIntegrationTest {
 
     @Autowired
     private SandboxExecutionRepository executionRepository;
+
+    @Autowired
+    private ExecutionEnvironmentRepository environmentRepository;
 
     @Autowired
     private SandboxExecutionActivityRepository activityRepository;
@@ -141,30 +146,29 @@ class SandboxResumeWebSocketIntegrationTest {
     }
 
     @Test
-    void failedRelaunchMarksTheExecutionFailedWithAVisibleError() throws Exception {
+    void failedRelaunchSettlesIdleWithAVisibleError() throws Exception {
         ExecutionScenario scenario = runFirstLifetimeToIdle("fail-plan", "fail-repo");
 
         try (WsPair second = WsPair.connectSidecar(
                 port, scenario, sidecar -> sidecar.withLaunchFailure("agent binary missing from snapshot"))) {
-            Awaitility.await("execution fails when the relaunch fails")
+            Awaitility.await("the failed relaunch is visible in the activity log")
                     .atMost(Duration.ofSeconds(20))
-                    .untilAsserted(() ->
-                            assertThat(statusOf(scenario.executionId())).isEqualTo(SandboxExecutionStatus.FAILED));
-            assertThat(activityRepository.findByExecutionIdAndActivityTypeOrderBySequenceAsc(
-                            scenario.executionId(), ActivityType.ERROR))
-                    .as("the failed relaunch is visible in the activity log")
-                    .isNotEmpty();
+                    .untilAsserted(
+                            () -> assertThat(activityRepository.findByExecutionIdAndActivityTypeOrderBySequenceAsc(
+                                            scenario.executionId(), ActivityType.ERROR))
+                                    .isNotEmpty());
+            assertThat(statusOf(scenario.executionId())).isEqualTo(SandboxExecutionStatus.IDLE);
             assertThat(second.sidecar().receivedMessages()).isNotEmpty();
         }
     }
 
     @Test
-    void reregisteringWithFailedExecutionRelaunchesAgentAndAllowsSteering() throws Exception {
+    void reregisteringWithIdleExecutionAllowsSteeringAfterRelaunch() throws Exception {
         ExecutionScenario scenario = runFirstLifetimeToIdle("failed-resume-plan", "failed-resume-repo");
-        SandboxExecution failed =
+        SandboxExecution execution =
                 executionRepository.findById(scenario.executionId()).orElseThrow();
-        failed.setStatus(SandboxExecutionStatus.FAILED);
-        executionRepository.save(failed);
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+        executionRepository.save(execution);
 
         try (WsPair second =
                 WsPair.connectSidecar(port, scenario, sidecar -> sidecar.withPersistedSession("persisted-session")
@@ -177,6 +181,7 @@ class SandboxResumeWebSocketIntegrationTest {
             assertThat(methods).contains("env.registerGitIdentity", "env.exec", "env.launch_acp_agent");
             assertThat(methods).doesNotContain("env.checkout");
 
+            awaitEnvironmentConnected(scenario.envId());
             sandboxExecutionService.steerExecution(
                     auth.user().getId(),
                     chat.getId(),
@@ -193,12 +198,12 @@ class SandboxResumeWebSocketIntegrationTest {
     }
 
     @Test
-    void steerExecution_fromFailedWithImmediatePromptRejection_returnsToFailed() throws Exception {
+    void steerExecution_withImmediatePromptRejection_returnsToIdle() throws Exception {
         ExecutionScenario scenario = runFirstLifetimeToIdle("steer-reject-plan", "steer-reject-repo");
-        SandboxExecution failed =
+        SandboxExecution execution =
                 executionRepository.findById(scenario.executionId()).orElseThrow();
-        failed.setStatus(SandboxExecutionStatus.FAILED);
-        executionRepository.save(failed);
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+        executionRepository.save(execution);
 
         try (WsPair second =
                 WsPair.connectSidecar(port, scenario, sidecar -> sidecar.withPersistedSession("persisted-session")
@@ -207,6 +212,7 @@ class SandboxResumeWebSocketIntegrationTest {
                         .expectTrigger("env.acp_prompt", 1))) {
             assertThat(second.sidecar().awaitTrigger("env.launch_acp_agent", 15, TimeUnit.SECONDS))
                     .isTrue();
+            awaitEnvironmentConnected(scenario.envId());
 
             sandboxExecutionService.steerExecution(
                     auth.user().getId(),
@@ -216,11 +222,21 @@ class SandboxResumeWebSocketIntegrationTest {
 
             assertThat(second.sidecar().awaitTrigger("env.acp_prompt", 15, TimeUnit.SECONDS))
                     .isTrue();
-            Awaitility.await("rejected recovery prompt marks execution FAILED instead of stranding RUNNING")
+            Awaitility.await("rejected recovery prompt settles IDLE instead of stranding RUNNING")
                     .atMost(Duration.ofSeconds(15))
-                    .untilAsserted(() ->
-                            assertThat(statusOf(scenario.executionId())).isEqualTo(SandboxExecutionStatus.FAILED));
+                    .untilAsserted(
+                            () -> assertThat(statusOf(scenario.executionId())).isEqualTo(SandboxExecutionStatus.IDLE));
         }
+    }
+
+    private void awaitEnvironmentConnected(UUID environmentId) {
+        Awaitility.await("environment becomes CONNECTED after agent launch")
+                .atMost(Duration.ofSeconds(15))
+                .pollDelay(Duration.ZERO)
+                .until(() -> environmentRepository
+                        .findById(environmentId)
+                        .map(env -> env.getStatus() == EnvironmentStatus.CONNECTED)
+                        .orElse(false));
     }
 
     private ExecutionScenario runFirstLifetimeToIdle(String canvasId, String repoName) throws Exception {

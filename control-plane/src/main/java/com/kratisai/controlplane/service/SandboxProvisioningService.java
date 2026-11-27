@@ -115,8 +115,9 @@ public class SandboxProvisioningService {
         writeActiveTaskFile(execution, skills);
 
         String virtualKey = requiresNewTransactionTemplate.execute(status -> {
-            SandboxExecution persisted =
-                    sandboxExecutionRepository.findById(execution.getId()).orElse(execution);
+            SandboxExecution persisted = sandboxExecutionRepository
+                    .findByIdForUpdate(execution.getId())
+                    .orElse(execution);
             SandboxExecutionUsage active = persisted.getActiveUsage();
             if (active != null && !isBlank(active.getVirtualKey())) {
                 logger.info("Virtual key already active for execution {}, reusing it", execution.getId());

@@ -56,8 +56,7 @@ export function SteeringBar({
     return null
   }
 
-  const canSteer =
-    executionStatus === 'RUNNING' || executionStatus === 'IDLE' || executionStatus === 'FAILED'
+  const canSteer = executionStatus === 'RUNNING' || executionStatus === 'IDLE'
   const canPublish = canPublishChanges(executionStatus, environmentStatus)
   const commentCount = draftComments.length
 

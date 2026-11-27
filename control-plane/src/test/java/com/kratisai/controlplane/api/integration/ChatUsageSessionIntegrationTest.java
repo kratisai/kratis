@@ -9,19 +9,24 @@ import com.kratisai.controlplane.api.restdto.CreateChatRequest;
 import com.kratisai.controlplane.api.restdto.CreateChatResponse;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
+import com.kratisai.controlplane.service.ChatFluxRegistry;
 import com.kratisai.controlplane.service.ChatUsageSessionService;
 import com.kratisai.controlplane.service.JwtService;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -54,6 +59,12 @@ class ChatUsageSessionIntegrationTest {
 
     @Autowired
     private JwtService jwtService;
+
+    @Autowired
+    private ChatFluxRegistry chatFluxRegistry;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private WebApplicationContext wac;
@@ -107,11 +118,32 @@ class ChatUsageSessionIntegrationTest {
         assertThat(session.isEnded()).isFalse();
         assertThat(session.getModel()).isEqualTo("gpt-4o");
 
+        Instant initialUsageUpdatedAt = session.getUsage().getUsageLastUpdatedAt();
+
+        // The planning turn syncs usage after removing its active stream from the registry.
+        Awaitility.await("planning turn completes")
+                .atMost(Duration.ofSeconds(30))
+                .pollDelay(Duration.ZERO)
+                .pollInterval(Duration.ofMillis(100))
+                .until(() -> !chatFluxRegistry.containsKey(chatId));
+        Awaitility.await("planning turn usage sync persists")
+                .atMost(Duration.ofSeconds(30))
+                .pollDelay(Duration.ZERO)
+                .pollInterval(Duration.ofMillis(100))
+                .until(() -> chatUsageSessionRepository
+                        .findById(session.getId())
+                        .map(updated -> updated.getUsage().getUsageLastUpdatedAt())
+                        .filter(updatedAt -> initialUsageUpdatedAt == null || updatedAt.isAfter(initialUsageUpdatedAt))
+                        .isPresent());
+
         // Test inactivity timeout / returning after > 4 hours spawns a new session
         UUID oldSessionId = session.getId();
         String oldVirtualKey = session.getUsage().getVirtualKey();
-        session.getUsage().setUsageLastUpdatedAt(Instant.now().minus(5, ChronoUnit.HOURS));
-        chatUsageSessionRepository.saveAndFlush(session);
+        Instant staleUsage = Instant.now().minus(5, ChronoUnit.HOURS);
+        jdbcTemplate.update(
+                "update chat_usage_sessions set usage_last_updated_at = ? where id = ?",
+                Timestamp.from(staleUsage),
+                oldSessionId);
 
         ChatUsageSession newSession =
                 chatUsageSessionService.getOrCreateActiveSession(chat, "gpt-4o", litellmModelName);

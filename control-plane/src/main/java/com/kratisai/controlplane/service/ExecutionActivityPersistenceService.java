@@ -25,13 +25,16 @@ import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -113,14 +116,51 @@ public class ExecutionActivityPersistenceService {
         }
     }
 
-    public void closeOpenStreams(UUID executionId) {
-        List<SandboxExecutionActivity> open =
-                repository.findByExecutionIdAndStatusOrderBySequenceAsc(executionId, ActivityStatus.IN_PROGRESS);
-        if (open.isEmpty()) {
+    public void settleOpenActivities(UUID executionId, int exitCode, boolean unexpectedProcessExit) {
+        List<SandboxExecutionActivity> candidates = repository.findByExecutionIdAndStatusInOrderBySequenceAsc(
+                executionId, List.of(ActivityStatus.IN_PROGRESS, ActivityStatus.PENDING));
+        List<SandboxExecutionActivity> toSettle = new ArrayList<>();
+        for (SandboxExecutionActivity activity : candidates) {
+            ActivityDetail detail = detailOrNull(activity);
+            if (activity.getStatus() == ActivityStatus.PENDING
+                    && detail != null
+                    && detail.hitl() != null
+                    && detail.hitl().state() == HitlState.AWAITING_HUMAN) {
+                continue;
+            }
+            if (activity.getActivityType() == ActivityType.COMMAND && unexpectedProcessExit) {
+                activity.setStatus(ActivityStatus.FAILED);
+                ActivityDetail updated = (detail != null ? detail.toBuilder() : ActivityDetail.builder())
+                        .exitCode(exitCode)
+                        .build();
+                activity.setDetail(toJson(updated));
+            } else {
+                activity.setStatus(ActivityStatus.COMPLETED);
+            }
+            toSettle.add(activity);
+        }
+        if (toSettle.isEmpty()) {
             return;
         }
-        open.forEach(activity -> activity.setStatus(ActivityStatus.COMPLETED));
-        repository.saveAll(open);
+        repository.saveAll(toSettle);
+        teamIdFor(executionId).ifPresent(teamId -> toSettle.forEach(activity -> publishActivity(teamId, activity)));
+    }
+
+    /**
+     * Settlement must not wedge on one malformed legacy detail row: treat unparseable detail as
+     * absent so the activity can still be settled.
+     */
+    private ActivityDetail detailOrNull(SandboxExecutionActivity activity) {
+        try {
+            return detailOf(activity);
+        } catch (IllegalStateException e) {
+            logger.warn(
+                    "Ignoring malformed detail for activity {} of execution {}",
+                    activity.getActionId(),
+                    activity.getExecutionId(),
+                    e);
+            return null;
+        }
     }
 
     @Transactional
@@ -319,14 +359,16 @@ public class ExecutionActivityPersistenceService {
         return ActivityKind.isCommandLike(toolKind) ? ActivityType.COMMAND : ActivityType.EDITED;
     }
 
-    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
+    @EventListener
+    @Transactional(propagation = Propagation.MANDATORY)
     public void onExecutionComplete(SandboxExecutionCompleteEvent event) {
-        closeOpenStreams(event.executionId());
+        settleOpenActivities(event.executionId(), event.exitCode(), event.unexpectedProcessExit());
         cancelPendingActivities(event.executionId(), "Execution completed", HitlResolver.system());
     }
 
     @Transactional
     public void recordTurnComplete(UUID executionId, String promptId, StopReason stopReason) {
+        settleOpenActivities(executionId, 0, false);
         String description = "Agent turn complete (" + (stopReason != null ? stopReason.getValue() : "unknown") + ")";
         String actionId = promptId != null ? "turn:" + promptId : null;
         SandboxExecutionActivity row = recordActivity(
@@ -445,7 +487,7 @@ public class ExecutionActivityPersistenceService {
                 row.getDescription(),
                 row.getActionId(),
                 row.getStatus(),
-                detailOf(row),
+                detailOrNull(row),
                 row.getCreatedAt()));
     }
 

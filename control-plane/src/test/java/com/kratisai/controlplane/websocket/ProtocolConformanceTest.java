@@ -893,7 +893,6 @@ class ProtocolConformanceTest {
             case TEAM_ENTITY_CHANGED -> ClientPayload.TeamEntityChangedResult.class;
             case USER_ENTITY_CHANGED -> ClientPayload.UserEntityChangedResult.class;
             case EXECUTION_OUTPUT -> ClientPayload.ExecutionOutputResult.class;
-            case EXECUTION_COMPLETE -> ClientPayload.ExecutionCompleteResult.class;
             case EXECUTION_STATUS_CHANGED -> ClientPayload.ExecutionStatusChangedResult.class;
             case CHAT_USAGE_CHANGED -> ClientPayload.ChatUsageChangedResult.class;
             case EXECUTION_ACTIVITY -> ClientPayload.ExecutionActivityResult.class;

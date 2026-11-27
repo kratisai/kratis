@@ -1,6 +1,5 @@
 package com.kratisai.controlplane.api.restdto;
 
-import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.UsageType;
 import java.time.Instant;
 import java.util.Collections;
@@ -14,7 +13,7 @@ public record UsageLogEntryDto(
         Long durationSeconds,
         String activityTitle,
         String agentName,
-        SandboxExecutionStatus status,
+        UsageLogStatus status,
         String userEmail,
         Set<ModelUsageDto> models,
         UsageType usageType,

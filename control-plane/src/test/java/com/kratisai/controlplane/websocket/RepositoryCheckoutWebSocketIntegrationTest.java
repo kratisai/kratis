@@ -150,7 +150,7 @@ class RepositoryCheckoutWebSocketIntegrationTest {
                 // Assert sandbox execution transitions to FAILED
                 SandboxExecution execAfterFailure =
                         sandboxExecutionRepository.findById(executionId).orElseThrow();
-                assertThat(execAfterFailure.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+                assertThat(execAfterFailure.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
 
                 // Clean up session
                 sessionRegistry.removeSession("env-session-id-edge-cases");
@@ -192,7 +192,7 @@ class RepositoryCheckoutWebSocketIntegrationTest {
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             SandboxExecution execAfterError =
                     sandboxExecutionRepository.findById(executionId).orElseThrow();
-            assertThat(execAfterError.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+            assertThat(execAfterError.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
             assertThat(execAfterError.getCompletedAt()).isNotNull();
         });
     }
@@ -229,7 +229,7 @@ class RepositoryCheckoutWebSocketIntegrationTest {
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             SandboxExecution execAfterError =
                     sandboxExecutionRepository.findById(executionId).orElseThrow();
-            assertThat(execAfterError.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+            assertThat(execAfterError.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
             assertThat(execAfterError.getCompletedAt()).isNotNull();
         });
     }
@@ -301,7 +301,7 @@ class RepositoryCheckoutWebSocketIntegrationTest {
                         .findById(setup.exec2())
                         .orElseThrow()
                         .getStatus())
-                .isEqualTo(SandboxExecutionStatus.FAILED));
+                .isEqualTo(SandboxExecutionStatus.IDLE));
 
         // Case 3: token generation throws
         fakeGitHubApiClient.setShouldThrow(true);
@@ -312,7 +312,7 @@ class RepositoryCheckoutWebSocketIntegrationTest {
                             .findById(setup.exec3())
                             .orElseThrow()
                             .getStatus())
-                    .isEqualTo(SandboxExecutionStatus.FAILED));
+                    .isEqualTo(SandboxExecutionStatus.IDLE));
         } finally {
             fakeGitHubApiClient.reset();
         }

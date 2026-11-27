@@ -42,9 +42,8 @@ class SuspendResumeMainBranchRealTest extends AbstractSuspendResumeRealTest {
             dockerOutput("docker", "rm", "-f", scratch);
         }
 
-        int acpInitialized = acpInitializedCount();
         resumeViaRest(envId);
-        awaitResumed(envId, acpInitialized);
+        awaitResumed(envId);
         assertThat(createDockerVerifier().fileExists("/kratis/diff_base_branch"))
                 .as("the legacy snapshot carries no persisted branch")
                 .isFalse();

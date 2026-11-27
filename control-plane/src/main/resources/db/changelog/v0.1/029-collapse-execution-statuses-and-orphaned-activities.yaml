@@ -1,0 +1,28 @@
+databaseChangeLog:
+  - changeSet:
+      id: 029-01-collapse-execution-statuses-and-orphaned-activities
+      author: kratis
+      preConditions:
+        - onFail: MARK_RAN
+        - onError: MARK_RAN
+        - and:
+            - tableExists:
+                tableName: sandbox_executions
+            - tableExists:
+                tableName: sandbox_execution_activities
+      changes:
+        - sql:
+            dbms: postgresql
+            splitStatements: true
+            sql: UPDATE sandbox_executions SET status = 'IDLE' WHERE status IN ('UNKNOWN', 'FAILED');
+        - sql:
+            dbms: postgresql
+            splitStatements: true
+            sql: >
+              UPDATE sandbox_execution_activities a
+              SET status = 'COMPLETED'
+              FROM sandbox_executions e
+              WHERE a.execution_id = e.id
+                AND e.status <> 'RUNNING'
+                AND a.status = 'PENDING'
+                AND (a.detail IS NULL OR a.detail -> 'hitl' ->> 'state' IS DISTINCT FROM 'awaiting_human');

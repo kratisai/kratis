@@ -13,6 +13,7 @@ import com.kratisai.controlplane.api.wsdto.JsonRpcError;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
+import com.kratisai.controlplane.model.ExecutionEnvironmentType;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.event.EnvironmentRegisteredEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
@@ -94,48 +95,59 @@ public class EnvironmentRegisterRpcHandler
         }
 
         ExecutionEnvironment env = envOpt.get();
-        boolean isReconnect = Boolean.TRUE.equals(params.isReconnect());
-
-        if (isReconnect) {
-            ReconnectState reconnectState = new ReconnectState(
-                    true,
-                    params.activeAcpSessionId(),
-                    Boolean.TRUE.equals(params.hasActiveAgent()),
-                    params.lastEventSequence() != null ? params.lastEventSequence() : 0L,
-                    params.pendingHitlIds() != null ? params.pendingHitlIds() : List.of());
-            return Flux.just(handleReconnect(sessionId, env, reconnectState, params.connectorVersion()));
-        }
-        return Flux.just(handleInitialRegistration(sessionId, env, params.connectorVersion()));
+        return Flux.just(handleRegistration(sessionId, env, params));
     }
 
-    private EnvironmentResponsePayload handleReconnect(
-            String sessionId, ExecutionEnvironment env, ReconnectState reconnectState, String connectorVersion) {
+    private EnvironmentResponsePayload handleRegistration(
+            String sessionId, ExecutionEnvironment env, EnvironmentRpcPayload.Register params) {
+        boolean isReconnect = Boolean.TRUE.equals(params.isReconnect());
+        boolean hasActiveAgent = Boolean.TRUE.equals(params.hasActiveAgent());
         logger.info(
-                "Environment {} reconnecting with session {} (connector version {})",
+                "Environment {} {} with session {} (connector version {})",
                 env.getId(),
+                isReconnect ? "reconnecting" : "registered",
                 sessionId,
-                loggable(connectorVersion));
+                loggable(params.connectorVersion()));
 
         String oldSessionId = sessionRegistry.replaceSessionForEnvironment(sessionId, env.getId());
         if (oldSessionId != null) {
             logger.info("Replaced old session {} for environment {}", oldSessionId, env.getId());
         }
 
-        if (env.getStatus() != EnvironmentStatus.CONNECTED) {
-            env.setLastActivityAt(Instant.now());
+        boolean agentReady = hasActiveAgent || env.getType() == ExecutionEnvironmentType.CONNECTOR;
+        EnvironmentStatus previousStatus = env.getStatus();
+        Instant now = Instant.now();
+
+        if (agentReady) {
+            if (previousStatus != EnvironmentStatus.CONNECTED) {
+                env.setLastActivityAt(now);
+            }
+            env.setStatus(EnvironmentStatus.CONNECTED);
+        } else {
+            env.setStatus(EnvironmentStatus.PENDING_CONNECT);
+            env.setLastActivityAt(now);
         }
-        env.setStatus(EnvironmentStatus.CONNECTED);
-        if (reconnectState.activeAcpSessionId() != null) {
-            logger.debug("Reconnect with active ACP session: {}", reconnectState.activeAcpSessionId());
+
+        if (params.activeAcpSessionId() != null) {
+            logger.debug("Registered with active ACP session: {}", params.activeAcpSessionId());
         }
-        env.setLastHeartbeat(Instant.now());
+        env.setLastHeartbeat(now);
         executionEnvironmentRepository.save(env);
 
-        reconcilePendingHitl(env, reconnectState.pendingHitlIds());
+        reconcilePendingHitl(env, params.pendingHitlIds());
 
-        eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
+        if (agentReady || env.getStatus() != previousStatus || isReconnect) {
+            eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
+        }
 
-        return EnvironmentRegisterResult.reconnected(env.getId().toString());
+        // The connector is the authority on agent liveness, not a possibly stale prior mapping.
+        if (!hasActiveAgent) {
+            eventPublisher.publishEvent(new EnvironmentRegisteredEvent(env.getId()));
+        }
+
+        return isReconnect
+                ? EnvironmentRegisterResult.reconnected(env.getId().toString())
+                : new EnvironmentRegisterResult(env.getId().toString());
     }
 
     /**
@@ -197,37 +209,6 @@ public class EnvironmentRegisterRpcHandler
                         hitl.optionId(),
                         hitl.content(),
                         hitl.resolvedBy() != null ? hitl.resolvedBy() : HitlResolver.system())));
-    }
-
-    private EnvironmentResponsePayload handleInitialRegistration(
-            String sessionId, ExecutionEnvironment env, String connectorVersion) {
-        logger.info(
-                "Environment {} registered with session {} (connector version {})",
-                env.getId(),
-                sessionId,
-                loggable(connectorVersion));
-        if (env.getStatus() != EnvironmentStatus.CONNECTED) {
-            env.setLastActivityAt(Instant.now());
-        }
-        env.setStatus(EnvironmentStatus.CONNECTED);
-        env.setLastHeartbeat(Instant.now());
-        executionEnvironmentRepository.save(env);
-
-        boolean alreadyLive = sessionRegistry.getSessionForEnvironment(env.getId()) != null;
-        sessionRegistry.registerEnvironmentSession(sessionId, env.getId());
-
-        eventPublisher.publishEvent(new TeamEntityChangedEvent(env.getTeam().getId(), TeamEntityType.ENVIRONMENTS));
-
-        if (alreadyLive) {
-            logger.warn(
-                    "Environment {} registered a duplicate initial session {}; keeping newest without relaunch",
-                    env.getId(),
-                    sessionId);
-            return EnvironmentRegisterResult.reconnected(env.getId().toString());
-        }
-        eventPublisher.publishEvent(new EnvironmentRegisteredEvent(env.getId()));
-
-        return new EnvironmentRegisterResult(env.getId().toString());
     }
 
     // The version is connector-supplied: strip control characters and bound the length before logging.

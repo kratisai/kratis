@@ -24,7 +24,7 @@ export interface CreateSandboxExecutionRequest {
 
 export type ExecutionDisplayStatus = 'SLEEPING' | ExecutionStatus
 
-export type ExecutionStatus = 'COMPLETED' | 'FAILED' | 'IDLE' | 'RUNNING'
+export type ExecutionStatus = 'COMPLETED' | 'IDLE' | 'RUNNING'
 
 export interface SandboxExecutionDto {
   // Start of the open RUNNING segment, or null when the execution is not running.

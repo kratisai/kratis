@@ -265,11 +265,6 @@ function ExecutionStatusDot({ status }: { status: ExecutionDisplayStatus }) {
       />
     )
   }
-  const dotColor =
-    status === 'RUNNING'
-      ? 'bg-emerald-500 animate-pulse'
-      : status === 'FAILED'
-        ? 'bg-rose-500'
-        : 'bg-emerald-600'
+  const dotColor = status === 'RUNNING' ? 'bg-emerald-500 animate-pulse' : 'bg-emerald-600'
   return <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', dotColor)} />
 }

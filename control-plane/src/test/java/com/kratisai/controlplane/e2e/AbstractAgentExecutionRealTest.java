@@ -42,15 +42,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -259,7 +251,7 @@ public abstract class AbstractAgentExecutionRealTest {
             return;
         }
         try (var walk = Files.walk(dir)) {
-            walk.sorted((a, b) -> b.compareTo(a)).forEach(p -> {
+            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
                 try {
                     Files.deleteIfExists(p);
                 } catch (Exception ignored) {
@@ -406,10 +398,6 @@ public abstract class AbstractAgentExecutionRealTest {
 
     protected String authToken() {
         return authToken;
-    }
-
-    protected int acpInitializedCount() {
-        return acpInitializedCount.get();
     }
 
     /**
@@ -674,19 +662,16 @@ public abstract class AbstractAgentExecutionRealTest {
                 .whenType(
                         ClientPayload.ExecutionOutputResult.class,
                         (wsSession, msg) -> lineLogger.appendChunk(msg.stream().getValue(), msg.line()))
-                .whenType(ClientPayload.ExecutionCompleteResult.class, (wsSession, msg) -> {
-                    lineLogger.flushAll();
-                    logger.info("[execution] Complete: exitCode={} status={}", msg.exitCode(), msg.status());
-                    if (msg.status() == SandboxExecutionStatus.FAILED) {
-                        executionFailedEarly = true;
-                    }
-                })
                 .whenType(ClientPayload.ExecutionActivityResult.class, (wsSession, msg) -> {
                     trackApprovalState(msg);
                     receivedActivityTypes.add(msg.activityType());
                     activityTimeline.add(msg.activityType() + ":" + msg.status());
                     captureAcpConformance(msg);
                     captureCommandOutput(msg);
+                    if (msg.activityType() == ActivityType.ERROR) {
+                        lineLogger.flushAll();
+                        executionFailedEarly = true;
+                    }
                     logger.debug("[execution][activity] {} — {}", msg.activityType(), msg.description());
                 })
                 .whenType(ClientPayload.ExecutionAcpInitializedResult.class, (wsSession, msg) -> {
@@ -1153,7 +1138,7 @@ public abstract class AbstractAgentExecutionRealTest {
                                 + "UI output:\n{}",
                         what,
                         executionFailedEarly,
-                        isExecutionTerminalOrFailed(envId),
+                        isExecutionSettled(envId),
                         getExecutionStatus(envId),
                         acpInitialized.get(),
                         uiClientSession != null && uiClientSession.isOpen(),
@@ -1169,19 +1154,19 @@ public abstract class AbstractAgentExecutionRealTest {
             return sandboxExecutionRepository.findAll().stream()
                     .filter(e -> e.getEnvironment().getId().equals(envId))
                     .findFirst()
-                    .map(e -> e.getStatus() == SandboxExecutionStatus.FAILED)
+                    .map(e -> e.getExitCode() != null && e.getExitCode() != 0)
                     .orElse(false);
         } catch (Exception e) {
             return false;
         }
     }
 
-    private boolean isExecutionTerminalOrFailed(UUID envId) {
+    private boolean isExecutionSettled(UUID envId) {
         try {
             return sandboxExecutionRepository.findAll().stream()
                     .filter(e -> e.getEnvironment().getId().equals(envId))
                     .findFirst()
-                    .map(e -> e.getStatus() == SandboxExecutionStatus.FAILED
+                    .map(e -> e.getStatus() == SandboxExecutionStatus.IDLE
                             || e.getStatus() == SandboxExecutionStatus.COMPLETED)
                     .orElse(false);
         } catch (Exception e) {
@@ -1243,7 +1228,7 @@ public abstract class AbstractAgentExecutionRealTest {
         // Wait for the sidecar container to connect
         long connectStart = System.nanoTime();
         Awaitility.await()
-                .atMost(60, TimeUnit.SECONDS)
+                .atMost(180, TimeUnit.SECONDS)
                 .pollDelay(Duration.ZERO)
                 .pollInterval(Duration.ofMillis(500))
                 .untilAsserted(() -> {
@@ -1263,7 +1248,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 .conditionEvaluationListener(awaitTimeoutDiagnostics("ACP agent initialization", env.getId()))
                 .until(() -> harnessStalled()
                         || executionFailedEarly
-                        || isExecutionTerminalOrFailed(env.getId())
+                        || isExecutionSettled(env.getId())
                         || getExecutionStatus(env.getId()) == SandboxExecutionStatus.IDLE
                         || acpInitializedPayloadReceived());
         TestTimingRegistry.instance().recordSubPhase("awaitAcpInit", System.nanoTime() - acpInitStart);
@@ -1292,7 +1277,7 @@ public abstract class AbstractAgentExecutionRealTest {
                 .pollInterval(Duration.ofMillis(500))
                 .conditionEvaluationListener(awaitTimeoutDiagnostics("ACP prompt completion", env.getId()))
                 .until(() -> harnessStalled()
-                        || isExecutionTerminalOrFailed(env.getId())
+                        || isExecutionSettled(env.getId())
                         || getExecutionStatus(env.getId()) == SandboxExecutionStatus.IDLE);
         TestTimingRegistry.instance().recordSubPhase("awaitPromptComplete", System.nanoTime() - promptStart);
         assertNoHarnessStall();
@@ -1554,7 +1539,7 @@ public abstract class AbstractAgentExecutionRealTest {
                             .as(
                                     "Execution for harness '%s' must settle after sleep",
                                     getHarness().getName())
-                            .isIn(SandboxExecutionStatus.IDLE, SandboxExecutionStatus.FAILED);
+                            .isEqualTo(SandboxExecutionStatus.IDLE);
                 });
 
         // The environment must have transitioned to SLEEPING

@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -29,6 +28,7 @@ import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
+import com.kratisai.controlplane.model.ExecutionEnvironmentType;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.event.EnvironmentRegisteredEvent;
@@ -54,7 +54,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.web.socket.WebSocketSession;
 
 @ExtendWith(MockitoExtension.class)
 class EnvironmentRegisterRpcHandlerTest {
@@ -172,6 +171,23 @@ class EnvironmentRegisterRpcHandlerTest {
                 });
     }
 
+    @Test
+    void handle_connectorInitialRegistration_marksConnected() {
+        ExecutionEnvironment env = createEnvironment();
+        env.setType(ExecutionEnvironmentType.CONNECTOR);
+        when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
+
+        EnvironmentRpcPayload.Register params =
+                new EnvironmentRpcPayload.Register(authToken, false, null, false, 0L, null, 1, "0.1.0");
+        JsonRpcInboundRequest request =
+                new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
+
+        handler.handle("ws-session-1", request, params).blockLast();
+
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+        assertThat(env.getLastActivityAt()).isNotNull();
+    }
+
     private ExecutionEnvironment createEnvironment() {
         Team team = new Team();
         team.setId(teamId);
@@ -202,21 +218,21 @@ class EnvironmentRegisterRpcHandlerTest {
         assertThat(result.status()).isEqualTo(EnvironmentRegisterStatus.REGISTERED);
 
         verify(executionEnvironmentRepository).save(env);
-        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
         assertThat(env.getLastHeartbeat()).isNotNull();
         assertThat(env.getLastActivityAt()).isNotNull();
 
-        verify(sessionRegistry).registerEnvironmentSession(any(String.class), eq(envId));
-        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+        verify(sessionRegistry).replaceSessionForEnvironment("ws-session-1", envId);
         verify(eventPublisher).publishEvent(any(EnvironmentRegisteredEvent.class));
     }
 
     @Test
-    void handle_withDuplicateInitialWhileSessionLive_replacesMappingWithoutRegisteredEvent() {
+    void handle_withDuplicateInitialWithoutActiveAgent_supersedesStaleSessionAndPublishesRegisteredEvent() {
         ExecutionEnvironment env = createEnvironment();
         env.setStatus(EnvironmentStatus.CONNECTED);
         when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
-        when(sessionRegistry.getSessionForEnvironment(envId)).thenReturn(mock(WebSocketSession.class));
+        when(sessionRegistry.replaceSessionForEnvironment("ws-session-2", envId))
+                .thenReturn("ws-session-1");
 
         EnvironmentRpcPayload.Register params =
                 new EnvironmentRpcPayload.Register(authToken, false, null, false, 0L, null, 1, "0.1.0");
@@ -228,11 +244,36 @@ class EnvironmentRegisterRpcHandlerTest {
 
         assertThat(response).isNotNull();
         EnvironmentRegisterResult result = (EnvironmentRegisterResult) response;
-        assertThat(result.status()).isEqualTo(EnvironmentRegisterStatus.RECONNECTED);
+        assertThat(result.status()).isEqualTo(EnvironmentRegisterStatus.REGISTERED);
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
+        assertThat(env.getLastActivityAt()).isNotNull();
+
+        verify(sessionRegistry).replaceSessionForEnvironment("ws-session-2", envId);
+        verify(eventPublisher).publishEvent(any(EnvironmentRegisteredEvent.class));
+    }
+
+    @Test
+    void handle_withDuplicateInitialAndActiveAgent_keepsConnectedWithoutRegisteredEvent() {
+        ExecutionEnvironment env = createEnvironment();
+        env.setStatus(EnvironmentStatus.PENDING_CONNECT);
+        when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
+        when(sessionRegistry.replaceSessionForEnvironment("ws-session-2", envId))
+                .thenReturn("ws-session-1");
+
+        EnvironmentRpcPayload.Register params =
+                new EnvironmentRpcPayload.Register(authToken, false, "acp-session", true, 0L, null, 1, "0.1.0");
+        JsonRpcInboundRequest request =
+                new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
+
+        EnvironmentResponsePayload response =
+                handler.handle("ws-session-2", request, params).blockLast();
+
+        assertThat(response).isNotNull();
+        EnvironmentRegisterResult result = (EnvironmentRegisterResult) response;
+        assertThat(result.status()).isEqualTo(EnvironmentRegisterStatus.REGISTERED);
         assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
 
-        verify(sessionRegistry).registerEnvironmentSession("ws-session-2", envId);
-        verify(eventPublisher).publishEvent(any(TeamEntityChangedEvent.class));
+        verify(sessionRegistry).replaceSessionForEnvironment("ws-session-2", envId);
         verify(eventPublisher, never()).publishEvent(any(EnvironmentRegisteredEvent.class));
     }
 
@@ -241,7 +282,8 @@ class EnvironmentRegisterRpcHandlerTest {
         ExecutionEnvironment env = createEnvironment();
         env.setStatus(EnvironmentStatus.CONNECTED);
         when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
-        when(sessionRegistry.getSessionForEnvironment(envId)).thenReturn(null);
+        when(sessionRegistry.replaceSessionForEnvironment("ws-session-2", envId))
+                .thenReturn(null);
 
         EnvironmentRpcPayload.Register params =
                 new EnvironmentRpcPayload.Register(authToken, false, null, false, 0L, null, 1, "0.1.0");
@@ -259,7 +301,7 @@ class EnvironmentRegisterRpcHandlerTest {
     }
 
     @Test
-    void handle_withValidInitialRegistration_shouldNotPublishReconnectEvents() {
+    void handle_withValidInitialRegistration_shouldReturnRegisteredAndReplaceAnyPriorMapping() {
         ExecutionEnvironment env = createEnvironment();
         when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
 
@@ -275,9 +317,8 @@ class EnvironmentRegisterRpcHandlerTest {
         EnvironmentRegisterResult result = (EnvironmentRegisterResult) response;
         assertThat(result.status()).isEqualTo(EnvironmentRegisterStatus.REGISTERED);
 
-        verify(sessionRegistry).registerEnvironmentSession(any(String.class), eq(envId));
+        verify(sessionRegistry).replaceSessionForEnvironment("ws-session-1", envId);
         verify(eventPublisher).publishEvent(any(EnvironmentRegisteredEvent.class));
-        verify(sessionRegistry, never()).replaceSessionForEnvironment(any(String.class), any());
     }
 
     @Test
@@ -320,19 +361,50 @@ class EnvironmentRegisterRpcHandlerTest {
 
         reconnect(env);
 
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
         assertThat(env.getLastActivityAt()).isAfter(staleChange);
     }
 
     @Test
-    void handle_withReconnectWhileConnected_shouldNotRestartStateClock() {
+    void handle_withReconnectWhileConnectedWithoutAgent_keepsSandboxPendingAndRefreshesClock() {
         ExecutionEnvironment env = createEnvironment();
         env.setStatus(EnvironmentStatus.CONNECTED);
         Instant staleChange = Instant.now().minus(Duration.ofHours(2));
         env.setLastActivityAt(staleChange);
+        when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
+        when(sessionRegistry.replaceSessionForEnvironment(any(String.class), eq(envId)))
+                .thenReturn("ws-old");
 
-        reconnect(env);
+        EnvironmentRpcPayload.Register params =
+                new EnvironmentRpcPayload.Register(authToken, true, null, false, 0L, null, 1, "0.1.0");
+        JsonRpcInboundRequest request =
+                new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
+        handler.handle("ws-new", request, params).blockLast();
 
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.PENDING_CONNECT);
+        assertThat(env.getLastActivityAt()).isAfter(staleChange);
+        verify(eventPublisher).publishEvent(any(EnvironmentRegisteredEvent.class));
+    }
+
+    @Test
+    void handle_withReconnectWhileConnectedAndAgentReady_keepsConnectedStateClock() {
+        ExecutionEnvironment env = createEnvironment();
+        env.setStatus(EnvironmentStatus.CONNECTED);
+        Instant staleChange = Instant.now().minus(Duration.ofHours(2));
+        env.setLastActivityAt(staleChange);
+        when(executionEnvironmentRepository.findByAuthToken(authToken)).thenReturn(Optional.of(env));
+        when(sessionRegistry.replaceSessionForEnvironment(any(String.class), eq(envId)))
+                .thenReturn("ws-old");
+
+        EnvironmentRpcPayload.Register params =
+                new EnvironmentRpcPayload.Register(authToken, true, "acp-session", true, 0L, null, 1, "0.1.0");
+        JsonRpcInboundRequest request =
+                new JsonRpcInboundRequest(EnvironmentRpcPayload.Register.METHOD, objectMapper.valueToTree(params), 1);
+        handler.handle("ws-new", request, params).blockLast();
+
+        assertThat(env.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
         assertThat(env.getLastActivityAt()).isEqualTo(staleChange);
+        verify(eventPublisher, never()).publishEvent(any(EnvironmentRegisteredEvent.class));
     }
 
     private void reconnect(ExecutionEnvironment env) {

@@ -177,7 +177,7 @@ The control plane owns permission policy:
 
 | Phase | Assertion |
 |-------|-----------|
-| Registration | Environment reaches `CONNECTED`. |
+| Registration | Environment reaches `CONNECTED` after the connector registers and the agent launch attempt finishes. |
 | Initialization | `env.acp_initialized` contains a session ID after `initialize` and `session/new`. |
 | Prompt | Normal completion returns exactly `end_turn`; every reason belongs to the ACP enum. |
 | Output | Expected files, output, activity, and model requests are observed. |
@@ -185,7 +185,7 @@ The control plane owns permission policy:
 | Cancellation | Pending permission receives cancelled outcome and prompt returns `cancelled`. |
 | Reconnect | Agent process and ACP session survive `/ws/env` interruption; registration and event delivery resume within the lease. |
 | Cleanup | `env.complete` is received, the virtual key is revoked, and the sandbox is removed. |
-| Suspend/resume | The resumed disk equals the suspended disk (git `HEAD`, `origin`, ACP session id, diff base branch). The agent session is re-attached (`relaunch: true`) without a second task prompt or LLM call. A fresh virtual key opens a second usage segment. The diff lists only sandbox-local files. Git credentials work again. |
+| Suspend/resume | The resumed disk equals the suspended disk (git `HEAD`, `origin`, ACP session id, diff base branch). The agent is launched and re-attaches the stored session without a task prompt or LLM call. A fresh virtual key opens a second usage segment. The diff lists only sandbox-local files. Git credentials work again. |
 
 ## Suspend/Resume Coverage
 
@@ -193,7 +193,7 @@ The control plane owns permission policy:
 |------|------|----------------|
 | Real E2E | `SuspendResumeMainBranchRealTest`, `SuspendResumeDevelopBranchRealTest` (base `AbstractSuspendResumeRealTest`) | Real agent turn, `docker commit` snapshot, REST resume, real git server with several commits and a non-default branch. Asserts disk/git state, fresh key and usage segments, no LLM replay, credentials redeployed, diff lists only local files, a second suspend/resume cycle, and the legacy-snapshot `origin/HEAD` fallback. |
 | Real connector | `SuspendResumeConnectorIntegrationTest` | No agent. Provider snapshot contract (disk survives, one snapshot image, `destroy` removes it) and the git state a woken connector inherits. |
-| WebSocket | `SandboxResumeWebSocketIntegrationTest` | Scripted sidecar re-registers: relaunch order, no checkout or prompt replay, non-idle executions only redeploy credentials, failed relaunch fails the execution. |
+| WebSocket | `SandboxResumeWebSocketIntegrationTest` | Scripted sidecar re-registers: agent launch on resume, no checkout or prompt replay, non-idle executions only redeploy credentials, failed launch settles `IDLE` with a visible error. |
 | Go | `git_resume_test.go` | Resumed connector manifest lists only local files; `resolveDiffBase` matrix; persisted-branch edge cases. |
 | Web | `use-resume-environment.test.tsx`, `environment-api.test.ts` | Resume mutation, 410/400 errors, no-team guard. |
 
@@ -210,8 +210,8 @@ rerun) were logical races in the control-plane fan-out path, fixed as follows:
    `envMessageExecutor`; fan-out is per web-client session over `clientBroadcastExecutor`.
 2. **`env.acp_initialized` was all-or-nothing.** A throw in prompt dispatch rolled back the ACP-init
    broadcast and left the execution `RUNNING`. **Fix:** `dispatchAcpPrompt` never throws synchronously.
-3. **Failed prompt dispatch silently stalled.** **Fix:** a `status: failed` acknowledgement marks the
-   execution `FAILED` (unless already terminal). Dispatch is now fire-and-ack, so a dropped
+3. **Failed prompt dispatch silently stalled.** **Fix:** a `status: failed` acknowledgement settles the
+   execution to `IDLE` (unless already terminal) and records an activity. Dispatch is now fire-and-ack, so a dropped
    connection, request timeout, or control-plane restart is non-fatal: the turn runs in the sidecar
    and its terminal outcome arrives as `env.acp_prompt_complete` (or `env.complete`).
 4. **Diagnostic:** waits also accept a persisted `stopReason` and log execution state on timeout.

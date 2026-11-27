@@ -219,7 +219,7 @@ public class ExecutionEnvironmentService {
                         && execution.getStatus() != SandboxExecutionStatus.IDLE)) {
             return;
         }
-        execution.setStatus(SandboxExecutionStatus.UNKNOWN);
+        execution.setStatus(SandboxExecutionStatus.IDLE);
         execution.setCompletedAt(Instant.now());
         sandboxExecutionRepository.save(execution);
         executionActivityPersistenceService.recordExecutionError(executionId, reason, null);
@@ -239,7 +239,7 @@ public class ExecutionEnvironmentService {
 
         UUID teamId = execution.getChat().getTeam().getId();
         eventPublisher.publishEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), -1, execution.getStatus(), reason));
+                new SandboxExecutionCompleteEvent(teamId, execution.getId(), -1, execution.getStatus(), reason, true));
         eventPublisher.publishEvent(
                 new ExecutionStatusChangedEvent(teamId, execution.getChat().getId(), execution.getId()));
     }
@@ -289,7 +289,7 @@ public class ExecutionEnvironmentService {
     }
 
     @Transactional
-    public void failStrandedExecution(UUID executionId) {
+    public void settleStrandedExecution(UUID executionId) {
         terminationTemplate.executeWithoutResult(
                 status -> forceTerminateExecution(executionId, UNAVAILABLE_ENVIRONMENT_REASON));
     }
@@ -541,7 +541,7 @@ public class ExecutionEnvironmentService {
 
     private void finishPurgedEnvironment(UUID envId, UUID teamId) {
         SandboxExecution active = findActiveExecution(envId);
-        if (active != null) {
+        if (active != null && active.getStatus() == SandboxExecutionStatus.RUNNING) {
             terminationTemplate.executeWithoutResult(
                     status -> forceTerminateExecution(active.getId(), PURGED_ENVIRONMENT_REASON));
             return;
@@ -551,10 +551,7 @@ public class ExecutionEnvironmentService {
                 .findFirstByEnvironmentIdOrderByStartedAtDesc(envId)
                 .ifPresent(execution -> {
                     executionActivityPersistenceService.recordSandboxPurged(execution.getId());
-                    if (execution.getStatus() == SandboxExecutionStatus.FAILED) {
-                        eventPublisher.publishEvent(
-                                new SandboxExecutionSuspendedEvent(teamId, execution.getId(), envId));
-                    }
+                    eventPublisher.publishEvent(new SandboxExecutionSuspendedEvent(teamId, execution.getId(), envId));
                     eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
                             teamId, execution.getChat().getId(), execution.getId()));
                 });
@@ -596,9 +593,49 @@ public class ExecutionEnvironmentService {
     }
 
     /**
-     * Lost runtime that keeps its snapshot: the environment returns to SLEEPING for another
-     * resume attempt. RUNNING executions move to UNKNOWN; IDLE and FAILED executions keep their
-     * status while sealing their active virtual key.
+     * Suspends a sandbox whose initial or recovery agent launch failed, preserving any workspace
+     * snapshot so the user can fix credentials/config and resume rather than leaving compute
+     * stranded in PENDING_CONNECT.
+     */
+    @Transactional
+    public void sleepAfterLaunchFailure(UUID envId) {
+        if (envId == null) {
+            return;
+        }
+        ExecutionEnvironment env =
+                executionEnvironmentRepository.findById(envId).orElse(null);
+        if (env == null
+                || env.getType() != ExecutionEnvironmentType.SANDBOX
+                || env.getProvider() == null
+                || env.getStatus() == EnvironmentStatus.SLEEPING
+                || env.getStatus() == EnvironmentStatus.TERMINATED) {
+            return;
+        }
+        UUID teamId = env.getTeam().getId();
+        try {
+            SandboxProvider sandboxProvider =
+                    sandboxOrchestratorService.getProvider(env.getProvider().getType());
+            if (!sandboxProvider.suspend(envId)) {
+                reconcilePurgedEnvironment(env);
+                return;
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to suspend sandbox {} after launch failure; leaving for lifecycle sweep", envId, e);
+            return;
+        }
+        markSuspended(env);
+        executionEnvironmentRepository.save(env);
+        sandboxExecutionRepository
+                .findFirstByEnvironmentIdOrderByStartedAtDesc(envId)
+                .ifPresent(execution -> eventPublisher.publishEvent(
+                        new SandboxExecutionSuspendedEvent(teamId, execution.getId(), envId)));
+        eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.ENVIRONMENTS));
+    }
+
+    /**
+     * Lost runtime that keeps its snapshot: the environment returns to SLEEPING for another resume
+     * attempt. An interrupted turn settles to IDLE so it can be continued or published after a
+     * resume; the active virtual key is always sealed.
      */
     @Transactional
     public void suspendAfterLostRuntime(ExecutionEnvironment env) {
@@ -609,11 +646,9 @@ public class ExecutionEnvironmentService {
                     if (latest.getStatus() == SandboxExecutionStatus.RUNNING) {
                         terminationTemplate.executeWithoutResult(
                                 status -> forceTerminateExecution(latest.getId(), UNAVAILABLE_ENVIRONMENT_REASON));
-                    } else if (latest.getStatus() == SandboxExecutionStatus.IDLE
-                            || latest.getStatus() == SandboxExecutionStatus.FAILED) {
-                        eventPublisher.publishEvent(new SandboxExecutionSuspendedEvent(
-                                latest.getChat().getTeam().getId(), latest.getId(), env.getId()));
                     }
+                    eventPublisher.publishEvent(new SandboxExecutionSuspendedEvent(
+                            latest.getChat().getTeam().getId(), latest.getId(), env.getId()));
                 });
     }
 

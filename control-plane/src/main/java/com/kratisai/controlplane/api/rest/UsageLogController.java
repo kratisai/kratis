@@ -2,9 +2,9 @@ package com.kratisai.controlplane.api.rest;
 
 import com.kratisai.controlplane.api.restdto.PageResponseDto;
 import com.kratisai.controlplane.api.restdto.UsageLogEntryDto;
+import com.kratisai.controlplane.api.restdto.UsageLogStatus;
 import com.kratisai.controlplane.api.restdto.UsageSummaryDto;
 import com.kratisai.controlplane.config.SecurityUtil;
-import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.UsageType;
 import com.kratisai.controlplane.service.UsageService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -46,7 +46,7 @@ public class UsageLogController {
             description = "Returns human-friendly usage log entries spanning Executions, Repository Ingestion "
                     + "Batches, Team Wiki builds, and Chat Sessions. The optional usageType filter "
                     + "accepts EXECUTION, INGESTION, TEAM_WIKI, or CHAT. The optional status filter "
-                    + "accepts RUNNING, COMPLETED, FAILED, IDLE, or UNKNOWN; COMPLETED also includes settled IDLE "
+                    + "accepts RUNNING, COMPLETED, or IDLE; COMPLETED also includes settled IDLE "
                     + "entries. Unknown values for either filter yield 400.")
     @ApiResponses(
             value = {
@@ -96,12 +96,12 @@ public class UsageLogController {
         }
     }
 
-    private static SandboxExecutionStatus parseStatus(String status) {
+    private static UsageLogStatus parseStatus(String status) {
         if (status == null || status.isBlank() || "all".equalsIgnoreCase(status.trim())) {
             return null;
         }
         try {
-            return SandboxExecutionStatus.valueOf(status.trim().toUpperCase(Locale.ROOT));
+            return UsageLogStatus.valueOf(status.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown status: " + status);
         }

@@ -8,7 +8,6 @@ import com.kratisai.controlplane.api.restdto.ChatDto;
 import com.kratisai.controlplane.api.restdto.ChatUsageDto;
 import com.kratisai.controlplane.api.restdto.LastActivityType;
 import com.kratisai.controlplane.api.restdto.TopicStatus;
-import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
 import com.kratisai.controlplane.model.CanvasEntity;
 import com.kratisai.controlplane.model.ChatEntity;
@@ -33,15 +32,7 @@ import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
 import com.kratisai.controlplane.repository.UserRepository;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -257,8 +248,8 @@ public class ChatService {
             for (ExecutionDiffSnapshot snapshot : diffSnapshotRepository.findByExecutionIdIn(latestExecutionIds)) {
                 snapshotsByExecution.put(snapshot.getExecutionId(), snapshot);
             }
-            pendingHitlExecutionIds = new HashSet<>(
-                    activityRepository.findExecutionIdsWithStatus(latestExecutionIds, ActivityStatus.PENDING));
+            pendingHitlExecutionIds =
+                    new HashSet<>(activityRepository.findExecutionIdsWithPendingHitl(latestExecutionIds));
         }
 
         Set<UUID> blocked = pendingHitlExecutionIds;
@@ -332,10 +323,9 @@ public class ChatService {
                 ? diffSnapshotRepository.findByExecutionId(latest.getId()).orElse(null)
                 : null;
         CanvasEntity latestCanvas = canvasRepository.findByChatIdAndDeletedAtIsNull(chatId).stream()
-                .max((first, second) -> first.getUpdatedAt().compareTo(second.getUpdatedAt()))
+                .max(Comparator.comparing(CanvasEntity::getUpdatedAt))
                 .orElse(null);
-        boolean pendingHitl = latest != null
-                && activityRepository.existsByExecutionIdAndStatus(latest.getId(), ActivityStatus.PENDING);
+        boolean pendingHitl = latest != null && activityRepository.existsPendingHitlForExecution(latest.getId());
         return toChatDto(
                 chat,
                 aggregateUsage(chatId),
@@ -403,9 +393,6 @@ public class ChatService {
         if (latest.getStatus() == SandboxExecutionStatus.RUNNING) {
             return TopicStatus.WORKING;
         }
-        if (latest.getStatus() == SandboxExecutionStatus.FAILED) {
-            return TopicStatus.FAILED;
-        }
         var latestChangeSet = latest.getLatestChangeSet();
         if (snapshot != null
                 && (snapshot.getTotalAdditions() > 0 || snapshot.getTotalDeletions() > 0)
@@ -429,7 +416,6 @@ public class ChatService {
             ExecutionDiffSnapshot snapshot,
             Instant lastMessageAt,
             CanvasEntity latestCanvas) {
-        Instant chatAt = lastMessageAt;
         Instant executionAt = latest != null
                 ? latestInstant(
                         latestInstant(latest.getStartedAt(), latest.getCompletedAt()),
@@ -437,15 +423,16 @@ public class ChatService {
                 : null;
         Instant canvasAt = latestCanvas != null ? latestCanvas.getUpdatedAt() : null;
 
-        if (executionAt != null && !isBefore(executionAt, chatAt) && !isBefore(executionAt, canvasAt)) {
+        if (executionAt != null && !isBefore(executionAt, lastMessageAt) && !isBefore(executionAt, canvasAt)) {
             return new LastActivity(
                     executionAt, LastActivityType.EXECUTION, latest.getId().toString());
         }
-        if (canvasAt != null && !isBefore(canvasAt, chatAt)) {
+        if (canvasAt != null && !isBefore(canvasAt, lastMessageAt)) {
             return new LastActivity(canvasAt, LastActivityType.CANVAS, latestCanvas.getDocumentId());
         }
-        if (chatAt != null) {
-            return new LastActivity(chatAt, LastActivityType.CHAT, chat.getId().toString());
+        if (lastMessageAt != null) {
+            return new LastActivity(
+                    lastMessageAt, LastActivityType.CHAT, chat.getId().toString());
         }
         return new LastActivity(
                 chat.getUpdatedAt(), LastActivityType.CHAT, chat.getId().toString());

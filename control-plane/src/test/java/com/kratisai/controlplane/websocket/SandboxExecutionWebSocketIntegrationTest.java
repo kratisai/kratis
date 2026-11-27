@@ -27,6 +27,7 @@ import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SandboxExecutionScenarioFactory;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
 import com.kratisai.controlplane.testsupport.TestDataFactory;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -103,8 +104,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                                 ClientPayload.ExecutionOutputResult.class,
                                 output -> output.stream() == OutputStream.STDERR,
                                 (webSocketSession, output) -> stderrOutput.set(output))
-                        .expectTrigger("execution_output", 2)
-                        .expectTrigger("execution_complete", 1),
+                        .expectTrigger("execution_output", 2),
                 sidecar -> sidecar.withAcpErrorOutput("bwrap: No permissions to create a new namespace")
                         .expectTrigger("env.launch_acp_agent", 1)
                         .expectTrigger("env.acp_prompt", 1))) {
@@ -122,16 +122,16 @@ class SandboxExecutionWebSocketIntegrationTest {
 
             sandboxExecutionService.terminateExecution(executionId);
 
-            assertThat(pair.client().awaitTrigger("execution_complete", 15, TimeUnit.SECONDS))
-                    .isTrue();
-            assertThat(pair.client().hasReceivedMessageContaining("execution_complete", "IDLE"))
-                    .isTrue();
+            await("env.complete persists exitCode=0 and status=IDLE")
+                    .atMost(15, TimeUnit.SECONDS)
+                    .pollDelay(Duration.ZERO)
+                    .untilAsserted(() -> {
+                        SandboxExecution finalExec =
+                                sandboxExecutionRepository.findById(executionId).orElseThrow();
+                        assertThat(finalExec.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
+                        assertThat(finalExec.getExitCode()).isEqualTo(0);
+                    });
         }
-
-        SandboxExecution finalExec =
-                sandboxExecutionRepository.findById(executionId).orElseThrow();
-        assertThat(finalExec.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
-        assertThat(finalExec.getExitCode()).isEqualTo(0);
     }
 
     @Test
@@ -279,7 +279,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                 scenario,
                 client -> client.expectTrigger("awaiting_human", 1)
                         .expectTrigger("\"state\":\"resolved\"", 1)
-                        .expectTrigger("execution_complete", 1),
+                        .expectTrigger("execution_status_changed", 1),
                 sidecar -> sidecar.withAcpCommand("rm -rf /")
                         .expectTrigger("env.acp_prompt", 1)
                         .expectTrigger("env.cancel_agent", 1))) {
@@ -296,8 +296,8 @@ class SandboxExecutionWebSocketIntegrationTest {
             assertThat(pair.client().awaitTrigger("\"state\":\"resolved\"", 15, TimeUnit.SECONDS))
                     .as("UI client should receive resolved state so the pending approval clears")
                     .isTrue();
-            assertThat(pair.client().awaitTrigger("execution_complete", 15, TimeUnit.SECONDS))
-                    .as("UI client should receive execution_complete after termination")
+            assertThat(pair.client().awaitTrigger("execution_status_changed", 15, TimeUnit.SECONDS))
+                    .as("UI client should receive execution_status_changed after termination")
                     .isTrue();
         }
     }
@@ -311,7 +311,7 @@ class SandboxExecutionWebSocketIntegrationTest {
                 port,
                 auth,
                 scenario,
-                client -> client.expectTrigger("execution_complete", 1),
+                client -> client.expectTrigger("execution_status_changed", 1),
                 sidecar -> sidecar.expectTrigger("env.launch_acp_agent", 1).expectTrigger("env.acp_prompt", 1))) {
             assertThat(pair.sidecar().awaitTrigger("env.launch_acp_agent", 15, TimeUnit.SECONDS))
                     .isTrue();

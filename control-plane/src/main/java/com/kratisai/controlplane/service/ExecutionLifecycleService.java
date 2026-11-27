@@ -1,6 +1,5 @@
 package com.kratisai.controlplane.service;
 
-import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
@@ -38,6 +37,6 @@ public class ExecutionLifecycleService {
         if (environmentId == null) {
             return false;
         }
-        return activityRepository.existsByEnvironmentIdAndStatus(environmentId, ActivityStatus.PENDING);
+        return activityRepository.existsPendingHitlForEnvironment(environmentId);
     }
 }

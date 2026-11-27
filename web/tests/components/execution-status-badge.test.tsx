@@ -21,10 +21,4 @@ describe('ExecutionStatusBadge', () => {
 
     expect(screen.getByText('Complete')).toBeInTheDocument()
   })
-
-  it('renders a Failed badge for a failed execution', () => {
-    render(<ExecutionStatusBadge status="FAILED" />)
-
-    expect(screen.getByText('Failed')).toBeInTheDocument()
-  })
 })

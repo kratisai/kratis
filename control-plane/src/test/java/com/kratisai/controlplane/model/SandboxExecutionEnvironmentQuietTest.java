@@ -29,8 +29,8 @@ class SandboxExecutionEnvironmentQuietTest {
         for (SandboxExecutionStatus next : List.of(
                 SandboxExecutionStatus.IDLE,
                 SandboxExecutionStatus.COMPLETED,
-                SandboxExecutionStatus.FAILED,
-                SandboxExecutionStatus.UNKNOWN)) {
+                SandboxExecutionStatus.IDLE,
+                SandboxExecutionStatus.IDLE)) {
             ExecutionEnvironment environment = environment();
             SandboxExecution execution = runningExecutionOn(environment);
 

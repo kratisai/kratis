@@ -289,7 +289,7 @@ describe('MobileTopicSelector', () => {
         harness: 'claude-code',
         id: 'exec-1',
         startedAt: '2026-08-30T10:00:00Z',
-        status: 'FAILED',
+        status: 'IDLE',
       },
     ])
 

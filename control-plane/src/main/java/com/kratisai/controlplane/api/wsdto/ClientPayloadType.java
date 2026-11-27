@@ -25,7 +25,6 @@ public enum ClientPayloadType {
     TEAM_ENTITY_CHANGED("team_entity_changed"),
     USER_ENTITY_CHANGED("user_entity_changed"),
     EXECUTION_OUTPUT("execution_output"),
-    EXECUTION_COMPLETE("execution_complete"),
     EXECUTION_STATUS_CHANGED("execution_status_changed"),
     CHAT_USAGE_CHANGED("chat_usage_changed"),
     EXECUTION_ACTIVITY("execution_activity"),

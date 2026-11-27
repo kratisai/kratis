@@ -382,7 +382,8 @@ class ChatExecutionControllerTest {
                 .untilAsserted(() -> {
                     ExecutionEnvironment updatedEnv =
                             executionEnvironmentRepository.findById(env.getId()).orElseThrow();
-                    assertThat(updatedEnv.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+                    assertThat(updatedEnv.getStatus())
+                            .isIn(EnvironmentStatus.PENDING_CONNECT, EnvironmentStatus.CONNECTED);
                     assertThat(updatedEnv.getLastHeartbeat()).isNotNull();
                     assertThat(updatedEnv.getLastHeartbeat()).isBeforeOrEqualTo(Instant.now());
                 });

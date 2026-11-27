@@ -82,11 +82,11 @@ class EnvironmentCheckoutCompleteRpcHandlerTest {
 
         handler.handle(sessionId, request, params);
         verify(sandboxExecutionService).resumeAfterCheckout(executionId);
-        verify(sandboxExecutionService, never()).failExecution(any(), any());
+        verify(sandboxExecutionService, never()).settleExecutionIdle(any(), any());
     }
 
     @Test
-    void handle_withFailureStatus_delegatesToFailExecution() {
+    void handle_withFailureStatus_settlesExecutionIdle() {
         when(sessionRegistry.getEnvironmentId(sessionId)).thenReturn(Optional.of(envId));
         SandboxExecution execution = createExecution();
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
@@ -97,7 +97,7 @@ class EnvironmentCheckoutCompleteRpcHandlerTest {
                 EnvironmentRpcPayload.CheckoutComplete.METHOD, objectMapper.valueToTree(params), null);
 
         handler.handle(sessionId, request, params);
-        verify(sandboxExecutionService).failExecution(executionId, "clone failed");
+        verify(sandboxExecutionService).settleExecutionIdle(executionId, "clone failed");
         verify(sandboxExecutionService, never()).resumeAfterCheckout(executionId);
     }
 
@@ -115,7 +115,7 @@ class EnvironmentCheckoutCompleteRpcHandlerTest {
                 .satisfies(
                         e -> assertThat(((RpcErrorException) e).error().code()).isEqualTo(-32001));
         verify(sandboxExecutionService, never()).resumeAfterCheckout(any());
-        verify(sandboxExecutionService, never()).failExecution(any());
+        verify(sandboxExecutionService, never()).settleExecutionIdle(any());
     }
 
     @Test
@@ -137,7 +137,7 @@ class EnvironmentCheckoutCompleteRpcHandlerTest {
                 .satisfies(
                         e -> assertThat(((RpcErrorException) e).error().code()).isEqualTo(-32002));
         verify(sandboxExecutionService, never()).resumeAfterCheckout(any());
-        verify(sandboxExecutionService, never()).failExecution(any());
+        verify(sandboxExecutionService, never()).settleExecutionIdle(any());
     }
 
     @Test

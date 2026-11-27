@@ -27,6 +27,7 @@ import com.kratisai.controlplane.api.wsdto.PermissionOption;
 import com.kratisai.controlplane.api.wsdto.PlanEntry;
 import com.kratisai.controlplane.api.wsdto.PlanEntryPriority;
 import com.kratisai.controlplane.api.wsdto.PlanEntryStatus;
+import com.kratisai.controlplane.api.wsdto.StopReason;
 import com.kratisai.controlplane.model.AgentHarness;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.SandboxExecution;
@@ -110,6 +111,53 @@ class ExecutionActivityPersistenceServiceTest {
         assertThat(saved.getActivityType()).isEqualTo(type);
         assertThat(saved.getStatus()).isEqualTo(status);
         assertThat(saved.getDescription()).isEqualTo(description);
+    }
+
+    @Test
+    void recordTurnComplete_closesQueuedNonHitlPendingToolCallWhileKeepingAwaitingHumanHitl() {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        SandboxExecutionActivity queuedBash =
+                row(executionId, 1, "tool-1", ActivityType.COMMAND, ActivityStatus.PENDING, "bash");
+        SandboxExecutionActivity awaitingHitl = new SandboxExecutionActivity(
+                executionId,
+                2,
+                "hitl-1",
+                ActivityType.COMMAND,
+                ActivityStatus.PENDING,
+                "Approve bash",
+                "{\"hitl\":{\"kind\":\"approval\",\"state\":\"awaiting_human\",\"message\":\"Approve bash\"}}");
+        when(repository.findByExecutionIdAndStatusInOrderBySequenceAsc(
+                        executionId, List.of(ActivityStatus.IN_PROGRESS, ActivityStatus.PENDING)))
+                .thenReturn(List.of(queuedBash, awaitingHitl));
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution(executionId, teamId)));
+        when(repository.nextSequence(executionId)).thenReturn(3L);
+
+        service.recordTurnComplete(executionId, "prompt-1", StopReason.END_TURN);
+
+        assertThat(queuedBash.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+        assertThat(awaitingHitl.getStatus()).isEqualTo(ActivityStatus.PENDING);
+        verify(repository).saveAll(List.of(queuedBash));
+        verify(eventPublisher, times(2)).publishEvent(any(SandboxExecutionActivityEvent.class));
+    }
+
+    @Test
+    void recordTurnComplete_closesAndBroadcastsTrailingOpenActivity() {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        SandboxExecutionActivity trailing =
+                row(executionId, 1, "msg-1", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "last response");
+        when(repository.findByExecutionIdAndStatusInOrderBySequenceAsc(
+                        executionId, List.of(ActivityStatus.IN_PROGRESS, ActivityStatus.PENDING)))
+                .thenReturn(List.of(trailing));
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution(executionId, teamId)));
+        when(repository.nextSequence(executionId)).thenReturn(2L);
+
+        service.recordTurnComplete(executionId, "prompt-1", StopReason.END_TURN);
+
+        assertThat(trailing.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+        verify(repository).saveAll(List.of(trailing));
+        verify(eventPublisher, times(2)).publishEvent(any(SandboxExecutionActivityEvent.class));
     }
 
     @Test
@@ -446,46 +494,101 @@ class ExecutionActivityPersistenceServiceTest {
     }
 
     @Test
-    void closeOpenStreams_marksAllInProgressMessageThoughtComplete() {
+    void settleOpenActivities_marksAllInProgressMessageThoughtCompleteAndPublishes() {
         UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         SandboxExecutionActivity message =
                 row(executionId, 1, "msg-1", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "message");
         SandboxExecutionActivity thought =
                 row(executionId, 2, "thought-1", ActivityType.THINKING, ActivityStatus.IN_PROGRESS, "reasoning");
-        when(repository.findByExecutionIdAndStatusOrderBySequenceAsc(executionId, ActivityStatus.IN_PROGRESS))
+        when(repository.findByExecutionIdAndStatusInOrderBySequenceAsc(
+                        executionId, List.of(ActivityStatus.IN_PROGRESS, ActivityStatus.PENDING)))
                 .thenReturn(List.of(message, thought));
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution(executionId, teamId)));
 
-        service.closeOpenStreams(executionId);
+        service.settleOpenActivities(executionId, 0, false);
 
         assertThat(message.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
         assertThat(thought.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
         verify(repository).saveAll(List.of(message, thought));
+        verify(eventPublisher, times(2)).publishEvent(any(SandboxExecutionActivityEvent.class));
     }
 
     @Test
-    void closeOpenStreams_closesOpenToolsAndCommandsToo() {
+    void settleOpenActivities_closesOpenToolsAndCommandsToo() {
         UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         SandboxExecutionActivity search =
                 row(executionId, 1, "search-1", ActivityType.RESEARCH, ActivityStatus.IN_PROGRESS, "glob");
         SandboxExecutionActivity command =
                 row(executionId, 2, "cmd-1", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "npm test");
-        when(repository.findByExecutionIdAndStatusOrderBySequenceAsc(executionId, ActivityStatus.IN_PROGRESS))
+        when(repository.findByExecutionIdAndStatusInOrderBySequenceAsc(
+                        executionId, List.of(ActivityStatus.IN_PROGRESS, ActivityStatus.PENDING)))
                 .thenReturn(List.of(search, command));
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution(executionId, teamId)));
 
-        service.closeOpenStreams(executionId);
+        service.settleOpenActivities(executionId, 0, false);
 
         assertThat(search.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
         assertThat(command.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
         verify(repository).saveAll(List.of(search, command));
+        verify(eventPublisher, times(2)).publishEvent(any(SandboxExecutionActivityEvent.class));
     }
 
     @Test
-    void closeOpenStreams_withNoOpenStreams_isNoOp() {
+    void settleOpenActivities_unexpectedProcessExitFailsCommandAndDeliberateStopCompletesIt() {
         UUID executionId = UUID.randomUUID();
-        when(repository.findByExecutionIdAndStatusOrderBySequenceAsc(executionId, ActivityStatus.IN_PROGRESS))
+        UUID teamId = UUID.randomUUID();
+        SandboxExecutionActivity cmdCrash =
+                row(executionId, 1, "cmd-crash", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "npm test");
+        when(repository.findByExecutionIdAndStatusInOrderBySequenceAsc(
+                        executionId, List.of(ActivityStatus.IN_PROGRESS, ActivityStatus.PENDING)))
+                .thenReturn(List.of(cmdCrash));
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution(executionId, teamId)));
+
+        service.settleOpenActivities(executionId, 0, true);
+
+        assertThat(cmdCrash.getStatus()).isEqualTo(ActivityStatus.FAILED);
+        assertThat(service.detailOf(cmdCrash).exitCode()).isZero();
+        verify(eventPublisher).publishEvent(any(SandboxExecutionActivityEvent.class));
+
+        SandboxExecutionActivity cmdStopped =
+                row(executionId, 2, "cmd-stop", ActivityType.COMMAND, ActivityStatus.IN_PROGRESS, "npm test");
+        when(repository.findByExecutionIdAndStatusInOrderBySequenceAsc(
+                        executionId, List.of(ActivityStatus.IN_PROGRESS, ActivityStatus.PENDING)))
+                .thenReturn(List.of(cmdStopped));
+
+        service.settleOpenActivities(executionId, 143, false);
+
+        assertThat(cmdStopped.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+    }
+
+    @Test
+    void settleOpenActivities_malformedDetailDoesNotAbortSettlement() {
+        UUID executionId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        SandboxExecutionActivity malformed = new SandboxExecutionActivity(
+                executionId, 1, "cmd-bad", ActivityType.COMMAND, ActivityStatus.PENDING, "npm test", "{not-json");
+        when(repository.findByExecutionIdAndStatusInOrderBySequenceAsc(
+                        executionId, List.of(ActivityStatus.IN_PROGRESS, ActivityStatus.PENDING)))
+                .thenReturn(List.of(malformed));
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution(executionId, teamId)));
+
+        service.settleOpenActivities(executionId, 0, false);
+
+        assertThat(malformed.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
+        verify(repository).saveAll(List.of(malformed));
+        verify(eventPublisher).publishEvent(any(SandboxExecutionActivityEvent.class));
+    }
+
+    @Test
+    void settleOpenActivities_withNoOpenStreams_isNoOp() {
+        UUID executionId = UUID.randomUUID();
+        when(repository.findByExecutionIdAndStatusInOrderBySequenceAsc(
+                        executionId, List.of(ActivityStatus.IN_PROGRESS, ActivityStatus.PENDING)))
                 .thenReturn(List.of());
 
-        service.closeOpenStreams(executionId);
+        service.settleOpenActivities(executionId, 0, false);
 
         verify(repository, never()).saveAll(any());
     }
@@ -497,20 +600,21 @@ class ExecutionActivityPersistenceServiceTest {
         SandboxExecutionActivity trailing =
                 row(executionId, 1, "msg-1", ActivityType.MESSAGE, ActivityStatus.IN_PROGRESS, "trailing message");
         SandboxExecutionActivity pending = pendingApproval(executionId, "tool-call-1");
-        when(repository.findByExecutionIdAndStatusOrderBySequenceAsc(executionId, ActivityStatus.IN_PROGRESS))
+        when(repository.findByExecutionIdAndStatusInOrderBySequenceAsc(
+                        executionId, List.of(ActivityStatus.IN_PROGRESS, ActivityStatus.PENDING)))
                 .thenReturn(List.of(trailing));
         when(repository.findByExecutionIdAndStatus(executionId, ActivityStatus.PENDING))
                 .thenReturn(List.of(pending));
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution(executionId, teamId)));
 
-        service.onExecutionComplete(
-                new SandboxExecutionCompleteEvent(UUID.randomUUID(), executionId, 0, SandboxExecutionStatus.COMPLETED));
+        service.onExecutionComplete(new SandboxExecutionCompleteEvent(
+                UUID.randomUUID(), executionId, 0, SandboxExecutionStatus.COMPLETED, null, false));
 
         assertThat(trailing.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
         assertThat(pending.getStatus()).isEqualTo(ActivityStatus.FAILED);
         verify(repository).saveAll(List.of(trailing));
         verify(repository).save(pending);
-        verify(eventPublisher).publishEvent(any(SandboxExecutionActivityEvent.class));
+        verify(eventPublisher, times(2)).publishEvent(any(SandboxExecutionActivityEvent.class));
     }
 
     @Test

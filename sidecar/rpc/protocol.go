@@ -374,7 +374,6 @@ type AcpPromptParams struct {
 	ExecutionID string `json:"executionId"`
 	PromptID    string `json:"promptId,omitempty"`
 	IsSteering  bool   `json:"isSteering,omitempty"`
-	Relaunch    bool   `json:"relaunch,omitempty"`
 }
 
 // AcpPromptResult is the success response payload for env.acp_prompt.
@@ -611,7 +610,6 @@ type AcpInitializedParams struct {
 	AgentName    string `json:"agentName"`
 	AgentVersion string `json:"agentVersion"`
 	ExecutionID  string `json:"executionId"`
-	Relaunch     bool   `json:"relaunch,omitempty"`
 }
 
 // AcpPromptCompleteParams is sent by the sidecar when session/prompt completes.

@@ -449,6 +449,22 @@ describe('UsageView', () => {
     )
   })
 
+  it('filters failed usage entries without offering the normalized IDLE status', async () => {
+    const user = userEvent.setup()
+    logEntries = [{ ...entryTemplate, status: 'FAILED', usageType: 'INGESTION' }]
+    render(<UsageView />)
+
+    await user.click(screen.getAllByRole('combobox')[2])
+    expect(screen.queryByRole('option', { name: 'Idle' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: 'Failed' }))
+
+    expect(fetchUsageLogsMock).toHaveBeenLastCalledWith(
+      'team-1',
+      expect.objectContaining({ page: 0, status: 'FAILED' }),
+    )
+    expect(screen.getByRole('button', { name: 'Failed' })).toBeInTheDocument()
+  })
+
   it('omits the usageType query param for the all value when fetching', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       json: async () => ({ content: [], number: 0, size: 15, totalElements: 0, totalPages: 0 }),

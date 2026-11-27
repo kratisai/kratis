@@ -112,31 +112,20 @@ describe('SteeringBar', () => {
     expect(await screen.findByText('Publish Changes')).toBeInTheDocument()
   })
 
-  it('allows steering when execution status is FAILED (recovery)', async () => {
+  it('disables steering when execution status is COMPLETED', () => {
     const steerSpy = vi.spyOn(diffApi, 'steerExecution').mockResolvedValue()
 
     render(
       <QueryClientProvider client={queryClient}>
-        <SteeringBar chatId="chat-1" executionId="exec-1" executionStatus="FAILED" />
+        <SteeringBar chatId="chat-1" executionId="exec-1" executionStatus="COMPLETED" />
       </QueryClientProvider>,
     )
 
-    const idleBar = screen.getByText(/Tap to steer agent/i)
-    fireEvent.click(idleBar)
+    fireEvent.click(screen.getByText(/Tap to steer agent/i))
 
-    const textarea = screen.getByLabelText('Steering guidance input')
-    fireEvent.change(textarea, { target: { value: 'Recover from the context overflow' } })
-
-    const sendBtn = screen.getByRole('button', { name: /Send Guidance/i })
-    expect(sendBtn).toBeEnabled()
-    fireEvent.click(sendBtn)
-
-    await waitFor(() => {
-      expect(steerSpy).toHaveBeenCalledWith('chat-1', 'exec-1', {
-        comments: [],
-        prompt: 'Recover from the context overflow',
-      })
-    })
+    expect(screen.getByLabelText('Steering guidance input')).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Send Guidance/i })).toBeDisabled()
+    expect(steerSpy).not.toHaveBeenCalled()
   })
 
   it('renders nothing while the environment is asleep', () => {
@@ -146,7 +135,7 @@ describe('SteeringBar', () => {
           chatId="chat-1"
           environmentStatus="SLEEPING"
           executionId="exec-1"
-          executionStatus="FAILED"
+          executionStatus="IDLE"
         />
       </QueryClientProvider>,
     )

@@ -119,26 +119,6 @@ export function triggerMockExecutionActivity(
   })
 }
 
-/** Emit an `execution_complete` frame from a sandbox task. */
-export function triggerMockExecutionComplete(
-  ws: MockWebSocket,
-  exitCode = 0,
-  status = 'SUCCESS',
-  executionId = 'exec-1',
-) {
-  ws.onmessage?.({
-    data: JSON.stringify({
-      jsonrpc: '2.0',
-      result: {
-        executionId,
-        exitCode,
-        status,
-        type: 'execution_complete',
-      },
-    }),
-  })
-}
-
 /** Emit an `execution_output` (stdout/stderr) frame from a sandbox task. */
 export function triggerMockExecutionOutput(
   ws: MockWebSocket,

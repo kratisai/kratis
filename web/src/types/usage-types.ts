@@ -14,7 +14,7 @@ export interface UsageLogEntry {
   durationSeconds: null | number
   id: string
   models: ModelUsageDto[]
-  status: 'COMPLETED' | 'FAILED' | 'IDLE' | 'RUNNING' | 'UNKNOWN' | null
+  status: 'COMPLETED' | 'FAILED' | 'IDLE' | 'RUNNING' | null
   targetUrl?: null | string
   timestamp: string
   usageType: UsageType

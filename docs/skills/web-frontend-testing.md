@@ -117,7 +117,6 @@ import {
   triggerMockComplete,
   triggerMockMessageEcho,
   triggerMockExecutionOutput,
-  triggerMockExecutionComplete,
 } from '../support/test-websocket'
 
 it('streams telemetry during a task', async () => {
@@ -147,7 +146,6 @@ Available trigger helpers (all take a `MockWebSocket` as the first argument):
 | `triggerMockMessageEcho(ws, content, sessionId, role?, messageId?)` | `message` frame |
 | `triggerMockComplete(ws, sessionId, messageId?, messageCount?)` | `complete` frame |
 | `triggerMockExecutionOutput(ws, line, stream?)` | `execution_output` frame |
-| `triggerMockExecutionComplete(ws, exitCode?, status?)` | `execution_complete` frame |
 
 ---
 

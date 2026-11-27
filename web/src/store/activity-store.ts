@@ -19,7 +19,6 @@ import type {
 import type { CreateHitlRuleRequest } from '@/types/hitl-rule-types'
 import type {
   ExecutionActivityResult,
-  ExecutionCompleteResult,
   HitlResponse,
   WireActivityStatus,
 } from '@/types/websocket-types'
@@ -37,7 +36,6 @@ interface ExecutionActivityState {
   collapseAll: (executionId: string) => void
   expandAll: (executionId: string) => void
   handleActivityEvent: (result: ExecutionActivityResult) => void
-  handleExecutionComplete: (result: ExecutionCompleteResult) => void
   resolveHitl: (
     executionId: string,
     actionId: string,
@@ -315,9 +313,9 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
     set((state) => {
       const existing = state.activitiesByExecution[executionId] ?? []
       if (existing.length === 0) return state
-      if (!existing.some((activity) => activity.collapsed !== true)) return state
+      if (!existing.some((activity) => !activity.collapsed)) return state
       const updated = existing.map((activity) =>
-        activity.collapsed !== true ? { ...activity, collapsed: true } : activity,
+        !activity.collapsed ? { ...activity, collapsed: true } : activity,
       )
       return {
         activitiesByExecution: {
@@ -332,9 +330,9 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
     set((state) => {
       const existing = state.activitiesByExecution[executionId] ?? []
       if (existing.length === 0) return state
-      if (!existing.some((activity) => activity.collapsed === true)) return state
+      if (!existing.some((activity) => activity.collapsed)) return state
       const updated = existing.map((activity) =>
-        activity.collapsed === true ? { ...activity, collapsed: false } : activity,
+        activity.collapsed ? { ...activity, collapsed: false } : activity,
       )
       return {
         activitiesByExecution: {
@@ -752,44 +750,6 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
         }
       })
     }
-  },
-
-  handleExecutionComplete: (result: ExecutionCompleteResult) => {
-    set((state) => {
-      const activities = state.activitiesByExecution[result.executionId] ?? []
-      if (activities.length === 0) {
-        return state
-      }
-
-      // The execution is over, so every still-active activity (tool, command,
-      // message, thinking) is done whether or not the agent reported a terminal
-      // status. Pending HITL approvals are left for the resolution event.
-      const updated = [...activities]
-      for (let i = 0; i < updated.length; i++) {
-        const activity = updated[i]
-        if (activity.state !== 'active') continue
-        const nextState: ActivityState =
-          activity.type === 'command_execution' && result.status === 'FAILED'
-            ? 'error'
-            : 'completed'
-        // The plan stays open so the current checklist remains visible; every
-        // other terminal activity collapses like it does when the next one starts.
-        const collapsed =
-          activity.type === 'plan' ? activity.collapsed : collapsedOnTransition(activity, nextState)
-        const endedAt = activity.endedAt ?? new Date().toISOString()
-        updated[i] =
-          activity.type === 'command_execution'
-            ? { ...activity, collapsed, endedAt, exitCode: result.exitCode, state: nextState }
-            : { ...activity, collapsed, endedAt, state: nextState }
-      }
-
-      return {
-        activitiesByExecution: {
-          ...state.activitiesByExecution,
-          [result.executionId]: updated,
-        },
-      }
-    })
   },
 
   resolveHitl: async (

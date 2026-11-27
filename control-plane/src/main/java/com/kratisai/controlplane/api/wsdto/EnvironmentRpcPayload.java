@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.api.wsdto;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.kratisai.controlplane.api.wsprotocol.Direction;
 import com.kratisai.controlplane.api.wsprotocol.MessageKind;
@@ -393,12 +394,13 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
     }
 
     /** Report that the ACP agent session was initialized. */
+    // Pre-upgrade sidecars still send the removed `relaunch` field; ignore only that name.
+    @JsonIgnoreProperties({"relaunch"})
     record AcpInitialized(
             @JsonProperty("sessionId") String sessionId,
             @JsonProperty("agentName") String agentName,
             @JsonProperty("agentVersion") String agentVersion,
-            @JsonProperty("executionId") String executionId,
-            @JsonProperty("relaunch") Boolean relaunch)
+            @JsonProperty("executionId") String executionId)
             implements InboundNotificationPayload {
         public static final String METHOD = "env.acp_initialized";
 
@@ -412,10 +414,6 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
             Objects.requireNonNull(agentName, "agentName is required");
             Objects.requireNonNull(agentVersion, "agentVersion is required");
             Objects.requireNonNull(executionId, "executionId is required");
-        }
-
-        public AcpInitialized(String sessionId, String agentName, String agentVersion, String executionId) {
-            this(sessionId, agentName, agentVersion, executionId, null);
         }
     }
 
@@ -554,8 +552,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
             @JsonProperty("taskPrompt") String taskPrompt,
             @JsonProperty("executionId") String executionId,
             @JsonProperty("promptId") String promptId,
-            @JsonProperty("isSteering") Boolean isSteering,
-            @JsonProperty("relaunch") Boolean relaunch)
+            @JsonProperty("isSteering") Boolean isSteering)
             implements OutboundRequestPayload<EnvironmentConnectorResult.AcpPrompt> {
         public static final String METHOD = "env.acp_prompt";
 
@@ -565,7 +562,7 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         }
 
         public AcpPrompt(String taskPrompt, String executionId) {
-            this(taskPrompt, executionId, null, null, null);
+            this(taskPrompt, executionId, null, null);
         }
 
         public AcpPrompt {

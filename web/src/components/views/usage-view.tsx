@@ -46,7 +46,7 @@ const USAGE_TYPE_META: Partial<Record<UsageType, { icon: LucideIcon; label: stri
   TEAM_WIKI: { icon: BookOpen, label: 'Team Wiki' },
 }
 
-const FILTERABLE_STATUSES = new Set(['COMPLETED', 'FAILED', 'IDLE', 'RUNNING', 'UNKNOWN'])
+const FILTERABLE_STATUSES = new Set(['COMPLETED', 'FAILED', 'RUNNING'])
 
 export function UsageView() {
   const currentTeamId = useAuthStore((state) => state.currentTeamId)
@@ -358,7 +358,6 @@ export function UsageView() {
               <SelectItem value="RUNNING">Running</SelectItem>
               <SelectItem value="COMPLETED">Completed</SelectItem>
               <SelectItem value="FAILED">Failed</SelectItem>
-              <SelectItem value="UNKNOWN">Unknown</SelectItem>
             </SelectContent>
           </Select>
 
@@ -674,11 +673,6 @@ const USAGE_STATUS_META: Partial<Record<NonNullable<UsageLogEntry['status']>, Us
     icon: RefreshCw,
     label: 'Active',
     spin: true,
-  },
-  UNKNOWN: {
-    className: 'bg-muted text-muted-foreground',
-    icon: HelpCircle,
-    label: 'Unknown',
   },
 }
 

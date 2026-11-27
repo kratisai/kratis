@@ -51,7 +51,7 @@ class SmallDtoCoverageTest {
     @Test
     void topicStatusWireValues() {
         assertThat(Arrays.stream(TopicStatus.values()).map(TopicStatus::getValue))
-                .containsExactly("working", "Planning", "Idle", "MR pushed", "Ready to publish", "Blocked", "Failed");
+                .containsExactly("working", "Planning", "Idle", "MR pushed", "Ready to publish", "Blocked");
         assertThat(TopicStatus.PLANNING.getValue()).isEqualTo("Planning");
     }
 }

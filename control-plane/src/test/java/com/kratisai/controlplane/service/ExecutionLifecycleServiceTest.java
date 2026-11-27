@@ -3,7 +3,6 @@ package com.kratisai.controlplane.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
-import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
@@ -33,9 +32,8 @@ class ExecutionLifecycleServiceTest {
     }
 
     @Test
-    void hasPendingHitl_queriesPersistedPendingActivities() {
-        when(activityRepository.existsByEnvironmentIdAndStatus(ENV_ID, ActivityStatus.PENDING))
-                .thenReturn(true);
+    void hasPendingHitl_queriesAwaitingHumanHitlActivities() {
+        when(activityRepository.existsPendingHitlForEnvironment(ENV_ID)).thenReturn(true);
 
         assertThat(service.hasPendingHitl(ENV_ID)).isTrue();
     }

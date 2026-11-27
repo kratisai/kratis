@@ -63,7 +63,11 @@ drives every sandbox the same way, independent of provider:
 7. Write the canonical task file (`env.exec` chunked base64 to
    `workspace/.kratis/ACTIVE_TASK.md`, git-ignored).
 8. Run harness setup commands (`env.exec` ×N).
-9. Launch the ACP agent (`env.launch_acp_agent`).
+9. Launch the ACP agent (`env.launch_acp_agent`). For a sandbox, the environment stays
+   `PENDING_CONNECT` until this succeeds; the control plane then promotes it to `CONNECTED`
+   and dispatches the initial prompt. If the launch fails, the control plane settles the
+   execution to `IDLE`, records an `ERROR` activity, and suspends the sandbox to `SLEEPING` so the
+   workspace snapshot is preserved for a later resume.
 
 Steps 3–8 are connector-side behaviour; see [`acp-lifecycle.md`](acp-lifecycle.md) and
 [`e2e-agent-orchestration.md`](e2e-agent-orchestration.md) for the full sequence.
@@ -96,8 +100,8 @@ segment with a fresh key, because sleep seals the old one.
 
 Sleep seals through `SandboxExecutionSuspendedEvent`, not through the complete event.
 `sleepEnvironmentInternal` publishes it for the latest execution after the `SLEEPING`
-commit. `suspendAfterLostRuntime` publishes it for `IDLE` and `FAILED` executions that
-stay resumable (`RUNNING` executions seal through the complete event on the same path).
+commit. `suspendAfterLostRuntime` settles an interrupted `RUNNING` execution to `IDLE`
+and publishes it for the latest execution that stays resumable.
 `SandboxExecutionService` handles the event `AFTER_COMMIT` on a worker thread, sealing
 both the event's execution and any prior executions on that environment that still hold
 active keys. It seals the segment first, waits `usageFinalizeDelay`, fetches final usage
@@ -106,10 +110,9 @@ the key. A fast resume inside the delay mints a fresh key because the old segmen
 already sealed. The usage refresher cancels its trailing refresh on suspend, so no
 refresh races the revoke.
 
-The UI gets no `execution_complete` on sleep. The sleep transaction already sends
-`TeamEntityChangedEvent(ENVIRONMENTS)` and `ExecutionStatusChangedEvent`, which refresh
-the environment list and the chat executions. The async finalize sends a second
-`ExecutionStatusChangedEvent` when the totals land.
+The sleep transaction already sends `TeamEntityChangedEvent(ENVIRONMENTS)` and
+`ExecutionStatusChangedEvent`, which refresh the environment list and the chat executions. The
+async finalize sends a second `ExecutionStatusChangedEvent` when the totals land.
 
 ## Cleanup and reconnect
 
@@ -140,11 +143,17 @@ definition. See
 
 ## Environment registration
 
-The connector registers over the environment WebSocket with `env.register`. A first-time
-registration flips the environment to connected and publishes `EnvironmentRegisteredEvent`,
-which relaunches the agent on a resumed sandbox. A reconnect (`isReconnect: true`) replaces
-the session mapping and rebinds pending human-in-the-loop requests, but never publishes the
-registered event, so no second relaunch fires.
+Initial registration and reconnect follow the same `env.register` path:
+
+- Every registration replaces any prior session mapping and reconciles pending HITL requests
+  against the sidecar's `pendingHitlIds`.
+- If the connector already has an active agent (`hasActiveAgent: true`) or the environment is a
+  `CONNECTOR` daemon, registration marks it `CONNECTED`. Otherwise a `SANDBOX` stays
+  `PENDING_CONNECT` until its checkout and `env.launch_acp_agent` finish.
+- Registration without an active agent publishes `EnvironmentRegisteredEvent`, which redeploys git
+  identity/auth and launches the agent for any `RUNNING` or `IDLE` execution (never starting an
+  agent turn on resume). The connector's `hasActiveAgent` flag is authoritative; a stale prior
+  session mapping never suppresses the launch.
 
 ## Suspend and resume
 
@@ -173,16 +182,22 @@ absent, `origin/HEAD` (git's own default branch) is used. A workspace with an or
 remote is therefore never treated as new and never reports the whole tree in the diff.
 See [`publish-rebase-flow.md`](publish-rebase-flow.md).
 
-When the latest execution for a resumed environment is `IDLE` or `FAILED`, the fresh
-`env.register` also **relaunches the agent**, after redeploying the git identity and auth (the new
-connector holds no credentials, and the relaunched agent needs them). The connector reads the ACP session id it persisted
-at `<credentials-dir>/acp_session_id` (inside the sandbox, so it survives the snapshot and is
-never seen by the control plane) and re-attaches with `session/resume` when the agent advertises
-`sessionCapabilities.resume`, else `session/load` when it advertises `loadSession`, else falls
-back to `session/new`. On re-attach the connector reports `env.acp_initialized` with
-`relaunch: true` (and `EnvironmentAcpInitializedRpcHandler` also skips initial prompt dispatch
-whenever the execution is not `RUNNING`), so the control plane does not re-dispatch the task
-prompt; the execution remains steerable.
+When the latest execution for a resumed environment is `IDLE`, `env.register` launches the
+agent after redeploying the git identity and auth (the new connector holds no credentials). The
+launch is not a turn: `env.launch_acp_agent` starts the agent and re-attaches the session the
+connector persisted at `<credentials-dir>/acp_session_id` (inside the sandbox, so it survives
+the snapshot and is never seen by the control plane), using `session/resume` when the agent
+advertises `sessionCapabilities.resume`, else `session/load` when it advertises `loadSession`,
+else `session/new`. The control plane promotes the environment to `CONNECTED` only after the agent
+launch succeeds and does not dispatch a prompt. If that launch fails, the control plane settles
+the execution to `IDLE`, records an `ERROR` activity, and suspends the sandbox to `SLEEPING`.
+
+The agent command is owned by the control plane and supplied on every `env.launch_acp_agent`.
+`env.acp_prompt` only prompts an already-live session; it never launches or relaunches the
+agent. If an already-`CONNECTED` agent exits unexpectedly (`!terminated`), the control plane
+records an `ERROR` activity, leaves the execution `IDLE`, moves the environment to
+`PENDING_CONNECT`, and triggers one fresh `env.launch_acp_agent`; if that launch fails, a
+`SANDBOX` suspends cleanly to `SLEEPING`.
 
 A resume mints a **fresh** LiteLLM virtual key (the previous one was revoked on sleep) and opens
 a new `sandbox_execution_usage` segment for it. The execution's reported totals are the sum of all
@@ -204,7 +219,7 @@ changes execution status. Neither writes the other's rows.
 
 ### Environment states
 
-| `CONNECTED` | Present | Present only after a prior suspend | Runtime live |
+| `CONNECTED` | Present | Present only after a prior suspend | Runtime live; an agent launch failure is recorded but does not block the workspace |
 | `SLEEPING` | Absent | Present | Resumable |
 | `TERMINATED` | Absent | Absent | Final |
 
@@ -215,7 +230,7 @@ execution is `RUNNING` or `IDLE`.
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING_CONNECT : create / spawn
-    PENDING_CONNECT --> CONNECTED : sidecar registers
+    PENDING_CONNECT --> CONNECTED : connector registers and agent launch attempt finishes
     SLEEPING --> PENDING_CONNECT : user resume
     CONNECTED --> SLEEPING : idle 20m, quiet, no pending HITL
     SLEEPING --> TERMINATED : retention 30d
@@ -234,7 +249,12 @@ throttled user read-path touches (publish capability checks, rebase, diff reads,
 
 - `CONNECTED`: the most recent of the last `RUNNING` execution stopping and the last
   throttled user touch, against `idle-timeout` (20 minutes).
-- `PENDING_CONNECT`: spawn or resume age, against `connect-timeout` (5 minutes).
+- `PENDING_CONNECT`: entry stamp (`last_activity_at`) on spawn, resume, or registration. While
+  no heartbeat has arrived since entry, checked against `connect-timeout` (5 minutes); once the
+  connector is heartbeating, checked against `connect-timeout` on `last_heartbeat` plus a `3x`
+  `connect-timeout` provisioning ceiling on `last_activity_at` (so long installs are not reaped
+  mid-flight, while hung installs still time out). `env.heartbeat` never mutates
+  `last_activity_at`.
 - `SLEEPING`: time since suspend, against `retention-period` (30 days). Each resume
   restarts it.
 
@@ -255,12 +275,13 @@ confirms nothing remains to preserve.
 
 ### Execution states
 
-- `RUNNING` → `IDLE`: the agent finishes a turn. A hung execution is stopped by the user
-  (Terminate) or by the connector going away.
+- `RUNNING` → `IDLE`: the agent finishes a turn for any reason — normal completion, a
+  tool or model error, a refusal, a non-zero process exit, or the connector going away.
 - Only a new user prompt returns `IDLE` to `RUNNING`. Sidecar activity does not.
-- Sleep does not change execution status.
-- `UNKNOWN`: the outcome was not observed, because the runtime was lost or the
-  environment was terminated.
+- Sleep does not change execution status. A sleep that interrupts a `RUNNING` turn settles
+  it to `IDLE`.
+- `COMPLETED` is entered only by an explicit user halt. There is no failure or unknown
+  execution state; errors live in the activity log and the execution remains steerable.
 
 ### Pending human answers
 
@@ -282,7 +303,7 @@ the connector never registered, so the sweep removes it after the timeout. The s
    conditional update that fails if the connector registered in the meantime. A late
    registration is never overwritten with `TERMINATED`; the lost-runtime rule reconciles
    the now-missing runtime.
-3. Sets `RUNNING` executions to `UNKNOWN`. `IDLE` executions stay `IDLE` for `SLEEPING`.
+3. Sets `RUNNING` executions to `IDLE`. `IDLE` executions stay `IDLE` for `SLEEPING`.
 
 ### Reaping
 

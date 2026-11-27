@@ -160,7 +160,7 @@ public class SidecarWebSocketFixture extends WebSocketFixture<SidecarWebSocketFi
 
     /**
      * Simulates a connector restarted from a suspend snapshot: it re-attaches the ACP session it
-     * persisted on disk and reports it with {@code relaunch: true}, so no task prompt follows.
+     * persisted on disk, so no task prompt follows.
      */
     public SidecarWebSocketFixture withPersistedSession(String sessionId) {
         return whenMethod("env.launch_acp_agent", (session, payload) -> {
@@ -187,9 +187,7 @@ public class SidecarWebSocketFixture extends WebSocketFixture<SidecarWebSocketFi
                             "agentVersion",
                             "1.0.0",
                             "executionId",
-                            getExecutionId(),
-                            "relaunch",
-                            true)),
+                            getExecutionId())),
                     null);
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(initialized)));
         });

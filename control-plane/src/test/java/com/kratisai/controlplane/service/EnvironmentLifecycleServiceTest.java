@@ -558,7 +558,60 @@ class EnvironmentLifecycleServiceTest {
     }
 
     @Test
-    void sweep_failsExecutionsOnlyOfTerminatedEnvironments() {
+    void sweep_pendingConnectHeartbeatingInsideProvisioningCeilingIsLeftAlone() {
+        sandboxProperties.getLifecycle().setConnectTimeout(Duration.ofMinutes(5));
+        lifecycleService = newService();
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.PENDING_CONNECT);
+        env.setLastActivityAt(Instant.now().minus(Duration.ofMinutes(8)));
+        env.setLastHeartbeat(Instant.now().minus(Duration.ofSeconds(10)));
+        givenEnvironments(EnvironmentStatus.PENDING_CONNECT, env);
+
+        lifecycleService.sweep();
+
+        verify(sandboxProvider, never()).suspend(any());
+        verify(executionEnvironmentService, never()).rollbackFailedResumeIfStillPending(any(), any());
+    }
+
+    @Test
+    void sweep_pendingConnectWithStaleHeartbeatPastConnectTimeoutIsReaped() {
+        sandboxProperties.getLifecycle().setConnectTimeout(Duration.ofMinutes(5));
+        lifecycleService = newService();
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.PENDING_CONNECT);
+        Instant entry = Instant.now().minus(Duration.ofMinutes(8));
+        env.setLastActivityAt(entry);
+        env.setLastHeartbeat(Instant.now().minus(Duration.ofMinutes(6)));
+        givenEnvironments(EnvironmentStatus.PENDING_CONNECT, env);
+        when(sandboxProvider.suspend(ENV_ID)).thenReturn(true);
+        when(executionEnvironmentService.rollbackFailedResumeIfStillPending(ENV_ID, entry))
+                .thenReturn(true);
+
+        lifecycleService.sweep();
+
+        verify(sandboxProvider).suspend(ENV_ID);
+        verify(executionEnvironmentService).rollbackFailedResumeIfStillPending(ENV_ID, entry);
+    }
+
+    @Test
+    void sweep_pendingConnectHeartbeatingPastProvisioningCeilingIsReaped() {
+        sandboxProperties.getLifecycle().setConnectTimeout(Duration.ofMinutes(5));
+        lifecycleService = newService();
+        ExecutionEnvironment env = sandbox(EnvironmentStatus.PENDING_CONNECT);
+        Instant entry = Instant.now().minus(Duration.ofMinutes(16));
+        env.setLastActivityAt(entry);
+        env.setLastHeartbeat(Instant.now().minus(Duration.ofSeconds(10)));
+        givenEnvironments(EnvironmentStatus.PENDING_CONNECT, env);
+        when(sandboxProvider.suspend(ENV_ID)).thenReturn(true);
+        when(executionEnvironmentService.rollbackFailedResumeIfStillPending(ENV_ID, entry))
+                .thenReturn(true);
+
+        lifecycleService.sweep();
+
+        verify(sandboxProvider).suspend(ENV_ID);
+        verify(executionEnvironmentService).rollbackFailedResumeIfStillPending(ENV_ID, entry);
+    }
+
+    @Test
+    void sweep_settlesRunningExecutionsOfTerminatedEnvironments() {
         ExecutionEnvironment env = sandbox(EnvironmentStatus.TERMINATED);
         SandboxExecution execution = new SandboxExecution();
         execution.setId(UUID.fromString("77777777-7777-7777-7777-777777777777"));
@@ -569,6 +622,6 @@ class EnvironmentLifecycleServiceTest {
 
         lifecycleService.sweep();
 
-        verify(executionEnvironmentService).failStrandedExecution(execution.getId());
+        verify(executionEnvironmentService).settleStrandedExecution(execution.getId());
     }
 }

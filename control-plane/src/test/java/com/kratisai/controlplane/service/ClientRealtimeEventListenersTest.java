@@ -14,7 +14,6 @@ import com.kratisai.controlplane.api.wsdto.ClientPayload;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ChatUsageChangedResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionAcpInitializedResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionActivityResult;
-import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionCompleteResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionDiffChangedResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionOutputResult;
 import com.kratisai.controlplane.api.wsdto.ClientPayload.ExecutionStatusChangedResult;
@@ -28,14 +27,12 @@ import com.kratisai.controlplane.model.IngestionBatch;
 import com.kratisai.controlplane.model.IngestionStatus;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
-import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.event.CanvasDeletedEvent;
 import com.kratisai.controlplane.model.event.ChatUsageChangedEvent;
 import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionAcpInitializedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
-import com.kratisai.controlplane.model.event.SandboxExecutionCompleteEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionDiffChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionOutputEvent;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
@@ -175,20 +172,6 @@ class ClientRealtimeEventListenersTest {
         assertThat(result.actionId()).isEqualTo("tool-call-7");
         assertThat(result.status()).isEqualTo(ActivityStatus.IN_PROGRESS);
         assertThat(result.createdAt()).isEqualTo(CREATED_AT.toString());
-    }
-
-    @Test
-    void onSandboxExecutionCompleteEvent_broadcastsComplete() {
-        UUID teamId = UUID.randomUUID();
-        UUID executionId = UUID.randomUUID();
-        listeners.onSandboxExecutionCompleteEvent(
-                new SandboxExecutionCompleteEvent(teamId, executionId, 0, SandboxExecutionStatus.COMPLETED));
-
-        ArgumentCaptor<ClientPayload> captor = ArgumentCaptor.forClass(ClientPayload.class);
-        verify(dispatch).broadcastNotificationToTeam(eq(teamId), captor.capture());
-        ExecutionCompleteResult result = (ExecutionCompleteResult) captor.getValue();
-        assertThat(result.exitCode()).isZero();
-        assertThat(result.status()).isEqualTo(SandboxExecutionStatus.COMPLETED);
     }
 
     @Test

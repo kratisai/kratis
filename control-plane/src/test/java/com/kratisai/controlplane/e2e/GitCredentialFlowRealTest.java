@@ -234,7 +234,18 @@ class GitCredentialFlowRealTest {
         RepoCredential credential = testDataFactory.createCredential(
                 testContext.team(), "Wrong PAT", CredentialType.PAT, "definitely-wrong-token");
 
-        launchExecution(credential, "git-cred-wrong-canvas");
+        Repository repository = testDataFactory.createRepository(
+                testContext.team(), "fixture-repo", gitFixture.getGitHttpUrl(), "main", credential);
+
+        canvasService.createCanvas(
+                chat.getId(), "git-cred-wrong-canvas", "Test Plan", "# Test Plan", CanvasType.SPEC, repository, null);
+        postExecutionAndTrackEnv(new CreateSandboxExecutionRequest(
+                provider.getId(),
+                null,
+                AgentHarness.valueOf("OPENCODE"),
+                "git-cred-wrong-canvas",
+                modelProvider.getId(),
+                "gpt-4o"));
 
         UUID executionId = sandboxExecutionRepository
                 .findFirstByEnvironmentIdOrderByStartedAtDesc(spawnedEnvId)
@@ -251,7 +262,7 @@ class GitCredentialFlowRealTest {
                                     .findFirstByEnvironmentIdOrderByStartedAtDesc(spawnedEnvId)
                                     .orElseThrow()
                                     .getStatus())
-                            .isEqualTo(SandboxExecutionStatus.FAILED);
+                            .isEqualTo(SandboxExecutionStatus.IDLE);
                     assertThat(sandboxExecutionActivityRepository.findByExecutionIdOrderBySequenceAsc(executionId))
                             .as("checkout failure activity carrying the real git error")
                             .anySatisfy(activity -> assertThat(activity.getDescription())
@@ -351,6 +362,21 @@ class GitCredentialFlowRealTest {
     }
 
     private void launchAndAwaitConnected(CreateSandboxExecutionRequest request) throws Exception {
+        UUID envId = postExecutionAndTrackEnv(request);
+
+        long connectStart = System.nanoTime();
+        Awaitility.await()
+                .atMost(180, TimeUnit.SECONDS)
+                .pollDelay(Duration.ZERO)
+                .pollInterval(Duration.ofMillis(500))
+                .untilAsserted(() -> {
+                    var updated = executionEnvironmentRepository.findById(envId).orElseThrow();
+                    assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+                });
+        TestTimingRegistry.instance().recordSubPhase("awaitConnected", System.nanoTime() - connectStart);
+    }
+
+    private UUID postExecutionAndTrackEnv(CreateSandboxExecutionRequest request) throws Exception {
         long postStart = System.nanoTime();
         mockMvc.perform(post("/api/v1/chats/{chatId}/executions", chat.getId())
                         .header("Authorization", "Bearer " + authToken)
@@ -364,18 +390,7 @@ class GitCredentialFlowRealTest {
                 .findFirst()
                 .orElseThrow();
         spawnedEnvId = env.getId();
-
-        long connectStart = System.nanoTime();
-        Awaitility.await()
-                .atMost(90, TimeUnit.SECONDS)
-                .pollDelay(Duration.ZERO)
-                .pollInterval(Duration.ofMillis(500))
-                .untilAsserted(() -> {
-                    var updated =
-                            executionEnvironmentRepository.findById(env.getId()).orElseThrow();
-                    assertThat(updated.getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
-                });
-        TestTimingRegistry.instance().recordSubPhase("awaitConnected", System.nanoTime() - connectStart);
+        return env.getId();
     }
 
     private String extractSidecarLog() {

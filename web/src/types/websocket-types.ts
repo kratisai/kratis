@@ -165,14 +165,6 @@ export interface ExecutionActivityResult {
   type: 'execution_activity'
 }
 
-export interface ExecutionCompleteResult {
-  executionId: string
-  exitCode: number
-  reason?: string
-  status: string
-  type: 'execution_complete'
-}
-
 export interface ExecutionDiffChangedResult {
   chatId: string
   executionId: string
@@ -276,7 +268,6 @@ export type JsonRpcResult =
   | ChatUsageChangedResult
   | CompleteResult
   | ExecutionActivityResult
-  | ExecutionCompleteResult
   | ExecutionDiffChangedResult
   | ExecutionLogsResult
   | ExecutionOutputResult

@@ -21,7 +21,7 @@ class SandboxExecutionActiveDurationTest {
         // An idle period must not accrue; re-entering RUNNING opens a new segment.
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         execution.setActiveSince(Instant.now().minusSeconds(30));
-        execution.setStatus(SandboxExecutionStatus.FAILED);
+        execution.setStatus(SandboxExecutionStatus.IDLE);
 
         assertThat(execution.getTotalActiveSeconds()).isEqualTo(90);
     }

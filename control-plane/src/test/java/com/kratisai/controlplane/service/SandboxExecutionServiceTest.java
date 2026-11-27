@@ -7,6 +7,7 @@ import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -55,6 +56,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -200,6 +202,18 @@ class SandboxExecutionServiceTest {
     }
 
     private SandboxExecutionService newSandboxExecutionService(Executor dispatchExecutor) {
+        return newSandboxExecutionService(dispatchExecutor, sandboxProvisioningService);
+    }
+
+    private SandboxExecutionService newSandboxExecutionService(
+            Executor dispatchExecutor, SandboxProvisioningService provisioningService) {
+        return newSandboxExecutionService(dispatchExecutor, provisioningService, activityPersistenceService);
+    }
+
+    private SandboxExecutionService newSandboxExecutionService(
+            Executor dispatchExecutor,
+            SandboxProvisioningService provisioningService,
+            ExecutionActivityPersistenceService activityService) {
         return new SandboxExecutionService(
                 transactionManager,
                 sandboxExecutionRepository,
@@ -211,12 +225,12 @@ class SandboxExecutionServiceTest {
                 sessionRegistry,
                 canvasService,
                 modelProviderRepository,
-                sandboxProvisioningService,
+                provisioningService,
                 virtualKeyService,
                 environmentRpcClient,
                 litellmProperties,
                 dispatchExecutor,
-                activityPersistenceService,
+                activityService,
                 sandboxOrchestratorService,
                 sandboxProperties,
                 providerOf(executionEnvironmentService));
@@ -225,12 +239,12 @@ class SandboxExecutionServiceTest {
     private static <T> ObjectProvider<T> providerOf(T instance) {
         return new ObjectProvider<>() {
             @Override
-            public T getObject() {
+            public @NonNull T getObject() {
                 return instance;
             }
 
             @Override
-            public T getObject(Object... args) {
+            public @NonNull T getObject(Object @NonNull ... args) {
                 return instance;
             }
 
@@ -390,7 +404,7 @@ class SandboxExecutionServiceTest {
         // The previous key was revoked on detach, so a resume must mint a fresh one.
         execution.startUsage("sk-old", "gpt-4o").setRevokedAt(Instant.now());
 
-        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.findByIdForUpdate(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.saveAndFlush(any(SandboxExecution.class)))
                 .thenAnswer(i -> i.getArgument(0));
         when(litellmProvisioningService.buildLiteLLMModelName(provider, "gpt-4o"))
@@ -414,7 +428,7 @@ class SandboxExecutionServiceTest {
         SandboxExecution execution = createTestExecution(AgentHarness.valueOf("OPENHANDS"), provider, "gpt-4o");
         execution.startUsage("sk-live", "gpt-4o");
 
-        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.findByIdForUpdate(execution.getId())).thenReturn(Optional.of(execution));
         when(litellmProvisioningService.buildLiteLLMModelName(provider, "gpt-4o"))
                 .thenReturn("model-alias");
         when(litellmProvisioningService.verifyModelRegistered(provider, "gpt-4o"))
@@ -456,7 +470,7 @@ class SandboxExecutionServiceTest {
 
         sandboxProvisioningService.launchAgent(execution);
 
-        assertThat(execution.getStatus()).isNotEqualTo(SandboxExecutionStatus.FAILED);
+        assertThat(execution.getStatus()).isNotEqualTo(SandboxExecutionStatus.IDLE);
         verify(litellmProvisioningService).verifyModelRegistered(any(), any());
     }
 
@@ -492,7 +506,7 @@ class SandboxExecutionServiceTest {
                     .map(SandboxExecutionCompleteEvent.class::cast)
                     .findFirst()
                     .orElseThrow();
-            assertThat(completeEvent.status()).isEqualTo(SandboxExecutionStatus.FAILED);
+            assertThat(completeEvent.status()).isEqualTo(SandboxExecutionStatus.IDLE);
             assertThat(completeEvent.executionId()).isEqualTo(execution.getId());
         });
     }
@@ -890,8 +904,6 @@ class SandboxExecutionServiceTest {
 
         service.handleEnvironmentRegistered(new EnvironmentRegisteredEvent(ENVIRONMENT_ID));
 
-        // A resumed sandbox (latest execution IDLE) relaunches the agent instead of only
-        // re-deploying git credentials.
         assertThat(submitted).hasSize(1);
         verify(environmentRpcClient, never())
                 .request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitIdentity.class));
@@ -913,14 +925,35 @@ class SandboxExecutionServiceTest {
 
         submitted.getFirst().run();
 
-        // The resumed connector holds no credentials, so the relaunched agent needs them redeployed.
         verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitIdentity.class));
     }
 
     @Test
-    void handleEnvironmentRegistered_withFailedExecution_redeploysGitCredentialsAndRelaunchesAgent() throws Exception {
+    void handleEnvironmentRegistered_withIdleConnectorLaunchFailure_keepsEnvironmentConnected() throws Exception {
         SandboxExecution execution = createTestExecution();
-        execution.setStatus(SandboxExecutionStatus.FAILED);
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+        execution.getEnvironment().setType(ExecutionEnvironmentType.CONNECTOR);
+        execution.getEnvironment().setStatus(EnvironmentStatus.CONNECTED);
+        when(sandboxExecutionRepository.findByEnvironmentIdAndStatus(ENVIRONMENT_ID, SandboxExecutionStatus.RUNNING))
+                .thenReturn(List.of());
+        when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENVIRONMENT_ID))
+                .thenReturn(Optional.of(execution));
+        when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
+        when(executionEnvironmentRepository.findById(ENVIRONMENT_ID))
+                .thenReturn(Optional.of(execution.getEnvironment()));
+        SandboxProvisioningService provisioning = spy(sandboxProvisioningService);
+        doThrow(new IllegalStateException("launch failed")).when(provisioning).launchAgent(any());
+        SandboxExecutionService service = newSandboxExecutionService(Runnable::run, provisioning);
+
+        service.handleEnvironmentRegistered(new EnvironmentRegisteredEvent(ENVIRONMENT_ID));
+
+        assertThat(execution.getEnvironment().getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+    }
+
+    @Test
+    void handleEnvironmentRegistered_withCompletedExecution_doesNotRelaunchAgent() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.setStatus(SandboxExecutionStatus.COMPLETED);
         when(sandboxExecutionRepository.findByEnvironmentIdAndStatus(ENVIRONMENT_ID, SandboxExecutionStatus.RUNNING))
                 .thenReturn(List.of());
         when(sandboxExecutionRepository.findFirstByEnvironmentIdOrderByStartedAtDesc(ENVIRONMENT_ID))
@@ -928,12 +961,12 @@ class SandboxExecutionServiceTest {
 
         List<Runnable> submitted = new ArrayList<>();
         SandboxExecutionService service = newSandboxExecutionService(submitted::add);
+
         service.handleEnvironmentRegistered(new EnvironmentRegisteredEvent(ENVIRONMENT_ID));
-        assertThat(submitted).hasSize(1);
 
-        submitted.getFirst().run();
-
+        assertThat(submitted).isEmpty();
         verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.RegisterGitIdentity.class));
+        verify(environmentRpcClient, never()).request(any(), any(EnvironmentRpcPayload.LaunchAcpAgent.class));
     }
 
     @Test
@@ -950,14 +983,14 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
-    void completeAcpPrompt_withRefusal_marksFailed() {
+    void completeAcpPrompt_withRefusal_transitionsToIdle() {
         SandboxExecution execution = createTestExecution();
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
 
         sandboxExecutionService.completeAcpPrompt(execution.getId(), null, StopReason.REFUSAL);
 
-        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(execution.getCompletedAt()).isNotNull();
         verify(sandboxExecutionRepository).save(execution);
     }
@@ -1128,7 +1161,7 @@ class SandboxExecutionServiceTest {
                 .map(SandboxExecutionCompleteEvent.class::cast)
                 .findFirst()
                 .orElseThrow();
-        assertThat(completeEvent.status()).isEqualTo(SandboxExecutionStatus.FAILED);
+        assertThat(completeEvent.status()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(completeEvent.executionId()).isEqualTo(execution.getId());
     }
 
@@ -1194,7 +1227,7 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
-    void dispatchAcpPrompt_promptFailedResponse_marksExecutionFailed() throws Exception {
+    void dispatchAcpPrompt_promptFailedResponse_settlesExecutionIdle() throws Exception {
         SandboxExecution execution = createTestExecution();
         when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
@@ -1209,10 +1242,10 @@ class SandboxExecutionServiceTest {
             assertThat(eventCaptor.getAllValues().stream()
                             .filter(SandboxExecutionCompleteEvent.class::isInstance)
                             .map(SandboxExecutionCompleteEvent.class::cast)
-                            .anyMatch(e -> e.status() == SandboxExecutionStatus.FAILED))
+                            .anyMatch(e -> e.status() == SandboxExecutionStatus.IDLE))
                     .isTrue();
         });
-        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
     }
 
     @Test
@@ -1326,7 +1359,7 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
-    void resumeAfterCheckout_launchFailure_marksExecutionFailedAndPublishes() {
+    void resumeAfterCheckout_launchFailure_settlesIdleAndPublishes() {
         ModelProvider provider = createTestModelProvider();
         SandboxExecution execution = createTestExecution(provider);
 
@@ -1352,22 +1385,22 @@ class SandboxExecutionServiceTest {
                     .map(SandboxExecutionCompleteEvent.class::cast)
                     .findFirst()
                     .orElseThrow();
-            assertThat(completeEvent.status()).isEqualTo(SandboxExecutionStatus.FAILED);
+            assertThat(completeEvent.status()).isEqualTo(SandboxExecutionStatus.IDLE);
             assertThat(completeEvent.executionId()).isEqualTo(execution.getId());
         });
-        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(execution.getCompletedAt()).isNotNull();
     }
 
     @Test
-    void failExecution_marksExecutionFailedAndPublishes() {
+    void settleExecutionIdle_marksExecutionIdleAndPublishes() {
         SandboxExecution execution = createTestExecution();
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
 
-        sandboxExecutionService.failExecution(execution.getId());
+        sandboxExecutionService.settleExecutionIdle(execution.getId());
 
-        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(execution.getCompletedAt()).isNotNull();
         verify(sandboxExecutionRepository).save(execution);
 
@@ -1395,15 +1428,15 @@ class SandboxExecutionServiceTest {
                 .map(SandboxExecutionCompleteEvent.class::cast)
                 .findFirst()
                 .orElseThrow();
-        assertThat(completeEvent.status()).isEqualTo(SandboxExecutionStatus.FAILED);
+        assertThat(completeEvent.status()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(completeEvent.executionId()).isEqualTo(execution.getId());
     }
 
     @Test
-    void failExecution_executionNotFound_throws() {
+    void settleExecutionIdle_executionNotFound_throws() {
         when(sandboxExecutionRepository.findById(any())).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> sandboxExecutionService.failExecution(UUID.randomUUID()))
+        assertThatThrownBy(() -> sandboxExecutionService.settleExecutionIdle(UUID.randomUUID()))
                 .isInstanceOf(ResponseStatusException.class);
 
         verify(sandboxExecutionRepository, never()).save(any());
@@ -1421,8 +1454,8 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
         when(virtualKeyService.fetchUsage("sk-final-key")).thenReturn(new LlmUsageSnapshot(0.99, 2000L, 1200L, 800L));
 
-        sandboxExecutionService.onSandboxExecutionCompleteEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), 0, SandboxExecutionStatus.COMPLETED));
+        sandboxExecutionService.onSandboxExecutionCompleteEvent(new SandboxExecutionCompleteEvent(
+                teamId, execution.getId(), 0, SandboxExecutionStatus.COMPLETED, null, false));
 
         verify(virtualKeyService).fetchUsage("sk-final-key");
         verify(virtualKeyService).revokeKey("sk-final-key");
@@ -1458,8 +1491,8 @@ class SandboxExecutionServiceTest {
             return new LlmUsageSnapshot(0.5, 10L, 6L, 4L);
         });
 
-        sandboxExecutionService.onSandboxExecutionCompleteEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), 0, SandboxExecutionStatus.COMPLETED));
+        sandboxExecutionService.onSandboxExecutionCompleteEvent(new SandboxExecutionCompleteEvent(
+                teamId, execution.getId(), 0, SandboxExecutionStatus.COMPLETED, null, false));
 
         verify(virtualKeyService).revokeKey("sk-final-key");
         assertThat(usage.getTotalTokens()).isEqualTo(10L);
@@ -1474,8 +1507,8 @@ class SandboxExecutionServiceTest {
                 .thenReturn(List.of("sk-final-key"));
         when(virtualKeyService.fetchUsage("sk-final-key")).thenThrow(new RuntimeException("litellm unreachable"));
 
-        sandboxExecutionService.onSandboxExecutionCompleteEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), 0, SandboxExecutionStatus.COMPLETED));
+        sandboxExecutionService.onSandboxExecutionCompleteEvent(new SandboxExecutionCompleteEvent(
+                teamId, execution.getId(), 0, SandboxExecutionStatus.COMPLETED, null, false));
 
         verify(virtualKeyService).revokeKey("sk-final-key");
         verify(eventPublisher, never()).publishEvent(any());
@@ -1488,8 +1521,8 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.findActiveVirtualKeysByExecutionId(execution.getId()))
                 .thenReturn(List.of());
 
-        sandboxExecutionService.onSandboxExecutionCompleteEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), 0, SandboxExecutionStatus.COMPLETED));
+        sandboxExecutionService.onSandboxExecutionCompleteEvent(new SandboxExecutionCompleteEvent(
+                teamId, execution.getId(), 0, SandboxExecutionStatus.COMPLETED, null, false));
 
         verify(virtualKeyService, never()).fetchUsage(any());
         verify(virtualKeyService, never()).revokeKey(any());
@@ -1513,8 +1546,8 @@ class SandboxExecutionServiceTest {
 
         // The listener must hand the finalize to the executor (off the transport thread) rather than
         // running it synchronously, so a slow finalize can never block heartbeat/terminate handling.
-        asyncService.onSandboxExecutionCompleteEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), 0, SandboxExecutionStatus.COMPLETED));
+        asyncService.onSandboxExecutionCompleteEvent(new SandboxExecutionCompleteEvent(
+                teamId, execution.getId(), 0, SandboxExecutionStatus.COMPLETED, null, false));
 
         assertThat(submitted).hasSize(1);
         verify(virtualKeyService, never()).fetchUsage(any());
@@ -1528,15 +1561,94 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
-    void onSandboxExecutionCompleteEvent_withIdleOrFailed_doesNotRevokeKey() {
+    void automaticRelaunchCounts_areLruBoundedAndEvictedOnTerminalCompletion() {
+        SandboxExecutionService service = newSandboxExecutionService(command -> {}, sandboxProvisioningService);
+
+        for (int i = 0; i < 512 + 100; i++) {
+            service.automaticRelaunchCounts.put(UUID.randomUUID(), 1);
+        }
+        assertThat(service.automaticRelaunchCounts.size()).isLessThanOrEqualTo(512);
+
+        service.automaticRelaunchCounts.put(EXECUTION_ID, 3);
+        service.onSandboxExecutionCompleteEvent(new SandboxExecutionCompleteEvent(
+                TEAM_ID, EXECUTION_ID, 0, SandboxExecutionStatus.COMPLETED, "execution halted", false));
+
+        assertThat(service.automaticRelaunchCounts).doesNotContainKey(EXECUTION_ID);
+    }
+
+    @Test
+    void relaunchAgentAfterCrash_stopsAutomaticRelaunchAfterLimit() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+        execution.getEnvironment().setStatus(EnvironmentStatus.CONNECTED);
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(executionEnvironmentRepository.findById(ENVIRONMENT_ID))
+                .thenReturn(Optional.of(execution.getEnvironment()));
+        SandboxProvisioningService provisioning = spy(sandboxProvisioningService);
+        doNothing().when(provisioning).launchAgent(any());
+        ExecutionActivityPersistenceService activity = spy(activityPersistenceService);
+        SandboxExecutionService service = newSandboxExecutionService(Runnable::run, provisioning, activity);
+
+        for (int attempt = 0; attempt < 4; attempt++) {
+            service.relaunchAgentAfterCrash(execution.getId());
+        }
+
+        verify(provisioning, times(3)).launchAgent(any());
+        verify(activity)
+                .recordExecutionError(
+                        eq(execution.getId()), org.mockito.ArgumentMatchers.contains("limit reached"), isNull());
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
+    }
+
+    @Test
+    void relaunchAgentAfterCrash_onLaunchSuccess_marksEnvironmentConnectedAndLeavesIdle() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+        execution.getEnvironment().setStatus(EnvironmentStatus.PENDING_CONNECT);
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(executionEnvironmentRepository.findById(ENVIRONMENT_ID))
+                .thenReturn(Optional.of(execution.getEnvironment()));
+        SandboxProvisioningService provisioning = spy(sandboxProvisioningService);
+        doNothing().when(provisioning).launchAgent(any());
+        SandboxExecutionService service = newSandboxExecutionService(Runnable::run, provisioning);
+
+        service.relaunchAgentAfterCrash(execution.getId());
+
+        verify(provisioning).launchAgent(any());
+        assertThat(execution.getEnvironment().getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
+    }
+
+    @Test
+    void relaunchAgentAfterCrash_onLaunchFailure_recordsErrorAndSleepsSandbox() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.setStatus(SandboxExecutionStatus.IDLE);
+        execution.getEnvironment().setStatus(EnvironmentStatus.PENDING_CONNECT);
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        SandboxProvisioningService provisioning = spy(sandboxProvisioningService);
+        doThrow(new IllegalStateException("launch failed")).when(provisioning).launchAgent(any());
+        SandboxExecutionService service = newSandboxExecutionService(Runnable::run, provisioning);
+
+        service.relaunchAgentAfterCrash(execution.getId());
+
+        ArgumentCaptor<SandboxExecutionActivity> activityCaptor =
+                ArgumentCaptor.forClass(SandboxExecutionActivity.class);
+        verify(activityRepository).save(activityCaptor.capture());
+        assertThat(activityCaptor.getValue().getActivityType()).isEqualTo(ActivityType.ERROR);
+        assertThat(activityCaptor.getValue().getDescription()).contains("launch failed");
+        verify(executionEnvironmentService).sleepAfterLaunchFailure(ENVIRONMENT_ID);
+    }
+
+    @Test
+    void onSandboxExecutionCompleteEvent_withIdle_doesNotRevokeKey() {
         UUID teamId = UUID.fromString("11111111-2222-3333-4444-555555555555");
         SandboxExecution execution = createTestExecution();
         execution.startUsage("sk-active-key", null);
 
-        sandboxExecutionService.onSandboxExecutionCompleteEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), 0, SandboxExecutionStatus.IDLE));
-        sandboxExecutionService.onSandboxExecutionCompleteEvent(
-                new SandboxExecutionCompleteEvent(teamId, execution.getId(), 1, SandboxExecutionStatus.FAILED));
+        sandboxExecutionService.onSandboxExecutionCompleteEvent(new SandboxExecutionCompleteEvent(
+                teamId, execution.getId(), 0, SandboxExecutionStatus.IDLE, null, false));
+        sandboxExecutionService.onSandboxExecutionCompleteEvent(new SandboxExecutionCompleteEvent(
+                teamId, execution.getId(), 1, SandboxExecutionStatus.IDLE, null, false));
 
         verify(sandboxExecutionRepository, never()).findActiveVirtualKeysByExecutionId(any());
         verify(virtualKeyService, never()).fetchUsage(any());
@@ -1571,7 +1683,7 @@ class SandboxExecutionServiceTest {
         SandboxExecution latest = createTestExecution();
         SandboxExecution priorFailed = createTestExecution();
         priorFailed.setId(UUID.randomUUID());
-        priorFailed.setStatus(SandboxExecutionStatus.FAILED);
+        priorFailed.setStatus(SandboxExecutionStatus.IDLE);
         priorFailed.startUsage("sk-prior-key", null);
 
         when(sandboxExecutionRepository.findExecutionIdsWithActiveVirtualKeysByEnvironmentId(ENVIRONMENT_ID))
@@ -1850,7 +1962,7 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
-    void haltExecution_failedSandboxExecution_publishesSuspendedEventAndPurgesEnvironment() {
+    void haltExecution_idleSandboxExecution_publishesSuspendedEventAndPurgesEnvironment() {
         SandboxExecution execution = createTestExecution();
         EnvironmentProvider provider = new EnvironmentProvider();
         provider.setId(UUID.randomUUID());
@@ -1861,7 +1973,7 @@ class SandboxExecutionServiceTest {
         Team haltTeam = new Team();
         haltTeam.setId(TEAM_ID);
         environment.setTeam(haltTeam);
-        execution.setStatus(SandboxExecutionStatus.FAILED);
+        execution.setStatus(SandboxExecutionStatus.IDLE);
 
         when(sandboxExecutionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
         when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
@@ -1872,8 +1984,12 @@ class SandboxExecutionServiceTest {
         sandboxExecutionService.haltExecution(USER_ID, CHAT_ID, EXECUTION_ID);
 
         verify(sandboxProvider).destroy(ENVIRONMENT_ID);
-        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
-        verify(eventPublisher).publishEvent(new SandboxExecutionSuspendedEvent(TEAM_ID, EXECUTION_ID, ENVIRONMENT_ID));
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
+        verify(eventPublisher)
+                .publishEvent(new SandboxExecutionCompleteEvent(
+                        TEAM_ID, EXECUTION_ID, 0, SandboxExecutionStatus.COMPLETED, "execution halted", false));
+        verify(eventPublisher, never())
+                .publishEvent(new SandboxExecutionSuspendedEvent(TEAM_ID, EXECUTION_ID, ENVIRONMENT_ID));
     }
 
     @Test
@@ -1886,14 +2002,14 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
-    void failExecution_cancelsPendingActivities() throws Exception {
+    void settleExecutionIdle_cancelsPendingActivities() throws Exception {
         SandboxExecution execution = createTestExecution();
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         SandboxExecutionActivity activity = pendingActivity("hitl-789", HitlKind.QUESTION, "Pick a target");
         when(activityRepository.findByExecutionIdAndStatus(execution.getId(), ActivityStatus.PENDING))
                 .thenReturn(List.of(activity));
 
-        sandboxExecutionService.failExecution(execution.getId());
+        sandboxExecutionService.settleExecutionIdle(execution.getId());
 
         assertThat(activity.getStatus()).isEqualTo(ActivityStatus.FAILED);
         ArgumentCaptor<SandboxExecutionActivityEvent> captor =
@@ -1901,20 +2017,20 @@ class SandboxExecutionServiceTest {
         verify(eventPublisher).publishEvent(captor.capture());
         assertThat(captor.getValue().actionId()).isEqualTo("hitl-789");
         assertThat(captor.getValue().detail().hitl().response()).isEqualTo(HitlResponse.CANCELLED);
-        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
     }
 
     @Test
-    void failExecution_withoutPendingPermission_doesNotPublishHitlResolution() {
+    void settleExecutionIdle_withoutPendingPermission_doesNotPublishHitlResolution() {
         SandboxExecution execution = createTestExecution();
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(activityRepository.findByExecutionIdAndStatus(execution.getId(), ActivityStatus.PENDING))
                 .thenReturn(List.of());
 
-        sandboxExecutionService.failExecution(execution.getId());
+        sandboxExecutionService.settleExecutionIdle(execution.getId());
 
         verify(eventPublisher, never()).publishEvent(any(SandboxExecutionActivityEvent.class));
-        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
     }
 
     private SandboxExecutionActivity pendingActivity(String actionId, HitlKind kind, String message) throws Exception {
@@ -2090,9 +2206,9 @@ class SandboxExecutionServiceTest {
     }
 
     @Test
-    void steerExecution_fromFailed_transitionsToRunningAndDispatchesRecoverySteeringPrompt() throws Exception {
+    void steerExecution_fromIdleWithPreviousExit_transitionsToRunningAndClearsErrorFields() throws Exception {
         SandboxExecution execution = createTestExecution();
-        execution.setStatus(SandboxExecutionStatus.FAILED);
+        execution.setStatus(SandboxExecutionStatus.IDLE);
         execution.setCompletedAt(Instant.now());
         execution.setExitCode(1);
         when(chatRepository.findById(CHAT_ID)).thenReturn(Optional.of(execution.getChat()));
@@ -2115,14 +2231,13 @@ class SandboxExecutionServiceTest {
                     ArgumentCaptor.forClass(EnvironmentRpcPayload.AcpPrompt.class);
             verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), captor.capture());
             EnvironmentRpcPayload.AcpPrompt prompt = captor.getValue();
-            assertThat(prompt.relaunch()).isEqualTo(Boolean.TRUE);
-            assertThat(prompt.isSteering()).isEqualTo(Boolean.TRUE);
+            assertThat(prompt.isSteering()).isNull();
             assertThat(prompt.taskPrompt()).isEqualTo("Fix tests");
         });
     }
 
     @Test
-    void steerExecution_fromRunning_dispatchesOrdinarySteeringWithoutRelaunch() throws Exception {
+    void steerExecution_fromRunning_dispatchesSteeringWithoutRelaunch() throws Exception {
         SandboxExecution execution = createTestExecution();
         execution.setStatus(SandboxExecutionStatus.RUNNING);
         when(chatRepository.findById(CHAT_ID)).thenReturn(Optional.of(execution.getChat()));
@@ -2141,10 +2256,28 @@ class SandboxExecutionServiceTest {
                     ArgumentCaptor.forClass(EnvironmentRpcPayload.AcpPrompt.class);
             verify(environmentRpcClient).request(eq(ENVIRONMENT_ID), captor.capture());
             EnvironmentRpcPayload.AcpPrompt prompt = captor.getValue();
-            assertThat(prompt.relaunch()).isNull();
             assertThat(prompt.isSteering()).isEqualTo(Boolean.TRUE);
             assertThat(prompt.taskPrompt()).isEqualTo("Also fix lint");
         });
+    }
+
+    @Test
+    void steerExecution_fromRunningWithRejectedPrompt_keepsExecutionRunning() throws Exception {
+        SandboxExecution execution = createTestExecution();
+        execution.setStatus(SandboxExecutionStatus.RUNNING);
+        when(chatRepository.findById(CHAT_ID)).thenReturn(Optional.of(execution.getChat()));
+        when(teamMemberRepository.existsByTeamIdAndUserId(TEAM_ID, USER_ID)).thenReturn(true);
+        when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
+        when(environmentRpcClient.request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)))
+                .thenReturn(new EnvironmentConnectorResult.AcpPrompt(PromptStatus.FAILED, null, "busy agent"));
+
+        sandboxExecutionService.steerExecution(
+                USER_ID, CHAT_ID, execution.getId(), new SteerExecutionRequest("More guidance", List.of()));
+
+        await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> verify(environmentRpcClient)
+                .request(eq(ENVIRONMENT_ID), any(EnvironmentRpcPayload.AcpPrompt.class)));
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.RUNNING);
+        verify(eventPublisher, never()).publishEvent(any(SandboxExecutionCompleteEvent.class));
     }
 
     @Test
@@ -2170,9 +2303,11 @@ class SandboxExecutionServiceTest {
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
         assertThatThrownBy(() -> sandboxExecutionService.steerExecution(
-                        USER_ID, CHAT_ID, execution.getId(), new SteerExecutionRequest("nope", List.of())))
+                        USER_ID, CHAT_ID, execution.getId(), new SteerExecutionRequest("Continue", List.of())))
                 .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("Cannot steer execution in state COMPLETED");
+                .hasMessageContaining("Completed executions cannot be steered");
+        assertThat(execution.getStatus()).isEqualTo(SandboxExecutionStatus.COMPLETED);
+        verify(sandboxExecutionRepository, never()).save(execution);
     }
 
     @Test
@@ -2208,7 +2343,7 @@ class SandboxExecutionServiceTest {
     @Test
     void dispatchSystemSteering_terminalExecution_skipsDispatch() throws Exception {
         SandboxExecution execution = createTestExecution();
-        execution.setStatus(SandboxExecutionStatus.FAILED);
+        execution.setStatus(SandboxExecutionStatus.COMPLETED);
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
 
         sandboxExecutionService.dispatchSystemSteering(execution.getId(), "guidance");

@@ -184,10 +184,6 @@ x-kratis-notifications:
   summary: Streamed stdout/stderr line from an execution
   schema:
     $ref: ./schemas/results/execution_output.schema.yaml
-- name: execution_complete
-  summary: Execution lifecycle completion signal
-  schema:
-    $ref: ./schemas/results/execution_complete.schema.yaml
 - name: execution_status_changed
   summary: Execution status or usage change for a chat's executions; receivers invalidate the chat execution list
   schema:

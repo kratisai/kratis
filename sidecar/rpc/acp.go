@@ -45,7 +45,6 @@ func (c *Client) ExecuteLaunchAcpAgent(params LaunchAcpAgentParams, reqID interf
 		AgentName:    result.AgentName,
 		AgentVersion: result.AgentVersion,
 		ExecutionID:  execID,
-		Relaunch:     result.Resumed,
 	})
 	c.sendSuccessResponse(reqID, LaunchAcpAgentResult{
 		Status:       LaunchLaunched,
@@ -107,10 +106,6 @@ func (c *Client) launchAcpAgentProcess(agentCommand string, logFiles []string, r
 		return err
 	}
 
-	c.mu.Lock()
-	c.acpAgentCommand = agentCommand
-	c.acpAgentLogFiles = logFiles
-	c.mu.Unlock()
 	return nil
 }
 
@@ -142,20 +137,6 @@ func (c *Client) ExecuteAcpPrompt(params AcpPromptParams, reqID interface{}) {
 	c.mu.Lock()
 	sup := c.supervisor
 	c.mu.Unlock()
-
-	if params.Relaunch && (sup == nil || !sup.IsSessionAlive()) {
-		if err := c.relaunchAgent(); err != nil {
-			log.Printf("[ACP] Relaunch before prompt failed: %v", err)
-			c.sendSuccessResponse(reqID, AcpPromptResult{
-				Status: PromptFailed,
-				Error:  fmt.Sprintf("agent relaunch failed: %v", err),
-			})
-			return
-		}
-		c.mu.Lock()
-		sup = c.supervisor
-		c.mu.Unlock()
-	}
 
 	if sup == nil {
 		c.sendSuccessResponse(reqID, AcpPromptResult{
@@ -277,52 +258,6 @@ func (c *Client) reportPromptFailure(sessionID string, promptErr error, errMessa
 		ExitCode: 1,
 		Reason:   reason,
 	})
-}
-
-// relaunchAgent tears down any stale ACP agent and launches the recorded
-// agent command, reattaching to the persisted ACP session when available. No
-// env.complete is reported for the teardown — the caller's prompt outcome
-// drives the terminal state.
-func (c *Client) relaunchAgent() error {
-	c.mu.Lock()
-	sup := c.supervisor
-	agentCommand := c.acpAgentCommand
-	logFiles := c.acpAgentLogFiles
-	c.mu.Unlock()
-
-	if agentCommand == "" {
-		return fmt.Errorf("no agent command recorded; cannot relaunch")
-	}
-
-	if sup != nil {
-		log.Printf("[ACP] Relaunch: terminating existing agent session")
-		if _, err := sup.TerminateQuietly(); err != nil {
-			log.Printf("[ACP] Relaunch: terminate of existing agent: %v", err)
-		}
-		c.mu.Lock()
-		c.supervisor = nil
-		c.mu.Unlock()
-	}
-
-	if err := c.launchAcpAgentProcess(agentCommand, logFiles, c.readPersistedSessionID()); err != nil {
-		return err
-	}
-
-	// Notify the control plane about the fresh session so the UI tracks the
-	// new ACP session id.
-	result := c.currentSupervisor().LastLaunchResult()
-	c.persistSessionID(result.Session.SessionID)
-	c.mu.Lock()
-	execID := c.currentExecutionID
-	c.mu.Unlock()
-	_ = c.sendNotification("env.acp_initialized", AcpInitializedParams{
-		SessionID:    result.Session.SessionID,
-		AgentName:    result.AgentName,
-		AgentVersion: result.AgentVersion,
-		ExecutionID:  execID,
-		Relaunch:     true,
-	})
-	return nil
 }
 
 // truncateReason bounds an agent error message for the terminal reason string.

@@ -84,7 +84,7 @@ function defaultChats() {
         createdByDisplayName: 'User 1',
         id: 'session-2',
         lastActivityAt: recent,
-        status: 'Failed',
+        status: 'Blocked',
         teamId: 'team-1',
         title: 'Archived Session 2',
         updatedAt: recent,
@@ -263,8 +263,7 @@ describe('SidebarNav', () => {
     expect(screen.getByText('working')).toHaveClass('text-white', 'font-semibold')
     expect(screen.getByText('Idle')).toHaveClass('text-yellow-400')
     expect(screen.getByText('MR pushed')).toHaveClass('text-emerald-400')
-    expect(screen.getByText('Blocked')).toHaveClass('text-amber-400')
-    expect(screen.getByText('Failed')).toHaveClass('text-red-400')
+    expect(screen.getAllByText('Blocked')[0]).toHaveClass('text-amber-400')
     expect(screen.getByText('Planning')).toHaveClass('text-purple-400')
   })
 

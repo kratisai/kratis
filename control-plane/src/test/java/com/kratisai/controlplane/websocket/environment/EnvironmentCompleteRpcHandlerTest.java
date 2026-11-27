@@ -15,7 +15,9 @@ import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
 import com.kratisai.controlplane.api.wsdto.RpcErrorException;
 import com.kratisai.controlplane.model.ChatEntity;
+import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
+import com.kratisai.controlplane.model.ExecutionEnvironmentType;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
@@ -98,6 +100,19 @@ class EnvironmentCompleteRpcHandlerTest {
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(createExecution()));
     }
 
+    private void stubOwnedConnectedSandboxExecution() {
+        stubOwnedConnectedExecution(ExecutionEnvironmentType.SANDBOX);
+    }
+
+    private SandboxExecution stubOwnedConnectedExecution(ExecutionEnvironmentType type) {
+        SandboxExecution execution = createExecution();
+        execution.getEnvironment().setType(type);
+        execution.getEnvironment().setStatus(EnvironmentStatus.CONNECTED);
+        when(sessionRegistry.getEnvironmentId(sessionId)).thenReturn(Optional.of(envId));
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+        return execution;
+    }
+
     @Test
     void handle_withExitCodeZero_setsIdleStatus() {
         stubOwnedExecution();
@@ -126,7 +141,7 @@ class EnvironmentCompleteRpcHandlerTest {
     }
 
     @Test
-    void handle_withNonZeroExitCode_setsFailedStatus() {
+    void handle_withNonZeroExitCode_settlesIdleAndRecordsErrorActivity() {
         stubOwnedExecution();
 
         EnvironmentRpcPayload.Complete params = new EnvironmentRpcPayload.Complete(1, executionId.toString());
@@ -136,7 +151,7 @@ class EnvironmentCompleteRpcHandlerTest {
         handler.handle(sessionId, request, params);
         ArgumentCaptor<SandboxExecution> savedCaptor = ArgumentCaptor.forClass(SandboxExecution.class);
         verify(executionRepository).save(savedCaptor.capture());
-        assertThat(savedCaptor.getValue().getStatus()).isEqualTo(SandboxExecutionStatus.FAILED);
+        assertThat(savedCaptor.getValue().getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
         assertThat(savedCaptor.getValue().getExitCode()).isEqualTo(1);
     }
 
@@ -170,19 +185,82 @@ class EnvironmentCompleteRpcHandlerTest {
         verify(eventPublisher).publishEvent(completeCaptor.capture());
         assertThat(completeCaptor.getValue().reason()).contains("1048576");
         assertThat(completeCaptor.getValue().exitCode()).isEqualTo(1);
+        assertThat(completeCaptor.getValue().unexpectedProcessExit()).isTrue();
     }
 
     @Test
-    void handle_withExitCodeZero_recordsNoErrorActivity() {
-        stubOwnedExecution();
+    void handle_withExitCodeZero_relaunchesUnexpectedlyExitedAgent() {
+        stubOwnedConnectedSandboxExecution();
 
-        EnvironmentRpcPayload.Complete params = new EnvironmentRpcPayload.Complete(0, executionId.toString());
+        EnvironmentRpcPayload.Complete params = new EnvironmentRpcPayload.Complete(
+                0, executionId.toString(), "agent process exited unexpectedly (exit code 0)");
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
                 EnvironmentRpcPayload.Complete.METHOD, objectMapper.valueToTree(params), null);
 
         handler.handle(sessionId, request, params);
 
-        verify(activityRepository, never()).save(any());
+        ArgumentCaptor<SandboxExecutionActivity> activityCaptor =
+                ArgumentCaptor.forClass(SandboxExecutionActivity.class);
+        verify(activityRepository).save(activityCaptor.capture());
+        assertThat(activityCaptor.getValue().getActivityType()).isEqualTo(ActivityType.ERROR);
+        assertThat(activityCaptor.getValue().getDescription()).contains("exit code 0");
+        verify(sandboxExecutionService).relaunchAgentAfterCrash(executionId);
+
+        ArgumentCaptor<SandboxExecutionCompleteEvent> completeCaptor =
+                ArgumentCaptor.forClass(SandboxExecutionCompleteEvent.class);
+        verify(eventPublisher).publishEvent(completeCaptor.capture());
+        assertThat(completeCaptor.getValue().unexpectedProcessExit()).isTrue();
+    }
+
+    @Test
+    void handle_withUnexpectedConnectorProcessExit_relaunchesAgent() {
+        SandboxExecution execution = stubOwnedConnectedExecution(ExecutionEnvironmentType.CONNECTOR);
+
+        EnvironmentRpcPayload.Complete params = new EnvironmentRpcPayload.Complete(
+                0, executionId.toString(), "agent process exited unexpectedly (exit code 0)");
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.Complete.METHOD, objectMapper.valueToTree(params), null);
+
+        handler.handle(sessionId, request, params);
+
+        assertThat(execution.getEnvironment().getStatus()).isEqualTo(EnvironmentStatus.CONNECTED);
+        verify(sandboxExecutionService).relaunchAgentAfterCrash(executionId);
+    }
+
+    @Test
+    void handle_withAbnormalExitOnConnectedSandbox_relaunchesAgentAndSettlesIdle() {
+        stubOwnedConnectedSandboxExecution();
+
+        EnvironmentRpcPayload.Complete params = new EnvironmentRpcPayload.Complete(
+                1, executionId.toString(), "agent process exited unexpectedly (exit code 1)");
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.Complete.METHOD, objectMapper.valueToTree(params), null);
+
+        handler.handle(sessionId, request, params);
+
+        ArgumentCaptor<SandboxExecution> savedCaptor = ArgumentCaptor.forClass(SandboxExecution.class);
+        verify(executionRepository).save(savedCaptor.capture());
+        assertThat(savedCaptor.getValue().getStatus()).isEqualTo(SandboxExecutionStatus.IDLE);
+        verify(sandboxExecutionService).relaunchAgentAfterCrash(executionId);
+    }
+
+    @Test
+    void handle_withUnexpectedExitWhilePendingConnect_doesNotTriggerSecondRelaunch() {
+        SandboxExecution execution = createExecution();
+        execution.getEnvironment().setType(ExecutionEnvironmentType.SANDBOX);
+        execution.getEnvironment().setStatus(EnvironmentStatus.PENDING_CONNECT);
+        when(sessionRegistry.getEnvironmentId(sessionId)).thenReturn(Optional.of(envId));
+        when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+
+        EnvironmentRpcPayload.Complete params =
+                new EnvironmentRpcPayload.Complete(-1, executionId.toString(), "ACP agent launch failed: boom");
+        JsonRpcInboundRequest request = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.Complete.METHOD, objectMapper.valueToTree(params), null);
+
+        handler.handle(sessionId, request, params);
+
+        verify(activityRepository).save(any(SandboxExecutionActivity.class));
+        verify(sandboxExecutionService, never()).relaunchAgentAfterCrash(any());
     }
 
     @Test
@@ -202,6 +280,12 @@ class EnvironmentCompleteRpcHandlerTest {
         assertThat(savedCaptor.getValue().getExitCode()).isEqualTo(143);
 
         verify(activityRepository, never()).save(any());
+        verify(sandboxExecutionService, never()).relaunchAgentAfterCrash(any());
+
+        ArgumentCaptor<SandboxExecutionCompleteEvent> completeCaptor =
+                ArgumentCaptor.forClass(SandboxExecutionCompleteEvent.class);
+        verify(eventPublisher).publishEvent(completeCaptor.capture());
+        assertThat(completeCaptor.getValue().unexpectedProcessExit()).isFalse();
     }
 
     @Test

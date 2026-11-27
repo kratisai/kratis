@@ -1,14 +1,5 @@
 import { useNavigate, useSearch } from '@tanstack/react-router'
-import {
-  AlertCircle,
-  Bot,
-  CheckCircle2,
-  ChevronDown,
-  GitCompare,
-  Loader2,
-  Moon,
-  PenTool,
-} from 'lucide-react'
+import { Bot, CheckCircle2, ChevronDown, GitCompare, Loader2, Moon, PenTool } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import type { ExecutionDisplayStatus, SandboxExecutionDto } from '@/lib/execution-api'
@@ -424,8 +415,6 @@ function ExecutionStatusIcon({ status }: { status: ExecutionDisplayStatus }) {
     case 'COMPLETED':
     case 'IDLE':
       return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-    case 'FAILED':
-      return <AlertCircle className="text-destructive h-3.5 w-3.5" />
     case 'RUNNING':
       return <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />
     case 'SLEEPING':

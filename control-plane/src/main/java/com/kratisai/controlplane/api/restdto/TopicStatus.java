@@ -9,8 +9,7 @@ public enum TopicStatus {
     IDLE("Idle"),
     MR_PUSHED("MR pushed"),
     READY_TO_PUBLISH("Ready to publish"),
-    BLOCKED("Blocked"),
-    FAILED("Failed");
+    BLOCKED("Blocked");
 
     private final String value;
 

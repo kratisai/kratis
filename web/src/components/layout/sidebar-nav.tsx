@@ -56,7 +56,6 @@ export function topicUrl(chat: ChatDto): TopicUrl {
 
 const STATUS_STYLES: Record<TopicStatus, string> = {
   Blocked: 'text-amber-400',
-  Failed: 'text-red-400',
   Idle: 'text-yellow-400',
   'MR pushed': 'text-emerald-400',
   Planning: 'text-purple-400',

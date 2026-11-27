@@ -91,18 +91,20 @@ public class EnvironmentLifecycleService {
         expireStaleSnapshots(now);
         applyLostRuntimeRule(now);
         reapOrphans(now);
-        failExecutionsOfTerminatedEnvironments();
+        settleExecutionsOfTerminatedEnvironments();
     }
 
     /**
-     * A PENDING_CONNECT row past {@code connect-timeout} never registered, regardless of whether
-     * its container is still running. Liveness is not connectivity: keeping a running container
-     * whose connector cannot reach the control plane leaks compute forever.
+     * A PENDING_CONNECT row past {@code connect-timeout} without a live heartbeat never
+     * connected or went silent mid-boot. Once the connector is heartbeating (running checkout or
+     * agent install), it gets up to 3x {@code connect-timeout} from registration before a hung
+     * provisioning attempt is reaped.
      */
     private void resolveStuckResumes(Instant now) {
+        Duration provisioningCeiling = connectTimeout.multipliedBy(3);
         for (ExecutionEnvironment env : environmentRepository.findByTypeAndStatus(
                 ExecutionEnvironmentType.SANDBOX, EnvironmentStatus.PENDING_CONNECT)) {
-            if (!elapsed(env.getLastActivityAt(), now, connectTimeout)) {
+            if (!isPendingConnectStuck(env, now, provisioningCeiling)) {
                 continue;
             }
             SandboxProvider provider = providerFor(env);
@@ -111,6 +113,16 @@ public class EnvironmentLifecycleService {
             }
             failRow("resolving stuck connect", () -> reapWedgedConnector(env, provider, now), env.getId());
         }
+    }
+
+    private boolean isPendingConnectStuck(ExecutionEnvironment env, Instant now, Duration provisioningCeiling) {
+        Instant heartbeat = env.getLastHeartbeat();
+        Instant entry = env.getLastActivityAt();
+        boolean heartbeatingSinceEntry = heartbeat != null && (entry == null || !heartbeat.isBefore(entry));
+        if (!heartbeatingSinceEntry) {
+            return elapsed(entry, now, connectTimeout);
+        }
+        return elapsed(heartbeat, now, connectTimeout) || elapsed(entry, now, provisioningCeiling);
     }
 
     private void reapWedgedConnector(ExecutionEnvironment env, SandboxProvider provider, Instant now) {
@@ -188,9 +200,9 @@ public class EnvironmentLifecycleService {
      * owned compute only through {@code suspend}, so any remaining state is preserved and the row
      * goes to SLEEPING with its turn history intact. A runner that is up is left alone until its
      * heartbeat (its only liveness signal) has been absent one full reconnect window. Only a
-     * nothing-left CONNECTED row becomes TERMINATED, after that window. RUNNING executions move
-     * to UNKNOWN on suspend; IDLE ones are unchanged for SLEEPING and move to UNKNOWN for
-     * TERMINATED. PENDING_CONNECT and SLEEPING rows do not need the heartbeat: their
+     * nothing-left CONNECTED row becomes TERMINATED, after that window. A RUNNING execution
+     * settles to IDLE on suspend; IDLE stays IDLE for both SLEEPING and TERMINATED.
+     * PENDING_CONNECT and SLEEPING rows do not need the heartbeat: their
      * last_activity_at is stamped on entry to that status, so the startup-grace gate above guards
      * both against docker listing lag right after the status change.
      */
@@ -348,16 +360,15 @@ public class EnvironmentLifecycleService {
         }
     }
 
-    /** A TERMINATED environment can never run its executions; nothing else strands them. */
-    private void failExecutionsOfTerminatedEnvironments() {
+    /** A TERMINATED environment can never run its executions; settle the interrupted RUNNING turn. */
+    private void settleExecutionsOfTerminatedEnvironments() {
         for (SandboxExecution execution : sandboxExecutionRepository.findByStatusInAndEnvironment_StatusIn(
-                List.of(SandboxExecutionStatus.RUNNING, SandboxExecutionStatus.IDLE),
-                List.of(EnvironmentStatus.TERMINATED))) {
+                List.of(SandboxExecutionStatus.RUNNING), List.of(EnvironmentStatus.TERMINATED))) {
             logger.info(
-                    "Failing execution {} of terminated environment {}",
+                    "Settling execution {} of terminated environment {}",
                     execution.getId(),
                     execution.getEnvironment().getId());
-            executionEnvironmentService.failStrandedExecution(execution.getId());
+            executionEnvironmentService.settleStrandedExecution(execution.getId());
         }
     }
 

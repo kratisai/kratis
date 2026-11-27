@@ -3,8 +3,6 @@ package com.kratisai.controlplane.websocket.environment;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -20,7 +18,6 @@ import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.event.SandboxExecutionAcpInitializedEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.service.EnvironmentSessionRegistry;
-import com.kratisai.controlplane.service.SandboxExecutionService;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,9 +38,6 @@ class EnvironmentAcpInitializedRpcHandlerTest {
     private SandboxExecutionRepository executionRepository;
 
     @Mock
-    private SandboxExecutionService sandboxExecutionService;
-
-    @Mock
     private ApplicationEventPublisher eventPublisher;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -56,7 +50,7 @@ class EnvironmentAcpInitializedRpcHandlerTest {
     @BeforeEach
     void setUp() {
         EnvironmentExecutionGuard executionGuard = new EnvironmentExecutionGuard(sessionRegistry, executionRepository);
-        handler = new EnvironmentAcpInitializedRpcHandler(executionGuard, sandboxExecutionService, eventPublisher);
+        handler = new EnvironmentAcpInitializedRpcHandler(executionGuard, eventPublisher);
     }
 
     private SandboxExecution createExecution() {
@@ -75,7 +69,7 @@ class EnvironmentAcpInitializedRpcHandlerTest {
     }
 
     @Test
-    void handle_withValidParams_sendsAcpPrompt() {
+    void handle_withValidParams_publishesEventWithoutPromptDispatch() {
         when(sessionRegistry.getEnvironmentId(sessionId)).thenReturn(Optional.of(envId));
         SandboxExecution execution = createExecution();
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
@@ -86,7 +80,6 @@ class EnvironmentAcpInitializedRpcHandlerTest {
                 EnvironmentRpcPayload.AcpInitialized.METHOD, objectMapper.valueToTree(params), null);
 
         handler.handle(sessionId, request, params);
-        verify(sandboxExecutionService).dispatchAcpPrompt(eq(execution));
 
         ArgumentCaptor<SandboxExecutionAcpInitializedEvent> captor =
                 ArgumentCaptor.forClass(SandboxExecutionAcpInitializedEvent.class);
@@ -100,40 +93,48 @@ class EnvironmentAcpInitializedRpcHandlerTest {
     }
 
     @Test
-    void handle_withRelaunch_skipsTaskPromptDispatch() {
+    void handle_withRunningExecution_publishesInitializedEvent() {
         when(sessionRegistry.getEnvironmentId(sessionId)).thenReturn(Optional.of(envId));
         SandboxExecution execution = createExecution();
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
 
-        EnvironmentRpcPayload.AcpInitialized params = new EnvironmentRpcPayload.AcpInitialized(
-                "acp-sess-2", "claude", "1.0", executionId.toString(), Boolean.TRUE);
+        EnvironmentRpcPayload.AcpInitialized params =
+                new EnvironmentRpcPayload.AcpInitialized("acp-sess-2", "claude", "1.0", executionId.toString());
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
                 EnvironmentRpcPayload.AcpInitialized.METHOD, objectMapper.valueToTree(params), null);
 
         handler.handle(sessionId, request, params);
 
-        // The caller that requested the relaunch delivers its own prompt; the
-        // handler must not re-dispatch the task prompt (which would run it twice).
-        verify(sandboxExecutionService, never()).dispatchAcpPrompt(eq(execution));
         verify(eventPublisher).publishEvent(any(SandboxExecutionAcpInitializedEvent.class));
     }
 
     @Test
-    void handle_withFailedExecutionAndNoRelaunch_skipsTaskPromptDispatch() {
+    void handle_withIdleExecution_publishesInitializedEvent() {
         when(sessionRegistry.getEnvironmentId(sessionId)).thenReturn(Optional.of(envId));
         SandboxExecution execution = createExecution();
-        execution.setStatus(SandboxExecutionStatus.FAILED);
+        execution.setStatus(SandboxExecutionStatus.IDLE);
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
 
-        EnvironmentRpcPayload.AcpInitialized params = new EnvironmentRpcPayload.AcpInitialized(
-                "acp-sess-3", "claude", "1.0", executionId.toString(), Boolean.FALSE);
+        EnvironmentRpcPayload.AcpInitialized params =
+                new EnvironmentRpcPayload.AcpInitialized("acp-sess-3", "claude", "1.0", executionId.toString());
         JsonRpcInboundRequest request = new JsonRpcInboundRequest(
                 EnvironmentRpcPayload.AcpInitialized.METHOD, objectMapper.valueToTree(params), null);
 
         handler.handle(sessionId, request, params);
 
-        verify(sandboxExecutionService, never()).dispatchAcpPrompt(eq(execution));
         verify(eventPublisher).publishEvent(any(SandboxExecutionAcpInitializedEvent.class));
+    }
+
+    @Test
+    void deserialize_ignoresLegacyRelaunchFieldFromPreUpgradeSidecar() throws Exception {
+        EnvironmentRpcPayload.AcpInitialized params =
+                objectMapper.readValue("""
+                {"sessionId":"acp-sess-1","agentName":"claude","agentVersion":"1.0",
+                 "executionId":"00000000-0000-0000-0000-000000000001","relaunch":true}
+                """, EnvironmentRpcPayload.AcpInitialized.class);
+
+        assertThat(params.sessionId()).isEqualTo("acp-sess-1");
+        assertThat(params.agentName()).isEqualTo("claude");
     }
 
     @Test

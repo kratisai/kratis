@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.kratisai.controlplane.api.restdto.ModelUsageDto;
 import com.kratisai.controlplane.api.restdto.UsageLogEntryDto;
+import com.kratisai.controlplane.api.restdto.UsageLogStatus;
 import com.kratisai.controlplane.api.restdto.UsageSummaryDto;
 import com.kratisai.controlplane.model.*;
 import com.kratisai.controlplane.repository.*;
@@ -151,6 +152,7 @@ class UsageServiceTest {
         assertThat(ingestionLogs).isNotNull();
         assertThat(ingestionLogs.getContent()).hasSize(1);
         assertThat(ingestionLogs.getContent().getFirst().usageType()).isEqualTo(UsageType.INGESTION);
+        assertThat(ingestionLogs.getContent().getFirst().status()).isEqualTo(UsageLogStatus.FAILED);
         assertThat(ingestionLogs.getContent().getFirst().targetUrl()).isEqualTo("/repos/" + repo.getId());
 
         Page<UsageLogEntryDto> chatLogs = usageService.getUsageLogs(
@@ -701,10 +703,10 @@ class UsageServiceTest {
                 null,
                 null,
                 null,
-                SandboxExecutionStatus.COMPLETED,
+                UsageLogStatus.COMPLETED,
                 PageRequest.of(0, 10));
         assertThat(completedLogs.getContent()).hasSize(1);
-        assertThat(completedLogs.getContent().getFirst().status()).isEqualTo(SandboxExecutionStatus.IDLE);
+        assertThat(completedLogs.getContent().getFirst().status()).isEqualTo(UsageLogStatus.IDLE);
 
         Page<UsageLogEntryDto> runningLogs = usageService.getUsageLogs(
                 user.getId(),
@@ -716,7 +718,7 @@ class UsageServiceTest {
                 null,
                 null,
                 null,
-                SandboxExecutionStatus.RUNNING,
+                UsageLogStatus.RUNNING,
                 PageRequest.of(0, 10));
         assertThat(runningLogs.getContent()).isEmpty();
 

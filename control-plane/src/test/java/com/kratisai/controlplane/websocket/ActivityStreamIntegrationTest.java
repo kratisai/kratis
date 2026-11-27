@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kratisai.controlplane.api.restdto.*;
+import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.api.wsdto.HitlResponse;
 import com.kratisai.controlplane.api.wsdto.JsonRpcInboundRequest;
@@ -15,6 +16,7 @@ import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ModelProviderRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
+import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.repository.UserRepository;
 import com.kratisai.controlplane.service.CanvasService;
@@ -23,10 +25,12 @@ import com.kratisai.controlplane.service.LiteLLMProvisioningService;
 import com.kratisai.controlplane.service.SandboxExecutionService;
 import com.kratisai.controlplane.testsupport.DatabaseCleaner;
 import com.kratisai.controlplane.testsupport.SpringIntegrationTest;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,8 +46,8 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 
 /**
  * E2E integration test verifying the full activity stream with HITL approval flow. Validates that
- * activity events, permission events, and completion events are correctly interleaved and
- * broadcast to UI clients in the expected order.
+ * activity events, permission events, and execution status changes are correctly broadcast to UI
+ * clients.
  *
  * <p>Test scenario:
  *
@@ -58,7 +62,7 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
  *   <li>Sidecar sends more env.activity events
  *   <li>Assert UI client receives continued activity stream
  *   <li>Sidecar sends env.complete
- *   <li>Assert UI client receives execution_complete
+ *   <li>Assert UI client receives execution_status_changed
  * </ol>
  */
 @SpringIntegrationTest
@@ -96,6 +100,9 @@ class ActivityStreamIntegrationTest {
 
     @Autowired
     private RepositoryRepository repositoryRepository;
+
+    @Autowired
+    private SandboxExecutionActivityRepository executionActivityRepository;
 
     @Autowired
     private DatabaseCleaner databaseCleaner;
@@ -185,13 +192,13 @@ class ActivityStreamIntegrationTest {
 
         // 3. Connect UI client subscribed to team events
         //    Expect: 2 activity events before permission, 1 permission_required,
-        //    1 permission_resolved, 1 execution_complete
+        //    1 permission_resolved, 1 execution_status_changed
         //    (3rd activity event verified via awaitMessageContaining after permission flow)
         ClientWebSocketFixture clientFixture = new ClientWebSocketFixture(userAuthToken, team.getId())
                 .expectTrigger("execution_activity", 2)
                 .expectTrigger("awaiting_human", 1)
                 .expectTrigger("\"state\":\"resolved\"", 1)
-                .expectTrigger("execution_complete", 1);
+                .expectTrigger("execution_status_changed", 1);
 
         StandardWebSocketClient client = new StandardWebSocketClient();
         WebSocketSession clientSession = client.execute(clientFixture, "ws://localhost:" + port + "/ws/client")
@@ -347,23 +354,48 @@ class ActivityStreamIntegrationTest {
                 .as("UI client should receive activity event after permission approval")
                 .isTrue();
 
-        // 17. Sidecar sends env.complete
+        JsonRpcInboundRequest openCommand = new JsonRpcInboundRequest(
+                EnvironmentRpcPayload.Activity.METHOD,
+                objectMapper.valueToTree(Map.of(
+                        "activityType", "COMMAND",
+                        "description", "Command interrupted by process exit",
+                        "actionId", "command-open-on-exit",
+                        "status", "in_progress",
+                        "executionId", executionId.toString())),
+                null);
+        sidecarSession.sendMessage(new TextMessage(objectMapper.writeValueAsString(openCommand)));
+        assertThat(clientFixture.awaitMessageContaining(
+                        5, TimeUnit.SECONDS, "execution_activity", "command-open-on-exit", "in_progress"))
+                .as("UI client receives the open command activity")
+                .isTrue();
+
+        // 17. Sidecar sends env.complete; control plane settles open activities before status update.
         JsonRpcInboundRequest completeRequest = new JsonRpcInboundRequest(
                 EnvironmentRpcPayload.Complete.METHOD,
                 objectMapper.valueToTree(Map.of("exitCode", 0, "executionId", executionId.toString())),
                 null);
         sidecarSession.sendMessage(new TextMessage(objectMapper.writeValueAsString(completeRequest)));
 
-        // 18. Assert UI client receives execution_complete
-        boolean completeReceived = clientFixture.awaitTrigger("execution_complete", 5, TimeUnit.SECONDS);
-        assertThat(completeReceived)
-                .as("UI client should receive execution_complete")
+        Awaitility.await("control plane persists the settled activity state")
+                .atMost(Duration.ofSeconds(5))
+                .pollDelay(Duration.ZERO)
+                .untilAsserted(() -> assertThat(executionActivityRepository
+                                .findByExecutionIdAndActionId(executionId, "command-open-on-exit")
+                                .orElseThrow()
+                                .getStatus())
+                        .isEqualTo(ActivityStatus.FAILED));
+        assertThat(clientFixture.awaitMessageContaining(
+                        5, TimeUnit.SECONDS, "execution_activity", "command-open-on-exit", "failed"))
+                .as("control plane broadcasts the settled activity state")
                 .isTrue();
-        assertThat(clientFixture.hasReceivedMessageContaining("execution_complete", "IDLE"))
-                .as("Execution complete event should contain IDLE status")
+
+        // 18. Assert UI client receives execution_status_changed
+        boolean statusChangedReceived = clientFixture.awaitTrigger("execution_status_changed", 5, TimeUnit.SECONDS);
+        assertThat(statusChangedReceived)
+                .as("UI client should receive execution_status_changed")
                 .isTrue();
-        assertThat(clientFixture.hasReceivedMessageContaining("execution_complete", executionId.toString()))
-                .as("Execution complete event should contain the correct executionId")
+        assertThat(clientFixture.hasReceivedMessageContaining("execution_status_changed", executionId.toString()))
+                .as("Execution status changed event should contain the correct executionId")
                 .isTrue();
 
         // Clean up sessions

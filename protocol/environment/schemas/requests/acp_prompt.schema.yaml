@@ -14,7 +14,4 @@ properties:
     description: Correlation id echoed in env.acp_prompt_complete. The sidecar acknowledges the dispatch immediately; the terminal outcome arrives as a notification with this id, letting the control plane ignore a completion from a superseded turn.
   isSteering:
     type: boolean
-  relaunch:
-    type: boolean
-    description: When true, if no active ACP session exists, the sidecar launches the recorded agent command and reattaches to any persisted session before sending the prompt; if a session is already active, it is reused.
 additionalProperties: false

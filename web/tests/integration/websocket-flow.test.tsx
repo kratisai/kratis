@@ -152,27 +152,12 @@ describe('WebSocket Integration Flow', () => {
           },
         }),
       })
-
-      ws.onmessage?.({
-        data: JSON.stringify({
-          jsonrpc: '2.0',
-          result: {
-            executionId: 'exec-1',
-            exitCode: 0,
-            status: 'SUCCESS',
-            type: 'execution_complete',
-          },
-        }),
-      })
     })
 
     // Verify logs render in JSDOM DOM
     await waitFor(() => {
       expect(screen.getByText('[Output] Executing build task...')).toBeInTheDocument()
       expect(screen.getByText('[Error] Deprecation warning occurred')).toBeInTheDocument()
-      expect(
-        screen.getByText('[System] Command completed successfully with exit code 0.'),
-      ).toBeInTheDocument()
     })
   })
 

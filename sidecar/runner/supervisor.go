@@ -477,12 +477,14 @@ func (s *AgentSupervisor) terminate(emitComplete bool) (int, error) {
 	s.session = nil
 	s.stateLock.Unlock()
 
-	s.completeOnce.Do(func() {
-		if s.eventSink != nil && emitComplete {
-			reason := "agent terminated by user request"
-			s.eventSink.SendComplete(CompletionInfo{ExitCode: exitCode, Reason: reason, Terminated: true})
-		}
-	})
+	if emitComplete {
+		s.completeOnce.Do(func() {
+			if s.eventSink != nil {
+				reason := "agent terminated by user request"
+				s.eventSink.SendComplete(CompletionInfo{ExitCode: exitCode, Reason: reason, Terminated: true})
+			}
+		})
+	}
 
 	if s.terminals != nil {
 		s.terminals.ReleaseAll()
@@ -808,20 +810,25 @@ func (s *AgentSupervisor) PID() int {
 	return 0
 }
 
-// CleanupFailedLaunch tears down a half-initialized launch (transport closed,
-// agent terminated) and reports the terminal env.complete.
+// CleanupFailedLaunch tears down a half-initialized launch and reports it as an
+// unexpected process exit so the control plane can record the error and retry.
 func (s *AgentSupervisor) CleanupFailedLaunch(errMsg string) {
 	s.cleanupFailedLaunch(errMsg)
 }
 
 func (s *AgentSupervisor) cleanupFailedLaunch(errMsg string) {
-	s.eventSink.SendOutput(fmt.Sprintf("[ACP] Launch failed: %s — terminating agent", errMsg), "stderr")
-	if s.transport != nil {
-		_ = s.transport.Close()
+	if s.eventSink != nil {
+		s.eventSink.SendOutput(fmt.Sprintf("[ACP] Launch failed: %s — terminating agent", errMsg), "stderr")
 	}
-	if s.cmd != nil && s.cmd.Process != nil {
-		_, _ = s.Terminate()
-	}
+	_, _ = s.TerminateQuietly()
+	s.completeOnce.Do(func() {
+		if s.eventSink != nil {
+			s.eventSink.SendComplete(CompletionInfo{
+				ExitCode: -1,
+				Reason:   fmt.Sprintf("ACP agent launch failed: %s", errMsg),
+			})
+		}
+	})
 }
 
 type queuedPrompt struct {

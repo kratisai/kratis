@@ -69,9 +69,6 @@ describe('executionDisplayStatus', () => {
 
   it('reports SLEEPING for a non-completed run whose environment is asleep', () => {
     expect(
-      executionDisplayStatus(execution({ environmentStatus: 'SLEEPING', status: 'FAILED' })),
-    ).toBe('SLEEPING')
-    expect(
       executionDisplayStatus(execution({ environmentStatus: 'SLEEPING', status: 'IDLE' })),
     ).toBe('SLEEPING')
   })
@@ -86,6 +83,6 @@ describe('executionDisplayStatus', () => {
     expect(
       executionDisplayStatus(execution({ environmentStatus: 'CONNECTED', status: 'RUNNING' })),
     ).toBe('RUNNING')
-    expect(executionDisplayStatus(execution({ status: 'FAILED' }))).toBe('FAILED')
+    expect(executionDisplayStatus(execution({ status: 'IDLE' }))).toBe('IDLE')
   })
 })

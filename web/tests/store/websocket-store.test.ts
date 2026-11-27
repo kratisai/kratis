@@ -4,13 +4,10 @@ import type { IngestionResult } from '@/types/websocket-types'
 
 import { DIFF_QUERY_KEYS } from '@/hooks/use-diff'
 import { queryClient } from '@/lib/query-client'
-import { useActivityStore } from '@/store/activity-store'
 import { useAuthStore } from '@/store/auth-store'
 import { useChatStore } from '@/store/chat-store'
-import { useExecutionStore } from '@/store/execution-store'
 import {
   handleChatUsageChangedResult,
-  handleExecutionCompleteResult,
   handleExecutionDiffChangedResult,
   handleExecutionStatusChangedResult,
   handleIngestionResult,
@@ -270,53 +267,6 @@ describe('handleExecutionDiffChangedResult', () => {
     })
 
     expect(invalidateSpy).not.toHaveBeenCalled()
-  })
-})
-
-describe('handleExecutionCompleteResult', () => {
-  beforeEach(() => {
-    useExecutionStore.setState({ logs: {}, terminalOpen: false })
-    vi.restoreAllMocks()
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-    useExecutionStore.setState({ logs: {}, terminalOpen: false })
-  })
-
-  it('appends a keyed completion log and updates activities, without an isExecuting flag', () => {
-    const activitySpy = vi.spyOn(useActivityStore.getState(), 'handleExecutionComplete')
-
-    handleExecutionCompleteResult({
-      executionId: 'exec-1',
-      exitCode: 0,
-      status: 'COMPLETED',
-      type: 'execution_complete',
-    })
-
-    expect(useExecutionStore.getState().logs['exec-1']).toEqual([
-      '[System] Command completed successfully with exit code 0.',
-    ])
-    expect(activitySpy).toHaveBeenCalledWith({
-      executionId: 'exec-1',
-      exitCode: 0,
-      status: 'COMPLETED',
-      type: 'execution_complete',
-    })
-    expect(useExecutionStore.getState()).not.toHaveProperty('isExecuting')
-  })
-
-  it('does not touch the terminal panel state on completion', () => {
-    useExecutionStore.setState({ terminalOpen: true })
-
-    handleExecutionCompleteResult({
-      executionId: 'exec-1',
-      exitCode: 1,
-      status: 'FAILED',
-      type: 'execution_complete',
-    })
-
-    expect(useExecutionStore.getState().terminalOpen).toBe(true)
   })
 })
 

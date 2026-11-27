@@ -8,7 +8,6 @@ import com.kratisai.controlplane.api.restdto.ChatDto;
 import com.kratisai.controlplane.api.restdto.ChatUsageDto;
 import com.kratisai.controlplane.api.restdto.LastActivityType;
 import com.kratisai.controlplane.api.restdto.TopicStatus;
-import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.model.CanvasEntity;
 import com.kratisai.controlplane.model.ChangeSet;
 import com.kratisai.controlplane.model.ChatEntity;
@@ -163,7 +162,7 @@ class ChatServiceTest {
         SandboxExecution execution = execution(chat, SandboxExecutionStatus.RUNNING);
         when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
                 .thenReturn(Optional.of(execution));
-        when(activityRepository.existsByExecutionIdAndStatus(execution.getId(), ActivityStatus.PENDING))
+        when(activityRepository.existsPendingHitlForExecution(execution.getId()))
                 .thenReturn(false);
 
         assertThat(listSingleChat(chat).status()).isEqualTo(TopicStatus.WORKING);
@@ -175,7 +174,7 @@ class ChatServiceTest {
         SandboxExecution execution = execution(chat, SandboxExecutionStatus.RUNNING);
         when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
                 .thenReturn(Optional.of(execution));
-        when(activityRepository.existsByExecutionIdAndStatus(execution.getId(), ActivityStatus.PENDING))
+        when(activityRepository.existsPendingHitlForExecution(execution.getId()))
                 .thenReturn(true);
 
         assertThat(listSingleChat(chat).status()).isEqualTo(TopicStatus.BLOCKED);
@@ -272,13 +271,13 @@ class ChatServiceTest {
     }
 
     @Test
-    void listChatsForTeam_failedExecution_returnsFailed() {
+    void listChatsForTeam_idleExecution_returnsIdle() {
         ChatEntity chat = persistedChat(Instant.parse("2026-05-01T10:00:00Z"));
-        SandboxExecution execution = execution(chat, SandboxExecutionStatus.FAILED);
+        SandboxExecution execution = execution(chat, SandboxExecutionStatus.IDLE);
         when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
                 .thenReturn(Optional.of(execution));
 
-        assertThat(listSingleChat(chat).status()).isEqualTo(TopicStatus.FAILED);
+        assertThat(listSingleChat(chat).status()).isEqualTo(TopicStatus.IDLE);
     }
 
     @Test
@@ -423,11 +422,10 @@ class ChatServiceTest {
                     .orElse(List.of());
             when(diffSnapshotRepository.findByExecutionIdIn(List.of(execution.getId())))
                     .thenReturn(snapshots);
-            List<UUID> pending =
-                    activityRepository.existsByExecutionIdAndStatus(execution.getId(), ActivityStatus.PENDING)
-                            ? List.of(execution.getId())
-                            : List.of();
-            when(activityRepository.findExecutionIdsWithStatus(List.of(execution.getId()), ActivityStatus.PENDING))
+            List<UUID> pending = activityRepository.existsPendingHitlForExecution(execution.getId())
+                    ? List.of(execution.getId())
+                    : List.of();
+            when(activityRepository.findExecutionIdsWithPendingHitl(List.of(execution.getId())))
                     .thenReturn(pending);
         });
 
