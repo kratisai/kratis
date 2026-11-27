@@ -24,6 +24,7 @@ import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.Team;
+import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
 import com.kratisai.controlplane.service.BlobStorageService;
 import java.io.ByteArrayInputStream;
@@ -44,6 +45,10 @@ class EnvironmentDiffManifestAndSectionsRpcHandlerTest {
 
     private ExecutionDiffSnapshotRepository diffSnapshotRepository;
     private BlobStorageService blobStorageService;
+    private ChatRepository chatRepository;
+    private SandboxExecution execution;
+    private ChatEntity chat;
+    private Team team;
 
     private EnvironmentDiffManifestRpcHandler manifestHandler;
     private EnvironmentDiffSectionsRpcHandler sectionsHandler;
@@ -55,18 +60,26 @@ class EnvironmentDiffManifestAndSectionsRpcHandlerTest {
     void setUp() {
         EnvironmentExecutionGuard executionGuard = mock(EnvironmentExecutionGuard.class);
         diffSnapshotRepository = mock(ExecutionDiffSnapshotRepository.class);
+        chatRepository = mock(ChatRepository.class);
         blobStorageService = mock(BlobStorageService.class);
         ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
         ObjectMapper objectMapper = new ObjectMapper();
 
         manifestHandler = new EnvironmentDiffManifestRpcHandler(
-                executionGuard, diffSnapshotRepository, blobStorageService, eventPublisher, objectMapper);
+                executionGuard,
+                diffSnapshotRepository,
+                chatRepository,
+                blobStorageService,
+                eventPublisher,
+                objectMapper);
         sectionsHandler = new EnvironmentDiffSectionsRpcHandler(executionGuard, blobStorageService);
 
-        SandboxExecution execution = mock(SandboxExecution.class);
-        ChatEntity chat = mock(ChatEntity.class);
-        Team team = mock(Team.class);
+        execution = mock(SandboxExecution.class);
+        when(execution.getId()).thenReturn(execId);
+        chat = mock(ChatEntity.class);
+        team = mock(Team.class);
         when(execution.getChat()).thenReturn(chat);
+        when(execution.getBaseCommitSha()).thenReturn("base");
         when(chat.getTeam()).thenReturn(team);
         when(chat.getId()).thenReturn(UUID.randomUUID());
         when(team.getId()).thenReturn(UUID.randomUUID());
@@ -91,6 +104,43 @@ class EnvironmentDiffManifestAndSectionsRpcHandlerTest {
                     assertThat(r.missing()).isEmpty();
                 })
                 .verifyComplete();
+    }
+
+    @Test
+    void manifestHandler_persistsNewBaseShaAndTouchesChat_whenDigestChanges() {
+        ExecutionDiffSnapshot existing = new ExecutionDiffSnapshot();
+        existing.setBaseCommit("base-old");
+        existing.setManifestDigest("digest-old");
+        when(diffSnapshotRepository.findByExecutionId(execId)).thenReturn(Optional.of(existing));
+
+        EnvironmentRpcPayload.DiffManifest params = new EnvironmentRpcPayload.DiffManifest(
+                execId.toString(), "base-new", "head", 2, 1, "digest-new", List.of());
+
+        StepVerifier.create(manifestHandler.handle(sessionId, 1, params))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        assertThat(existing.getBaseCommit()).isEqualTo("base-new");
+        assertThat(existing.getManifestDigest()).isEqualTo("digest-new");
+        verify(execution).setBaseCommitSha("base-new");
+        verify(chatRepository).touchUpdatedAt(eq(chat.getId()), any());
+    }
+
+    @Test
+    void manifestHandler_keepsStoredBaseSha_whenSidecarSendsBlankBase() {
+        ExecutionDiffSnapshot existing = new ExecutionDiffSnapshot();
+        existing.setBaseCommit("base-old");
+        existing.setManifestDigest("digest-old");
+        when(diffSnapshotRepository.findByExecutionId(execId)).thenReturn(Optional.of(existing));
+
+        EnvironmentRpcPayload.DiffManifest params =
+                new EnvironmentRpcPayload.DiffManifest(execId.toString(), "", "head", 1, 0, "digest-new", List.of());
+
+        StepVerifier.create(manifestHandler.handle(sessionId, 1, params))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        verify(execution, never()).setBaseCommitSha(any());
     }
 
     @Test

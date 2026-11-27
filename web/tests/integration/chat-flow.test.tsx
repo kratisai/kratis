@@ -7,6 +7,7 @@ import { useUIStore } from '@/store/ui-store'
 
 import { createMockTeam } from '../support/test-factories'
 import {
+  mockGetChat,
   mockListChats,
   mockListTeams,
   setupFetchMock,
@@ -232,6 +233,79 @@ describe('Chat Flow', () => {
     await waitFor(() => {
       expect(screen.getByText('Connected')).toBeInTheDocument()
     })
+  })
+
+  it('redirects a bare topic URL to its most recent execution changes view', async () => {
+    mockListTeams([
+      {
+        createdAt: '2024-01-01T00:00:00Z',
+        id: 'team-1',
+        isDefault: true,
+        name: 'Test Team',
+        role: 'owner',
+        tavilyApiKeyConfigured: false,
+      },
+    ])
+    mockGetChat({
+      createdAt: '2024-01-01T00:00:00Z',
+      createdByDisplayName: 'Test User',
+      id: 'session-route',
+      lastActivityTargetId: 'exec-route',
+      lastActivityType: 'EXECUTION',
+      status: 'Ready to publish',
+      teamId: 'team-1',
+      title: 'Recent execution',
+      updatedAt: '2024-01-01T00:00:00Z',
+    })
+
+    setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
+    const { router } = renderIntegration(['/chats/session-route'])
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/chats/session-route/executions/exec-route')
+    })
+    expect(router.state.location.search).toMatchObject({ tab: 'changes' })
+  })
+
+  it('keeps the chat thread when the user explicitly selects chat', async () => {
+    mockGetChat({
+      createdAt: '2024-01-01T00:00:00Z',
+      createdByDisplayName: 'Test User',
+      id: 'session-explicit',
+      lastActivityTargetId: 'exec-explicit',
+      lastActivityType: 'EXECUTION',
+      status: 'MR pushed',
+      teamId: 'team-1',
+      title: 'Explicit chat',
+      updatedAt: '2024-01-01T00:00:00Z',
+    })
+    mockListTeams([
+      {
+        createdAt: '2024-01-01T00:00:00Z',
+        id: 'team-1',
+        isDefault: true,
+        name: 'Test Team',
+        role: 'owner',
+        tavilyApiKeyConfigured: false,
+      },
+    ])
+
+    setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
+    const { router } = renderIntegration(['/chats/session-explicit'])
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/chats/session-explicit/executions/exec-explicit')
+    })
+
+    await act(async () => {
+      await router.navigate({
+        params: { id: 'session-explicit' },
+        state: { explicitChat: true },
+        to: '/chats/$id',
+      })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(router.state.location.pathname).toBe('/chats/session-explicit')
   })
 
   it('clears sessions and resets state', async () => {

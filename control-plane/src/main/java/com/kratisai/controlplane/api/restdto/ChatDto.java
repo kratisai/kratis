@@ -18,4 +18,6 @@ public record ChatDto(
         Instant usageLastUpdatedAt,
         boolean allowAllPermissions,
         TopicStatus status,
-        Instant lastActivityAt) {}
+        Instant lastActivityAt,
+        LastActivityType lastActivityType,
+        String lastActivityTargetId) {}

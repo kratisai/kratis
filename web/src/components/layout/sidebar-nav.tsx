@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 
-import type { TopicStatus } from '@/lib/chat-api'
+import type { ChatDto, TopicStatus } from '@/lib/chat-api'
 
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -27,12 +27,40 @@ import { WikiSidebarSection } from './wiki-sidebar-section'
 
 const STALE_TOPIC_MS = 7 * 24 * 60 * 60 * 1000
 
+type TopicUrl =
+  | { params: { docId: string; id: string }; search: undefined; to: '/chats/$id/canvas/$docId' }
+  | {
+      params: { executionId: string; id: string }
+      search: undefined | { tab: 'changes' }
+      to: '/chats/$id/executions/$executionId'
+    }
+  | { params: { id: string }; search: undefined; to: '/chats/$id' }
+
+export function topicUrl(chat: ChatDto): TopicUrl {
+  if (chat.lastActivityType === 'EXECUTION' && chat.lastActivityTargetId) {
+    return {
+      params: { executionId: chat.lastActivityTargetId, id: chat.id },
+      search: chat.status === 'Ready to publish' ? { tab: 'changes' } : undefined,
+      to: '/chats/$id/executions/$executionId',
+    }
+  }
+  if (chat.lastActivityType === 'CANVAS' && chat.lastActivityTargetId) {
+    return {
+      params: { docId: chat.lastActivityTargetId, id: chat.id },
+      search: undefined,
+      to: '/chats/$id/canvas/$docId',
+    }
+  }
+  return { params: { id: chat.id }, search: undefined, to: '/chats/$id' }
+}
+
 const STATUS_STYLES: Record<TopicStatus, string> = {
   Blocked: 'text-amber-400',
   Failed: 'text-red-400',
   Idle: 'text-yellow-400',
   'MR pushed': 'text-emerald-400',
   Planning: 'text-purple-400',
+  'Ready to publish': 'text-amber-400',
   working: 'text-white font-semibold',
 }
 
@@ -189,6 +217,7 @@ export function SidebarNav({ className, onClose, showLabels = true }: SidebarNav
                     params: { id: chat.id },
                     to: '/chats/$id',
                   })
+                  const topicTarget = topicUrl(chat)
                   return (
                     <div
                       className={cn(
@@ -202,8 +231,9 @@ export function SidebarNav({ className, onClose, showLabels = true }: SidebarNav
                       <Link
                         className="min-w-0 flex-1 py-0.5 leading-snug break-words whitespace-normal"
                         onClick={handleChatClick}
-                        params={{ id: chat.id }}
-                        to="/chats/$id"
+                        params={topicTarget.params}
+                        search={topicTarget.search}
+                        to={topicTarget.to}
                       >
                         <span className="block">{chat.title}</span>
                         <TopicStatusLabel

@@ -35,6 +35,7 @@ import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.ChangeSetRepository;
 import com.kratisai.controlplane.repository.ChatRepository;
+import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
 import com.kratisai.controlplane.repository.RepoCredentialRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
@@ -71,6 +72,9 @@ class PublishAcceptanceScenariosTest {
 
     @Mock
     private ChatRepository chatRepository;
+
+    @Mock
+    private ExecutionDiffSnapshotRepository executionDiffSnapshotRepository;
 
     @Mock
     private SandboxExecutionActivityRepository activityRepository;
@@ -140,6 +144,7 @@ class PublishAcceptanceScenariosTest {
                 sandboxExecutionRepository,
                 changeSetRepository,
                 chatRepository,
+                executionDiffSnapshotRepository,
                 activityRepository,
                 activityPersistenceService,
                 eventPublisher,

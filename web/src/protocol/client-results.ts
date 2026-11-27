@@ -191,6 +191,7 @@ export const CLIENT_RESULTS = {
         'THINKING',
         'RESEARCH',
         'EDITED',
+        'END_TURN',
         'COMMAND',
         'MESSAGE',
         'ELICITATION',

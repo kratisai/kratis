@@ -1,12 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Outlet, useParams, useRouterState } from '@tanstack/react-router'
+import { Outlet, useNavigate, useParams, useRouterState } from '@tanstack/react-router'
 import { Maximize2, Minimize2, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { useChat } from '@/hooks/use-chats'
 import { useResumeEnvironment } from '@/hooks/use-environments'
 import { useChatExecutions } from '@/hooks/use-executions'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/store/auth-store'
 import { useCanvasStore } from '@/store/canvas-store'
 import { useChatStore } from '@/store/chat-store'
 import { useExecutionStore } from '@/store/execution-store'
@@ -42,6 +44,13 @@ export function ChatView() {
 
   const chatId = id || currentChatId
   const { data: executions = [] } = useChatExecutions(chatId)
+  const currentTeamId = useAuthStore((state) => state.currentTeamId)
+  const { data: currentChat } = useChat(currentTeamId, chatId)
+  const locationState = useRouterState({ select: (state) => state.location.state }) as
+    | undefined
+    | { explicitChat?: boolean }
+  const navigate = useNavigate()
+  const redirectedChatIds = useRef(new Set<string>())
   const latestRunning = [...executions]
     .reverse()
     .find((e) => e.status === 'RUNNING' || e.status === 'IDLE')
@@ -61,6 +70,31 @@ export function ChatView() {
   const currentStage: 'design' | 'execution' = pathname.includes('/executions/')
     ? 'execution'
     : 'design'
+
+  useEffect(() => {
+    if (!id || pathname !== `/chats/${id}` || !currentChat?.lastActivityType) return
+    if (locationState?.explicitChat) {
+      redirectedChatIds.current.add(id)
+      return
+    }
+    if (redirectedChatIds.current.has(id)) return
+    if (currentChat.lastActivityType === 'EXECUTION' && currentChat.lastActivityTargetId) {
+      redirectedChatIds.current.add(id)
+      void navigate({
+        params: { executionId: currentChat.lastActivityTargetId, id },
+        replace: true,
+        search: currentChat.status === 'Ready to publish' ? { tab: 'changes' } : {},
+        to: '/chats/$id/executions/$executionId',
+      })
+    } else if (currentChat.lastActivityType === 'CANVAS' && currentChat.lastActivityTargetId) {
+      redirectedChatIds.current.add(id)
+      void navigate({
+        params: { docId: currentChat.lastActivityTargetId, id },
+        replace: true,
+        to: '/chats/$id/canvas/$docId',
+      })
+    }
+  }, [currentChat, id, locationState, navigate, pathname])
 
   useEffect(() => {
     if (chatId) {

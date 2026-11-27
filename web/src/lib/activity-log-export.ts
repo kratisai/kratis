@@ -44,6 +44,8 @@ function formatActivity(activity: Activity): string[] {
       return formatCommandExecution(activity)
     case 'elicitation':
       return formatElicitation(activity)
+    case 'end_turn':
+      return [`[End Turn] ${activity.description}`, `Started: ${activity.startedAt}`]
     case 'error':
       return formatError(activity)
     case 'message':

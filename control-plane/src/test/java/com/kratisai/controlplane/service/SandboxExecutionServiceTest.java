@@ -1052,6 +1052,7 @@ class SandboxExecutionServiceTest {
         SandboxExecution execution = createTestExecution();
         when(sandboxExecutionRepository.findById(execution.getId())).thenReturn(Optional.of(execution));
         when(sandboxExecutionRepository.save(any(SandboxExecution.class))).thenReturn(execution);
+        when(activityRepository.nextSequence(execution.getId())).thenReturn(1L);
 
         sandboxExecutionService.completeAcpPrompt(execution.getId(), "prompt-1", StopReason.END_TURN);
 
@@ -1059,11 +1060,12 @@ class SandboxExecutionServiceTest {
                 ArgumentCaptor.forClass(SandboxExecutionActivity.class);
         verify(activityRepository, atLeastOnce()).save(activityCaptor.capture());
         assertThat(activityCaptor.getAllValues())
-                .filteredOn(a -> a.getActivityType() == ActivityType.MESSAGE)
+                .filteredOn(a -> a.getActivityType() == ActivityType.END_TURN)
                 .singleElement()
                 .satisfies(activity -> {
                     assertThat(activity.getStatus()).isEqualTo(ActivityStatus.COMPLETED);
                     assertThat(activity.getDescription()).isEqualTo("Agent turn complete (end_turn)");
+                    assertThat(activity.getActionId()).isEqualTo("turn:prompt-1");
                 });
 
         ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
@@ -1074,7 +1076,8 @@ class SandboxExecutionServiceTest {
                 .satisfies(event -> {
                     SandboxExecutionActivityEvent activity = (SandboxExecutionActivityEvent) event;
                     assertThat(activity.executionId()).isEqualTo(execution.getId());
-                    assertThat(activity.activityType()).isEqualTo(ActivityType.MESSAGE);
+                    assertThat(activity.activityType()).isEqualTo(ActivityType.END_TURN);
+                    assertThat(activity.actionId()).isEqualTo("turn:prompt-1");
                     assertThat(activity.description()).isEqualTo("Agent turn complete (end_turn)");
                     assertThat(activity.status()).isEqualTo(ActivityStatus.COMPLETED);
                 });

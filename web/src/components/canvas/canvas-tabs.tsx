@@ -69,7 +69,11 @@ export function CanvasTabs({ chatId, className, docId }: CanvasTabsProps) {
           to: '/chats/$id/canvas/$docId',
         })
       } else {
-        await navigate({ params: { id: chatId }, to: '/chats/$id' })
+        await navigate({
+          params: { id: chatId },
+          state: { explicitChat: true },
+          to: '/chats/$id',
+        })
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)

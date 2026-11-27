@@ -24,6 +24,7 @@ import com.kratisai.controlplane.model.event.SandboxExecutionHitlRequiredEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionHitlResolvedEvent;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -69,6 +70,9 @@ public class ExecutionActivityPersistenceService {
         ActivityDetail lifecycle = detail != null ? detail.withHitl(null) : null;
         if (actionId == null || actionId.isBlank()) {
             return insert(executionId, activityType, description, null, status, lifecycle);
+        }
+        if (activityType == ActivityType.END_TURN || activityType == ActivityType.PUBLISH) {
+            return insert(executionId, activityType, description, actionId, status, lifecycle);
         }
         return repository
                 .findByExecutionIdAndActionId(executionId, actionId)
@@ -322,10 +326,11 @@ public class ExecutionActivityPersistenceService {
     }
 
     @Transactional
-    public void recordTurnComplete(UUID executionId, StopReason stopReason) {
+    public void recordTurnComplete(UUID executionId, String promptId, StopReason stopReason) {
         String description = "Agent turn complete (" + (stopReason != null ? stopReason.getValue() : "unknown") + ")";
-        SandboxExecutionActivity row =
-                recordActivity(executionId, ActivityType.MESSAGE, description, null, ActivityStatus.COMPLETED, null);
+        String actionId = promptId != null ? "turn:" + promptId : null;
+        SandboxExecutionActivity row = recordActivity(
+                executionId, ActivityType.END_TURN, description, actionId, ActivityStatus.COMPLETED, null);
         executionRepository
                 .findById(executionId)
                 .map(execution -> execution.getChat().getTeam().getId())
@@ -410,6 +415,11 @@ public class ExecutionActivityPersistenceService {
             String actionId,
             ActivityStatus status,
             ActivityDetail detail) {
+        if (activityType == ActivityType.END_TURN || activityType == ActivityType.PUBLISH) {
+            executionRepository
+                    .findById(executionId)
+                    .orElseThrow(() -> new IllegalStateException("Execution not found: " + executionId));
+        }
         SandboxExecutionActivity row = new SandboxExecutionActivity(
                 executionId,
                 repository.nextSequence(executionId),
@@ -418,6 +428,11 @@ public class ExecutionActivityPersistenceService {
                 status,
                 description,
                 toJson(detail));
+        if (activityType == ActivityType.END_TURN || activityType == ActivityType.PUBLISH) {
+            Instant createdAt = Instant.now();
+            row.setCreatedAt(createdAt);
+            row.setUpdatedAt(createdAt);
+        }
         repository.save(row);
         return row;
     }

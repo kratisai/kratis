@@ -109,6 +109,10 @@ public class ChatEntity {
         return updatedAt;
     }
 
+    public void touchUpdatedAt(Instant updatedAt) {
+        this.updatedAt = updatedAt;
+    }
+
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
     }

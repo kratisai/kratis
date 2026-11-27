@@ -6,12 +6,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.kratisai.controlplane.api.restdto.ChatDto;
 import com.kratisai.controlplane.api.restdto.ChatUsageDto;
+import com.kratisai.controlplane.api.restdto.LastActivityType;
 import com.kratisai.controlplane.api.restdto.TopicStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.MessageRole;
+import com.kratisai.controlplane.model.CanvasEntity;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ChatMemoryEntity;
 import com.kratisai.controlplane.model.ChatUsageSession;
+import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
+import com.kratisai.controlplane.model.PublishedPrStatus;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
@@ -19,19 +23,24 @@ import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
 import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.repository.AgentChatMemoryRepository;
+import com.kratisai.controlplane.repository.CanvasRepository;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
+import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
 import com.kratisai.controlplane.repository.TeamRepository;
 import com.kratisai.controlplane.repository.UserRepository;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
@@ -52,6 +61,8 @@ public class ChatService {
     private final ChatUsageSessionRepository chatUsageSessionRepository;
     private final SandboxExecutionRepository sandboxExecutionRepository;
     private final SandboxExecutionActivityRepository activityRepository;
+    private final ExecutionDiffSnapshotRepository diffSnapshotRepository;
+    private final CanvasRepository canvasRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final ChatFluxRegistry chatFluxRegistry;
 
@@ -64,6 +75,8 @@ public class ChatService {
             ChatUsageSessionRepository chatUsageSessionRepository,
             SandboxExecutionRepository sandboxExecutionRepository,
             SandboxExecutionActivityRepository activityRepository,
+            ExecutionDiffSnapshotRepository diffSnapshotRepository,
+            CanvasRepository canvasRepository,
             ApplicationEventPublisher eventPublisher,
             ChatFluxRegistry chatFluxRegistry) {
         this.chatRepository = chatRepository;
@@ -74,6 +87,8 @@ public class ChatService {
         this.chatUsageSessionRepository = chatUsageSessionRepository;
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.activityRepository = activityRepository;
+        this.diffSnapshotRepository = diffSnapshotRepository;
+        this.canvasRepository = canvasRepository;
         this.eventPublisher = eventPublisher;
         this.chatFluxRegistry = chatFluxRegistry;
     }
@@ -117,6 +132,7 @@ public class ChatService {
         ChatMemoryEntity entity =
                 new ChatMemoryEntity(chatId, nextIndex, MessageRole.USER, userMessage, null, null, null);
         chatMemoryRepository.save(entity);
+        chatRepository.touchUpdatedAt(chatId, entity.getCreatedAt());
     }
 
     /** Persist an assistant error message so a failed turn is visible after reconnect/reload. */
@@ -128,6 +144,7 @@ public class ChatService {
         ChatMemoryEntity entity =
                 new ChatMemoryEntity(chatId, nextIndex, MessageRole.ASSISTANT, message, null, null, metadata);
         chatMemoryRepository.save(entity);
+        chatRepository.touchUpdatedAt(chatId, entity.getCreatedAt());
     }
 
     /** Persist an interstitial paused record into chat memory. */
@@ -153,6 +170,7 @@ public class ChatService {
         ChatMemoryEntity entity =
                 new ChatMemoryEntity(chatId, nextIndex, MessageRole.ASSISTANT, "", null, null, metadata);
         chatMemoryRepository.save(entity);
+        chatRepository.touchUpdatedAt(chatId, entity.getCreatedAt());
     }
 
     /**
@@ -209,15 +227,67 @@ public class ChatService {
                     : chatRepository.findTop20ByTeamIdAndArchivedAtIsNullOrderByUpdatedAtDesc(teamId);
         }
 
-        return chats.stream().map(this::toChatDto).toList();
+        if (chats.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> chatIds = chats.stream().map(ChatEntity::getId).toList();
+        Map<UUID, Instant> lastMessageAt = new HashMap<>();
+        for (ChatRepository.ChatLastMessage row : chatRepository.findLastMessageAtByChatIds(chatIds)) {
+            lastMessageAt.put(row.getChatId(), row.getLastMessageAt());
+        }
+        Map<UUID, CanvasEntity> latestCanvas = new HashMap<>();
+        for (CanvasEntity canvas : canvasRepository.findByChatIdInAndDeletedAtIsNull(chatIds)) {
+            latestCanvas.merge(canvas.getChatId(), canvas, ChatService::latestCanvas);
+        }
+        Map<UUID, List<ChatUsageSession>> sessionsByChat = new HashMap<>();
+        for (ChatUsageSession session : chatUsageSessionRepository.findByChatIdIn(chatIds)) {
+            sessionsByChat
+                    .computeIfAbsent(session.getChat().getId(), ignored -> new ArrayList<>())
+                    .add(session);
+        }
+        Map<UUID, SandboxExecution> latestByChat = new HashMap<>();
+        for (SandboxExecution execution : sandboxExecutionRepository.findLatestByChatIds(chatIds)) {
+            latestByChat.merge(execution.getChat().getId(), execution, ChatService::latestExecution);
+        }
+        Map<UUID, ExecutionDiffSnapshot> snapshotsByExecution = new HashMap<>();
+        List<UUID> latestExecutionIds =
+                latestByChat.values().stream().map(SandboxExecution::getId).toList();
+        Set<UUID> pendingHitlExecutionIds = Set.of();
+        if (!latestExecutionIds.isEmpty()) {
+            for (ExecutionDiffSnapshot snapshot : diffSnapshotRepository.findByExecutionIdIn(latestExecutionIds)) {
+                snapshotsByExecution.put(snapshot.getExecutionId(), snapshot);
+            }
+            pendingHitlExecutionIds = new HashSet<>(
+                    activityRepository.findExecutionIdsWithStatus(latestExecutionIds, ActivityStatus.PENDING));
+        }
+
+        Set<UUID> blocked = pendingHitlExecutionIds;
+        return chats.stream()
+                .map(chat -> {
+                    SandboxExecution latest = latestByChat.get(chat.getId());
+                    ExecutionDiffSnapshot snapshot = latest != null ? snapshotsByExecution.get(latest.getId()) : null;
+                    List<ChatUsageSession> sessions = sessionsByChat.getOrDefault(chat.getId(), List.of());
+                    return toChatDto(
+                            chat,
+                            aggregateUsage(sessions),
+                            latest,
+                            snapshot,
+                            lastMessageAt.get(chat.getId()),
+                            latestCanvas.get(chat.getId()),
+                            latest != null && blocked.contains(latest.getId()));
+                })
+                .toList();
     }
 
-    private ChatDto toChatDto(ChatEntity chat) {
-        ChatUsageDto usage = aggregateUsage(chat.getId());
-        SandboxExecution latest = sandboxExecutionRepository
-                .findFirstByChatIdOrderByStartedAtDesc(chat.getId())
-                .orElse(null);
-
+    private ChatDto toChatDto(
+            ChatEntity chat,
+            ChatUsageDto usage,
+            SandboxExecution latest,
+            ExecutionDiffSnapshot snapshot,
+            Instant lastMessageAt,
+            CanvasEntity latestCanvas,
+            boolean pendingHitl) {
+        LastActivity lastActivity = deriveLastActivity(chat, latest, snapshot, lastMessageAt, latestCanvas);
         return new ChatDto(
                 chat.getId(),
                 chat.getTeam().getId(),
@@ -232,21 +302,65 @@ public class ChatService {
                 usage.completionTokens(),
                 usage.usageLastUpdatedAt(),
                 chat.isAllowAllPermissions(),
-                deriveStatus(chat, latest),
-                deriveLastActivityAt(chat, latest));
+                deriveStatus(chat, latest, snapshot, pendingHitl),
+                lastActivity.at(),
+                lastActivity.type(),
+                lastActivity.targetId());
+    }
+
+    private static CanvasEntity latestCanvas(CanvasEntity first, CanvasEntity second) {
+        return first.getUpdatedAt().isAfter(second.getUpdatedAt()) ? first : second;
+    }
+
+    private static SandboxExecution latestExecution(SandboxExecution first, SandboxExecution second) {
+        return first.getStartedAt().isAfter(second.getStartedAt()) ? first : second;
     }
 
     @Transactional(readOnly = true)
     public ChatUsageDto getChatUsage(UUID chatId, UUID teamId, UUID userId) {
-        verifyChat(chatId, teamId);
-        if (!teamMemberRepository.existsByTeamIdAndUserId(teamId, userId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this team");
-        }
+        requireChatAccess(chatId, teamId, userId);
         return aggregateUsage(chatId);
     }
 
+    @Transactional(readOnly = true)
+    public ChatDto getChat(UUID chatId, UUID teamId, UUID userId) {
+        ChatEntity chat = requireChatAccess(chatId, teamId, userId);
+        SandboxExecution latest = sandboxExecutionRepository
+                .findFirstByChatIdOrderByStartedAtDesc(chatId)
+                .orElse(null);
+        ExecutionDiffSnapshot snapshot = latest != null
+                ? diffSnapshotRepository.findByExecutionId(latest.getId()).orElse(null)
+                : null;
+        CanvasEntity latestCanvas = canvasRepository.findByChatIdAndDeletedAtIsNull(chatId).stream()
+                .max((first, second) -> first.getUpdatedAt().compareTo(second.getUpdatedAt()))
+                .orElse(null);
+        boolean pendingHitl = latest != null
+                && activityRepository.existsByExecutionIdAndStatus(latest.getId(), ActivityStatus.PENDING);
+        return toChatDto(
+                chat,
+                aggregateUsage(chatId),
+                latest,
+                snapshot,
+                chatRepository.findLastMessageAt(chatId).orElse(null),
+                latestCanvas,
+                pendingHitl);
+    }
+
+    private ChatEntity requireChatAccess(UUID chatId, UUID teamId, UUID userId) {
+        ChatEntity chat = chatRepository
+                .findByIdAndTeamId(chatId, teamId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chat not found"));
+        if (!teamMemberRepository.existsByTeamIdAndUserId(teamId, userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a member of this team");
+        }
+        return chat;
+    }
+
     private ChatUsageDto aggregateUsage(UUID chatId) {
-        List<ChatUsageSession> sessions = chatUsageSessionRepository.findByChatId(chatId);
+        return aggregateUsage(chatUsageSessionRepository.findByChatId(chatId));
+    }
+
+    private ChatUsageDto aggregateUsage(List<ChatUsageSession> sessions) {
         double totalSpend = sessions.stream()
                 .mapToDouble(sess -> sess.getUsage().getTotalSpend() != null
                         ? sess.getUsage().getTotalSpend()
@@ -275,36 +389,73 @@ public class ChatService {
         return new ChatUsageDto(totalSpend, totalTokens, promptTokens, completionTokens, usageLastUpdatedAt);
     }
 
-    private TopicStatus deriveStatus(ChatEntity chat, SandboxExecution latest) {
+    private TopicStatus deriveStatus(
+            ChatEntity chat, SandboxExecution latest, ExecutionDiffSnapshot snapshot, boolean pendingHitl) {
         if (chatFluxRegistry.containsKey(chat.getId())) {
             return TopicStatus.PLANNING;
         }
         if (latest == null) {
             return TopicStatus.IDLE;
         }
-        if (activityRepository.existsByExecutionIdAndStatus(latest.getId(), ActivityStatus.PENDING)) {
+        if (pendingHitl) {
             return TopicStatus.BLOCKED;
         }
         if (latest.getStatus() == SandboxExecutionStatus.RUNNING) {
             return TopicStatus.WORKING;
         }
-        if (!latest.getChangeSets().isEmpty()) {
-            return TopicStatus.MR_PUSHED;
-        }
         if (latest.getStatus() == SandboxExecutionStatus.FAILED) {
             return TopicStatus.FAILED;
+        }
+        var latestChangeSet = latest.getLatestChangeSet();
+        if (snapshot != null
+                && (snapshot.getTotalAdditions() > 0 || snapshot.getTotalDeletions() > 0)
+                && (latestChangeSet == null
+                        || !Objects.equals(snapshot.getManifestDigest(), latestChangeSet.getManifestDigest()))) {
+            return TopicStatus.READY_TO_PUBLISH;
+        }
+        if (latestChangeSet != null
+                && (snapshot == null
+                        || Objects.equals(snapshot.getManifestDigest(), latestChangeSet.getManifestDigest()))
+                && latestChangeSet.getPrStatus() != PublishedPrStatus.MERGED
+                && latestChangeSet.getPrStatus() != PublishedPrStatus.CLOSED) {
+            return TopicStatus.MR_PUSHED;
         }
         return TopicStatus.IDLE;
     }
 
-    private Instant deriveLastActivityAt(ChatEntity chat, SandboxExecution latest) {
-        Instant lastActivityAt = chat.getUpdatedAt();
-        if (latest == null) {
-            return lastActivityAt;
+    private LastActivity deriveLastActivity(
+            ChatEntity chat,
+            SandboxExecution latest,
+            ExecutionDiffSnapshot snapshot,
+            Instant lastMessageAt,
+            CanvasEntity latestCanvas) {
+        Instant chatAt = lastMessageAt;
+        Instant executionAt = latest != null
+                ? latestInstant(
+                        latestInstant(latest.getStartedAt(), latest.getCompletedAt()),
+                        snapshot != null ? snapshot.getUpdatedAt() : null)
+                : null;
+        Instant canvasAt = latestCanvas != null ? latestCanvas.getUpdatedAt() : null;
+
+        if (executionAt != null && !isBefore(executionAt, chatAt) && !isBefore(executionAt, canvasAt)) {
+            return new LastActivity(
+                    executionAt, LastActivityType.EXECUTION, latest.getId().toString());
         }
-        lastActivityAt = latestInstant(lastActivityAt, latest.getStartedAt());
-        return latestInstant(lastActivityAt, latest.getCompletedAt());
+        if (canvasAt != null && !isBefore(canvasAt, chatAt)) {
+            return new LastActivity(canvasAt, LastActivityType.CANVAS, latestCanvas.getDocumentId());
+        }
+        if (chatAt != null) {
+            return new LastActivity(chatAt, LastActivityType.CHAT, chat.getId().toString());
+        }
+        return new LastActivity(
+                chat.getUpdatedAt(), LastActivityType.CHAT, chat.getId().toString());
     }
+
+    private static boolean isBefore(Instant candidate, Instant reference) {
+        return reference != null && candidate.isBefore(reference);
+    }
+
+    private record LastActivity(Instant at, LastActivityType type, String targetId) {}
 
     private Instant latestInstant(Instant first, Instant second) {
         if (first == null) {

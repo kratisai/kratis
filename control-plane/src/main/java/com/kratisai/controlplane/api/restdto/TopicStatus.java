@@ -8,6 +8,7 @@ public enum TopicStatus {
     PLANNING("Planning"),
     IDLE("Idle"),
     MR_PUSHED("MR pushed"),
+    READY_TO_PUBLISH("Ready to publish"),
     BLOCKED("Blocked"),
     FAILED("Failed");
 

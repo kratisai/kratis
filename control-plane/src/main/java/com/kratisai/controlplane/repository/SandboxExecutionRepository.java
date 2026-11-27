@@ -25,6 +25,10 @@ public interface SandboxExecutionRepository extends JpaRepository<SandboxExecuti
 
     Optional<SandboxExecution> findFirstByChatIdOrderByStartedAtDesc(UUID chatId);
 
+    @Query("SELECT e FROM SandboxExecution e WHERE e.chat.id IN :chatIds AND NOT EXISTS"
+            + " (SELECT 1 FROM SandboxExecution newer WHERE newer.chat = e.chat AND newer.startedAt > e.startedAt)")
+    List<SandboxExecution> findLatestByChatIds(@Param("chatIds") Collection<UUID> chatIds);
+
     List<SandboxExecution> findByStatusInAndEnvironment_StatusIn(
             Collection<SandboxExecutionStatus> statuses, Collection<EnvironmentStatus> environmentStatuses);
 

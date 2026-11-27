@@ -418,6 +418,7 @@ export type WireActivityType =
   | 'COMMAND'
   | 'EDITED'
   | 'ELICITATION'
+  | 'END_TURN'
   | 'ERROR'
   | 'MESSAGE'
   | 'PLAN'

@@ -79,6 +79,30 @@ describe('activity-store', () => {
     useActivityStore.setState({ activitiesByExecution: {} })
   })
 
+  describe('handleActivityEvent turn completion', () => {
+    it('stores deterministic end-turn activity with server timestamp', () => {
+      const createdAt = '2026-10-20T17:32:12.672Z'
+      const result = activityResult({
+        actionId: 'turn:prompt-1',
+        activityType: 'END_TURN',
+        createdAt,
+        description: 'Agent turn complete (end_turn)',
+        status: 'completed',
+      })
+
+      useActivityStore.getState().handleActivityEvent(result)
+      useActivityStore.getState().handleActivityEvent(result)
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities).toHaveLength(1)
+      expect(activities[0]).toMatchObject({
+        actionId: 'turn:prompt-1',
+        startedAt: createdAt,
+        type: 'end_turn',
+      })
+    })
+  })
+
   describe('handleActivityEvent terminal errors', () => {
     it('creates an error activity carrying the agent message and exit code', () => {
       const store = useActivityStore.getState()
@@ -2333,6 +2357,49 @@ describe('activity-store', () => {
       const activity = activities[0] as PublishActivity
       expect(activity.description).toBe('Published changes: Updated Pull Request #42')
       expect(activity.startedAt).toBe('2026-10-20T10:00:00.000Z')
+      expect(activity.endedAt).toBe('2026-10-20T10:00:00.000Z')
+    })
+
+    it('records terminal timestamps so exports include an ended line', () => {
+      const store = useActivityStore.getState()
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'turn:prompt-1',
+          activityType: 'END_TURN',
+          createdAt: '2026-10-20T10:00:00.000Z',
+          description: 'Agent turn complete',
+          status: 'completed',
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'warn-1',
+          activityType: 'WARNING',
+          createdAt: '2026-10-20T10:01:00.000Z',
+          description: 'Careful',
+          status: 'completed',
+        }),
+      )
+      store.handleActivityEvent(
+        activityResult({
+          actionId: 'err-1',
+          activityType: 'ERROR',
+          createdAt: '2026-10-20T10:02:00.000Z',
+          description: 'Boom',
+          status: 'failed',
+        }),
+      )
+
+      const activities = useActivityStore.getState().activitiesByExecution['exec-1']
+      expect(activities.find((activity) => activity.type === 'end_turn')?.endedAt).toBe(
+        '2026-10-20T10:00:00.000Z',
+      )
+      expect(activities.find((activity) => activity.type === 'warning')?.endedAt).toBe(
+        '2026-10-20T10:01:00.000Z',
+      )
+      expect(activities.find((activity) => activity.type === 'error')?.endedAt).toBe(
+        '2026-10-20T10:02:00.000Z',
+      )
     })
   })
 })

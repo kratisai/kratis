@@ -7,6 +7,7 @@ import type {
   ActivityState,
   CommandExecutionActivity,
   ElicitationActivity,
+  EndTurnActivity,
   ErrorActivity,
   MessageActivity,
   PlanActivity,
@@ -55,6 +56,9 @@ export function activityCommand(activity: Activity): string {
   if (activity.type === 'command_execution') {
     return activity.command
   }
+  if (activity.type === 'end_turn') {
+    return activity.description
+  }
   const detail = activity.detail
   if (typeof detail?.title === 'string' && detail.title !== '') {
     return detail.title
@@ -71,6 +75,8 @@ export function activityTitle(activity: Activity): string {
       return activity.command
     case 'elicitation':
       return activity.message
+    case 'end_turn':
+      return activity.description
     case 'error':
       return 'Execution failed'
     case 'message':
@@ -575,12 +581,11 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
       set((state) => {
         const existing = state.activitiesByExecution[executionId] ?? []
         const idx = existing.findIndex((a) => a.type === 'error')
-        const now = new Date().toISOString()
         const activity: ErrorActivity = {
           actionId,
           collapsed: false,
           detail,
-          endedAt: now,
+          endedAt: idx >= 0 ? (existing[idx].endedAt ?? result.createdAt) : result.createdAt,
           executionId,
           exitCode: detail?.exitCode,
           id: idx >= 0 ? existing[idx].id : nextActivityId(),
@@ -606,12 +611,11 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
         const idx = actionId
           ? existing.findIndex((a) => a.type === 'warning' && a.actionId === actionId)
           : -1
-        const now = new Date().toISOString()
         const activity: WarningActivity = {
           actionId,
           collapsed: false,
           detail,
-          endedAt: now,
+          endedAt: idx >= 0 ? (existing[idx].endedAt ?? result.createdAt) : result.createdAt,
           executionId,
           id: idx >= 0 ? existing[idx].id : nextActivityId(),
           message: description,
@@ -630,6 +634,33 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
           },
         }
       })
+    } else if (activityType === 'END_TURN') {
+      set((state) => {
+        const existing = state.activitiesByExecution[executionId] ?? []
+        const action = actionId ?? `turn-${result.createdAt}`
+        if (
+          existing.some((activity) => activity.actionId === action && activity.type === 'end_turn')
+        ) {
+          return state
+        }
+        const activity: EndTurnActivity = {
+          actionId: action,
+          collapsed: true,
+          description,
+          endedAt: result.createdAt,
+          executionId,
+          id: nextActivityId(),
+          startedAt: result.createdAt,
+          state: 'completed',
+          type: 'end_turn',
+        }
+        return {
+          activitiesByExecution: {
+            ...state.activitiesByExecution,
+            [executionId]: appendActivity(existing, activity),
+          },
+        }
+      })
     } else if (activityType === 'PUBLISH') {
       set((state) => {
         const existing = state.activitiesByExecution[executionId] ?? []
@@ -637,7 +668,6 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
         const idx = existing.findIndex(
           (a) => a.type === 'publish' && a.actionId === publishActionId,
         )
-        const now = new Date().toISOString()
         const activity: PublishActivity = {
           actionId: publishActionId,
           baseBranch: detail?.baseBranch,
@@ -645,7 +675,7 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
           commitSha: detail?.commitSha,
           description,
           detail,
-          endedAt: now,
+          endedAt: idx >= 0 ? (existing[idx].endedAt ?? result.createdAt) : result.createdAt,
           executionId,
           headBranch: detail?.headBranch,
           id: idx >= 0 ? existing[idx].id : nextActivityId(),
@@ -746,7 +776,7 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
         // other terminal activity collapses like it does when the next one starts.
         const collapsed =
           activity.type === 'plan' ? activity.collapsed : collapsedOnTransition(activity, nextState)
-        const endedAt = new Date().toISOString()
+        const endedAt = activity.endedAt ?? new Date().toISOString()
         updated[i] =
           activity.type === 'command_execution'
             ? { ...activity, collapsed, endedAt, exitCode: result.exitCode, state: nextState }

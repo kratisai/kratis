@@ -10,8 +10,10 @@ import com.kratisai.controlplane.api.wsdto.EnvironmentRpcPayload;
 import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.event.SandboxExecutionDiffChangedEvent;
+import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
 import com.kratisai.controlplane.service.BlobStorageService;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -27,6 +29,7 @@ public class EnvironmentDiffManifestRpcHandler
 
     private final EnvironmentExecutionGuard executionGuard;
     private final ExecutionDiffSnapshotRepository diffSnapshotRepository;
+    private final ChatRepository chatRepository;
     private final BlobStorageService blobStorageService;
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
@@ -34,11 +37,13 @@ public class EnvironmentDiffManifestRpcHandler
     public EnvironmentDiffManifestRpcHandler(
             EnvironmentExecutionGuard executionGuard,
             ExecutionDiffSnapshotRepository diffSnapshotRepository,
+            ChatRepository chatRepository,
             BlobStorageService blobStorageService,
             ApplicationEventPublisher eventPublisher,
             ObjectMapper objectMapper) {
         this.executionGuard = executionGuard;
         this.diffSnapshotRepository = diffSnapshotRepository;
+        this.chatRepository = chatRepository;
         this.blobStorageService = blobStorageService;
         this.eventPublisher = eventPublisher;
         this.objectMapper = objectMapper;
@@ -101,7 +106,11 @@ public class EnvironmentDiffManifestRpcHandler
         snapshot.setTotalDeletions(params.totalDeletions());
         snapshot.setSummaryJson(summaryJson);
         snapshot.setManifestDigest(params.manifestDigest());
+        if (params.baseCommit() != null && !params.baseCommit().isBlank()) {
+            execution.setBaseCommitSha(params.baseCommit());
+        }
         diffSnapshotRepository.save(snapshot);
+        chatRepository.touchUpdatedAt(execution.getChat().getId(), Instant.now());
 
         UUID teamId = execution.getChat().getTeam().getId();
         UUID chatId = execution.getChat().getId();

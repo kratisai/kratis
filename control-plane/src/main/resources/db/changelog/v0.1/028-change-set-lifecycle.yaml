@@ -1,0 +1,20 @@
+databaseChangeLog:
+- changeSet:
+    id: 028-change-set-lifecycle-001
+    author: kratis
+    changes:
+    - addColumn:
+        tableName: change_sets
+        columns:
+        - column:
+            name: manifest_digest
+            type: VARCHAR(64)
+        - column:
+            name: pr_status
+            type: VARCHAR(32)
+    - addColumn:
+        tableName: sandbox_executions
+        columns:
+        - column:
+            name: base_commit_sha
+            type: VARCHAR(64)

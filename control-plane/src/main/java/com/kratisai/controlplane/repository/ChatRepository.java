@@ -2,6 +2,7 @@ package com.kratisai.controlplane.repository;
 
 import com.kratisai.controlplane.model.ChatEntity;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -13,6 +14,19 @@ import org.springframework.data.repository.query.Param;
 public interface ChatRepository extends JpaRepository<ChatEntity, UUID> {
 
     List<ChatEntity> findByTeamId(UUID teamId);
+
+    @Query("SELECT MAX(m.createdAt) FROM ChatMemoryEntity m WHERE m.chatId = :chatId")
+    Optional<Instant> findLastMessageAt(@Param("chatId") UUID chatId);
+
+    @Query("SELECT m.chatId AS chatId, MAX(m.createdAt) AS lastMessageAt FROM ChatMemoryEntity m"
+            + " WHERE m.chatId IN :chatIds GROUP BY m.chatId")
+    List<ChatLastMessage> findLastMessageAtByChatIds(@Param("chatIds") Collection<UUID> chatIds);
+
+    interface ChatLastMessage {
+        UUID getChatId();
+
+        Instant getLastMessageAt();
+    }
 
     /** Get last 20 chats for a specific team, ordered by most recently updated. */
     List<ChatEntity> findTop20ByTeamIdOrderByUpdatedAtDesc(UUID teamId);
@@ -46,6 +60,10 @@ public interface ChatRepository extends JpaRepository<ChatEntity, UUID> {
     @Modifying
     @Query("UPDATE ChatEntity c SET c.archivedAt = :archivedAt WHERE c.id = :chatId")
     int updateArchivedAt(@Param("chatId") UUID chatId, @Param("archivedAt") Instant archivedAt);
+
+    @Modifying
+    @Query("UPDATE ChatEntity c SET c.updatedAt = :updatedAt WHERE c.id = :chatId")
+    int touchUpdatedAt(@Param("chatId") UUID chatId, @Param("updatedAt") Instant updatedAt);
 
     @Modifying
     @Query("UPDATE ChatEntity c SET c.allowAllPermissions = :enabled WHERE c.id = :chatId")

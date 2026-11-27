@@ -122,6 +122,7 @@ class ExecutionActivityPersistenceServiceTest {
         ChatEntity chat = new ChatEntity();
         chat.setTeam(team);
         SandboxExecution execution = new SandboxExecution();
+        execution.setId(executionId);
         execution.setChat(chat);
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
         when(repository.nextSequence(executionId)).thenReturn(1L);
@@ -133,12 +134,14 @@ class ExecutionActivityPersistenceServiceTest {
                 .when(repository)
                 .save(any());
 
-        service.recordTurnComplete(executionId, null);
+        service.recordTurnComplete(executionId, "prompt-1", null);
 
         ArgumentCaptor<SandboxExecutionActivityEvent> captor =
                 ArgumentCaptor.forClass(SandboxExecutionActivityEvent.class);
         verify(eventPublisher).publishEvent(captor.capture());
         assertThat(captor.getValue().teamId()).isEqualTo(teamId);
+        assertThat(captor.getValue().activityType()).isEqualTo(ActivityType.END_TURN);
+        assertThat(captor.getValue().actionId()).isEqualTo("turn:prompt-1");
         assertThat(captor.getValue().createdAt()).isEqualTo(createdAt);
     }
 

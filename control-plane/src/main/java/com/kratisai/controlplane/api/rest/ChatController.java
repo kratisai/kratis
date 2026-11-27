@@ -71,6 +71,21 @@ public class ChatController {
         return ResponseEntity.ok(chatService.listChatsForTeam(teamId, userId, onlyMine, status));
     }
 
+    @GetMapping("/{id}")
+    @Operation(summary = "Get a chat", description = "Returns a single chat with status and last-activity metadata")
+    @ApiResponses(
+            value = {
+                @ApiResponse(
+                        responseCode = "200",
+                        description = "Chat details",
+                        content = @Content(schema = @Schema(implementation = ChatDto.class))),
+                @ApiResponse(responseCode = "403", description = "Not a member of this team", content = @Content),
+                @ApiResponse(responseCode = "404", description = "Chat not found", content = @Content)
+            })
+    public ResponseEntity<ChatDto> getChat(@PathVariable UUID id, @RequestParam UUID teamId) {
+        return ResponseEntity.ok(chatService.getChat(id, teamId, SecurityUtil.getCurrentUserId()));
+    }
+
     @GetMapping("/{id}/usage")
     @Operation(summary = "Get chat usage", description = "Returns aggregate LLM usage for a chat")
     @ApiResponses(

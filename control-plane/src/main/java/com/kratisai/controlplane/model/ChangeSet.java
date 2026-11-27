@@ -2,6 +2,8 @@ package com.kratisai.controlplane.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
@@ -45,6 +47,13 @@ public class ChangeSet {
 
     @Column(name = "pr_url", length = 1024, updatable = false)
     private String prUrl;
+
+    @Column(name = "manifest_digest", length = 64)
+    private String manifestDigest;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "pr_status", length = 32)
+    private PublishedPrStatus prStatus;
 
     @Column(name = "base_branch", length = 255, updatable = false)
     private String baseBranch;
@@ -113,5 +122,21 @@ public class ChangeSet {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getManifestDigest() {
+        return manifestDigest;
+    }
+
+    public void setManifestDigest(String manifestDigest) {
+        this.manifestDigest = manifestDigest;
+    }
+
+    public PublishedPrStatus getPrStatus() {
+        return prStatus;
+    }
+
+    public void setPrStatus(PublishedPrStatus prStatus) {
+        this.prStatus = prStatus;
     }
 }

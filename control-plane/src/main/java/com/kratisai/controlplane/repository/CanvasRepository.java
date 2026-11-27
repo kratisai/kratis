@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.repository;
 
 import com.kratisai.controlplane.model.CanvasEntity;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -11,6 +12,8 @@ public interface CanvasRepository extends JpaRepository<CanvasEntity, Long> {
     List<CanvasEntity> findByChatIdAndDeletedAtIsNull(UUID chatId);
 
     Optional<CanvasEntity> findByChatIdAndDocumentIdAndDeletedAtIsNull(UUID chatId, String documentId);
+
+    List<CanvasEntity> findByChatIdInAndDeletedAtIsNull(Collection<UUID> chatIds);
 
     /**
      * Unfiltered lookup used where tombstones must be visible: soft-delete resolution and blocking

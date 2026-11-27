@@ -753,11 +753,17 @@ export function handleExecutionDiffChangedResult(result: ExecutionDiffChangedRes
   void queryClient.invalidateQueries({
     queryKey: DIFF_QUERY_KEYS.execution(result.chatId, result.executionId),
   })
+  void queryClient.invalidateQueries({
+    queryKey: teamEntityQueryKey('CHATS', result.teamId) ?? ['chats', result.teamId],
+  })
 }
 
 export function handleExecutionStatusChangedResult(result: ExecutionStatusChangedResult): void {
   if (result.teamId !== useAuthStore.getState().currentTeamId) return
   void queryClient.invalidateQueries({ queryKey: [CHAT_EXECUTIONS_QUERY_KEY, result.chatId] })
+  void queryClient.invalidateQueries({
+    queryKey: teamEntityQueryKey('CHATS', result.teamId) ?? ['chats', result.teamId],
+  })
 }
 
 export function handleIngestionResult(result: IngestionResult): void {

@@ -61,6 +61,7 @@ public class CanvasService {
         entity.setCanvasType(canvasType);
         entity.setRepository(repository);
         entity.setNewRepoName(newRepoName);
+        chatRepository.touchUpdatedAt(chatId, Instant.now());
         return initializeRepoLabel(canvasRepository.save(entity));
     }
 
@@ -72,6 +73,7 @@ public class CanvasService {
     public CanvasEntity updateCanvas(UUID chatId, String documentId, String content) {
         CanvasEntity entity = findCanvasOrThrow(chatId, documentId);
         entity.setContent(content);
+        chatRepository.touchUpdatedAt(chatId, Instant.now());
         return initializeRepoLabel(canvasRepository.save(entity));
     }
 
@@ -94,6 +96,7 @@ public class CanvasService {
         entity.setCanvasType(canvasType);
         entity.setRepository(repository);
         entity.setNewRepoName(newRepoName);
+        chatRepository.touchUpdatedAt(chatId, Instant.now());
         return initializeRepoLabel(canvasRepository.save(entity));
     }
 
@@ -132,6 +135,7 @@ public class CanvasService {
                         new ResponseStatusException(HttpStatus.NOT_FOUND, "Canvas document not found: " + documentId));
         if (entity.getDeletedAt() == null) {
             entity.setDeletedAt(Instant.now());
+            chatRepository.touchUpdatedAt(chatId, Instant.now());
             canvasRepository.save(entity);
             eventPublisher.publishEvent(new CanvasDeletedEvent(chat.getTeam().getId(), chatId, documentId));
         }

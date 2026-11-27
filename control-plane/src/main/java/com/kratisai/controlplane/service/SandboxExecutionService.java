@@ -838,6 +838,7 @@ public class SandboxExecutionService {
             activePromptIds.remove(executionId);
             execution.setStatus(SandboxExecutionStatus.FAILED);
             execution.setCompletedAt(Instant.now());
+            chatRepository.touchUpdatedAt(execution.getChat().getId(), Instant.now());
             sandboxExecutionRepository.save(execution);
             cancelPendingPermissions(execution, "execution refused");
             activityPersistenceService.recordExecutionError(executionId, "agent refused the task", 0);
@@ -850,12 +851,14 @@ public class SandboxExecutionService {
             logger.info("ACP prompt refusal for execution {} → status=FAILED", executionId);
         } else {
             execution.setStatus(SandboxExecutionStatus.IDLE);
+            execution.setCompletedAt(null);
+            chatRepository.touchUpdatedAt(execution.getChat().getId(), Instant.now());
             sandboxExecutionRepository.save(execution);
 
             eventPublisher.publishEvent(
                     new ExecutionStatusChangedEvent(teamId, execution.getChat().getId(), execution.getId()));
 
-            activityPersistenceService.recordTurnComplete(executionId, stopReason);
+            activityPersistenceService.recordTurnComplete(executionId, promptId, stopReason);
 
             logger.info(
                     "ACP prompt turn complete for execution {} with stopReason='{}' → status=IDLE",

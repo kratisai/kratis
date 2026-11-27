@@ -38,6 +38,7 @@ import com.kratisai.controlplane.model.CredentialType;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
+import com.kratisai.controlplane.model.PublishedPrStatus;
 import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
@@ -86,6 +87,9 @@ class SandboxExecutionPublishServiceTest {
 
     @Mock
     private ChatRepository chatRepository;
+
+    @Mock
+    private ExecutionDiffSnapshotRepository executionDiffSnapshotRepository;
 
     @Mock
     private SandboxExecutionActivityRepository sandboxExecutionActivityRepository;
@@ -200,6 +204,7 @@ class SandboxExecutionPublishServiceTest {
                 sandboxExecutionRepository,
                 changeSetRepository,
                 chatRepository,
+                executionDiffSnapshotRepository,
                 activityRepository,
                 activityPersistenceService,
                 eventPublisher,
@@ -2204,6 +2209,7 @@ class SandboxExecutionPublishServiceTest {
     void publishPullRequest_recordsSinglePublishActivityAndPublishesEvent() throws Exception {
         stubExecutionLookup();
         stubWorkspaceObserve();
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId)).thenReturn(List.of());
 
         RepoProvider repoProvider = mock(RepoProvider.class);
         when(repoProvider.supportsPullRequests()).thenReturn(true);
@@ -2228,7 +2234,7 @@ class SandboxExecutionPublishServiceTest {
 
         assertThat(result.prNumber()).isEqualTo(101);
 
-        String expectedActionId = "pub:pr:" + repository.getId() + ":101";
+        String expectedActionId = "pub:cs:" + executionId + ":1";
         ArgumentCaptor<ActivityDetail> detailCaptor = ArgumentCaptor.forClass(ActivityDetail.class);
         verify(activityPersistenceService)
                 .recordActivity(
@@ -2270,13 +2276,15 @@ class SandboxExecutionPublishServiceTest {
         ChangeSet existingChangeSet = new ChangeSet(
                 execution,
                 1,
-                "digest",
+                "base",
                 "sha111",
                 "pr-branch",
                 202L,
                 "https://github.com/test/repo/pull/202",
                 "main",
                 Instant.now());
+        existingChangeSet.setManifestDigest("digest-empty");
+        existingChangeSet.setPrStatus(PublishedPrStatus.OPEN);
         when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId)).thenReturn(List.of(existingChangeSet));
 
         when(repoProvider.getPullRequest(eq(repository), any(), eq(202L)))
@@ -2300,7 +2308,7 @@ class SandboxExecutionPublishServiceTest {
 
         assertThat(result.prNumber()).isEqualTo(202);
 
-        String expectedActionId = "pub:pr:" + repository.getId() + ":202";
+        String expectedActionId = "pub:cs:" + executionId + ":2";
         ArgumentCaptor<ActivityDetail> detailCaptor = ArgumentCaptor.forClass(ActivityDetail.class);
         verify(activityPersistenceService)
                 .recordActivity(
@@ -2323,6 +2331,7 @@ class SandboxExecutionPublishServiceTest {
     void pushBranch_recordsSinglePublishActivityAndPublishesEvent() throws Exception {
         stubExecutionLookup();
         stubWorkspaceObserve();
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId)).thenReturn(List.of());
 
         EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
                 "sha1234567890", "feature-branch", "refs/heads/feature-branch", "SUCCESS");
@@ -2336,7 +2345,7 @@ class SandboxExecutionPublishServiceTest {
 
         assertThat(response.branchName()).isEqualTo("feature-branch");
 
-        String expectedActionId = "pub:push:" + executionId + ":sha1234567890";
+        String expectedActionId = "pub:cs:" + executionId + ":1";
         ArgumentCaptor<ActivityDetail> detailCaptor = ArgumentCaptor.forClass(ActivityDetail.class);
         verify(activityPersistenceService)
                 .recordActivity(
@@ -2405,7 +2414,7 @@ class SandboxExecutionPublishServiceTest {
         when(repoProvider.createPullRequest(eq(repository), eq(auth), any(CreatePullRequestCommand.class)))
                 .thenReturn(expectedPr);
 
-        String expectedActionId = "pub:pr:" + repository.getId() + ":101";
+        String expectedActionId = "pub:cs:" + executionId + ":1";
         when(activityPersistenceService.recordActivity(
                         eq(executionId), eq(ActivityType.PUBLISH), any(), eq(expectedActionId), any(), any()))
                 .thenThrow(new DataIntegrityViolationException("Unique constraint violation"));
@@ -2449,7 +2458,7 @@ class SandboxExecutionPublishServiceTest {
         when(repoProvider.createPullRequest(eq(repository), eq(auth), any(CreatePullRequestCommand.class)))
                 .thenReturn(expectedPr);
 
-        String expectedActionId = "pub:pr:" + repository.getId() + ":101";
+        String expectedActionId = "pub:cs:" + executionId + ":1";
         when(activityPersistenceService.recordActivity(
                         eq(executionId), eq(ActivityType.PUBLISH), any(), eq(expectedActionId), any(), any()))
                 .thenReturn(new SandboxExecutionActivity(
@@ -2488,6 +2497,7 @@ class SandboxExecutionPublishServiceTest {
     void pushBranch_commitTimeUniqueViolation_fallsBackToMerge() throws Exception {
         stubExecutionLookup();
         stubWorkspaceObserve();
+        when(changeSetRepository.findByExecutionIdOrderBySeqAsc(executionId)).thenReturn(List.of());
 
         EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
                 "sha1234567890", "feature-branch", "refs/heads/feature-branch", "SUCCESS");
@@ -2496,7 +2506,7 @@ class SandboxExecutionPublishServiceTest {
                         eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
                 .thenReturn(pushResult);
 
-        String expectedActionId = "pub:push:" + executionId + ":sha1234567890";
+        String expectedActionId = "pub:cs:" + executionId + ":1";
 
         when(activityPersistenceService.recordActivity(
                         eq(executionId), eq(ActivityType.PUBLISH), any(), eq(expectedActionId), any(), any()))

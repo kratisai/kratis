@@ -492,6 +492,8 @@ func (c *Client) ExecuteGitRebase(params GitRebaseParams, reqID interface{}) {
 	// 6. Update execution base SHA
 	c.persistExecutionBaseSha(actualDefaultSha)
 
+	c.pushDiffManifestSync()
+
 	// 7. Compute updated stats
 	stats, statsErr := c.computeChangeSetStats(workspace, cmdEnv, actualDefaultSha)
 	if statsErr != nil {
@@ -694,6 +696,8 @@ func (c *Client) ExecuteGitPublish(params GitPushParams, reqID interface{}) {
 	if revErr == nil {
 		commitSha = strings.TrimSpace(string(revOut))
 	}
+
+	c.pushDiffManifestSync()
 
 	remoteRef := fmt.Sprintf("refs/heads/%s", branchName)
 	if reqID != nil {

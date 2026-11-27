@@ -27,6 +27,7 @@ import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.EnvironmentStatus;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ModelProvider;
+import com.kratisai.controlplane.model.PublishedPrStatus;
 import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
@@ -35,9 +36,11 @@ import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
+import com.kratisai.controlplane.model.event.ExecutionStatusChangedEvent;
 import com.kratisai.controlplane.model.event.SandboxExecutionActivityEvent;
 import com.kratisai.controlplane.repository.ChangeSetRepository;
 import com.kratisai.controlplane.repository.ChatRepository;
+import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
 import com.kratisai.controlplane.repository.RepoCredentialRepository;
 import com.kratisai.controlplane.repository.RepositoryRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
@@ -76,6 +79,7 @@ public class SandboxExecutionPublishService {
     private final SandboxExecutionRepository sandboxExecutionRepository;
     private final ChangeSetRepository changeSetRepository;
     private final ChatRepository chatRepository;
+    private final ExecutionDiffSnapshotRepository executionDiffSnapshotRepository;
     private final SandboxExecutionActivityRepository activityRepository;
     private final ExecutionActivityPersistenceService activityPersistenceService;
     private final ApplicationEventPublisher eventPublisher;
@@ -94,6 +98,7 @@ public class SandboxExecutionPublishService {
             SandboxExecutionRepository sandboxExecutionRepository,
             ChangeSetRepository changeSetRepository,
             ChatRepository chatRepository,
+            ExecutionDiffSnapshotRepository executionDiffSnapshotRepository,
             SandboxExecutionActivityRepository activityRepository,
             ExecutionActivityPersistenceService activityPersistenceService,
             ApplicationEventPublisher eventPublisher,
@@ -110,6 +115,7 @@ public class SandboxExecutionPublishService {
         this.sandboxExecutionRepository = sandboxExecutionRepository;
         this.changeSetRepository = changeSetRepository;
         this.chatRepository = chatRepository;
+        this.executionDiffSnapshotRepository = executionDiffSnapshotRepository;
         this.activityRepository = activityRepository;
         this.activityPersistenceService =
                 Objects.requireNonNull(activityPersistenceService, "activityPersistenceService is required");
@@ -127,11 +133,13 @@ public class SandboxExecutionPublishService {
         this.requiresNewTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public PublishCapabilitiesDto getPublishCapabilities(UUID userId, UUID chatId, UUID executionId) {
         SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
         touchIfConnected(execution.getEnvironment());
-        return buildPublishCapabilities(execution);
+        PublishCapabilitiesDto capabilities = buildPublishCapabilities(execution);
+        chatRepository.touchUpdatedAt(chatId, Instant.now());
+        return capabilities;
     }
 
     /** Best-effort liveness stamp: a failed activity touch never fails the read it accompanies. */
@@ -216,11 +224,44 @@ public class SandboxExecutionPublishService {
         }
 
         PullRequestSnapshot prSnapshot = null;
-        if (latestChangeSet != null && supportsPr && repo != null) {
+        if (latestChangeSet != null && latestChangeSet.getPrNumber() != null && latestChangeSet.getPrStatus() != null) {
+            prSnapshot = new PullRequestSnapshot(
+                    latestChangeSet.getPrNumber(),
+                    switch (latestChangeSet.getPrStatus()) {
+                        case OPEN -> PullRequestSnapshot.PullRequestState.OPEN;
+                        case MERGED -> PullRequestSnapshot.PullRequestState.MERGED;
+                        case CLOSED -> PullRequestSnapshot.PullRequestState.CLOSED;
+                    },
+                    latestChangeSet.getPrUrl(),
+                    latestChangeSet.getBranchName(),
+                    defaultBranch,
+                    latestChangeSet.getPushedCommitSha());
+        }
+        if (latestChangeSet != null
+                && latestChangeSet.getPrNumber() != null
+                && supportsPr
+                && repo != null
+                && latestChangeSet.getPrStatus() != PublishedPrStatus.MERGED
+                && latestChangeSet.getPrStatus() != PublishedPrStatus.CLOSED) {
             RepoProvider provider = providerRegistry.getProvider(repo);
             try {
                 GitAuthMaterial auth = credentialResolver.resolve(repo);
                 prSnapshot = provider.getPullRequest(repo, auth, latestChangeSet.getPrNumber());
+                PublishedPrStatus previousStatus = latestChangeSet.getPrStatus();
+                PublishedPrStatus currentStatus =
+                        switch (prSnapshot.state()) {
+                            case OPEN -> PublishedPrStatus.OPEN;
+                            case MERGED -> PublishedPrStatus.MERGED;
+                            case CLOSED -> PublishedPrStatus.CLOSED;
+                        };
+                latestChangeSet.setPrStatus(currentStatus);
+                if (currentStatus != previousStatus
+                        && (currentStatus == PublishedPrStatus.MERGED || currentStatus == PublishedPrStatus.CLOSED)) {
+                    eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
+                            execution.getChat().getTeam().getId(),
+                            execution.getChat().getId(),
+                            execution.getId()));
+                }
             } catch (Exception e) {
                 logger.warn(
                         "Failed to fetch live PR snapshot for PR #{}: {}",
@@ -304,6 +345,25 @@ public class SandboxExecutionPublishService {
         // Digest covers git observables and non-editable plan parts only: the branch, title,
         // and body are user-editable LLM suggestions that vary between fetches, and keeping
         // them as digest inputs would raise spurious PLAN_CHANGED (409) before publish.
+        if (latestChangeSet != null && prSnapshot != null) {
+            PublishedPrStatus currentStatus = latestChangeSet.getPrStatus();
+            PublishedPrStatus observedStatus =
+                    switch (prSnapshot.state()) {
+                        case OPEN -> PublishedPrStatus.OPEN;
+                        case MERGED -> PublishedPrStatus.MERGED;
+                        case CLOSED -> PublishedPrStatus.CLOSED;
+                    };
+            if (currentStatus != observedStatus) {
+                latestChangeSet.setPrStatus(observedStatus);
+                if (observedStatus == PublishedPrStatus.MERGED || observedStatus == PublishedPrStatus.CLOSED) {
+                    eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
+                            execution.getChat().getTeam().getId(),
+                            execution.getChat().getId(),
+                            execution.getId()));
+                }
+            }
+        }
+
         String digestInputs = String.format(
                 "%s:%s:%s:%s:%s",
                 obsResult.defaultSha(),
@@ -447,17 +507,19 @@ public class SandboxExecutionPublishService {
         ChangeSet changeSet = new ChangeSet(
                 execution,
                 nextSeq,
-                currentCaps.changeSet().digest(),
+                execution.getBaseCommitSha() != null ? execution.getBaseCommitSha() : "unknown",
                 pushResult.commitSha() != null ? pushResult.commitSha() : "unknown",
                 pushResult.branchName(),
                 null,
                 null,
                 null,
                 Instant.now());
+        changeSet.setManifestDigest(currentCaps.changeSet().digest());
         changeSetRepository.save(changeSet);
+        chatRepository.touchUpdatedAt(chatId, Instant.now());
 
         String commitSha = pushResult.commitSha();
-        String actionId = "pub:push:" + executionId + ":" + (commitSha != null ? commitSha : "unknown");
+        String actionId = "pub:cs:" + executionId + ":" + changeSet.getSeq();
         String description =
                 "Published changes to branch " + pushResult.branchName() + " (" + shortSha(commitSha) + ")";
         ActivityDetail detail =
@@ -554,16 +616,19 @@ public class SandboxExecutionPublishService {
             ChangeSet changeSet = new ChangeSet(
                     execution,
                     nextSeq,
-                    currentCaps.changeSet().digest(),
+                    execution.getBaseCommitSha() != null ? execution.getBaseCommitSha() : "unknown",
                     pushedCommitSha,
                     headBranch,
                     target.prNumber(),
                     prUrl,
                     baseBranch,
                     Instant.now());
+            changeSet.setManifestDigest(currentCaps.changeSet().digest());
+            changeSet.setPrStatus(PublishedPrStatus.OPEN);
             changeSetRepository.save(changeSet);
+            chatRepository.touchUpdatedAt(chatId, Instant.now());
 
-            String actionId = "pub:pr:" + repo.getId() + ":" + target.prNumber();
+            String actionId = "pub:cs:" + executionId + ":" + changeSet.getSeq();
             String description =
                     "Published changes: Updated Pull Request #" + target.prNumber() + " on branch " + headBranch;
             ActivityDetail detail = ActivityDetail.forPublish(
@@ -591,16 +656,19 @@ public class SandboxExecutionPublishService {
         ChangeSet changeSet = new ChangeSet(
                 execution,
                 nextSeq,
-                currentCaps.changeSet().digest(),
+                execution.getBaseCommitSha() != null ? execution.getBaseCommitSha() : "unknown",
                 pushedCommitSha,
                 result.headBranch(),
                 result.prNumber(),
                 result.prUrl(),
                 result.baseBranch(),
                 Instant.now());
+        changeSet.setManifestDigest(currentCaps.changeSet().digest());
+        changeSet.setPrStatus(PublishedPrStatus.OPEN);
         changeSetRepository.save(changeSet);
+        chatRepository.touchUpdatedAt(chatId, Instant.now());
 
-        String actionId = "pub:pr:" + repo.getId() + ":" + result.prNumber();
+        String actionId = "pub:cs:" + executionId + ":" + changeSet.getSeq();
         String description = "Published changes: Pull Request #" + result.prNumber() + " created to merge "
                 + result.headBranch() + " into " + result.baseBranch();
         ActivityDetail detail = ActivityDetail.forPublish(
@@ -620,6 +688,7 @@ public class SandboxExecutionPublishService {
             SandboxExecution execution, String actionId, String description, ActivityDetail detail) {
         UUID teamId = execution.getChat().getTeam().getId();
         UUID executionId = execution.getId();
+        chatRepository.touchUpdatedAt(execution.getChat().getId(), Instant.now());
         SandboxExecutionActivity activity;
         try {
             activity = requiresNewTransactionTemplate.execute(status -> activityPersistenceService.recordActivity(

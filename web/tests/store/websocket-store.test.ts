@@ -237,16 +237,14 @@ describe('handleExecutionDiffChangedResult', () => {
       type: 'execution_diff_changed',
     })
 
-    expect(invalidateSpy).toHaveBeenCalledTimes(1)
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['execution-diff', 'chat-1', 'exec-1'],
     })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['chats', 'team-1'] })
   })
 
-  it('invalidates the summary and all file diffs of the execution, and nothing else', () => {
-    queryClient.setQueryData(DIFF_QUERY_KEYS.summary('chat-1', 'exec-1'), 'summary')
-    queryClient.setQueryData(DIFF_QUERY_KEYS.summary('chat-1', 'exec-other'), 'summary')
-    queryClient.setQueryData(DIFF_QUERY_KEYS.file('chat-1', 'exec-1', 'src/app.ts'), 'file')
+  it('invalidates the summary, all file diffs, and the team chat list of the execution', () => {
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined)
 
     handleExecutionDiffChangedResult({
       chatId: 'chat-1',
@@ -255,17 +253,10 @@ describe('handleExecutionDiffChangedResult', () => {
       type: 'execution_diff_changed',
     })
 
-    expect(
-      queryClient.getQueryState(DIFF_QUERY_KEYS.summary('chat-1', 'exec-1')),
-    ).toMatchObject({ isInvalidated: true })
-    expect(
-      queryClient.getQueryState(DIFF_QUERY_KEYS.file('chat-1', 'exec-1', 'src/app.ts')),
-    ).toMatchObject({ isInvalidated: true })
-    expect(
-      queryClient.getQueryState(DIFF_QUERY_KEYS.summary('chat-1', 'exec-other')),
-    ).toMatchObject({ isInvalidated: false })
-
-    queryClient.removeQueries({ queryKey: DIFF_QUERY_KEYS.all })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: DIFF_QUERY_KEYS.execution('chat-1', 'exec-1'),
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['chats', 'team-1'] })
   })
 
   it('does nothing when team does not match', () => {

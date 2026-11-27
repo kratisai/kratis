@@ -6,18 +6,24 @@ import static org.mockito.Mockito.*;
 
 import com.kratisai.controlplane.api.restdto.ChatDto;
 import com.kratisai.controlplane.api.restdto.ChatUsageDto;
+import com.kratisai.controlplane.api.restdto.LastActivityType;
 import com.kratisai.controlplane.api.restdto.TopicStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityStatus;
+import com.kratisai.controlplane.model.CanvasEntity;
 import com.kratisai.controlplane.model.ChangeSet;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.ChatUsageSession;
+import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
+import com.kratisai.controlplane.model.PublishedPrStatus;
 import com.kratisai.controlplane.model.SandboxExecution;
 import com.kratisai.controlplane.model.SandboxExecutionStatus;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.User;
 import com.kratisai.controlplane.repository.AgentChatMemoryRepository;
+import com.kratisai.controlplane.repository.CanvasRepository;
 import com.kratisai.controlplane.repository.ChatRepository;
 import com.kratisai.controlplane.repository.ChatUsageSessionRepository;
+import com.kratisai.controlplane.repository.ExecutionDiffSnapshotRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionActivityRepository;
 import com.kratisai.controlplane.repository.SandboxExecutionRepository;
 import com.kratisai.controlplane.repository.TeamMemberRepository;
@@ -40,6 +46,8 @@ class ChatServiceTest {
     private ChatUsageSessionRepository chatUsageSessionRepository;
     private SandboxExecutionRepository sandboxExecutionRepository;
     private SandboxExecutionActivityRepository activityRepository;
+    private ExecutionDiffSnapshotRepository diffSnapshotRepository;
+    private CanvasRepository canvasRepository;
     private ChatFluxRegistry chatFluxRegistry;
     private ChatService chatService;
 
@@ -53,8 +61,12 @@ class ChatServiceTest {
         chatUsageSessionRepository = mock(ChatUsageSessionRepository.class);
         sandboxExecutionRepository = mock(SandboxExecutionRepository.class);
         activityRepository = mock(SandboxExecutionActivityRepository.class);
+        diffSnapshotRepository = mock(ExecutionDiffSnapshotRepository.class);
+        canvasRepository = mock(CanvasRepository.class);
         ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
         chatFluxRegistry = mock(ChatFluxRegistry.class);
+
+        when(canvasRepository.findByChatIdAndDeletedAtIsNull(any())).thenReturn(List.of());
 
         chatService = new ChatService(
                 chatRepository,
@@ -65,6 +77,8 @@ class ChatServiceTest {
                 chatUsageSessionRepository,
                 sandboxExecutionRepository,
                 activityRepository,
+                diffSnapshotRepository,
+                canvasRepository,
                 eventPublisher,
                 chatFluxRegistry);
     }
@@ -91,8 +105,6 @@ class ChatServiceTest {
 
         when(chatRepository.findTop20ByTeamIdAndArchivedAtIsNullOrderByUpdatedAtDesc(teamId))
                 .thenReturn(List.of(chat));
-        when(chatUsageSessionRepository.findByChatId(chat.getId())).thenReturn(List.of());
-
         ChatUsageSession session1 = new ChatUsageSession(chat, "key-1");
         session1.getUsage().setTotalSpend(1.0);
         session1.getUsage().setTotalTokens(50L);
@@ -107,7 +119,7 @@ class ChatServiceTest {
         session2.getUsage().setCompletionTokens(50L);
         session2.getUsage().setUsageLastUpdatedAt(Instant.now());
 
-        when(chatUsageSessionRepository.findByChatId(chat.getId())).thenReturn(List.of(session1, session2));
+        when(chatUsageSessionRepository.findByChatIdIn(List.of(chat.getId()))).thenReturn(List.of(session1, session2));
 
         List<ChatDto> dtos = chatService.listChatsForTeam(teamId, userId, false, "active");
 
@@ -131,6 +143,8 @@ class ChatServiceTest {
 
         assertThat(dto.status()).isEqualTo(TopicStatus.IDLE);
         assertThat(dto.lastActivityAt()).isEqualTo(updatedAt);
+        assertThat(dto.lastActivityType()).isEqualTo(LastActivityType.CHAT);
+        assertThat(dto.lastActivityTargetId()).isEqualTo(chat.getId().toString());
     }
 
     @Test
@@ -184,7 +198,77 @@ class ChatServiceTest {
         when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
                 .thenReturn(Optional.of(execution));
 
+        var changeSet = execution.getLatestChangeSet();
+        changeSet.setManifestDigest("digest-1");
+        changeSet.setPrStatus(PublishedPrStatus.OPEN);
+        when(diffSnapshotRepository.findByExecutionId(execution.getId()))
+                .thenReturn(Optional.of(
+                        new ExecutionDiffSnapshot(execution.getId(), "base", "head", 0, 0, "[]", "digest-1")));
+        when(chatRepository.findLastMessageAt(chat.getId())).thenReturn(Optional.empty());
+
         assertThat(listSingleChat(chat).status()).isEqualTo(TopicStatus.MR_PUSHED);
+    }
+
+    @Test
+    void listChatsForTeam_uncommittedDiffWithoutChangeSet_returnsReadyToPublish() {
+        ChatEntity chat = persistedChat(Instant.parse("2026-05-01T10:00:00Z"));
+        SandboxExecution execution = execution(chat, SandboxExecutionStatus.COMPLETED);
+        when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
+                .thenReturn(Optional.of(execution));
+        when(diffSnapshotRepository.findByExecutionId(execution.getId()))
+                .thenReturn(Optional.of(
+                        new ExecutionDiffSnapshot(execution.getId(), "base", "head", 1, 0, "[]", "digest")));
+
+        assertThat(listSingleChat(chat).status()).isEqualTo(TopicStatus.READY_TO_PUBLISH);
+    }
+
+    @Test
+    void listChatsForTeam_changedManifestAfterPublish_returnsReadyToPublish() {
+        ChatEntity chat = persistedChat(Instant.parse("2026-05-01T10:00:00Z"));
+        SandboxExecution execution = execution(chat, SandboxExecutionStatus.IDLE);
+        ChangeSet changeSet = new ChangeSet(execution, 1, "base", "push", "feature", null, null, "main", Instant.now());
+        changeSet.setManifestDigest("published-digest");
+        execution.addChangeSet(changeSet);
+        when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
+                .thenReturn(Optional.of(execution));
+        when(diffSnapshotRepository.findByExecutionId(execution.getId()))
+                .thenReturn(Optional.of(
+                        new ExecutionDiffSnapshot(execution.getId(), "base", "head", 2, 0, "[]", "new-digest")));
+        when(chatRepository.findLastMessageAt(chat.getId())).thenReturn(Optional.empty());
+
+        assertThat(listSingleChat(chat).status()).isEqualTo(TopicStatus.READY_TO_PUBLISH);
+    }
+
+    @Test
+    void listChatsForTeam_diffWithoutPublish_returnsReadyToPublish() {
+        ChatEntity chat = persistedChat(Instant.parse("2026-05-01T10:00:00Z"));
+        SandboxExecution execution = execution(chat, SandboxExecutionStatus.COMPLETED);
+        when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
+                .thenReturn(Optional.of(execution));
+        when(diffSnapshotRepository.findByExecutionId(execution.getId()))
+                .thenReturn(Optional.of(
+                        new ExecutionDiffSnapshot(execution.getId(), "base", "head", 0, 3, "[]", "digest")));
+        when(chatRepository.findLastMessageAt(chat.getId())).thenReturn(Optional.empty());
+
+        assertThat(listSingleChat(chat).status()).isEqualTo(TopicStatus.READY_TO_PUBLISH);
+    }
+
+    @Test
+    void listChatsForTeam_mergedPullRequestWithNoDiff_returnsIdle() {
+        ChatEntity chat = persistedChat(Instant.parse("2026-05-01T10:00:00Z"));
+        SandboxExecution execution = execution(chat, SandboxExecutionStatus.COMPLETED);
+        ChangeSet changeSet = new ChangeSet(execution, 1, "base", "push", "feature", 42L, "url", "main", Instant.now());
+        changeSet.setManifestDigest("digest-1");
+        changeSet.setPrStatus(PublishedPrStatus.MERGED);
+        execution.addChangeSet(changeSet);
+        when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
+                .thenReturn(Optional.of(execution));
+        when(diffSnapshotRepository.findByExecutionId(execution.getId()))
+                .thenReturn(Optional.of(
+                        new ExecutionDiffSnapshot(execution.getId(), "base", "head", 0, 0, "[]", "digest-1")));
+        when(chatRepository.findLastMessageAt(chat.getId())).thenReturn(Optional.empty());
+
+        assertThat(listSingleChat(chat).status()).isEqualTo(TopicStatus.IDLE);
     }
 
     @Test
@@ -208,7 +292,16 @@ class ChatServiceTest {
         when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
                 .thenReturn(Optional.of(execution));
 
-        assertThat(listSingleChat(chat).lastActivityAt()).isEqualTo(completedAt);
+        when(chatRepository.findLastMessageAt(chat.getId())).thenReturn(Optional.empty());
+        ExecutionDiffSnapshot snapshot =
+                new ExecutionDiffSnapshot(execution.getId(), "base", "head", 0, 0, "[]", "digest");
+        snapshot.setUpdatedAt(completedAt);
+        when(diffSnapshotRepository.findByExecutionId(execution.getId())).thenReturn(Optional.of(snapshot));
+
+        ChatDto dto = listSingleChat(chat);
+        assertThat(dto.lastActivityAt()).isEqualTo(completedAt);
+        assertThat(dto.lastActivityType()).isEqualTo(LastActivityType.EXECUTION);
+        assertThat(dto.lastActivityTargetId()).isEqualTo(execution.getId().toString());
     }
 
     @Test
@@ -261,12 +354,14 @@ class ChatServiceTest {
                 .thenReturn(List.of(chat));
         when(sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId()))
                 .thenReturn(Optional.empty());
+        when(chatUsageSessionRepository.findByChatId(chat.getId())).thenReturn(List.of());
         ChatUsageSession session = new ChatUsageSession(chat, "key-1");
         session.getUsage().setTotalSpend(1.25);
         session.getUsage().setTotalTokens(250L);
         session.getUsage().setPromptTokens(150L);
         session.getUsage().setCompletionTokens(100L);
         session.getUsage().setUsageLastUpdatedAt(Instant.parse("2026-01-01T00:00:00Z"));
+        when(chatUsageSessionRepository.findByChatIdIn(List.of(chat.getId()))).thenReturn(List.of(session));
         when(chatUsageSessionRepository.findByChatId(chat.getId())).thenReturn(List.of(session));
 
         ChatDto listDto =
@@ -307,7 +402,47 @@ class ChatServiceTest {
         when(teamMemberRepository.existsByTeamIdAndUserId(teamId, userId)).thenReturn(true);
         when(chatRepository.findTop20ByTeamIdAndArchivedAtIsNullOrderByUpdatedAtDesc(teamId))
                 .thenReturn(List.of(chat));
-        when(chatUsageSessionRepository.findByChatId(chat.getId())).thenReturn(List.of());
+
+        List<UUID> chatIds = List.of(chat.getId());
+        Instant lastMessageAt = chatRepository.findLastMessageAt(chat.getId()).orElse(null);
+        when(chatRepository.findLastMessageAtByChatIds(chatIds))
+                .thenReturn(lastMessageAt == null ? List.of() : List.of(new LastMessage(chat.getId(), lastMessageAt)));
+        List<ChatUsageSession> usageSessions = chatUsageSessionRepository.findByChatId(chat.getId());
+        when(chatUsageSessionRepository.findByChatIdIn(chatIds)).thenReturn(usageSessions);
+        List<CanvasEntity> canvases = canvasRepository.findByChatIdAndDeletedAtIsNull(chat.getId());
+        when(canvasRepository.findByChatIdInAndDeletedAtIsNull(chatIds)).thenReturn(canvases);
+
+        Optional<SandboxExecution> latest =
+                sandboxExecutionRepository.findFirstByChatIdOrderByStartedAtDesc(chat.getId());
+        when(sandboxExecutionRepository.findLatestByChatIds(chatIds))
+                .thenReturn(latest.map(List::of).orElse(List.of()));
+        latest.ifPresent(execution -> {
+            List<ExecutionDiffSnapshot> snapshots = diffSnapshotRepository
+                    .findByExecutionId(execution.getId())
+                    .map(List::of)
+                    .orElse(List.of());
+            when(diffSnapshotRepository.findByExecutionIdIn(List.of(execution.getId())))
+                    .thenReturn(snapshots);
+            List<UUID> pending =
+                    activityRepository.existsByExecutionIdAndStatus(execution.getId(), ActivityStatus.PENDING)
+                            ? List.of(execution.getId())
+                            : List.of();
+            when(activityRepository.findExecutionIdsWithStatus(List.of(execution.getId()), ActivityStatus.PENDING))
+                    .thenReturn(pending);
+        });
+
         return chatService.listChatsForTeam(teamId, userId, false, "active").getFirst();
+    }
+
+    private record LastMessage(UUID chatId, Instant lastMessageAt) implements ChatRepository.ChatLastMessage {
+        @Override
+        public UUID getChatId() {
+            return chatId;
+        }
+
+        @Override
+        public Instant getLastMessageAt() {
+            return lastMessageAt;
+        }
     }
 }

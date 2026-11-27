@@ -282,6 +282,16 @@ export function mockGenerateSshKey(response?: Record<string, unknown>) {
 // Credential mocks
 // ---------------------------------------------------------------------------
 
+export function mockGetChat(chat: ChatDto) {
+  addFetchHandler((url, options) => {
+    const match = url.match(/\/api\/v1\/chats\/[^/?]+\?teamId=/)
+    if (match && (options.method === 'GET' || !options.method)) {
+      return jsonResponse(chat)
+    }
+    return null
+  })
+}
+
 export function mockGetTeam(team: Record<string, unknown>) {
   addFetchHandler((url) => {
     if (url === `/api/v1/teams/${team.id}`) {
@@ -312,6 +322,10 @@ export function mockHaltExecution(chatId: string, executionId: string) {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Environment mocks
+// ---------------------------------------------------------------------------
+
 export function mockInviteMember() {
   addFetchHandler((url, options) => {
     if (url.includes('/api/v1/teams/') && url.includes('/members') && options.method === 'POST') {
@@ -329,10 +343,6 @@ export function mockInviteMember() {
     return null
   })
 }
-
-// ---------------------------------------------------------------------------
-// Environment mocks
-// ---------------------------------------------------------------------------
 
 export function mockListChatExecutions(executions: Array<Record<string, unknown>> = []) {
   addFetchHandler((url, options) => {

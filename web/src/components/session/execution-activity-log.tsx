@@ -1,3 +1,4 @@
+import { formatDistanceStrict } from 'date-fns'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -14,12 +15,23 @@ import {
   Terminal,
   XCircle,
 } from 'lucide-react'
-import { type KeyboardEvent, memo, type ReactNode, useEffect, useMemo, useRef } from 'react'
+import {
+  createContext,
+  type KeyboardEvent,
+  memo,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 
 import type {
   Activity,
   CommandExecutionActivity,
   ElicitationActivity,
+  EndTurnActivity,
   ErrorActivity,
   HitlResolverKind,
   MessageActivity,
@@ -64,10 +76,14 @@ interface ExecutionActivityLogProps {
   executionId: string
 }
 
+const RELATIVE_TIME_REFRESH_MS = 30_000
+const RelativeNowContext = createContext<null | number>(null)
+
 export function ExecutionActivityLog({ executionId }: ExecutionActivityLogProps) {
   const activities = useActivityStore(
     (state) => state.activitiesByExecution[executionId] ?? EMPTY_ACTIVITIES,
   )
+  const relativeNow = useRelativeNow()
   const collapseAll = useActivityStore((state) => state.collapseAll)
   const expandAll = useActivityStore((state) => state.expandAll)
   const logRef = useRef<HTMLDivElement>(null)
@@ -122,42 +138,44 @@ export function ExecutionActivityLog({ executionId }: ExecutionActivityLogProps)
   }
 
   return (
-    <div
-      className="activity-log mx-auto w-full max-w-4xl min-w-0 space-y-1 p-2 sm:p-4"
-      data-testid="execution-activity-log"
-      ref={logRef}
-    >
-      <div className="text-muted-foreground mb-2 flex items-center justify-end gap-1 text-xs">
-        <Button
-          aria-label="Expand all activities"
-          className="text-muted-foreground hover:text-foreground h-7 gap-1 px-2 text-xs"
-          onClick={() => expandAll(executionId)}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          <ChevronsUpDown className="h-3 w-3" />
-          <span>Expand all</span>
-        </Button>
-        <Button
-          aria-label="Collapse all activities"
-          className="text-muted-foreground hover:text-foreground h-7 gap-1 px-2 text-xs"
-          onClick={() => collapseAll(executionId)}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          <ChevronsDownUp className="h-3 w-3" />
-          <span>Collapse all</span>
-        </Button>
-      </div>
-      {activities.map((activity) => (
-        <div data-activity-id={activity.id} key={activity.id}>
-          <ActivityItem activity={activity} executionId={executionId} />
+    <RelativeNowContext.Provider value={relativeNow}>
+      <div
+        className="activity-log mx-auto w-full max-w-4xl min-w-0 space-y-1 p-2 sm:p-4"
+        data-testid="execution-activity-log"
+        ref={logRef}
+      >
+        <div className="text-muted-foreground mb-2 flex items-center justify-end gap-1 text-xs">
+          <Button
+            aria-label="Expand all activities"
+            className="text-muted-foreground hover:text-foreground h-7 gap-1 px-2 text-xs"
+            onClick={() => expandAll(executionId)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <ChevronsUpDown className="h-3 w-3" />
+            <span>Expand all</span>
+          </Button>
+          <Button
+            aria-label="Collapse all activities"
+            className="text-muted-foreground hover:text-foreground h-7 gap-1 px-2 text-xs"
+            onClick={() => collapseAll(executionId)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <ChevronsDownUp className="h-3 w-3" />
+            <span>Collapse all</span>
+          </Button>
         </div>
-      ))}
-      <div ref={logEndRef} />
-    </div>
+        {activities.map((activity) => (
+          <div data-activity-id={activity.id} key={activity.id}>
+            <ActivityItem activity={activity} executionId={executionId} />
+          </div>
+        ))}
+        <div ref={logEndRef} />
+      </div>
+    </RelativeNowContext.Provider>
   )
 }
 
@@ -178,12 +196,23 @@ function isTextSelected(): boolean {
   return Boolean(selection && selection.toString().trim().length > 0)
 }
 
+function useRelativeNow(): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), RELATIVE_TIME_REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [])
+  return now
+}
+
 const ActivityItem = memo(function ActivityItem({ activity, executionId }: ActivityItemProps) {
   switch (activity.type) {
     case 'command_execution':
       return <CommandExecutionActivityItem activity={activity} executionId={executionId} />
     case 'elicitation':
       return <ElicitationActivityItem activity={activity} executionId={executionId} />
+    case 'end_turn':
+      return <EndTurnActivityItem activity={activity} executionId={executionId} />
     case 'error':
       return <ErrorActivityItem activity={activity} executionId={executionId} />
     case 'message':
@@ -356,6 +385,20 @@ function ActivityTextShell({
   )
 }
 
+function ActivityTimestamp({ timestamp }: { timestamp: string }) {
+  const date = new Date(timestamp)
+  const now = useContext(RelativeNowContext) ?? Date.now()
+  return (
+    <time
+      className="text-muted-foreground shrink-0 text-xs"
+      dateTime={timestamp}
+      title={date.toLocaleString()}
+    >
+      {formatDistanceStrict(date, new Date(now), { addSuffix: true })}
+    </time>
+  )
+}
+
 function approvalResolution(
   activity: CommandExecutionActivity | ToolExecutionActivity,
 ): ApprovalResolution | undefined {
@@ -502,6 +545,24 @@ function elicitationTitle(activity: ElicitationActivity): string {
           ? 'Question cancelled'
           : 'Question'
   return `${label}: ${activity.message}`
+}
+
+function EndTurnActivityItem({
+  activity,
+  executionId,
+}: {
+  activity: EndTurnActivity
+  executionId: string
+}) {
+  return (
+    <ActivityItemShell
+      activity={activity}
+      executionId={executionId}
+      icon={<CheckCircle2 className="h-3 w-3 shrink-0 text-green-500" />}
+      title={activity.description}
+      trailing={<ActivityTimestamp timestamp={activity.startedAt} />}
+    />
+  )
 }
 
 function ErrorActivityItem({
@@ -655,6 +716,7 @@ function PublishActivityItem({
       executionId={executionId}
       icon={<GitPullRequest className="h-3 w-3 shrink-0 text-green-500" />}
       title={activityTitle(activity)}
+      trailing={<ActivityTimestamp timestamp={activity.startedAt} />}
     />
   )
 }

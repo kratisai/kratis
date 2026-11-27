@@ -112,6 +112,7 @@ export function TopicStageNav({
   const handleSelectChat = () => {
     void navigate({
       params: { id: chatId },
+      state: { explicitChat: true },
       to: '/chats/$id',
     })
   }

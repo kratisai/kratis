@@ -29,7 +29,9 @@ class SmallDtoCoverageTest {
                 now,
                 false,
                 TopicStatus.WORKING,
-                now);
+                now,
+                LastActivityType.CHAT,
+                chatId.toString());
         assertThat(dto.id()).isEqualTo(chatId);
         assertThat(dto.teamId()).isEqualTo(teamId);
         assertThat(dto.title()).isEqualTo("Chat Title");
@@ -42,12 +44,14 @@ class SmallDtoCoverageTest {
         assertThat(dto.status()).isEqualTo(TopicStatus.WORKING);
         assertThat(dto.status().getValue()).isEqualTo("working");
         assertThat(dto.lastActivityAt()).isEqualTo(now);
+        assertThat(dto.lastActivityType()).isEqualTo(LastActivityType.CHAT);
+        assertThat(dto.lastActivityTargetId()).isEqualTo(chatId.toString());
     }
 
     @Test
     void topicStatusWireValues() {
         assertThat(Arrays.stream(TopicStatus.values()).map(TopicStatus::getValue))
-                .containsExactly("working", "Planning", "Idle", "MR pushed", "Blocked", "Failed");
+                .containsExactly("working", "Planning", "Idle", "MR pushed", "Ready to publish", "Blocked", "Failed");
         assertThat(TopicStatus.PLANNING.getValue()).isEqualTo("Planning");
     }
 }

@@ -142,3 +142,9 @@ declare module '@tanstack/react-router' {
     router: typeof router
   }
 }
+
+declare module '@tanstack/history' {
+  interface HistoryState {
+    explicitChat?: boolean
+  }
+}

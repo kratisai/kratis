@@ -1,6 +1,7 @@
 package com.kratisai.controlplane.repository;
 
 import com.kratisai.controlplane.model.ChatUsageSession;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -11,6 +12,9 @@ import org.springframework.data.repository.query.Param;
 public interface ChatUsageSessionRepository extends JpaRepository<ChatUsageSession, UUID> {
 
     List<ChatUsageSession> findByChatId(UUID chatId);
+
+    @Query("SELECT cus FROM ChatUsageSession cus WHERE cus.chat.id IN :chatIds")
+    List<ChatUsageSession> findByChatIdIn(@Param("chatIds") Collection<UUID> chatIds);
 
     @Query("SELECT cus FROM ChatUsageSession cus WHERE cus.usage.virtualKey = :virtualKey")
     Optional<ChatUsageSession> findByVirtualKey(@Param("virtualKey") String virtualKey);

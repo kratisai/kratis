@@ -1,3 +1,4 @@
+import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ExecutionActivityLog } from '@/components/session/execution-activity-log'
@@ -60,6 +61,68 @@ describe('Execution Activity Log', () => {
     // Clear activity store
     useActivityStore.getState().clearActivities('current')
     useActivityStore.getState().clearActivities(EXECUTION_ID)
+  })
+
+  it('renders server timestamps for end-turn and publish activities', async () => {
+    const timestamp = '2026-10-20T17:32:12.672Z'
+    const ws = setupConnected()
+    triggerMockExecutionActivity(
+      ws,
+      EXECUTION_ID,
+      'END_TURN',
+      'Agent turn complete (end_turn)',
+      'completed',
+      'turn:prompt-1',
+      undefined,
+      timestamp,
+    )
+    triggerMockExecutionActivity(
+      ws,
+      EXECUTION_ID,
+      'PUBLISH',
+      'Published changes',
+      'completed',
+      'pub:cs:exec-1:1',
+      { headBranch: 'feature' },
+      timestamp,
+    )
+
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    const times = await screen.findAllByText(/ago|in /)
+    expect(times).toHaveLength(2)
+    times.forEach((time) => {
+      expect(time.tagName).toBe('TIME')
+      expect(time).toHaveAttribute('dateTime', timestamp)
+      expect(time).toHaveAttribute('title', new Date(timestamp).toLocaleString())
+    })
+  })
+
+  it('refreshes relative timestamps while the view stays open', () => {
+    setupConnected()
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'turn:prompt-1',
+      activityType: 'END_TURN',
+      createdAt: '2026-10-20T17:27:00.000Z',
+      description: 'Agent turn complete',
+      executionId: EXECUTION_ID,
+      status: 'completed',
+      type: 'execution_activity',
+    })
+
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-20T17:32:00.000Z'))
+      renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+      expect(screen.getByText('5 minutes ago')).toBeInTheDocument()
+
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+      expect(screen.getByText('6 minutes ago')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('renders thinking activity', async () => {

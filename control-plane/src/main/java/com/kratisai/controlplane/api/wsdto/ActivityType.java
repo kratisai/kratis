@@ -7,6 +7,7 @@ public enum ActivityType {
     THINKING("THINKING"),
     RESEARCH("RESEARCH"),
     EDITED("EDITED"),
+    END_TURN("END_TURN"),
     COMMAND("COMMAND"),
     MESSAGE("MESSAGE"),
     ELICITATION("ELICITATION"),

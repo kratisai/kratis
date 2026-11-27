@@ -57,6 +57,7 @@ export function renderWithRouter(initialEntries: string[] = ['/']) {
       </QueryClientProvider>,
     ),
     queryClient: client,
+    router: testRouter,
     user: userEvent.setup(),
   }
 }

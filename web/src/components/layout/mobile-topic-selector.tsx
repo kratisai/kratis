@@ -110,6 +110,7 @@ export function MobileTopicSelector() {
   const navigateToChat = () => {
     void navigate({
       params: { id: chatId },
+      state: { explicitChat: true },
       to: '/chats/$id',
     })
   }

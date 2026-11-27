@@ -4,6 +4,7 @@ import com.kratisai.controlplane.api.wsdto.ActivityStatus;
 import com.kratisai.controlplane.api.wsdto.ActivityType;
 import com.kratisai.controlplane.model.SandboxExecutionActivity;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,6 +31,11 @@ public interface SandboxExecutionActivityRepository extends JpaRepository<Sandbo
     List<SandboxExecutionActivity> findByExecutionIdAndStatus(UUID executionId, ActivityStatus status);
 
     boolean existsByExecutionIdAndStatus(UUID executionId, ActivityStatus status);
+
+    @Query("SELECT DISTINCT a.executionId FROM SandboxExecutionActivity a"
+            + " WHERE a.executionId IN :executionIds AND a.status = :status")
+    List<UUID> findExecutionIdsWithStatus(
+            @Param("executionIds") Collection<UUID> executionIds, @Param("status") ActivityStatus status);
 
     List<SandboxExecutionActivity> findByStatusAndCreatedAtBefore(ActivityStatus status, Instant cutoff);
 

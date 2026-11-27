@@ -174,6 +174,7 @@ describe('TopicStageNav', () => {
 
     expect(mockNavigate).toHaveBeenCalledWith({
       params: { id: 'chat-1' },
+      state: { explicitChat: true },
       to: '/chats/$id',
     })
   })
@@ -360,6 +361,7 @@ describe('TopicStageNav', () => {
 
       expect(mockNavigate).toHaveBeenCalledWith({
         params: { id: 'chat-1' },
+        state: { explicitChat: true },
         to: '/chats/$id',
       })
     })

@@ -7,6 +7,8 @@ export interface ChatDto {
   createdByDisplayName: string
   id: string
   lastActivityAt?: null | string
+  lastActivityTargetId?: null | string
+  lastActivityType?: 'CANVAS' | 'CHAT' | 'EXECUTION'
   status?: TopicStatus
   teamId: string
   title: string
@@ -33,7 +35,14 @@ export interface CreateChatResponse {
   id: string
 }
 
-export type TopicStatus = 'Blocked' | 'Failed' | 'Idle' | 'MR pushed' | 'Planning' | 'working'
+export type TopicStatus =
+  | 'Blocked'
+  | 'Failed'
+  | 'Idle'
+  | 'MR pushed'
+  | 'Planning'
+  | 'Ready to publish'
+  | 'working'
 
 export async function archiveChatApi(chatId: string): Promise<void> {
   const response = await fetchWithAuth(`/api/v1/chats/${encodeURIComponent(chatId)}/archive`, {
@@ -54,6 +63,17 @@ export async function createChatApi(params: CreateChatParams): Promise<CreateCha
   if (!response.ok) {
     const errorText = await response.text()
     throw new Error(errorText || 'Failed to create chat')
+  }
+  return response.json()
+}
+
+export async function fetchChat(teamId: string, chatId: string): Promise<ChatDto> {
+  const response = await fetchWithAuth(
+    `/api/v1/chats/${encodeURIComponent(chatId)}?teamId=${encodeURIComponent(teamId)}`,
+  )
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || 'Failed to fetch chat')
   }
   return response.json()
 }

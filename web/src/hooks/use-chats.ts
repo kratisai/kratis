@@ -6,6 +6,7 @@ import {
   createChatApi,
   type CreateChatParams,
   type CreateChatResponse,
+  fetchChat,
   fetchChats,
   unarchiveChatApi,
   updateChatPermissionsApi,
@@ -26,6 +27,14 @@ export function useArchiveChat(teamId: null | string | undefined) {
         void queryClient.invalidateQueries({ queryKey: ['chats', teamId] })
       }
     },
+  })
+}
+
+export function useChat(teamId: null | string | undefined, chatId: null | string | undefined) {
+  return useQuery<ChatDto>({
+    enabled: !!teamId && !!chatId,
+    queryFn: () => fetchChat(teamId!, chatId!),
+    queryKey: ['chats', teamId, 'detail', chatId],
   })
 }
 

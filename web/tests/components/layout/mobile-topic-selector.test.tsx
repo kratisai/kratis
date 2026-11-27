@@ -129,6 +129,24 @@ describe('MobileTopicSelector', () => {
     })
   })
 
+  it('navigates to the bare chat route with an explicit marker', async () => {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MobileTopicSelector />
+      </QueryClientProvider>,
+    )
+
+    const trigger = screen.getByRole('button', { name: /topic navigation menu/i })
+    fireEvent.pointerDown(trigger, { pointerType: 'mouse' })
+    fireEvent.click(await screen.findByText('Chat Conversation'))
+
+    expect(mockNavigate).toHaveBeenCalledWith({
+      params: { id: 'chat-1' },
+      state: { explicitChat: true },
+      to: '/chats/$id',
+    })
+  })
+
   it('displays active doc title when docId is in route', () => {
     mockParams = { docId: 'doc-1', executionId: undefined, id: 'chat-1' }
 

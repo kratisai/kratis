@@ -490,6 +490,7 @@ describe("CanvasTabs", () => {
     expect(useCanvasStore.getState().canvases["session-1"]).toBeUndefined();
     expect(navigateMock).toHaveBeenCalledWith({
       params: { id: "session-1" },
+      state: { explicitChat: true },
       to: "/chats/$id",
     });
   });

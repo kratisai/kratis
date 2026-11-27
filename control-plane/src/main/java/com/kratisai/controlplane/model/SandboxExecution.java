@@ -75,6 +75,9 @@ public class SandboxExecution {
             foreignKey = @ForeignKey(name = "fk_sandbox_executions_repository"))
     private Repository repository;
 
+    @Column(name = "base_commit_sha", length = 64)
+    private String baseCommitSha;
+
     @Column(name = "new_repo_name", length = 255)
     private String newRepoName;
 
@@ -234,6 +237,14 @@ public class SandboxExecution {
 
     public void setRepository(Repository repository) {
         this.repository = repository;
+    }
+
+    public String getBaseCommitSha() {
+        return baseCommitSha;
+    }
+
+    public void setBaseCommitSha(String baseCommitSha) {
+        this.baseCommitSha = baseCommitSha;
     }
 
     public String getNewRepoName() {
