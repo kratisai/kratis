@@ -1,0 +1,25 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: PreviewParams
+type: object
+required:
+- port
+- label
+properties:
+  executionId:
+    type: string
+    description: "Optional execution id. When omitted the control plane resolves the current execution for the session."
+  port:
+    type: integer
+    description: "Sandbox-local port the application listens on."
+    minimum: 1
+    maximum: 65535
+  label:
+    type: string
+    description: "Human-readable service label shown in the activity log."
+  path:
+    type: string
+    description: "Optional path appended to the published URL (e.g. /health or /docs)."
+  description:
+    type: string
+    description: "Optional note about what the preview exposes."
+additionalProperties: false

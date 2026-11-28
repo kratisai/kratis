@@ -39,6 +39,7 @@ Design and runtime reference. Do not copy wire shapes here; `protocol/` is the c
 | [cache-invalidation-strategy.md](knowledge/cache-invalidation-strategy.md) | AFTER_COMMIT fan-out and TanStack Query |
 | [chat-interaction-design.md](knowledge/chat-interaction-design.md) | Chat persistence, replay, payload types |
 | [sandbox-provisioning.md](knowledge/sandbox-provisioning.md) | Docker sandbox contract |
+| [sandbox-publish.md](knowledge/sandbox-publish.md) | Publishing previews and attachments to the user |
 | [acp-lifecycle.md](knowledge/acp-lifecycle.md) | Connector as ACP client |
 | [e2e-agent-orchestration.md](knowledge/e2e-agent-orchestration.md) | E2E sequence and host Docker hygiene |
 | [repository-intelligence.md](knowledge/repository-intelligence.md) | Ingestion, repo-relations, graph, wiki |

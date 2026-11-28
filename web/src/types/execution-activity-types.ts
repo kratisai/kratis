@@ -1,4 +1,5 @@
 import type {
+  ActivityAttachment,
   ActivityDetail,
   ActivityDiff,
   ActivityHitl,
@@ -15,6 +16,7 @@ import type {
 } from './websocket-types'
 
 export type {
+  ActivityAttachment,
   ActivityDetail,
   ActivityDiff,
   ActivityHitl,
@@ -31,6 +33,7 @@ export type {
 }
 
 export type Activity =
+  | AttachmentActivity
   | CommandExecutionActivity
   | ElicitationActivity
   | EndTurnActivity
@@ -45,6 +48,7 @@ export type Activity =
 export type ActivityState = 'active' | 'completed' | 'error' | 'pending_approval'
 
 export type ActivityType =
+  | 'attachment'
   | 'command_execution'
   | 'elicitation'
   | 'end_turn'
@@ -55,6 +59,13 @@ export type ActivityType =
   | 'thinking'
   | 'tool_execution'
   | 'warning'
+
+export interface AttachmentActivity extends BaseActivity {
+  attachment?: ActivityAttachment
+  description: string
+  detail?: ActivityDetail
+  type: 'attachment'
+}
 
 export interface BaseActivity {
   actionId?: string
@@ -127,6 +138,8 @@ export interface PublishActivity extends BaseActivity {
   detail?: ActivityDetail
   headBranch?: string
   isUpdate?: boolean
+  previewLabel?: string
+  previewUrl?: string
   prNumber?: number
   providerType?: string
   prUrl?: string

@@ -62,4 +62,25 @@ class ProtocolDefaultsTest {
         assertThat(payloadSlice.direction()).isEqualTo(Direction.CONTROL_PLANE_TO_CONNECTOR);
         assertThat(payloadSlice.method()).isEqualTo(EnvironmentRpcPayload.ReadFileSlice.METHOD);
     }
+
+    @Test
+    void environmentRpcPayload_previewDefaults() {
+        EnvironmentRpcPayload payload = new EnvironmentRpcPayload.Preview("exec-1", 3000, "Web app", "/health", "note");
+
+        assertThat(payload.messageKind()).isEqualTo(MessageKind.REQUEST);
+        assertThat(payload.direction()).isEqualTo(Direction.CONNECTOR_TO_CONTROL_PLANE);
+        assertThat(payload.method()).isEqualTo(EnvironmentRpcPayload.Preview.METHOD);
+        assertThat(payload.method()).isEqualTo("env.preview");
+    }
+
+    @Test
+    void environmentRpcPayload_attachmentDefaults() {
+        EnvironmentRpcPayload payload = new EnvironmentRpcPayload.Attachment(
+                "exec-1", "a1", AttachmentKind.IMAGE, "Shot", "image/png", "iVBORw0KGgo=", "s");
+
+        assertThat(payload.messageKind()).isEqualTo(MessageKind.REQUEST);
+        assertThat(payload.direction()).isEqualTo(Direction.CONNECTOR_TO_CONTROL_PLANE);
+        assertThat(payload.method()).isEqualTo(EnvironmentRpcPayload.Attachment.METHOD);
+        assertThat(payload.method()).isEqualTo("env.attachment");
+    }
 }

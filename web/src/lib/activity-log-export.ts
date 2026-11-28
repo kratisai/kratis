@@ -1,5 +1,6 @@
 import type {
   Activity,
+  AttachmentActivity,
   CommandExecutionActivity,
   ElicitationActivity,
   ErrorActivity,
@@ -40,6 +41,8 @@ export function formatActivityLog(activities: Activity[], executionId: string): 
 
 function formatActivity(activity: Activity): string[] {
   switch (activity.type) {
+    case 'attachment':
+      return formatAttachment(activity)
     case 'command_execution':
       return formatCommandExecution(activity)
     case 'elicitation':
@@ -61,6 +64,22 @@ function formatActivity(activity: Activity): string[] {
     case 'warning':
       return formatWarning(activity)
   }
+}
+
+function formatAttachment(activity: AttachmentActivity): string[] {
+  const lines = [`[Attachment] ${activity.attachment?.title ?? activity.description}`]
+  formatCommon(lines, activity)
+  const attachment = activity.attachment ?? activity.detail?.attachment
+  if (attachment) {
+    lines.push(`Kind: ${attachment.kind}`)
+    if (attachment.contentType) {
+      lines.push(`Content type: ${attachment.contentType}`)
+    }
+    if (attachment.viewUrl) {
+      lines.push(`URL: ${attachment.viewUrl}`)
+    }
+  }
+  return lines
 }
 
 function formatCommandExecution(activity: CommandExecutionActivity): string[] {
@@ -139,6 +158,9 @@ function formatPublish(activity: PublishActivity): string[] {
   }
   if (activity.prUrl) {
     lines.push(`PR URL: ${activity.prUrl}`)
+  }
+  if (activity.detail?.previewUrl) {
+    lines.push(`Preview URL: ${activity.detail.previewUrl}`)
   }
   return lines
 }

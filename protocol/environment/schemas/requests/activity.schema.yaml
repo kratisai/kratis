@@ -107,5 +107,29 @@ properties:
               - "in_progress"
               - "completed"
           additionalProperties: true
+      previewUrl:
+        type: string
+        description: "Control-plane-origin URL for a published sandbox application preview."
+      previewLabel:
+        type: string
+        description: "Human-readable label for the published preview."
+      attachment:
+        type: object
+        description: "A published attachment (image or markdown) rendered as an expandable thumbnail."
+        properties:
+          id:
+            type: string
+          kind:
+            type: string
+            enum:
+            - "image"
+            - "markdown"
+          title:
+            type: string
+          contentType:
+            type: string
+          viewUrl:
+            type: string
+        additionalProperties: false
     additionalProperties: true
 additionalProperties: false

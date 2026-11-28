@@ -1,0 +1,21 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: AttachmentResult
+type: object
+required:
+- type
+- status
+properties:
+  type:
+    type: string
+    enum:
+    - "env_attachment"
+  status:
+    type: string
+    enum:
+    - "published"
+  attachmentId:
+    type: string
+  viewUrl:
+    type: string
+    description: "Control-plane-origin URL serving the attachment (inline)."
+additionalProperties: false

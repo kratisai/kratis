@@ -15,7 +15,16 @@ export const JsonRpcErrorCodes = {
 export const INVALID_TOKEN_CODE = JsonRpcErrorCodes.INVALID_TOKEN
 export const NOT_AUTHENTICATED_CODE = JsonRpcErrorCodes.NOT_AUTHENTICATED
 
+export interface ActivityAttachment {
+  contentType?: string
+  id: string
+  kind: 'image' | 'markdown'
+  title?: string
+  viewUrl?: string
+}
+
 export interface ActivityDetail {
+  attachment?: ActivityAttachment
   baseBranch?: string
   commitSha?: string
   diff?: ActivityDiff
@@ -28,6 +37,8 @@ export interface ActivityDetail {
   messageId?: string
   output?: string
   plan?: PlanEntry[]
+  previewLabel?: string
+  previewUrl?: string
   prNumber?: number
   providerType?: string
   prUrl?: string
@@ -407,6 +418,7 @@ export type UserEntityType = 'PROFILE' | 'TEAMS'
 export type WireActivityStatus = 'completed' | 'failed' | 'in_progress' | 'pending'
 
 export type WireActivityType =
+  | 'ATTACHMENT'
   | 'COMMAND'
   | 'EDITED'
   | 'ELICITATION'

@@ -1,0 +1,35 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: AttachmentParams
+type: object
+required:
+- attachmentId
+- kind
+- title
+- contentType
+- contentBase64
+properties:
+  executionId:
+    type: string
+    description: "Optional execution id. When omitted the control plane resolves the current execution for the session."
+  attachmentId:
+    type: string
+    description: "Client-chosen unique id (uuid) for the attachment. Idempotency key: a repeat with the same id is ignored."
+  kind:
+    type: string
+    enum:
+    - "image"
+    - "markdown"
+    description: "Attachment kind. Initially only image and markdown are supported."
+  title:
+    type: string
+    description: "Human-readable title shown in the activity log."
+  contentType:
+    type: string
+    description: "MIME type of the content (image/png, image/jpeg, image/webp, image/gif, image/svg+xml, text/markdown)."
+  contentBase64:
+    type: string
+    description: "Base64-encoded file content. The decoded size must not exceed the attachment size cap (10 MB)."
+  summary:
+    type: string
+    description: "Optional one-line summary of what the attachment shows."
+additionalProperties: false

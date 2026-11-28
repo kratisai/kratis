@@ -112,6 +112,11 @@ type Client struct {
 	// terminalManager manages ACP terminal sessions
 	terminalManager *acp.TerminalManager
 
+	// publishPoller forwards agent-dropped publish spool entries (preview URLs and
+	// attachments) to the control plane. Started once per client, stopped on Close.
+	publishPoller     *PublishPoller
+	publishPollerOnce sync.Once
+
 	// Permission cancellation context
 	permCtx    context.Context
 	permCancel context.CancelFunc
@@ -453,6 +458,24 @@ func (c *Client) Start(ctx context.Context) {
 
 			c.reportDisconnect()
 
+			// Forward agent-dropped publish spool entries (preview URLs, attachments)
+			// to the control plane. Started once per client so reconnects do not spawn
+			// a second poller; the spool is idempotent and done/ entries never replay.
+			c.publishPollerOnce.Do(func() {
+				c.publishPoller = c.StartPublishPolling(func(result PublishResult) {
+					if result.Error != "" {
+						log.Printf("[PUBLISH] %s entry %s failed: %s", result.Kind, result.Source, result.Error)
+						return
+					}
+					if result.PreviewURL != "" {
+						log.Printf("[PUBLISH] preview published: %s", result.PreviewURL)
+					}
+					if result.ViewURL != "" {
+						log.Printf("[PUBLISH] attachment published: %s", result.ViewURL)
+					}
+				})
+			})
+
 			// Heartbeat ticker
 			ticker := time.NewTicker(c.Timeouts.HeartbeatInterval)
 
@@ -553,6 +576,13 @@ func (c *Client) cleanupCredentials() {
 }
 
 func (c *Client) closeAll() {
+	// Drain the publish spool one final time, then stop the poller so shutdown does
+	// not leave a goroutine or a half-processed entry behind.
+	if c.publishPoller != nil {
+		c.publishPoller.Stop()
+		c.publishPoller = nil
+	}
+
 	c.mu.Lock()
 	sup := c.supervisor
 	c.supervisor = nil

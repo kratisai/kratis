@@ -9,7 +9,9 @@ public enum EnvironmentResultType {
     ENV_REGISTER("env_register"),
     ENV_HEARTBEAT("env_heartbeat"),
     ENV_DIFF_MANIFEST("env_diff_manifest"),
-    ENV_DIFF_SECTIONS("env_diff_sections");
+    ENV_DIFF_SECTIONS("env_diff_sections"),
+    ENV_PREVIEW("env_preview"),
+    ENV_ATTACHMENT("env_attachment");
 
     private static final Map<String, EnvironmentResultType> BY_WIRE = new HashMap<>();
 

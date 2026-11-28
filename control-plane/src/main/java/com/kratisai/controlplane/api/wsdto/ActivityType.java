@@ -14,7 +14,8 @@ public enum ActivityType {
     PLAN("PLAN"),
     ERROR("ERROR"),
     WARNING("WARNING"),
-    PUBLISH("PUBLISH");
+    PUBLISH("PUBLISH"),
+    ATTACHMENT("ATTACHMENT");
 
     private final String value;
 

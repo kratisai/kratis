@@ -35,14 +35,17 @@ class ActiveTaskPromptTest {
         String prompt = ActiveTaskPrompt.buildTaskPrompt("# Plan\nDo stuff", activeTaskPath());
 
         assertThat(prompt).contains("You are running as a non-root user inside a sandbox that you own.");
-        assertThat(prompt).contains("prefix the command with sudo");
+        assertThat(prompt).contains("Passwordless sudo is available.");
+        assertThat(prompt).doesNotContain("prefix the command with sudo");
+        assertThat(prompt).doesNotContain("sudo apt update && sudo apt install");
+        assertThat(prompt).contains("The `sandbox-package-install` skill");
         assertThat(prompt).contains("Approval prompts WILL be answered via HITL");
         assertThat(prompt).contains("Canonical task copy: " + activeTaskPath());
         assertThat(prompt).contains("Keep command output bounded");
         assertThat(prompt).contains("Execute the user's task systematically: prepare, execute and verify.");
         assertThat(prompt).contains("First, Prepare the environment.");
         assertThat(prompt).contains("Inspect `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`");
-        assertThat(prompt).contains("install libraries and dependencies as needed");
+        assertThat(prompt).contains("Install toolchains and project dependencies.");
         assertThat(prompt).contains("Next execute the task.");
         assertThat(prompt).contains("extract the Definition of Done");
         assertThat(prompt).contains("verify-as-you-go");

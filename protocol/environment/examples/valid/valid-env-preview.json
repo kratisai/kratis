@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "method": "env.preview",
+  "params": {
+    "executionId": "123e4567-e89b-12d3-a456-426614174000",
+    "port": 3000,
+    "label": "Web app",
+    "path": "/health",
+    "description": "Dev server preview"
+  }
+}

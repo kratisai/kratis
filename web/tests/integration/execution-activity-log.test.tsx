@@ -1,3 +1,4 @@
+import { fireEvent, within } from '@testing-library/react'
 import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -699,5 +700,55 @@ describe('Execution Activity Log', () => {
     expect(screen.getByText('go test ./...')).toBeInTheDocument()
     expect(screen.queryByText(/Permission rejected/)).not.toBeInTheDocument()
     expect(screen.queryByText('Permission request required')).not.toBeInTheDocument()
+  })
+
+  it('renders an attachment thumbnail that expands to the full image', async () => {
+    useActivityStore.getState().handleActivityEvent({
+      actionId: 'attachment:shot-1',
+      activityType: 'ATTACHMENT',
+      createdAt: '2026-10-20T17:32:12.672Z',
+      description: 'Published image attachment',
+      detail: {
+        attachment: {
+          contentType: 'image/png',
+          id: 'shot-1',
+          kind: 'image',
+          title: 'Checkout screenshot',
+          viewUrl: '/attachments/env-1/shot-1',
+        },
+      },
+      executionId: EXECUTION_ID,
+      status: 'completed',
+      type: 'execution_activity',
+    })
+
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    const thumbnail = await screen.findByAltText('Checkout screenshot')
+    expect(thumbnail).toHaveAttribute('src', '/attachments/env-1/shot-1')
+
+    fireEvent.click(thumbnail)
+
+    const dialog = await screen.findByRole('dialog')
+    const expanded = within(dialog).getByAltText('Checkout screenshot')
+    expect(expanded).toHaveAttribute('src', '/attachments/env-1/shot-1')
+  })
+
+  it('renders an open preview link for a published preview', async () => {
+    const ws = setupConnected()
+    triggerMockExecutionActivity(
+      ws,
+      EXECUTION_ID,
+      'PUBLISH',
+      "Published preview 'Web app' on sandbox port 3000",
+      'completed',
+      'preview:3000',
+      { previewLabel: 'Web app', previewUrl: '/preview/env-1/3000/' },
+    )
+
+    renderWithProviders(<ExecutionActivityLog executionId={EXECUTION_ID} />)
+
+    const link = await screen.findByRole('link', { name: /Open preview/ })
+    expect(link).toHaveAttribute('href', '/preview/env-1/3000/')
   })
 })

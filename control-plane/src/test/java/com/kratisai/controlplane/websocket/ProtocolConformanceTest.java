@@ -848,6 +848,8 @@ class ProtocolConformanceTest {
             case "env.git_set_remote" -> EnvironmentConnectorResult.GitSetRemote.class;
             case "env.git_observe_publish" -> EnvironmentConnectorResult.GitObservePublish.class;
             case "env.git_rebase" -> EnvironmentConnectorResult.GitRebase.class;
+            case "env.preview" -> EnvironmentResponsePayload.PreviewResult.class;
+            case "env.attachment" -> EnvironmentResponsePayload.AttachmentResult.class;
             default -> null;
         };
     }
@@ -872,6 +874,8 @@ class ProtocolConformanceTest {
             case "git_set_remote" -> EnvironmentConnectorResult.GitSetRemote.class;
             case "git_observe_publish" -> EnvironmentConnectorResult.GitObservePublish.class;
             case "git_rebase" -> EnvironmentConnectorResult.GitRebase.class;
+            case "preview" -> EnvironmentResponsePayload.PreviewResult.class;
+            case "attachment" -> EnvironmentResponsePayload.AttachmentResult.class;
             default -> throw new AssertionError("Unexpected environment result fixture: " + name);
         };
     }

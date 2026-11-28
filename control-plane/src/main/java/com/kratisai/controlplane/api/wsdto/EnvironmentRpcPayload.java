@@ -311,6 +311,55 @@ public sealed interface EnvironmentRpcPayload extends RpcPayload
         }
     }
 
+    /** Publish a sandbox application preview URL to the user. */
+    record Preview(
+            @JsonProperty("executionId") String executionId,
+            @JsonProperty("port") int port,
+            @JsonProperty("label") String label,
+            @JsonProperty("path") String path,
+            @JsonProperty("description") String description)
+            implements InboundRequestPayload {
+        public static final String METHOD = "env.preview";
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+
+        public Preview {
+            if (port < 1 || port > 65535) {
+                throw new IllegalArgumentException("port must be between 1 and 65535");
+            }
+            Objects.requireNonNull(label, "label is required");
+        }
+    }
+
+    /** Publish an image or markdown attachment to the user. */
+    record Attachment(
+            @JsonProperty("executionId") String executionId,
+            @JsonProperty("attachmentId") String attachmentId,
+            @JsonProperty("kind") AttachmentKind kind,
+            @JsonProperty("title") String title,
+            @JsonProperty("contentType") String contentType,
+            @JsonProperty("contentBase64") String contentBase64,
+            @JsonProperty("summary") String summary)
+            implements InboundRequestPayload {
+        public static final String METHOD = "env.attachment";
+
+        @Override
+        public String method() {
+            return METHOD;
+        }
+
+        public Attachment {
+            Objects.requireNonNull(attachmentId, "attachmentId is required");
+            Objects.requireNonNull(kind, "kind is required");
+            Objects.requireNonNull(title, "title is required");
+            Objects.requireNonNull(contentType, "contentType is required");
+            Objects.requireNonNull(contentBase64, "contentBase64 is required");
+        }
+    }
+
     /** Report agent activity on an execution. */
     record Activity(
             @JsonProperty("activityType") ActivityType activityType,

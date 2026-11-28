@@ -676,3 +676,71 @@ type PlanEntryPriority = acp.PlanEntryPriority
 
 // PlanEntryStatus aliases acp.PlanEntryStatus.
 type PlanEntryStatus = acp.PlanEntryStatus
+
+// PreviewParams is the parameters payload for env.preview. The sidecar reports a
+// sandbox-local port serving an application; the control plane owns the
+// address translation and returns a user-openable URL.
+type PreviewParams struct {
+	ExecutionID string `json:"executionId,omitempty"`
+	Port        int    `json:"port"`
+	Label       string `json:"label"`
+	Path        string `json:"path,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// PreviewResultType is the wire "type" of an env.preview result.
+type PreviewResultType string
+
+const PreviewResultTypeEnvPreview PreviewResultType = "env_preview"
+
+// PreviewStatus is the closed set of env.preview status values.
+type PreviewStatus string
+
+const PreviewStatusPublished PreviewStatus = "published"
+
+// PreviewResult is the success response payload for env.preview.
+type PreviewResult struct {
+	Type       PreviewResultType `json:"type"`
+	Status     PreviewStatus     `json:"status"`
+	PreviewURL string            `json:"previewUrl"`
+}
+
+// AttachmentKind is the closed set of env.attachment kind values. Only images and
+// markdown are supported initially; other types may be added later.
+type AttachmentKind string
+
+const (
+	AttachmentKindImage    AttachmentKind = "image"
+	AttachmentKindMarkdown AttachmentKind = "markdown"
+)
+
+// AttachmentParams is the parameters payload for env.attachment. ContentBase64 is
+// the base64-encoded file content. The decoded size must not exceed the control
+// plane's attachment size cap (10 MB); larger files are rejected before upload.
+type AttachmentParams struct {
+	ExecutionID   string         `json:"executionId,omitempty"`
+	AttachmentID  string         `json:"attachmentId"`
+	Kind          AttachmentKind `json:"kind"`
+	Title         string         `json:"title"`
+	ContentType   string         `json:"contentType"`
+	ContentBase64 string         `json:"contentBase64"`
+	Summary       string         `json:"summary,omitempty"`
+}
+
+// AttachmentResultType is the wire "type" of an env.attachment result.
+type AttachmentResultType string
+
+const AttachmentResultTypeEnvAttachment AttachmentResultType = "env_attachment"
+
+// AttachmentStatus is the closed set of env.attachment status values.
+type AttachmentStatus string
+
+const AttachmentStatusPublished AttachmentStatus = "published"
+
+// AttachmentResult is the success response payload for env.attachment.
+type AttachmentResult struct {
+	Type         AttachmentResultType `json:"type"`
+	Status       AttachmentStatus     `json:"status"`
+	AttachmentID string               `json:"attachmentId,omitempty"`
+	ViewURL      string               `json:"viewUrl,omitempty"`
+}

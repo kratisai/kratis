@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type {
+  AttachmentActivity,
   CommandExecutionActivity,
+  PublishActivity,
   ThinkingActivity,
   ToolExecutionActivity,
 } from '@/types/execution-activity-types'
@@ -118,6 +120,49 @@ describe('formatActivityLog', () => {
     const text = formatActivityLog([commandActivity, thinkingActivity], EXECUTION_ID)
 
     expect(text).toContain('  Build complete\n\n[Thinking]')
+  })
+
+  it('formats an attachment with kind, content type, and view URL', () => {
+    const attachmentActivity: AttachmentActivity = {
+      attachment: {
+        contentType: 'image/png',
+        id: 'shot-1',
+        kind: 'image',
+        title: 'Checkout screenshot',
+        viewUrl: '/attachments/env-1/shot-1',
+      },
+      collapsed: false,
+      description: 'Published image attachment',
+      executionId: EXECUTION_ID,
+      id: 'att-1',
+      startedAt: '2024-06-15T10:30:00.000Z',
+      state: 'completed',
+      type: 'attachment',
+    }
+
+    const text = formatActivityLog([attachmentActivity], EXECUTION_ID)
+
+    expect(text).toContain('[Attachment] Checkout screenshot')
+    expect(text).toContain('Kind: image')
+    expect(text).toContain('Content type: image/png')
+    expect(text).toContain('URL: /attachments/env-1/shot-1')
+  })
+
+  it('formats a published preview URL', () => {
+    const previewActivity: PublishActivity = {
+      collapsed: false,
+      description: "Published preview 'Web app' on sandbox port 3000",
+      detail: { previewLabel: 'Web app', previewUrl: '/preview/env-1/3000/' },
+      executionId: EXECUTION_ID,
+      id: 'pub-1',
+      startedAt: '2024-06-15T10:30:00.000Z',
+      state: 'completed',
+      type: 'publish',
+    }
+
+    const text = formatActivityLog([previewActivity], EXECUTION_ID)
+
+    expect(text).toContain('Preview URL: /preview/env-1/3000/')
   })
 })
 

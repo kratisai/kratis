@@ -49,9 +49,8 @@ public final class ActiveTaskPrompt {
         String canvas = canvasContent != null ? canvasContent : "";
         return """
                 You are running as a non-root user inside a sandbox that you own. You can and should \
-                make changes to this sandbox as needed to complete the task. To install system \
-                packages, prefix the command with sudo (e.g. `sudo apt update && sudo apt install -y \
-                <package>`). Approval prompts WILL be answered via HITL — always attempt the action, \
+                make changes to this sandbox as needed to complete the task. Passwordless sudo is \
+                available. Approval prompts WILL be answered via HITL — always attempt the action, \
                 never skip work to avoid a prompt.
 
                 Canonical task copy: %s — re-read it at every gate.
@@ -62,10 +61,8 @@ public final class ActiveTaskPrompt {
                 First, Prepare the environment.
                  - Inspect `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md` (repo root first, then the task
                  subproject) and any repo `skills` for build/setup instructions
-                 - Identify the required tool chains and install system packages using 'sudo apt \
-                 update && sudo apt install -y <package>'
-                 - install libraries and dependencies as needed (`npm ci` or `sudo apt install -y` or \
-                 `pip install` tec.  Use command appropriate for the repository or submodule)
+                 - Install toolchains and project dependencies. The `sandbox-package-install` skill \
+                 covers system packages, language toolchains, and project dependencies.
 
                 Next execute the task.
                  - Plan. Before edits: extract the Definition of Done (canvas acceptance plus \

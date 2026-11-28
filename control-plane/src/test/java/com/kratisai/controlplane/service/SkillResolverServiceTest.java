@@ -121,6 +121,20 @@ class SkillResolverServiceTest {
     }
 
     @Test
+    void discoveriesDirectoryWithoutSkillFileIsNotCatalogued() throws Exception {
+        writeSkill(installationDirectory.resolve("a-skill"), "a-skill", "Directory skill");
+        Files.createDirectories(installationDirectory.resolve("_discoveries"));
+        Files.writeString(installationDirectory.resolve("_discoveries").resolve("README.md"), "# Prose only\n");
+        Path flat = installationDirectory.resolve("b-skill.md");
+        Files.writeString(flat, "---\nname: b-skill\ndescription: Flat skill\n---\n");
+        when(teamSkillRepository.findByTeamIdAndEnabledTrue(TEAM_ID)).thenReturn(List.of());
+
+        assertThat(resolver.resolveCatalog(TEAM_ID))
+                .extracting(SkillDefinition::name)
+                .containsExactly("a-skill", "b-skill");
+    }
+
+    @Test
     void teamSkillWithInvalidMetadataIsSkipped() {
         when(teamSkillRepository.findByTeamIdAndEnabledTrue(TEAM_ID))
                 .thenReturn(List.of(teamSkill("Bad_Name", "Team"), teamSkill("valid", "Team valid")));

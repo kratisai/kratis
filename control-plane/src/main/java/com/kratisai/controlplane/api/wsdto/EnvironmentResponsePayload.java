@@ -15,7 +15,9 @@ public sealed interface EnvironmentResponsePayload
                 EnvironmentResponsePayload.DiffManifestResult,
                 EnvironmentResponsePayload.DiffSectionsResult,
                 EnvironmentResponsePayload.HitlActivityResult,
-                EnvironmentResponsePayload.GitTokenResult {
+                EnvironmentResponsePayload.GitTokenResult,
+                EnvironmentResponsePayload.PreviewResult,
+                EnvironmentResponsePayload.AttachmentResult {
 
     record EnvironmentRegisterResult(EnvironmentResultType type, EnvironmentRegisterStatus status, String environmentId)
             implements EnvironmentResponsePayload {
@@ -122,6 +124,48 @@ public sealed interface EnvironmentResponsePayload
 
         public DiffSectionsResult(DiffSectionsStatus status, List<String> missing) {
             this(EnvironmentResultType.ENV_DIFF_SECTIONS, status, missing);
+        }
+    }
+
+    enum PreviewStatus {
+        @JsonProperty("published")
+        PUBLISHED
+    }
+
+    enum AttachmentStatus {
+        @JsonProperty("published")
+        PUBLISHED
+    }
+
+    record PreviewResult(
+            @JsonProperty("type") EnvironmentResultType type,
+            @JsonProperty("status") PreviewStatus status,
+            @JsonProperty("previewUrl") String previewUrl)
+            implements EnvironmentResponsePayload {
+        public PreviewResult {
+            Objects.requireNonNull(type, "type is required");
+            Objects.requireNonNull(status, "status is required");
+            Objects.requireNonNull(previewUrl, "previewUrl is required");
+        }
+
+        public PreviewResult(String previewUrl) {
+            this(EnvironmentResultType.ENV_PREVIEW, PreviewStatus.PUBLISHED, previewUrl);
+        }
+    }
+
+    record AttachmentResult(
+            @JsonProperty("type") EnvironmentResultType type,
+            @JsonProperty("status") AttachmentStatus status,
+            @JsonProperty("attachmentId") String attachmentId,
+            @JsonProperty("viewUrl") String viewUrl)
+            implements EnvironmentResponsePayload {
+        public AttachmentResult {
+            Objects.requireNonNull(type, "type is required");
+            Objects.requireNonNull(status, "status is required");
+        }
+
+        public AttachmentResult(String attachmentId, String viewUrl) {
+            this(EnvironmentResultType.ENV_ATTACHMENT, AttachmentStatus.PUBLISHED, attachmentId, viewUrl);
         }
     }
 }

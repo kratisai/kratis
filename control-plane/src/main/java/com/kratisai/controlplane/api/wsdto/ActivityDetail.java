@@ -28,7 +28,19 @@ public record ActivityDetail(
         @JsonProperty("baseBranch") String baseBranch,
         @JsonProperty("commitSha") String commitSha,
         @JsonProperty("isUpdate") Boolean isUpdate,
-        @JsonProperty("providerType") String providerType) {
+        @JsonProperty("providerType") String providerType,
+
+        @JsonProperty("previewUrl") String previewUrl,
+        @JsonProperty("previewLabel") String previewLabel,
+        @JsonProperty("attachment") ActivityAttachment attachment) {
+
+    /** A published sandbox artifact (image or markdown) shown as an expandable thumbnail. */
+    public record ActivityAttachment(
+            @JsonProperty("id") String id,
+            @JsonProperty("kind") String kind,
+            @JsonProperty("title") String title,
+            @JsonProperty("contentType") String contentType,
+            @JsonProperty("viewUrl") String viewUrl) {}
 
     public static Builder builder() {
         return new Builder();
@@ -57,7 +69,10 @@ public record ActivityDetail(
                 .baseBranch(baseBranch)
                 .commitSha(commitSha)
                 .isUpdate(isUpdate)
-                .providerType(providerType);
+                .providerType(providerType)
+                .previewUrl(previewUrl)
+                .previewLabel(previewLabel)
+                .attachment(attachment);
     }
 
     public ActivityDetail withHitl(ActivityHitl hitl) {
@@ -81,6 +96,14 @@ public record ActivityDetail(
                 .isUpdate(isUpdate)
                 .providerType(providerType)
                 .build();
+    }
+
+    public static ActivityDetail forPreview(String previewUrl, String previewLabel) {
+        return builder().previewUrl(previewUrl).previewLabel(previewLabel).build();
+    }
+
+    public static ActivityDetail forAttachment(ActivityAttachment attachment) {
+        return builder().attachment(attachment).build();
     }
 
     public static ActivityDetail forPlan(List<PlanEntry> plan) {
@@ -135,6 +158,9 @@ public record ActivityDetail(
         private String commitSha;
         private Boolean isUpdate;
         private String providerType;
+        private String previewUrl;
+        private String previewLabel;
+        private ActivityAttachment attachment;
 
         public Builder kind(ActivityKind kind) {
             this.kind = kind;
@@ -226,6 +252,21 @@ public record ActivityDetail(
             return this;
         }
 
+        public Builder previewUrl(String previewUrl) {
+            this.previewUrl = previewUrl;
+            return this;
+        }
+
+        public Builder previewLabel(String previewLabel) {
+            this.previewLabel = previewLabel;
+            return this;
+        }
+
+        public Builder attachment(ActivityAttachment attachment) {
+            this.attachment = attachment;
+            return this;
+        }
+
         public ActivityDetail build() {
             return new ActivityDetail(
                     kind,
@@ -245,7 +286,10 @@ public record ActivityDetail(
                     baseBranch,
                     commitSha,
                     isUpdate,
-                    providerType);
+                    providerType,
+                    previewUrl,
+                    previewLabel,
+                    attachment);
         }
     }
 }

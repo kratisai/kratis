@@ -9,6 +9,7 @@ import {
   ExternalLink,
   GitPullRequest,
   HelpCircle,
+  Image as ImageIcon,
   ListTodo,
   Loader2,
   ShieldCheck,
@@ -29,6 +30,8 @@ import {
 
 import type {
   Activity,
+  ActivityAttachment,
+  AttachmentActivity,
   CommandExecutionActivity,
   ElicitationActivity,
   EndTurnActivity,
@@ -48,6 +51,13 @@ import { ActivityElicitation } from '@/components/session/activities/activity-el
 import { PlanEntriesList, planSummaryLabel } from '@/components/session/plan-entries'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { markdownToText } from '@/lib/markdown-to-text'
 import { cn, isSafeHttpUrl } from '@/lib/utils'
 import { activityCommand, activityTitle, useActivityStore } from '@/store/activity-store'
@@ -207,6 +217,8 @@ function useRelativeNow(): number {
 
 const ActivityItem = memo(function ActivityItem({ activity, executionId }: ActivityItemProps) {
   switch (activity.type) {
+    case 'attachment':
+      return <AttachmentActivityItem activity={activity} executionId={executionId} />
     case 'command_execution':
       return <CommandExecutionActivityItem activity={activity} executionId={executionId} />
     case 'elicitation':
@@ -446,6 +458,105 @@ function approvalTitle(activity: CommandExecutionActivity | ToolExecutionActivit
   return resolution?.titlePrefix
     ? `${resolution.titlePrefix}: ${activityCommand(activity)}`
     : activityTitle(activity)
+}
+
+/**
+ * A published attachment (image or markdown) from the sandbox.
+ *
+ * Images render as an inline thumbnail that expands to the full image in a dialog. Markdown
+ * renders as a file row that expands to the rendered markdown. The view URL is served by the
+ * control plane (capability URL), so a plain anchor works without an auth header.
+ */
+function AttachmentActivityItem({
+  activity,
+  executionId,
+}: {
+  activity: AttachmentActivity
+  executionId: string
+}) {
+  const attachment = activity.attachment ?? activity.detail?.attachment
+  return (
+    <ActivityItemShell
+      activity={activity}
+      content={
+        <div className="mt-1 space-y-1.5 pl-5 text-xs">
+          <p className="text-muted-foreground">{activity.description}</p>
+          {attachment ? <AttachmentBody attachment={attachment} /> : null}
+        </div>
+      }
+      executionId={executionId}
+      icon={<ImageIcon className="h-3 w-3 shrink-0 text-blue-500" />}
+      title={activityTitle(activity)}
+      trailing={<ActivityTimestamp timestamp={activity.startedAt} />}
+    />
+  )
+}
+
+function AttachmentBody({ attachment }: { attachment: ActivityAttachment }) {
+  const [open, setOpen] = useState(false)
+  const [markdownBody, setMarkdownBody] = useState<null | string>(null)
+  const isImage = attachment.kind === 'image'
+  const viewUrl = attachment.viewUrl
+
+  useEffect(() => {
+    if (!open || isImage || !viewUrl) return
+    let cancelled = false
+    fetch(viewUrl)
+      .then((response) => (response.ok ? response.text() : null))
+      .then((text) => {
+        if (!cancelled) setMarkdownBody(text)
+      })
+      .catch(() => {
+        if (!cancelled) setMarkdownBody(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, isImage, viewUrl])
+
+  return (
+    <Dialog onOpenChange={setOpen} open={open}>
+      {isImage && viewUrl ? (
+        <DialogTrigger asChild>
+          <button
+            className="border-border hover:border-primary/50 block cursor-pointer overflow-hidden rounded border text-left"
+            type="button"
+          >
+            <img
+              alt={attachment.title}
+              className="max-h-40 w-full object-cover"
+              loading="lazy"
+              src={viewUrl}
+            />
+          </button>
+        </DialogTrigger>
+      ) : (
+        <DialogTrigger asChild>
+          <Button size="sm" type="button" variant="outline">
+            {attachment.title}
+          </Button>
+        </DialogTrigger>
+      )}
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{attachment.title}</DialogTitle>
+        </DialogHeader>
+        {isImage && viewUrl ? (
+          <img
+            alt={attachment.title}
+            className="max-h-[70vh] w-full rounded object-contain"
+            src={viewUrl}
+          />
+        ) : markdownBody ? (
+          <div className="text-foreground max-h-[70vh] overflow-y-auto text-sm">
+            <MarkdownMessage content={markdownBody} />
+          </div>
+        ) : (
+          <p className="text-muted-foreground">Could not load attachment content.</p>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 function byResolverSuffix(resolver: HitlResolverKind | undefined): string {
@@ -707,6 +818,19 @@ function PublishActivityItem({
                     ? `View Pull Request #${activity.prNumber}`
                     : 'View Pull Request'}
                 </span>
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+          )}
+          {activity.previewUrl && (
+            <div>
+              <a
+                className="text-primary inline-flex items-center gap-1 font-medium hover:underline"
+                href={activity.previewUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <span>Open preview: {activity.previewLabel ?? activity.description}</span>
                 <ExternalLink className="h-3 w-3" />
               </a>
             </div>

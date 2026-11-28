@@ -5,6 +5,7 @@ import type {
   ActivityDetail,
   ActivityHitl,
   ActivityState,
+  AttachmentActivity,
   CommandExecutionActivity,
   ElicitationActivity,
   EndTurnActivity,
@@ -69,6 +70,8 @@ export function activityCommand(activity: Activity): string {
 
 export function activityTitle(activity: Activity): string {
   switch (activity.type) {
+    case 'attachment':
+      return activity.attachment?.title ?? activity.description
     case 'command_execution':
       return activity.command
     case 'elicitation':
@@ -678,12 +681,45 @@ export const useActivityStore = create<ExecutionActivityState>((set) => ({
           headBranch: detail?.headBranch,
           id: idx >= 0 ? existing[idx].id : nextActivityId(),
           isUpdate: detail?.isUpdate,
+          previewLabel: detail?.previewLabel,
+          previewUrl: detail?.previewUrl,
           prNumber: detail?.prNumber,
           providerType: detail?.providerType,
           prUrl: detail?.prUrl,
           startedAt: idx >= 0 ? existing[idx].startedAt : result.createdAt,
           state: 'completed',
           type: 'publish',
+        }
+        const updated =
+          idx >= 0
+            ? existing.map((a, i) => (i === idx ? activity : a))
+            : appendActivity(existing, activity)
+        return {
+          activitiesByExecution: {
+            ...state.activitiesByExecution,
+            [executionId]: updated,
+          },
+        }
+      })
+    } else if (activityType === 'ATTACHMENT') {
+      set((state) => {
+        const existing = state.activitiesByExecution[executionId] ?? []
+        const attachmentActionId = actionId ?? `att-${nextActivityId()}`
+        const idx = existing.findIndex(
+          (a) => a.type === 'attachment' && a.actionId === attachmentActionId,
+        )
+        const activity: AttachmentActivity = {
+          actionId: attachmentActionId,
+          attachment: detail?.attachment,
+          collapsed: false,
+          description,
+          detail,
+          endedAt: idx >= 0 ? (existing[idx].endedAt ?? result.createdAt) : result.createdAt,
+          executionId,
+          id: idx >= 0 ? existing[idx].id : nextActivityId(),
+          startedAt: idx >= 0 ? existing[idx].startedAt : result.createdAt,
+          state: 'completed',
+          type: 'attachment',
         }
         const updated =
           idx >= 0

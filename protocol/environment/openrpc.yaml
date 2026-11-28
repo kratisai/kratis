@@ -62,6 +62,34 @@ methods:
     required: true
     schema:
       $ref: ./schemas/requests/sidecar_error.schema.yaml
+- name: env.preview
+  summary: Publish a sandbox application preview URL to the user
+  description: The sidecar reports a sandbox-local port serving an application. The control plane owns the address translation and returns a control-plane-origin URL the user can open; it also records the preview in the task activity log.
+  x-kratis-direction: connector-to-control-plane
+  x-kratis-message-kind: request
+  params:
+  - name: params
+    required: true
+    schema:
+      $ref: ./schemas/requests/preview.schema.yaml
+  result:
+    name: result
+    schema:
+      $ref: ./schemas/results/preview.schema.yaml
+- name: env.attachment
+  summary: Publish an image or markdown attachment to the user
+  description: The sidecar uploads one attachment (base64-encoded, images and markdown only) with simple metadata. The control plane stores it, returns an inline view URL, and records it in the task activity log where the web UI renders a thumbnail that expands.
+  x-kratis-direction: connector-to-control-plane
+  x-kratis-message-kind: request
+  params:
+  - name: params
+    required: true
+    schema:
+      $ref: ./schemas/requests/attachment.schema.yaml
+  result:
+    name: result
+    schema:
+      $ref: ./schemas/results/attachment.schema.yaml
 - name: env.diff_manifest
   summary: Submit a git diff manifest with per-file SHA hashes and check for missing sections
   description: The sidecar sends the manifest containing all changed files and their section SHAs. The control plane returns whether it is already committed or incomplete with a list of missing section SHAs.

@@ -1,0 +1,20 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: PreviewResult
+type: object
+required:
+- type
+- status
+- previewUrl
+properties:
+  type:
+    type: string
+    enum:
+    - "env_preview"
+  status:
+    type: string
+    enum:
+    - "published"
+  previewUrl:
+    type: string
+    description: "Control-plane-origin URL the user opens (e.g. /preview/<environmentId>/...). The control plane owns the address translation."
+additionalProperties: false
