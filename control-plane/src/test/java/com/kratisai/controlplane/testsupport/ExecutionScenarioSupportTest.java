@@ -67,9 +67,9 @@ class ExecutionScenarioSupportTest {
     }
 
     @Test
-    void wsPairBuildsLocalhostUrls() {
-        assertThat(WsPair.clientUrl(1234)).isEqualTo("ws://localhost:1234/ws/client");
-        assertThat(WsPair.envUrl(8080)).isEqualTo("ws://localhost:8080/ws/env");
+    void wsPairBuildsIpv4LoopbackUrls() {
+        assertThat(WsPair.clientUrl(1234)).isEqualTo("ws://127.0.0.1:1234/ws/client");
+        assertThat(WsPair.envUrl(8080)).isEqualTo("ws://127.0.0.1:8080/ws/env");
     }
 
     @Test

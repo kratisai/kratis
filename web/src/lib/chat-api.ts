@@ -2,17 +2,12 @@ import { fetchWithAuth } from '@/lib/auth-api'
 
 export interface ChatDto {
   allowAllPermissions?: boolean
-  archivedAt?: null | string
-  createdAt: string
-  createdByDisplayName: string
   id: string
   lastActivityAt?: null | string
   lastActivityTargetId?: null | string
   lastActivityType?: 'CANVAS' | 'CHAT' | 'EXECUTION'
   status?: TopicStatus
-  teamId: string
   title: string
-  updatedAt: string
 }
 
 export interface ChatUsageDto {
@@ -38,6 +33,7 @@ export interface CreateChatResponse {
 export type TopicStatus =
   | 'Blocked'
   | 'Idle'
+  | 'MR merged'
   | 'MR pushed'
   | 'Planning'
   | 'Ready to publish'

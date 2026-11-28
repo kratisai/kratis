@@ -22,6 +22,7 @@ import java.security.Signature;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.RSAPrivateCrtKeySpec;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -573,7 +574,13 @@ public class GitHubApiService {
         String headBranch = node.path("head").path("ref").asText("");
         String baseBranch = node.path("base").path("ref").asText("");
         String headSha = node.path("head").path("sha").asText("");
-        return new PullRequestSnapshot(number, state, url, headBranch, baseBranch, headSha);
+        Instant mergedAt = merged ? parseInstant(node, "merged_at") : null;
+        return new PullRequestSnapshot(number, state, url, headBranch, baseBranch, headSha, mergedAt);
+    }
+
+    private static Instant parseInstant(JsonNode node, String field) {
+        String value = node.path(field).asText("");
+        return value.isBlank() ? null : OffsetDateTime.parse(value).toInstant();
     }
 
     private JsonNode parse(ResponseEntity<String> response) {

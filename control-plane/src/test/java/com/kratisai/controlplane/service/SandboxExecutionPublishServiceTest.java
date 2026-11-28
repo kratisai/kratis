@@ -35,6 +35,7 @@ import com.kratisai.controlplane.git.provider.RepoProviderRegistry;
 import com.kratisai.controlplane.model.ChangeSet;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.CredentialType;
+import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
@@ -1292,6 +1293,9 @@ class SandboxExecutionPublishServiceTest {
     void pushBranch_successfulPush() throws Exception {
         stubExecutionLookup();
         stubWorkspaceObserve();
+        when(executionDiffSnapshotRepository.findByExecutionId(executionId))
+                .thenReturn(Optional.of(
+                        new ExecutionDiffSnapshot(executionId, "base", "head", 1, 0, "[]", "diff-manifest-digest")));
 
         EnvironmentConnectorResult.GitPush pushResult = new EnvironmentConnectorResult.GitPush(
                 "sha123", "feature-branch", "refs/heads/feature-branch", "SUCCESS");
@@ -1307,7 +1311,28 @@ class SandboxExecutionPublishServiceTest {
         assertThat(response.commitSha()).isEqualTo("sha123");
         assertThat(response.remoteRef()).isEqualTo("refs/heads/feature-branch");
         assertThat(response.status()).isEqualTo("SUCCESS");
-        verify(changeSetRepository).save(any(ChangeSet.class));
+
+        ArgumentCaptor<ChangeSet> changeSetCaptor = ArgumentCaptor.forClass(ChangeSet.class);
+        verify(changeSetRepository).save(changeSetCaptor.capture());
+        assertThat(changeSetCaptor.getValue().getManifestDigest()).isEqualTo("diff-manifest-digest");
+    }
+
+    @Test
+    void pushBranch_withoutDiffSnapshot_storesObservedChangeSetDigest() throws Exception {
+        stubExecutionLookup();
+        stubWorkspaceObserve();
+        when(executionDiffSnapshotRepository.findByExecutionId(executionId)).thenReturn(Optional.empty());
+
+        when(environmentRpcClient.request(
+                        eq(envId), any(EnvironmentRpcPayload.GitPush.class), anyLong(), eq(TimeUnit.SECONDS)))
+                .thenReturn(new EnvironmentConnectorResult.GitPush(
+                        "sha123", "feature-branch", "refs/heads/feature-branch", "SUCCESS"));
+
+        service.pushBranch(userId, chatId, executionId, new PushBranchRequestDto("feature-branch", "msg", true));
+
+        ArgumentCaptor<ChangeSet> changeSetCaptor = ArgumentCaptor.forClass(ChangeSet.class);
+        verify(changeSetRepository).save(changeSetCaptor.capture());
+        assertThat(changeSetCaptor.getValue().getManifestDigest()).isEqualTo("digest-empty");
     }
 
     @Test
@@ -1390,6 +1415,9 @@ class SandboxExecutionPublishServiceTest {
     void publishPullRequest_successfulCreation() throws Exception {
         stubExecutionLookup();
         stubWorkspaceObserve();
+        when(executionDiffSnapshotRepository.findByExecutionId(executionId))
+                .thenReturn(Optional.of(
+                        new ExecutionDiffSnapshot(executionId, "base", "head", 1, 0, "[]", "diff-manifest-digest")));
 
         RepoProvider repoProvider = mock(RepoProvider.class);
         when(repoProvider.supportsPullRequests()).thenReturn(true);
@@ -1414,7 +1442,10 @@ class SandboxExecutionPublishServiceTest {
 
         assertThat(result.prNumber()).isEqualTo(101);
         assertThat(result.prUrl()).isEqualTo("https://github.com/test/repo/pull/101");
-        verify(changeSetRepository).save(any(ChangeSet.class));
+
+        ArgumentCaptor<ChangeSet> changeSetCaptor = ArgumentCaptor.forClass(ChangeSet.class);
+        verify(changeSetRepository).save(changeSetCaptor.capture());
+        assertThat(changeSetCaptor.getValue().getManifestDigest()).isEqualTo("diff-manifest-digest");
 
         ArgumentCaptor<EnvironmentRpcPayload.GitPush> pushCaptor =
                 ArgumentCaptor.forClass(EnvironmentRpcPayload.GitPush.class);
@@ -1580,7 +1611,8 @@ class SandboxExecutionPublishServiceTest {
                         "https://github.com/test/repo/pull/77",
                         "existing-branch",
                         "main",
-                        "sha777"));
+                        "sha777",
+                        null));
 
         EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
                 "main",
@@ -1728,7 +1760,8 @@ class SandboxExecutionPublishServiceTest {
                         "https://github.com/test/repo/pull/77",
                         "existing-branch",
                         "main",
-                        "sha777"));
+                        "sha777",
+                        null));
 
         EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
                 "main",
@@ -1917,7 +1950,8 @@ class SandboxExecutionPublishServiceTest {
                         "https://github.com/test/repo/pull/77",
                         "existing-branch",
                         "main",
-                        "sha777"));
+                        "sha777",
+                        null));
 
         stubObserveWithChanges();
 
@@ -1955,7 +1989,8 @@ class SandboxExecutionPublishServiceTest {
                         "https://github.com/test/repo/pull/77",
                         "kratis/feature-1",
                         "main",
-                        "sha777"));
+                        "sha777",
+                        null));
 
         stubObserveWithChanges();
 
@@ -2035,7 +2070,8 @@ class SandboxExecutionPublishServiceTest {
                         "https://github.com/test/repo/pull/77",
                         "existing-branch",
                         "main",
-                        "sha777"));
+                        "sha777",
+                        null));
 
         EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
                 "main",
@@ -2113,7 +2149,8 @@ class SandboxExecutionPublishServiceTest {
                         "https://github.com/test/repo/pull/77",
                         "existing-branch",
                         "main",
-                        "sha777"));
+                        "sha777",
+                        null));
 
         EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
                 "main",
@@ -2174,7 +2211,8 @@ class SandboxExecutionPublishServiceTest {
                         "https://github.com/test/repo/pull/383",
                         "canvas-repos",
                         "main",
-                        "head-sha"));
+                        "head-sha",
+                        null));
 
         EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
                 "main",
@@ -2268,6 +2306,9 @@ class SandboxExecutionPublishServiceTest {
     void publishPullRequest_updatePr_recordsSinglePublishActivityWithUpdateDetail() throws Exception {
         stubExecutionLookup();
         stubWorkspaceObserve();
+        when(executionDiffSnapshotRepository.findByExecutionId(executionId))
+                .thenReturn(Optional.of(
+                        new ExecutionDiffSnapshot(executionId, "base", "head", 1, 0, "[]", "diff-manifest-digest")));
 
         RepoProvider repoProvider = mock(RepoProvider.class);
         when(repoProvider.supportsPullRequests()).thenReturn(true);
@@ -2294,7 +2335,8 @@ class SandboxExecutionPublishServiceTest {
                         "https://github.com/test/repo/pull/202",
                         "pr-branch",
                         "main",
-                        "sha111"));
+                        "sha111",
+                        null));
 
         EnvironmentConnectorResult.GitPush pushResult =
                 new EnvironmentConnectorResult.GitPush("sha222", "pr-branch", "refs/heads/pr-branch", "SUCCESS");
@@ -2307,6 +2349,10 @@ class SandboxExecutionPublishServiceTest {
         PullRequestResultDto result = service.publishPullRequest(userId, chatId, executionId, request);
 
         assertThat(result.prNumber()).isEqualTo(202);
+
+        ArgumentCaptor<ChangeSet> changeSetCaptor = ArgumentCaptor.forClass(ChangeSet.class);
+        verify(changeSetRepository).save(changeSetCaptor.capture());
+        assertThat(changeSetCaptor.getValue().getManifestDigest()).isEqualTo("diff-manifest-digest");
 
         String expectedActionId = "pub:cs:" + executionId + ":2";
         ArgumentCaptor<ActivityDetail> detailCaptor = ArgumentCaptor.forClass(ActivityDetail.class);

@@ -48,12 +48,16 @@ public class ChangeSet {
     @Column(name = "pr_url", length = 1024, updatable = false)
     private String prUrl;
 
+    // Must be the env.diff_manifest digest; chat status compares it with ExecutionDiffSnapshot.
     @Column(name = "manifest_digest", length = 64)
     private String manifestDigest;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "pr_status", length = 32)
     private PublishedPrStatus prStatus;
+
+    @Column(name = "pr_merged_at")
+    private Instant prMergedAt;
 
     @Column(name = "base_branch", length = 255, updatable = false)
     private String baseBranch;
@@ -138,5 +142,13 @@ public class ChangeSet {
 
     public void setPrStatus(PublishedPrStatus prStatus) {
         this.prStatus = prStatus;
+    }
+
+    public Instant getPrMergedAt() {
+        return prMergedAt;
+    }
+
+    public void setPrMergedAt(Instant prMergedAt) {
+        this.prMergedAt = prMergedAt;
     }
 }

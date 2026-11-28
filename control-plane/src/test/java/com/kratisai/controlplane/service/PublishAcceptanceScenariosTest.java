@@ -123,9 +123,7 @@ class PublishAcceptanceScenariosTest {
     private final UUID envId = UUID.randomUUID();
 
     private SandboxExecution execution;
-    private ChatEntity chat;
     private Repository repository;
-    private ExecutionEnvironment environment;
     private final List<ChangeSet> recordedChangeSets = new ArrayList<>();
 
     @BeforeEach
@@ -176,10 +174,10 @@ class PublishAcceptanceScenariosTest {
 
         User user = new User("user@kratis.ai", "hash", "User");
         user.setId(userId);
-        chat = new ChatEntity(team, user, "Acceptance Chat");
+        ChatEntity chat = new ChatEntity(team, user, "Acceptance Chat");
         chat.setId(chatId);
 
-        environment = new ExecutionEnvironment();
+        ExecutionEnvironment environment = new ExecutionEnvironment();
         environment.setId(envId);
         environment.setTeam(team);
         environment.setStatus(EnvironmentStatus.CONNECTED);
@@ -270,8 +268,8 @@ class PublishAcceptanceScenariosTest {
 
         assertThat(result.prNumber()).isEqualTo(1L);
         assertThat(recordedChangeSets).hasSize(1);
-        assertThat(recordedChangeSets.get(0).getPrNumber()).isEqualTo(1L);
-        assertThat(recordedChangeSets.get(0).getPushedCommitSha()).isEqualTo("commit-1");
+        assertThat(recordedChangeSets.getFirst().getPrNumber()).isEqualTo(1L);
+        assertThat(recordedChangeSets.getFirst().getPushedCommitSha()).isEqualTo("commit-1");
     }
 
     @Test
@@ -295,7 +293,8 @@ class PublishAcceptanceScenariosTest {
                         "https://github.com/org/repo/pull/1",
                         "kratis/feature-1",
                         "main",
-                        "commit-1"));
+                        "commit-1",
+                        null));
 
         EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
                 "main",
@@ -435,7 +434,8 @@ class PublishAcceptanceScenariosTest {
                         "https://github.com/org/repo/pull/1",
                         "kratis/feature-1",
                         "main",
-                        "commit-1"));
+                        "commit-1",
+                        null));
 
         EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
                 "main",
@@ -478,7 +478,8 @@ class PublishAcceptanceScenariosTest {
                         "https://github.com/org/repo/pull/1",
                         "kratis/feature-1",
                         "main",
-                        "commit-1"));
+                        "commit-1",
+                        null));
 
         EnvironmentConnectorResult.GitObservePublish obs = new EnvironmentConnectorResult.GitObservePublish(
                 "main",

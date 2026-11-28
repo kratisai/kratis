@@ -10,6 +10,7 @@ import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.client.AzureDevOpsApiClient;
 import com.kratisai.controlplane.model.RepositoryVisibility;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -281,6 +282,30 @@ class AzureDevOpsApiServiceTest {
                 "tok");
 
         assertThat(result.cloneUrl()).isEqualTo("https://dev.azure.com/myorg/proj/_git/repo");
+    }
+
+    @Test
+    void getPullRequest_readsMergedClosedDate() {
+        String json = "{\"pullRequestId\":42,\"status\":\"completed\","
+                + "\"closedDate\":\"2026-05-01T12:05:00Z\","
+                + "\"sourceRefName\":\"refs/heads/feature\",\"targetRefName\":\"refs/heads/main\","
+                + "\"lastMergeSourceCommit\":{\"commitId\":\"head-sha\"}}";
+        when(azureDevOpsApiClient.getPullRequest(
+                        any(UriBuilderFactory.class),
+                        eq("proj"),
+                        eq("repo"),
+                        eq(42L),
+                        eq("7.1"),
+                        eq(basicAuthHeader())))
+                .thenReturn(ResponseEntity.ok(json));
+
+        PullRequestSnapshot snapshot = service.getPullRequest(
+                new AzureDevOpsApiService.Coordinates("https://dev.azure.com/myorg", "myorg", "proj", "repo"),
+                42L,
+                "tok");
+
+        assertThat(snapshot.state()).isEqualTo(PullRequestSnapshot.PullRequestState.MERGED);
+        assertThat(snapshot.mergedAt()).isEqualTo(Instant.parse("2026-05-01T12:05:00Z"));
     }
 
     @Test

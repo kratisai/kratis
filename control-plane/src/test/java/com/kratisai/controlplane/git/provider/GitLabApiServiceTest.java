@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.client.GitLabApiClient;
 import com.kratisai.controlplane.model.RepositoryVisibility;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -263,6 +264,27 @@ class GitLabApiServiceTest {
                 "https://gitlab.com");
 
         assertThat(result.name()).isEqualTo("fake-user/repo");
+    }
+
+    @Test
+    void getMergeRequest_readsMergeTimestamp() {
+        String json = """
+                {
+                  "iid": 42,
+                  "state": "merged",
+                  "merged_at": "2026-05-01T12:05:00Z",
+                  "web_url": "https://gitlab.com/group/sub/-/merge_requests/42",
+                  "source_branch": "feature",
+                  "target_branch": "main",
+                  "sha": "head-sha"
+                }""";
+        when(gitLabApiClient.getMergeRequest(any(UriBuilderFactory.class), eq("group%2Fsub"), eq(42L), eq("tok")))
+                .thenReturn(ResponseEntity.ok(json));
+
+        PullRequestSnapshot snapshot = service.getMergeRequest("group/sub", 42L, "tok", "https://gitlab.com");
+
+        assertThat(snapshot.state()).isEqualTo(PullRequestSnapshot.PullRequestState.MERGED);
+        assertThat(snapshot.mergedAt()).isEqualTo(Instant.parse("2026-05-01T12:05:00Z"));
     }
 
     @Test

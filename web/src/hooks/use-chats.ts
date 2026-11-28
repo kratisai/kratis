@@ -40,8 +40,8 @@ export function useChat(teamId: null | string | undefined, chatId: null | string
 
 export function useChatPermissions(chatId: null | string | undefined): boolean {
   const teamId = useAuthStore((state) => state.currentTeamId)
-  const { data: chats = [] } = useChats(teamId, 'all', 'active')
-  return chats.find((chat) => chat.id === chatId)?.allowAllPermissions ?? false
+  const { data: chat } = useChat(teamId, chatId)
+  return chat?.allowAllPermissions ?? false
 }
 
 export function useChats(

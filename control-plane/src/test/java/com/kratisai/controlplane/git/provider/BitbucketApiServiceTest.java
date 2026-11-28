@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.client.BitbucketApiClient;
 import com.kratisai.controlplane.model.RepositoryVisibility;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -225,6 +226,22 @@ class BitbucketApiServiceTest {
                 "myteam", new CreateRepositoryCommand("repo", RepositoryVisibility.PRIVATE, "main"), "tok");
 
         assertThat(result.cloneUrl()).isEqualTo("https://bitbucket.org/myteam/repo.git");
+    }
+
+    @Test
+    void getPullRequest_usesUpdatedOnAsMergedAtApproximation() {
+        String json = "{\"id\":42,\"state\":\"MERGED\","
+                + "\"updated_on\":\"2026-05-01T12:05:00.123456+00:00\","
+                + "\"links\":{\"html\":{\"href\":\"https://bitbucket.org/team/repo/pull-requests/42\"}},"
+                + "\"source\":{\"branch\":{\"name\":\"feature\"},\"commit\":{\"hash\":\"head-sha\"}},"
+                + "\"destination\":{\"branch\":{\"name\":\"main\"}}}";
+        when(bitbucketApiClient.getPullRequest(eq("team"), eq("repo"), eq(42L), eq("Bearer tok")))
+                .thenReturn(ResponseEntity.ok(json));
+
+        PullRequestSnapshot snapshot = service.getPullRequest("team", "repo", 42L, "tok");
+
+        assertThat(snapshot.state()).isEqualTo(PullRequestSnapshot.PullRequestState.MERGED);
+        assertThat(snapshot.mergedAt()).isEqualTo(Instant.parse("2026-05-01T12:05:00.123456Z"));
     }
 
     @Test

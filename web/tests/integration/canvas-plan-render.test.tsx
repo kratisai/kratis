@@ -33,12 +33,8 @@ describe('Canvas Plan Rendering', () => {
     mockListTeams([team])
     mockListChats([
       {
-        createdAt: '2024-01-01T00:00:00Z',
-        createdByDisplayName: 'Test User',
         id: 'session-1',
-        teamId: team.id,
         title: 'Test Session',
-        updatedAt: '2024-01-01T00:00:00Z',
       },
     ])
 
@@ -112,12 +108,8 @@ describe('Canvas Plan Rendering', () => {
     mockListTeams([team])
     mockListChats([
       {
-        createdAt: '2024-01-01T00:00:00Z',
-        createdByDisplayName: 'Test User',
         id: 'session-1',
-        teamId: team.id,
         title: 'Test Session',
-        updatedAt: '2024-01-01T00:00:00Z',
       },
     ])
 

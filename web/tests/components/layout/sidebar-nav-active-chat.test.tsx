@@ -28,12 +28,8 @@ vi.mock('@/hooks/use-chats', () => ({
 
 function chatDto(overrides: Partial<ChatDto>): ChatDto {
   return {
-    createdAt: '2026-01-01T00:00:00.000Z',
-    createdByDisplayName: 'Test User',
     id: 'chat-1',
-    teamId: 'team-1',
     title: 'Chat One',
-    updatedAt: '2026-01-02T00:00:00.000Z',
     ...overrides,
   }
 }
@@ -143,7 +139,7 @@ describe('SidebarNav', () => {
     useAuthStore.setState({ currentTeamId: 'team-1' })
     chatsMock.mockReturnValue([
       chatDto({ id: 'chat-1', title: 'Chat One' }),
-      chatDto({ id: 'chat-2', title: 'Chat Two', updatedAt: '2026-01-03T00:00:00.000Z' }),
+      chatDto({ id: 'chat-2', title: 'Chat Two' }),
     ])
   })
 
@@ -183,7 +179,6 @@ describe('SidebarNav', () => {
   it('renders chat list and supports viewing archived chats', async () => {
     chatsMock.mockReturnValue([
       chatDto({
-        archivedAt: '2026-01-02T00:00:00.000Z',
         id: 'chat-archived',
         title: 'Archived Chat',
       }),

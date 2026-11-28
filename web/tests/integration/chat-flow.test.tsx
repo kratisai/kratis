@@ -45,16 +45,12 @@ describe('Chat Flow', () => {
         tavilyApiKeyConfigured: false,
       },
     ])
-    mockListChats([
-      {
-        createdAt: '2024-01-01T00:00:00Z',
-        createdByDisplayName: 'Test User',
-        id: 'session-1',
-        teamId: 'team-1',
-        title: 'Test Session',
-        updatedAt: '2024-01-01T00:00:00Z',
-      },
-    ])
+     mockListChats([
+       {
+         id: 'session-1',
+         title: 'Test Session',
+       },
+     ])
 
     setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
     renderIntegration(['/chats/session-1'])
@@ -247,15 +243,11 @@ describe('Chat Flow', () => {
       },
     ])
     mockGetChat({
-      createdAt: '2024-01-01T00:00:00Z',
-      createdByDisplayName: 'Test User',
       id: 'session-route',
       lastActivityTargetId: 'exec-route',
       lastActivityType: 'EXECUTION',
       status: 'Ready to publish',
-      teamId: 'team-1',
       title: 'Recent execution',
-      updatedAt: '2024-01-01T00:00:00Z',
     })
 
     setAuthenticated({ teamId: 'team-1', userId: 'user-1' })
@@ -269,15 +261,11 @@ describe('Chat Flow', () => {
 
   it('keeps the chat thread when the user explicitly selects chat', async () => {
     mockGetChat({
-      createdAt: '2024-01-01T00:00:00Z',
-      createdByDisplayName: 'Test User',
       id: 'session-explicit',
       lastActivityTargetId: 'exec-explicit',
       lastActivityType: 'EXECUTION',
       status: 'MR pushed',
-      teamId: 'team-1',
       title: 'Explicit chat',
-      updatedAt: '2024-01-01T00:00:00Z',
     })
     mockListTeams([
       {
@@ -516,16 +504,12 @@ describe('Chat Flow', () => {
   it('shows the plan shortcut after a completed response and sends the plan request on click', async () => {
     const team = createMockTeam()
     mockListTeams([team])
-    mockListChats([
-      {
-        createdAt: '2024-01-01T00:00:00Z',
-        createdByDisplayName: 'Test User',
-        id: 'session-plan',
-        teamId: team.id,
-        title: 'Plan Session',
-        updatedAt: '2024-01-01T00:00:00Z',
-      },
-    ])
+     mockListChats([
+       {
+         id: 'session-plan',
+         title: 'Plan Session',
+       },
+     ])
 
     setAuthenticated({ teamId: team.id, userId: 'user-1' })
     renderIntegration(['/chats/session-plan'])

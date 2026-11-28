@@ -6,6 +6,8 @@ import com.kratisai.controlplane.api.restdto.PullRequestResultDto;
 import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.client.AzureDevOpsApiClient;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -362,6 +364,13 @@ public class AzureDevOpsApiService {
             baseBranch = baseBranch.substring("refs/heads/".length());
         }
         String headSha = node.path("lastMergeSourceCommit").path("commitId").asText("");
-        return new PullRequestSnapshot(number, state, url, headBranch, baseBranch, headSha);
+        Instant mergedAt =
+                state == PullRequestSnapshot.PullRequestState.MERGED ? parseInstant(node, "closedDate") : null;
+        return new PullRequestSnapshot(number, state, url, headBranch, baseBranch, headSha, mergedAt);
+    }
+
+    private static Instant parseInstant(JsonNode node, String field) {
+        String value = node.path(field).asText("");
+        return value.isBlank() ? null : OffsetDateTime.parse(value).toInstant();
     }
 }

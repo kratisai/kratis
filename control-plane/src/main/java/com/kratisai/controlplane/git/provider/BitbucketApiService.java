@@ -8,6 +8,8 @@ import com.kratisai.controlplane.client.BitbucketApiClient;
 import com.kratisai.controlplane.model.RepositoryVisibility;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -268,7 +270,15 @@ public class BitbucketApiService {
         String headBranch = node.path("source").path("branch").path("name").asText("");
         String baseBranch = node.path("destination").path("branch").path("name").asText("");
         String headSha = node.path("source").path("commit").path("hash").asText("");
-        return new PullRequestSnapshot(number, state, url, headBranch, baseBranch, headSha);
+        // Bitbucket Cloud exposes no dedicated merge timestamp; updated_on can include later activity.
+        Instant mergedAt =
+                state == PullRequestSnapshot.PullRequestState.MERGED ? parseInstant(node, "updated_on") : null;
+        return new PullRequestSnapshot(number, state, url, headBranch, baseBranch, headSha, mergedAt);
+    }
+
+    private static Instant parseInstant(JsonNode node, String field) {
+        String value = node.path(field).asText("");
+        return value.isBlank() ? null : OffsetDateTime.parse(value).toInstant();
     }
 
     private Integer extractPageNumber(String url) {

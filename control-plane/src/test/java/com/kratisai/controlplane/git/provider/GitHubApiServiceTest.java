@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -234,6 +235,28 @@ class GitHubApiServiceTest {
                 "fake-user", false, new CreateRepositoryCommand("repo", RepositoryVisibility.PRIVATE, "main"), "tok");
 
         assertThat(result.cloneUrl()).isEqualTo("https://github.com/fake-user/repo.git");
+    }
+
+    @Test
+    void getPullRequest_readsMergeTimestamp() {
+        String json = """
+                {
+                  "number": 42,
+                  "state": "closed",
+                  "merged": true,
+                  "merged_at": "2026-05-01T12:05:00Z",
+                  "html_url": "https://github.com/owner/repo/pull/42",
+                  "head": {"ref": "feature", "sha": "head-sha"},
+                  "base": {"ref": "main"}
+                }""";
+        Mockito.when(gitHubApiClient.getPullRequest(
+                        Mockito.eq("owner"), Mockito.eq("repo"), Mockito.eq(42L), Mockito.eq("Bearer tok")))
+                .thenReturn(ResponseEntity.ok(json));
+
+        PullRequestSnapshot snapshot = gitHubApiService.getPullRequest("owner", "repo", 42L, "tok");
+
+        assertThat(snapshot.state()).isEqualTo(PullRequestSnapshot.PullRequestState.MERGED);
+        assertThat(snapshot.mergedAt()).isEqualTo(Instant.parse("2026-05-01T12:05:00Z"));
     }
 
     @Test

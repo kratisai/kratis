@@ -40,14 +40,10 @@ function setupSessionView() {
     },
   ])
   mockListChats([
-    {
-      createdAt: '2024-01-01T00:00:00Z',
-      createdByDisplayName: 'Test User',
-      id: SESSION_ID,
-      teamId: TEAM_ID,
-      title: 'Test Session',
-      updatedAt: '2024-01-01T00:00:00Z',
-    },
+   {
+     id: SESSION_ID,
+     title: 'Test Session',
+   },
   ])
   mockListChatExecutions([
     {

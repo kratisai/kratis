@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { useChats } from '@/hooks/use-chats'
 
+import { createMockChat } from '../support/test-factories'
+
 // Mock the chat API
 vi.mock('@/lib/chat-api', () => ({
   fetchChats: vi.fn(),
@@ -22,16 +24,7 @@ const createWrapper = () => {
   )
 }
 
-const mockChats = [
-  {
-    createdAt: '2024-01-01T00:00:00Z',
-    createdByDisplayName: 'User 1',
-    id: 'session-1',
-    teamId: 'team-1',
-    title: 'Test Session 1',
-    updatedAt: '2024-01-01T00:00:00Z',
-  },
-]
+const mockChats = [createMockChat({ id: 'session-1', title: 'Test Session 1' })]
 
 describe('useChats', () => {
   it('fetches chats on mount', async () => {

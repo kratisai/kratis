@@ -25,6 +25,7 @@ import com.kratisai.controlplane.git.provider.RepoProviderRegistry;
 import com.kratisai.controlplane.model.ChangeSet;
 import com.kratisai.controlplane.model.ChatEntity;
 import com.kratisai.controlplane.model.EnvironmentStatus;
+import com.kratisai.controlplane.model.ExecutionDiffSnapshot;
 import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.PublishedPrStatus;
@@ -235,7 +236,8 @@ public class SandboxExecutionPublishService {
                     latestChangeSet.getPrUrl(),
                     latestChangeSet.getBranchName(),
                     defaultBranch,
-                    latestChangeSet.getPushedCommitSha());
+                    latestChangeSet.getPushedCommitSha(),
+                    latestChangeSet.getPrMergedAt());
         }
         if (latestChangeSet != null
                 && latestChangeSet.getPrNumber() != null
@@ -255,6 +257,13 @@ public class SandboxExecutionPublishService {
                             case CLOSED -> PublishedPrStatus.CLOSED;
                         };
                 latestChangeSet.setPrStatus(currentStatus);
+                if (currentStatus == PublishedPrStatus.MERGED) {
+                    Instant mergedAt = prSnapshot.mergedAt();
+                    if (mergedAt == null) {
+                        mergedAt = latestChangeSet.getPrMergedAt();
+                    }
+                    latestChangeSet.setPrMergedAt(mergedAt != null ? mergedAt : Instant.now());
+                }
                 if (currentStatus != previousStatus
                         && (currentStatus == PublishedPrStatus.MERGED || currentStatus == PublishedPrStatus.CLOSED)) {
                     eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
@@ -355,6 +364,13 @@ public class SandboxExecutionPublishService {
                     };
             if (currentStatus != observedStatus) {
                 latestChangeSet.setPrStatus(observedStatus);
+                if (observedStatus == PublishedPrStatus.MERGED) {
+                    Instant mergedAt = prSnapshot.mergedAt();
+                    if (mergedAt == null) {
+                        mergedAt = latestChangeSet.getPrMergedAt();
+                    }
+                    latestChangeSet.setPrMergedAt(mergedAt != null ? mergedAt : Instant.now());
+                }
                 if (observedStatus == PublishedPrStatus.MERGED || observedStatus == PublishedPrStatus.CLOSED) {
                     eventPublisher.publishEvent(new ExecutionStatusChangedEvent(
                             execution.getChat().getTeam().getId(),
@@ -441,7 +457,8 @@ public class SandboxExecutionPublishService {
         }
     }
 
-    @Transactional(readOnly = true)
+    // Must stay writable: buildPublishCapabilities persists prStatus/prMergedAt via dirty checking.
+    @Transactional
     public PublishCapabilitiesDto rebase(UUID userId, UUID chatId, UUID executionId) {
         SandboxExecution execution = validateAndGetExecution(userId, chatId, executionId);
         ExecutionEnvironment env = execution.getEnvironment();
@@ -514,7 +531,7 @@ public class SandboxExecutionPublishService {
                 null,
                 null,
                 Instant.now());
-        changeSet.setManifestDigest(currentCaps.changeSet().digest());
+        changeSet.setManifestDigest(manifestDigestForChangeSet(executionId, currentCaps));
         changeSetRepository.save(changeSet);
         chatRepository.touchUpdatedAt(chatId, Instant.now());
 
@@ -623,7 +640,7 @@ public class SandboxExecutionPublishService {
                     prUrl,
                     baseBranch,
                     Instant.now());
-            changeSet.setManifestDigest(currentCaps.changeSet().digest());
+            changeSet.setManifestDigest(manifestDigestForChangeSet(executionId, currentCaps));
             changeSet.setPrStatus(PublishedPrStatus.OPEN);
             changeSetRepository.save(changeSet);
             chatRepository.touchUpdatedAt(chatId, Instant.now());
@@ -663,7 +680,7 @@ public class SandboxExecutionPublishService {
                 result.prUrl(),
                 result.baseBranch(),
                 Instant.now());
-        changeSet.setManifestDigest(currentCaps.changeSet().digest());
+        changeSet.setManifestDigest(manifestDigestForChangeSet(executionId, currentCaps));
         changeSet.setPrStatus(PublishedPrStatus.OPEN);
         changeSetRepository.save(changeSet);
         chatRepository.touchUpdatedAt(chatId, Instant.now());
@@ -734,6 +751,21 @@ public class SandboxExecutionPublishService {
             return "unknown";
         }
         return sha.length() > 7 ? sha.substring(0, 7) : sha;
+    }
+
+    /**
+     * Change-set and diff-manifest digests are compared when deriving chat status, so a published
+     * change set must store the current diff manifest digest. The publish observation digest hashes
+     * a different payload and is only a fallback when no manifest has been synced yet. This reads
+     * the last synced manifest, so a lost post-push sync can briefly report unpublished changes
+     * until the sidecar retry or the next publish updates the snapshot.
+     */
+    private String manifestDigestForChangeSet(UUID executionId, PublishCapabilitiesDto currentCaps) {
+        return executionDiffSnapshotRepository
+                .findByExecutionId(executionId)
+                .map(ExecutionDiffSnapshot::getManifestDigest)
+                .filter(digest -> !digest.isBlank())
+                .orElse(currentCaps.changeSet().digest());
     }
 
     private String formatStatsSummary(
@@ -1118,7 +1150,7 @@ public class SandboxExecutionPublishService {
         if (branchName == null || branchName.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Branch name is required");
         }
-        if (baseBranch != null && branchName.equals(baseBranch)) {
+        if (branchName.equals(baseBranch)) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
                     "Cannot publish directly to base branch \"" + baseBranch + "\". Please specify a feature branch.");

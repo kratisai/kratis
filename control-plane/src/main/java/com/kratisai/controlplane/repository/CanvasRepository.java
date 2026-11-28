@@ -1,11 +1,14 @@
 package com.kratisai.controlplane.repository;
 
 import com.kratisai.controlplane.model.CanvasEntity;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface CanvasRepository extends JpaRepository<CanvasEntity, Long> {
 
@@ -13,7 +16,17 @@ public interface CanvasRepository extends JpaRepository<CanvasEntity, Long> {
 
     Optional<CanvasEntity> findByChatIdAndDocumentIdAndDeletedAtIsNull(UUID chatId, String documentId);
 
-    List<CanvasEntity> findByChatIdInAndDeletedAtIsNull(Collection<UUID> chatIds);
+    @Query("SELECT cv.chatId AS chatId, cv.documentId AS documentId, cv.updatedAt AS updatedAt"
+            + " FROM CanvasEntity cv WHERE cv.chatId IN :chatIds AND cv.deletedAt IS NULL")
+    List<CanvasActivity> findActiveMetadataByChatIdIn(@Param("chatIds") Collection<UUID> chatIds);
+
+    interface CanvasActivity {
+        UUID getChatId();
+
+        String getDocumentId();
+
+        Instant getUpdatedAt();
+    }
 
     /**
      * Unfiltered lookup used where tombstones must be visible: soft-delete resolution and blocking

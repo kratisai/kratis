@@ -59,14 +59,10 @@ describe('Plan Canvas to Execution Flow', () => {
 
     mockListTeams([team])
     mockListChats([
-      {
-        createdAt: '2024-01-01T00:00:00Z',
-        createdByDisplayName: 'Test User',
-        id: 'session-1',
-        teamId: team.id,
-        title: 'Test Session',
-        updatedAt: '2024-01-01T00:00:00Z',
-      },
+     {
+       id: 'session-1',
+       title: 'Test Session',
+     },
     ])
     mockListProviders([{ id: 'provider-1', name: 'Docker', teamId: team.id }])
     mockListEnvironments([])

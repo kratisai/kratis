@@ -257,7 +257,8 @@ class GitHubRepoProviderTest {
                 "https://github.com/test-owner/test-repo/pull/383",
                 "canvas-repos",
                 "main",
-                "sha-head");
+                "sha-head",
+                null);
         when(gitHubApiService.getPullRequest(eq("test-owner"), eq("test-repo"), eq(383L), eq("tok")))
                 .thenReturn(snapshot);
 
@@ -274,7 +275,8 @@ class GitHubRepoProviderTest {
                 "https://github.com/test-owner/test-repo/pull/383",
                 "canvas-repos",
                 "main",
-                "sha-head");
+                "sha-head",
+                null);
         when(gitHubApiService.findOpenPullRequestForHead(
                         eq("test-owner"), eq("test-repo"), eq("canvas-repos"), eq("tok")))
                 .thenReturn(Optional.of(snapshot));

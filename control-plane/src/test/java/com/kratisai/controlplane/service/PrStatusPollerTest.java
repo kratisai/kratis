@@ -45,7 +45,7 @@ class PrStatusPollerTest {
 
         poller.pollOpenPullRequests();
 
-        verify(refresher, never()).apply(any(), any());
+        verify(refresher, never()).apply(any(), any(), any());
     }
 
     @Test
@@ -56,7 +56,26 @@ class PrStatusPollerTest {
 
         poller.pollOpenPullRequests();
 
-        verify(refresher).apply(changeSetId, PublishedPrStatus.MERGED);
+        verify(refresher).apply(changeSetId, PublishedPrStatus.MERGED, null);
+    }
+
+    @Test
+    void passesObservedMergeTimestampToRefresher() {
+        Instant mergedAt = Instant.parse("2026-05-01T10:00:00Z");
+        when(refresher.load(changeSetId)).thenReturn(Optional.of(target(PublishedPrStatus.OPEN)));
+        when(provider.getPullRequest(repository, auth, 42L))
+                .thenReturn(new PullRequestSnapshot(
+                        42,
+                        PullRequestSnapshot.PullRequestState.MERGED,
+                        "https://example.test/pr/42",
+                        "feature",
+                        "main",
+                        "sha",
+                        mergedAt));
+
+        poller.pollOpenPullRequests();
+
+        verify(refresher).apply(changeSetId, PublishedPrStatus.MERGED, mergedAt);
     }
 
     @Test
@@ -67,7 +86,7 @@ class PrStatusPollerTest {
 
         poller.pollOpenPullRequests();
 
-        verify(refresher).apply(changeSetId, PublishedPrStatus.OPEN);
+        verify(refresher).apply(changeSetId, PublishedPrStatus.OPEN, null);
     }
 
     @Test
@@ -83,7 +102,7 @@ class PrStatusPollerTest {
 
         poller.pollOpenPullRequests();
 
-        verify(refresher).apply(otherId, PublishedPrStatus.CLOSED);
+        verify(refresher).apply(otherId, PublishedPrStatus.CLOSED, null);
     }
 
     @Test
@@ -94,7 +113,7 @@ class PrStatusPollerTest {
         poller.pollOpenPullRequests();
 
         verify(provider, never()).getPullRequest(any(), any(), eq(42L));
-        verify(refresher, never()).apply(any(), any());
+        verify(refresher, never()).apply(any(), any(), any());
     }
 
     private PrStatusRefresher.PollTarget target(PublishedPrStatus status) {
@@ -102,6 +121,6 @@ class PrStatusPollerTest {
     }
 
     private PullRequestSnapshot snapshot(PullRequestSnapshot.PullRequestState state) {
-        return new PullRequestSnapshot(42, state, "https://example.test/pr/42", "feature", "main", "sha");
+        return new PullRequestSnapshot(42, state, "https://example.test/pr/42", "feature", "main", "sha", null);
     }
 }

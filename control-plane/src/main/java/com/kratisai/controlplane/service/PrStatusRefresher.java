@@ -63,14 +63,16 @@ public class PrStatusRefresher {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void apply(UUID changeSetId, PublishedPrStatus observedStatus) {
+    public void apply(UUID changeSetId, PublishedPrStatus observedStatus, Instant mergedAt) {
         ChangeSet changeSet =
                 changeSetRepository.findWithPollingGraphById(changeSetId).orElse(null);
         if (changeSet == null || changeSet.getPrStatus() == observedStatus) {
             return;
         }
         changeSet.setPrStatus(observedStatus);
-        changeSet.getExecution().getChat().touchUpdatedAt(Instant.now());
+        if (observedStatus == PublishedPrStatus.MERGED) {
+            changeSet.setPrMergedAt(mergedAt != null ? mergedAt : Instant.now());
+        }
         changeSetRepository.save(changeSet);
         if (observedStatus == PublishedPrStatus.MERGED || observedStatus == PublishedPrStatus.CLOSED) {
             var execution = changeSet.getExecution();

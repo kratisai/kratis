@@ -57,6 +57,7 @@ export function topicUrl(chat: ChatDto): TopicUrl {
 const STATUS_STYLES: Record<TopicStatus, string> = {
   Blocked: 'text-amber-400',
   Idle: 'text-yellow-400',
+  'MR merged': 'text-blue-400',
   'MR pushed': 'text-emerald-400',
   Planning: 'text-purple-400',
   'Ready to publish': 'text-amber-400',
@@ -74,6 +75,10 @@ function formatLastActivity(timestamp: number): string {
     month: 'short',
     year: 'numeric',
   })
+}
+
+function topicActivityTimestamp(chat: ChatDto): number {
+  return chat.lastActivityAt ? new Date(chat.lastActivityAt).getTime() : 0
 }
 
 function TopicStatusLabel({ lastActivityAt, status }: TopicStatusLabelProps) {
@@ -208,7 +213,7 @@ export function SidebarNav({ className, onClose, showLabels = true }: SidebarNav
             </div>
             <ScrollArea className="min-h-0 flex-1">
               {[...chats]
-                .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+                .sort((a, b) => topicActivityTimestamp(b) - topicActivityTimestamp(a))
                 .slice(0, 20)
                 .map((chat) => {
                   const isActive = !!matchRoute({

@@ -3,9 +3,11 @@ package com.kratisai.controlplane.websocket;
 import com.kratisai.controlplane.testsupport.SandboxExecutionScenarioFactory.ExecutionScenario;
 import com.kratisai.controlplane.testsupport.TestDataFactory.AuthContext;
 import java.io.IOException;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
@@ -19,6 +21,10 @@ public final class WsPair implements AutoCloseable {
     // Handshake + server-side subscription registration must survive heavily loaded CI forked
     // JVMs; 5s intermittently expired before the WS upgrade answered (CI TimeoutException at WsPair.connect).
     static final int CONNECT_TIMEOUT_SECONDS = 15;
+
+    // The test server binds IPv4 (server.address=0.0.0.0); localhost can resolve to ::1, which is
+    // refused on runners where the connector is not dual-stack.
+    private static final String LOOPBACK_HOST = "127.0.0.1";
 
     private final ClientWebSocketFixture clientFixture;
     private final SidecarWebSocketFixture sidecarFixture;
@@ -53,13 +59,21 @@ public final class WsPair implements AutoCloseable {
         configureClient.accept(clientFixture);
         SidecarWebSocketFixture sidecarFixture = new SidecarWebSocketFixture(connectorToken);
         configureSidecar.accept(sidecarFixture);
-        StandardWebSocketClient wsClient = new StandardWebSocketClient();
-        WebSocketSession clientSession =
-                wsClient.execute(clientFixture, clientUrl(port)).get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        awaitClientSubscribe(clientFixture);
-        WebSocketSession sidecarSession =
-                wsClient.execute(sidecarFixture, envUrl(port)).get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        return new WsPair(clientFixture, sidecarFixture, clientSession, sidecarSession);
+        StandardWebSocketClient wsClient = webSocketClient();
+        WebSocketSession clientSession = null;
+        WebSocketSession sidecarSession = null;
+        try {
+            clientSession =
+                    wsClient.execute(clientFixture, clientUrl(port)).get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            awaitClientSubscribe(clientFixture);
+            sidecarSession =
+                    wsClient.execute(sidecarFixture, envUrl(port)).get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return new WsPair(clientFixture, sidecarFixture, clientSession, sidecarSession);
+        } catch (Exception | Error failure) {
+            closeAfterFailure(sidecarSession, failure);
+            closeAfterFailure(clientSession, failure);
+            throw failure;
+        }
     }
 
     public static WsPair connect(
@@ -88,11 +102,17 @@ public final class WsPair implements AutoCloseable {
         Objects.requireNonNull(configureClient, "configureClient");
         ClientWebSocketFixture clientFixture = new ClientWebSocketFixture(accessToken, teamId);
         configureClient.accept(clientFixture);
-        WebSocketSession clientSession = new StandardWebSocketClient()
-                .execute(clientFixture, clientUrl(port))
-                .get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        awaitClientSubscribe(clientFixture);
-        return new WsPair(clientFixture, null, clientSession, null);
+        WebSocketSession clientSession = null;
+        try {
+            clientSession = webSocketClient()
+                    .execute(clientFixture, clientUrl(port))
+                    .get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            awaitClientSubscribe(clientFixture);
+            return new WsPair(clientFixture, null, clientSession, null);
+        } catch (Exception | Error failure) {
+            closeAfterFailure(clientSession, failure);
+            throw failure;
+        }
     }
 
     public static WsPair connectClient(int port, AuthContext auth, Consumer<ClientWebSocketFixture> configureClient)
@@ -107,9 +127,8 @@ public final class WsPair implements AutoCloseable {
         Objects.requireNonNull(configureSidecar, "configureSidecar");
         SidecarWebSocketFixture sidecarFixture = new SidecarWebSocketFixture(connectorToken);
         configureSidecar.accept(sidecarFixture);
-        WebSocketSession sidecarSession = new StandardWebSocketClient()
-                .execute(sidecarFixture, envUrl(port))
-                .get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        WebSocketSession sidecarSession =
+                webSocketClient().execute(sidecarFixture, envUrl(port)).get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         return new WsPair(null, sidecarFixture, null, sidecarSession);
     }
 
@@ -119,17 +138,36 @@ public final class WsPair implements AutoCloseable {
         return connectSidecar(port, scenario.connectorToken(), configureSidecar);
     }
 
+    static StandardWebSocketClient webSocketClient() {
+        StandardWebSocketClient client = new StandardWebSocketClient();
+        // Tomcat's client defaults connect/write/read I/O to 5s; align it with the test budget so
+        // loaded CI forks cannot fail the handshake before the outer future timeout.
+        client.setUserProperties(Map.of(
+                "org.apache.tomcat.websocket.IO_TIMEOUT_MS",
+                String.valueOf(TimeUnit.SECONDS.toMillis(CONNECT_TIMEOUT_SECONDS))));
+        return client;
+    }
+
     public static String clientUrl(int port) {
-        return "ws://localhost:" + port + "/ws/client";
+        return "ws://" + LOOPBACK_HOST + ":" + port + "/ws/client";
     }
 
     public static String envUrl(int port) {
-        return "ws://localhost:" + port + "/ws/env";
+        return "ws://" + LOOPBACK_HOST + ":" + port + "/ws/env";
     }
 
-    private static void awaitClientSubscribe(ClientWebSocketFixture clientFixture) throws InterruptedException {
-        if (clientFixture != null) {
-            clientFixture.awaitSubscription(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    static void awaitClientSubscribe(ClientWebSocketFixture clientFixture)
+            throws InterruptedException, TimeoutException {
+        if (clientFixture != null && !clientFixture.awaitSubscription(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            throw new TimeoutException("Client WebSocket subscription was not acknowledged");
+        }
+    }
+
+    private static void closeAfterFailure(WebSocketSession session, Throwable failure) {
+        try {
+            closeIfOpen(session);
+        } catch (IOException closeFailure) {
+            failure.addSuppressed(closeFailure);
         }
     }
 

@@ -4,6 +4,7 @@ import com.kratisai.controlplane.client.GitHubApiClient;
 import com.kratisai.controlplane.client.GitHubContentDto;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -24,11 +25,16 @@ public class FakeGitHubApiClientConfig {
                 "{\"repositories\": [{\"name\": \"repo1\", \"clone_url\": \"https://github.com/fake/repo1.git\", \"default_branch\": \"main\"}]}";
         private String mockUserRepositoriesJson =
                 "[{\"name\": \"user-repo1\", \"clone_url\": \"https://github.com/fake/user-repo1.git\", \"default_branch\": \"main\"}]";
+        private String mockPullRequestResponse;
         private volatile boolean repositoryExists;
         private volatile boolean repositoryHasCommits;
 
         public void setShouldThrow(boolean throwError) {
             shouldThrow = throwError;
+        }
+
+        public void setPullRequestResponse(String pullRequestResponse) {
+            mockPullRequestResponse = pullRequestResponse;
         }
 
         public int createPullRequestInvocations() {
@@ -47,6 +53,7 @@ public class FakeGitHubApiClientConfig {
                     "{\"repositories\": [{\"name\": \"repo1\", \"clone_url\": \"https://github.com/fake/repo1.git\", \"default_branch\": \"main\"}]}";
             mockUserRepositoriesJson =
                     "[{\"name\": \"user-repo1\", \"clone_url\": \"https://github.com/fake/user-repo1.git\", \"default_branch\": \"main\"}]";
+            mockPullRequestResponse = null;
         }
 
         @Override
@@ -152,9 +159,12 @@ public class FakeGitHubApiClientConfig {
                 return ResponseEntity.internalServerError().build();
             }
             return ResponseEntity.ok(
-                    "{\"number\": " + pullNumber + ", \"html_url\": \"https://github.com/" + owner + "/" + repo
-                            + "/pull/" + pullNumber
-                            + "\", \"head\": {\"ref\": \"feat\", \"sha\": \"sha1\"}, \"base\": {\"ref\": \"main\"}, \"state\": \"open\"}");
+                    Objects.requireNonNullElseGet(
+                            mockPullRequestResponse,
+                            () -> "{\"number\": " + pullNumber + ", \"html_url\": \"https://github.com/" + owner + "/"
+                                    + repo
+                                    + "/pull/" + pullNumber
+                                    + "\", \"head\": {\"ref\": \"feat\", \"sha\": \"sha1\"}, \"base\": {\"ref\": \"main\"}, \"state\": \"open\"}"));
         }
 
         @Override

@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { SidebarNav, topicUrl } from '@/components/layout/sidebar-nav'
 
+import { createMockChat } from '../../support/test-factories'
+
 const mockUseChats = vi.hoisted(() => vi.fn())
 
 vi.mock('@/hooks/use-chats', () => ({
@@ -67,85 +69,33 @@ function defaultChats() {
   const recent = new Date().toISOString()
   return {
     data: [
-      {
-        archivedAt: null,
-        createdAt: recent,
-        createdByDisplayName: 'User 1',
-        id: 'session-1',
-        lastActivityAt: recent,
-        status: 'working',
-        teamId: 'team-1',
-        title: 'Test Session 1',
-        updatedAt: recent,
-      },
-      {
-        archivedAt: '2024-01-02T00:00:00Z',
-        createdAt: '2024-01-01T00:00:00Z',
-        createdByDisplayName: 'User 1',
-        id: 'session-2',
-        lastActivityAt: recent,
-        status: 'Blocked',
-        teamId: 'team-1',
-        title: 'Archived Session 2',
-        updatedAt: recent,
-      },
-      {
-        archivedAt: null,
-        createdAt: recent,
-        createdByDisplayName: 'User 1',
-        id: 'session-3',
-        lastActivityAt: recent,
-        status: 'Idle',
-        teamId: 'team-1',
-        title: 'Idle Session',
-        updatedAt: recent,
-      },
-      {
-        archivedAt: null,
-        createdAt: recent,
-        createdByDisplayName: 'User 1',
+      createMockChat({ id: 'session-1', lastActivityAt: recent, status: 'working', title: 'Test Session 1' }),
+      createMockChat({ id: 'session-2', lastActivityAt: recent, status: 'Blocked', title: 'Archived Session 2' }),
+      createMockChat({ id: 'session-3', lastActivityAt: recent, status: 'Idle', title: 'Idle Session' }),
+      createMockChat({
         id: 'session-4',
         lastActivityAt: recent,
         lastActivityTargetId: 'exec-1',
         lastActivityType: 'EXECUTION',
         status: 'MR pushed',
-        teamId: 'team-1',
         title: 'Published Session',
-        updatedAt: recent,
-      },
-      {
-        archivedAt: null,
-        createdAt: recent,
-        createdByDisplayName: 'User 1',
-        id: 'session-5',
+      }),
+      createMockChat({
+        id: 'session-8',
         lastActivityAt: recent,
-        status: 'Blocked',
-        teamId: 'team-1',
-        title: 'Blocked Session',
-        updatedAt: recent,
-      },
-      {
-        archivedAt: null,
-        createdAt: recent,
-        createdByDisplayName: 'User 1',
-        id: 'session-7',
-        lastActivityAt: recent,
-        status: 'Planning',
-        teamId: 'team-1',
-        title: 'Planning Session',
-        updatedAt: recent,
-      },
-      {
-        archivedAt: null,
-        createdAt: '2020-01-01T00:00:00Z',
-        createdByDisplayName: 'User 1',
+        lastActivityTargetId: 'exec-merged',
+        lastActivityType: 'EXECUTION',
+        status: 'MR merged',
+        title: 'Merged Session',
+      }),
+      createMockChat({ id: 'session-5', lastActivityAt: recent, status: 'Blocked', title: 'Blocked Session' }),
+      createMockChat({ id: 'session-7', lastActivityAt: recent, status: 'Planning', title: 'Planning Session' }),
+      createMockChat({
         id: 'session-6',
         lastActivityAt: '2020-01-01T00:00:00Z',
         status: 'Idle',
-        teamId: 'team-1',
         title: 'Stale Session',
-        updatedAt: '2020-01-01T00:00:00Z',
-      },
+      }),
     ],
     isLoading: false,
   }
@@ -174,8 +124,8 @@ describe('SidebarNav', () => {
     mockUseChats.mockImplementation((_teamId: string, _filter: string, status: string) => ({
       data:
         status === 'archived'
-          ? defaultChats().data.filter((chat) => chat.archivedAt)
-          : defaultChats().data.filter((chat) => !chat.archivedAt),
+          ? defaultChats().data.filter((chat) => chat.id === 'session-2')
+          : defaultChats().data.filter((chat) => chat.id !== 'session-2'),
       isLoading: false,
     }))
     renderWithProviders(<SidebarNav />)
@@ -200,15 +150,47 @@ describe('SidebarNav', () => {
     expect(mockUseChats).toHaveBeenCalledWith('team-1', 'all', 'active')
   })
 
-  it('routes topics by their most recent activity', () => {
-    const base = {
-      createdAt: '2026-10-20T17:32:12.672Z',
-      createdByDisplayName: 'User 1',
-      id: 'session-1',
-      teamId: 'team-1',
+  it('orders topics by most recent activity rather than updated timestamp', () => {
+    const base = createMockChat({
+      id: 'topic',
+      lastActivityAt: '2026-05-01T10:00:00Z',
       title: 'Topic',
-      updatedAt: '2026-10-20T17:32:12.672Z',
-    }
+    })
+    mockUseChats.mockImplementation(() => ({
+      data: [
+        {
+          ...base,
+          id: 'older-activity',
+          lastActivityAt: '2026-05-01T10:00:00Z',
+          status: 'Idle',
+          title: 'Older activity',
+        },
+        {
+          ...base,
+          id: 'recent-activity',
+          lastActivityAt: '2026-05-04T10:00:00Z',
+          status: 'Idle',
+          title: 'Recent activity',
+        },
+      ],
+      isLoading: false,
+    }))
+
+    const { container } = renderWithProviders(<SidebarNav />)
+    const topicLinks = Array.from(container.querySelectorAll('a[data-to="/chats/$id"]'))
+
+    expect(topicLinks.map((link) => link.querySelector('span')?.textContent)).toEqual([
+      'Recent activity',
+      'Older activity',
+    ])
+  })
+
+  it('routes topics by their most recent activity', () => {
+    const base = createMockChat({
+      id: 'session-1',
+      lastActivityAt: '2026-10-20T17:32:12.672Z',
+      title: 'Topic',
+    })
 
     expect(
       topicUrl({
@@ -232,6 +214,19 @@ describe('SidebarNav', () => {
       }),
     ).toEqual({
       params: { executionId: 'exec-1', id: 'session-1' },
+      search: undefined,
+      to: '/chats/$id/executions/$executionId',
+    })
+
+    expect(
+      topicUrl({
+        ...base,
+        lastActivityTargetId: 'exec-merged',
+        lastActivityType: 'EXECUTION',
+        status: 'MR merged',
+      }),
+    ).toEqual({
+      params: { executionId: 'exec-merged', id: 'session-1' },
       search: undefined,
       to: '/chats/$id/executions/$executionId',
     })
@@ -262,6 +257,7 @@ describe('SidebarNav', () => {
     renderWithProviders(<SidebarNav />)
     expect(screen.getByText('working')).toHaveClass('text-white', 'font-semibold')
     expect(screen.getByText('Idle')).toHaveClass('text-yellow-400')
+    expect(screen.getByText('MR merged')).toHaveClass('text-blue-400')
     expect(screen.getByText('MR pushed')).toHaveClass('text-emerald-400')
     expect(screen.getAllByText('Blocked')[0]).toHaveClass('text-amber-400')
     expect(screen.getByText('Planning')).toHaveClass('text-purple-400')

@@ -76,14 +76,10 @@ describe('Chat reconnect flow', () => {
     const chatId = 'chat-reconnect-complete'
     mockListTeams([team])
     mockListChats([
-      {
-        createdAt: '2024-01-01T00:00:00Z',
-        createdByDisplayName: 'Test User',
-        id: chatId,
-        teamId: team.id,
-        title: 'Reconnect complete',
-        updatedAt: '2024-01-01T00:00:00Z',
-      },
+       {
+         id: chatId,
+         title: 'Reconnect complete',
+       },
     ])
 
     setAuthenticated({ teamId: team.id, userId: 'user-1' })
@@ -149,14 +145,10 @@ describe('Chat reconnect flow', () => {
     const chatId = 'chat-reconnect-running'
     mockListTeams([team])
     mockListChats([
-      {
-        createdAt: '2024-01-01T00:00:00Z',
-        createdByDisplayName: 'Test User',
-        id: chatId,
-        teamId: team.id,
-        title: 'Reconnect running',
-        updatedAt: '2024-01-01T00:00:00Z',
-      },
+       {
+         id: chatId,
+         title: 'Reconnect running',
+       },
     ])
 
     setAuthenticated({ teamId: team.id, userId: 'user-1' })

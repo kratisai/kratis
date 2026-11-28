@@ -7,6 +7,8 @@ import com.kratisai.controlplane.api.restdto.RemoteRepositoryDto;
 import com.kratisai.controlplane.client.GitLabApiClient;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -299,7 +301,14 @@ public class GitLabApiService {
         String headBranch = node.path("source_branch").asText("");
         String baseBranch = node.path("target_branch").asText("");
         String headSha = node.path("sha").asText("");
-        return new PullRequestSnapshot(number, state, url, headBranch, baseBranch, headSha);
+        Instant mergedAt =
+                state == PullRequestSnapshot.PullRequestState.MERGED ? parseInstant(node, "merged_at") : null;
+        return new PullRequestSnapshot(number, state, url, headBranch, baseBranch, headSha, mergedAt);
+    }
+
+    private static Instant parseInstant(JsonNode node, String field) {
+        String value = node.path(field).asText("");
+        return value.isBlank() ? null : OffsetDateTime.parse(value).toInstant();
     }
 
     private JsonNode parse(ResponseEntity<String> response) {

@@ -9,11 +9,13 @@ import { useAuthStore } from '@/store/auth-store'
 import { createMockChat } from '../../support/test-factories'
 
 let chatList: Array<ReturnType<typeof createMockChat>> = []
+let listRequestCount = 0
 let patchBody: null | Record<string, unknown> = null
 
 beforeEach(() => {
   useAuthStore.setState({ currentTeamId: 'team-1', isAuthenticated: true })
   chatList = []
+  listRequestCount = 0
   patchBody = null
   vi.stubGlobal(
     'fetch',
@@ -21,7 +23,18 @@ beforeEach(() => {
       const url =
         typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
       const options = init ?? {}
+      if (/\/api\/v1\/chats\/[^/?]+\?teamId=/.test(url) && (!options.method || options.method === 'GET')) {
+        const chatId = url.match(/\/api\/v1\/chats\/([^/?]+)/)?.[1]
+        const chat = chatList.find((item) => item.id === chatId)
+        return chat
+          ? new Response(JSON.stringify(chat), {
+              headers: { 'Content-Type': 'application/json' },
+              status: 200,
+            })
+          : new Response(null, { status: 404 })
+      }
       if (url.startsWith('/api/v1/chats?') && (!options.method || options.method === 'GET')) {
+        listRequestCount += 1
         return new Response(JSON.stringify(chatList), {
           headers: { 'Content-Type': 'application/json' },
           status: 200,
@@ -59,6 +72,7 @@ describe('AllowAllPermissionsToggle', () => {
       name: /auto approve permission requests in this topic/i,
     })
     await waitFor(() => expect(button).toHaveAttribute('aria-pressed', 'true'))
+    expect(listRequestCount).toBe(0)
   })
 
   it('defaults to disabled when the topic has prompts enabled', async () => {

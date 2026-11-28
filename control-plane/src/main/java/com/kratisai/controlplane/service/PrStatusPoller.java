@@ -51,7 +51,7 @@ public class PrStatusPoller {
                 target.provider().getPullRequest(target.repository(), target.auth(), target.prNumber());
         PublishedPrStatus observedStatus = status(snapshot.state());
         if (observedStatus != target.currentStatus()) {
-            refresher.apply(changeSetId, observedStatus);
+            refresher.apply(changeSetId, observedStatus, snapshot.mergedAt());
         }
     }
 

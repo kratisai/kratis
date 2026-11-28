@@ -22,6 +22,7 @@ import com.kratisai.controlplane.model.ExecutionEnvironment;
 import com.kratisai.controlplane.model.ExecutionEnvironmentType;
 import com.kratisai.controlplane.model.ModelProvider;
 import com.kratisai.controlplane.model.ProviderType;
+import com.kratisai.controlplane.model.PublishedPrStatus;
 import com.kratisai.controlplane.model.RepoCredential;
 import com.kratisai.controlplane.model.Repository;
 import com.kratisai.controlplane.model.RepositoryType;
@@ -327,6 +328,38 @@ class SandboxExecutionPublishControllerTest {
                         .orElseThrow()
                         .getLastActivityAt())
                 .isAfter(stale);
+    }
+
+    @Test
+    void rebase_whenPullRequestMerged_persistsMergeStatusAndTimestamp() throws Exception {
+        Instant mergedAt = Instant.parse("2026-05-01T12:05:00Z");
+        fakeGitHubApiClient.setPullRequestResponse("""
+                {"number":42,"html_url":"https://github.com/test-owner/test-repo/pull/42",
+                 "head":{"ref":"feature","sha":"sha-12345"},"base":{"ref":"main"},
+                 "state":"closed","merged":true,"merged_at":"2026-05-01T12:05:00Z"}
+                """);
+        ChangeSet changeSet = new ChangeSet(
+                execution,
+                1,
+                "sha-main",
+                "sha-12345",
+                "feature",
+                42L,
+                "https://github.com/test-owner/test-repo/pull/42",
+                "main",
+                Instant.parse("2026-05-01T12:00:00Z"));
+        changeSet.setPrStatus(PublishedPrStatus.OPEN);
+        changeSetRepository.save(changeSet);
+
+        mockMvc.perform(post("/api/v1/chats/{chatId}/executions/{execId}/rebase", chat.getId(), execution.getId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + authToken))
+                .andExpect(status().isOk());
+
+        ChangeSet persisted = changeSetRepository
+                .findByExecutionIdOrderBySeqAsc(execution.getId())
+                .getFirst();
+        assertThat(persisted.getPrStatus()).isEqualTo(PublishedPrStatus.MERGED);
+        assertThat(persisted.getPrMergedAt()).isEqualTo(mergedAt);
     }
 
     @Test
