@@ -227,6 +227,84 @@ class UsageLogControllerTest {
     }
 
     @Test
+    void getUsageLogs_withLowercaseUsageType_shouldFilter() throws Exception {
+        createUsageProducers();
+
+        mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-logs?usageType=execution")
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].usageType").value("EXECUTION"));
+    }
+
+    @Test
+    void getUsageLogs_withBlankUsageType_shouldNotFilter() throws Exception {
+        createUsageProducers();
+
+        mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-logs")
+                        .queryParam("usageType", "")
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3));
+    }
+
+    @Test
+    void getUsageLogs_withUnknownStartDate_shouldReturn400() throws Exception {
+        mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-logs?startDate=banana")
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getUsageLogs_withNonNumericPage_shouldReturn400() throws Exception {
+        mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-logs?page=banana")
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getUsageSummary_withUnknownStartDate_shouldReturn400() throws Exception {
+        mockMvc.perform(get("/api/v1/teams/" + team.getId() + "/usage-summary?startDate=banana")
+                        .header("Authorization", "Bearer " + authToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    private void createUsageProducers() {
+        ChatEntity chat = chatRepository.save(new ChatEntity(team, user, "Exec Chat"));
+        ExecutionEnvironment environment = new ExecutionEnvironment();
+        environment.setName("Usage Filter Environment");
+        environment.setType(ExecutionEnvironmentType.SANDBOX);
+        environment.setTeam(team);
+        environment.setUser(user);
+        environment = executionEnvironmentRepository.save(environment);
+
+        CanvasEntity canvas =
+                new CanvasEntity(chat.getId(), "usage-filter", "Fix: Usage Log Execution Names", "content");
+        canvas.setCanvasType(CanvasType.SPEC);
+        canvas.setNewRepoName("Test Repository");
+        canvas = canvasRepository.save(canvas);
+
+        SandboxExecution execution = new SandboxExecution();
+        execution.setChat(chat);
+        execution.setEnvironment(environment);
+        execution.setCanvas(canvas);
+        execution.setStatus(SandboxExecutionStatus.COMPLETED);
+        execution.setStartedAt(java.time.Instant.now());
+        sandboxExecutionRepository.save(execution);
+
+        ChatUsageSession chatSession = new ChatUsageSession(
+                chatRepository.save(new ChatEntity(team, user, "Filter Chat")), "sk-filter", "gpt-4o");
+        chatSession.setStartedAt(java.time.Instant.now());
+        chatUsageSessionRepository.save(chatSession);
+
+        TeamWikiBatch teamWikiBatch = new TeamWikiBatch(team, TeamWikiBuildMode.FULL, TeamWikiTriggerKind.MANUAL, null);
+        teamWikiBatch.setStatus(IngestionStatus.SUCCESS);
+        teamWikiBatch.setStartedAt(java.time.Instant.now().minusSeconds(30));
+        teamWikiBatch.setCompletedAt(java.time.Instant.now());
+        teamWikiBatchRepository.save(teamWikiBatch);
+    }
+
+    @Test
     void getUsageSummary_whenNotMember_shouldReturnForbidden() throws Exception {
         var otherContext = testDataFactory.createUserAndTeam();
         User otherUser = otherContext.user();

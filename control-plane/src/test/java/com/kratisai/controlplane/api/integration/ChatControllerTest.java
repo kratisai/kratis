@@ -397,12 +397,12 @@ class ChatControllerTest {
     }
 
     @Test
-    void listChats_invalidTeamId_shouldReturn500() throws Exception {
+    void listChats_invalidTeamId_shouldReturn400() throws Exception {
         mockMvc.perform(get("/api/v1/chats")
                         .param("teamId", "not-a-uuid")
                         .param("filter", "mine")
                         .header("Authorization", "Bearer " + authToken))
-                .andExpect(status().is5xxServerError());
+                .andExpect(status().isBadRequest());
     }
 
     @Test

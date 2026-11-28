@@ -15,18 +15,15 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.Instant;
-import java.util.Locale;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/v1/teams/{teamId}")
@@ -46,8 +43,9 @@ public class UsageLogController {
             description = "Returns human-friendly usage log entries spanning Executions, Repository Ingestion "
                     + "Batches, Team Wiki builds, and Chat Sessions. The optional usageType filter "
                     + "accepts EXECUTION, INGESTION, TEAM_WIKI, or CHAT. The optional status filter "
-                    + "accepts RUNNING, COMPLETED, or IDLE; COMPLETED also includes settled IDLE "
-                    + "entries. Unknown values for either filter yield 400.")
+                    + "accepts RUNNING, COMPLETED, IDLE, or FAILED; COMPLETED also includes settled IDLE "
+                    + "entries. The value all means no filter for either parameter. Unknown values for either "
+                    + "filter yield 400.")
     @ApiResponses(
             value = {
                 @ApiResponse(
@@ -62,11 +60,11 @@ public class UsageLogController {
             @RequestParam(required = false) String timeframe,
             @RequestParam(required = false) Instant startDate,
             @RequestParam(required = false) Instant endDate,
-            @RequestParam(required = false) String usageType,
+            @RequestParam(required = false) UsageType usageType,
             @RequestParam(required = false) String model,
             @RequestParam(required = false) String agent,
             @RequestParam(required = false) String userEmail,
-            @RequestParam(required = false) String status,
+            @RequestParam(required = false) UsageLogStatus status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         UUID userId = SecurityUtil.getCurrentUserId();
@@ -76,35 +74,13 @@ public class UsageLogController {
                 timeframe,
                 startDate,
                 endDate,
-                parseUsageType(usageType),
+                usageType,
                 model,
                 agent,
                 userEmail,
-                parseStatus(status),
+                status,
                 PageRequest.of(page, size));
         return ResponseEntity.ok(PageResponseDto.from(logs));
-    }
-
-    private static UsageType parseUsageType(String usageType) {
-        if (usageType == null || usageType.isBlank() || "all".equalsIgnoreCase(usageType.trim())) {
-            return null;
-        }
-        try {
-            return UsageType.valueOf(usageType.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown usage type: " + usageType);
-        }
-    }
-
-    private static UsageLogStatus parseStatus(String status) {
-        if (status == null || status.isBlank() || "all".equalsIgnoreCase(status.trim())) {
-            return null;
-        }
-        try {
-            return UsageLogStatus.valueOf(status.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown status: " + status);
-        }
     }
 
     @GetMapping("/usage-summary")
