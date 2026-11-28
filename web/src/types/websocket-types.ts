@@ -363,6 +363,7 @@ export type TeamEntityType =
   | 'PERMISSIONS'
   | 'REPOSITORIES'
   | 'SANDBOX_EXECUTIONS'
+  | 'SKILLS'
   | 'TEAM_WIKI'
   | 'USAGE'
 

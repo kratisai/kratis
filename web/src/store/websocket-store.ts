@@ -24,6 +24,7 @@ import type {
 } from '@/types/websocket-types'
 
 import { DIFF_QUERY_KEYS } from '@/hooks/use-diff'
+import { TEAM_SKILLS_QUERY_KEY } from '@/hooks/use-team-skills'
 import { isRefreshTokenRejected, refreshAccessToken } from '@/lib/auth-api'
 import { queryClient } from '@/lib/query-client'
 import { useActivityStore } from '@/store/activity-store'
@@ -80,6 +81,8 @@ export function teamEntityQueryKey(entity: string, teamId: string): null | strin
       return ['permissions', teamId]
     case 'REPOSITORIES':
       return [REPOSITORIES_QUERY_KEY, teamId]
+    case 'SKILLS':
+      return [TEAM_SKILLS_QUERY_KEY, teamId]
     case 'TEAM_WIKI':
       return ['team-wiki', teamId]
     case 'USAGE':

@@ -9,5 +9,6 @@ public enum TeamEntityType {
     CHATS,
     USAGE,
     PERMISSIONS,
-    TEAM_WIKI
+    TEAM_WIKI,
+    SKILLS
 }

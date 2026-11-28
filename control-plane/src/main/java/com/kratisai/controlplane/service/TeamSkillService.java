@@ -4,6 +4,8 @@ import com.kratisai.controlplane.api.restdto.TeamSkillResponse;
 import com.kratisai.controlplane.api.restdto.UpdateTeamSkillRequest;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.TeamSkill;
+import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
+import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.repository.TeamRepository;
 import com.kratisai.controlplane.repository.TeamSkillRepository;
 import java.io.IOException;
@@ -16,6 +18,7 @@ import java.util.UUID;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -36,6 +39,7 @@ public class TeamSkillService {
     private final BlobStorageService blobStorageService;
     private final SkillArchiveService archiveService;
     private final SkillFrontmatterParser frontmatterParser;
+    private final ApplicationEventPublisher eventPublisher;
 
     public TeamSkillService(
             TeamSkillRepository teamSkillRepository,
@@ -43,13 +47,15 @@ public class TeamSkillService {
             TeamService teamService,
             BlobStorageService blobStorageService,
             SkillArchiveService archiveService,
-            SkillFrontmatterParser frontmatterParser) {
+            SkillFrontmatterParser frontmatterParser,
+            ApplicationEventPublisher eventPublisher) {
         this.teamSkillRepository = teamSkillRepository;
         this.teamRepository = teamRepository;
         this.teamService = teamService;
         this.blobStorageService = blobStorageService;
         this.archiveService = archiveService;
         this.frontmatterParser = frontmatterParser;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -119,6 +125,7 @@ public class TeamSkillService {
 
             try {
                 TeamSkill saved = teamSkillRepository.save(entity);
+                eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.SKILLS));
                 logger.info("Uploaded skill '{}' for team {}", skill.name(), teamId);
                 return TeamSkillResponse.from(saved);
             } catch (DataIntegrityViolationException e) {
@@ -139,7 +146,9 @@ public class TeamSkillService {
         if (request.enabled() != null) {
             skill.setEnabled(request.enabled());
         }
-        return TeamSkillResponse.from(teamSkillRepository.save(skill));
+        TeamSkill saved = teamSkillRepository.save(skill);
+        eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.SKILLS));
+        return TeamSkillResponse.from(saved);
     }
 
     @Transactional
@@ -148,6 +157,7 @@ public class TeamSkillService {
         TeamSkill skill = requireSkill(teamId, skillId);
         blobStorageService.deleteObject(skill.getBlobPath());
         teamSkillRepository.delete(skill);
+        eventPublisher.publishEvent(new TeamEntityChangedEvent(teamId, TeamEntityType.SKILLS));
         logger.info("Deleted skill '{}' for team {}", skill.getName(), teamId);
     }
 

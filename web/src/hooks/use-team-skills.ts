@@ -11,7 +11,7 @@ import {
 } from '@/lib/team-skill-api'
 import { useAuthStore } from '@/store/auth-store'
 
-const TEAM_SKILLS_QUERY_KEY = 'team-skills'
+export const TEAM_SKILLS_QUERY_KEY = 'team-skills'
 
 interface UpdateTeamSkillVariables extends UpdateTeamSkillRequest {
   skillId: string

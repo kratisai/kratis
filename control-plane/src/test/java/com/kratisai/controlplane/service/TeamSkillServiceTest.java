@@ -13,6 +13,8 @@ import com.kratisai.controlplane.api.restdto.TeamSkillResponse;
 import com.kratisai.controlplane.api.restdto.UpdateTeamSkillRequest;
 import com.kratisai.controlplane.model.Team;
 import com.kratisai.controlplane.model.TeamSkill;
+import com.kratisai.controlplane.model.event.TeamEntityChangedEvent;
+import com.kratisai.controlplane.model.event.TeamEntityType;
 import com.kratisai.controlplane.repository.TeamRepository;
 import com.kratisai.controlplane.repository.TeamSkillRepository;
 import java.io.ByteArrayOutputStream;
@@ -29,6 +31,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -45,6 +48,7 @@ class TeamSkillServiceTest {
     private TeamService teamService;
     private BlobStorageService blobStorageService;
     private SkillArchiveService archiveService;
+    private ApplicationEventPublisher eventPublisher;
     private TeamSkillService service;
 
     @BeforeEach
@@ -54,13 +58,15 @@ class TeamSkillServiceTest {
         teamService = mock(TeamService.class);
         blobStorageService = mock(BlobStorageService.class);
         archiveService = new SkillArchiveService();
+        eventPublisher = mock(ApplicationEventPublisher.class);
         service = new TeamSkillService(
                 teamSkillRepository,
                 teamRepository,
                 teamService,
                 blobStorageService,
                 archiveService,
-                new SkillFrontmatterParser());
+                new SkillFrontmatterParser(),
+                eventPublisher);
     }
 
     @Test
@@ -84,6 +90,7 @@ class TeamSkillServiceTest {
         assertThat(response.description()).isEqualTo("Run lint");
         assertThat(response.enabled()).isTrue();
         verify(teamService).validateMembership(USER_ID, TEAM_ID);
+        verify(eventPublisher).publishEvent(new TeamEntityChangedEvent(TEAM_ID, TeamEntityType.SKILLS));
 
         ArgumentCaptor<byte[]> content = ArgumentCaptor.forClass(byte[].class);
         verify(blobStorageService)
@@ -126,6 +133,7 @@ class TeamSkillServiceTest {
 
         assertThat(response.enabled()).isFalse();
         assertThat(response.description()).isEqualTo("Run lint");
+        verify(eventPublisher).publishEvent(new TeamEntityChangedEvent(TEAM_ID, TeamEntityType.SKILLS));
     }
 
     @Test
@@ -162,6 +170,7 @@ class TeamSkillServiceTest {
 
         verify(blobStorageService).deleteObject(skill.getBlobPath());
         verify(teamSkillRepository).delete(skill);
+        verify(eventPublisher).publishEvent(new TeamEntityChangedEvent(TEAM_ID, TeamEntityType.SKILLS));
     }
 
     @Test

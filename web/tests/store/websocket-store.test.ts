@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IngestionResult } from '@/types/websocket-types'
 
 import { DIFF_QUERY_KEYS } from '@/hooks/use-diff'
+import { TEAM_SKILLS_QUERY_KEY } from '@/hooks/use-team-skills'
 import { queryClient } from '@/lib/query-client'
 import { useAuthStore } from '@/store/auth-store'
 import { useChatStore } from '@/store/chat-store'
@@ -23,6 +24,10 @@ describe('teamEntityQueryKey', () => {
 
   it('maps CREDENTIALS to the credentials query key', () => {
     expect(teamEntityQueryKey('CREDENTIALS', 'team-1')).toEqual(['credentials', 'team-1'])
+  })
+
+  it('maps SKILLS to the team skills query key', () => {
+    expect(teamEntityQueryKey('SKILLS', 'team-1')).toEqual([TEAM_SKILLS_QUERY_KEY, 'team-1'])
   })
 
   it('maps MODEL_PROVIDERS to the model-providers query key', () => {
@@ -170,6 +175,20 @@ describe('handleTeamEntityChangedResult', () => {
   afterEach(() => {
     useAuthStore.setState({ currentTeamId: null })
     useChatStore.setState({ currentChatId: null })
+  })
+
+  it('invalidates the team skills query when skills change', () => {
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined)
+
+    handleTeamEntityChangedResult({
+      entity: 'SKILLS',
+      teamId: 'team-1',
+      type: 'team_entity_changed',
+    })
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: [TEAM_SKILLS_QUERY_KEY, 'team-1'],
+    })
   })
 
   it('refetches the open chat executions when an environment changes', () => {
